@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目文档管理中心</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032201">
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032201"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <h1>📁 项目文档管理中心</h1>
+            <div class="header-actions">
+                <!-- 项目选择下拉菜单 -->
+                <select id="projectSelect" class="project-dropdown">
+                    <option value="">-- 选择项目 --</option>
+                </select>
+                <button id="newProjectBtn" class="btn btn-success">新建项目</button>
+                <button id="loadProjectBtn" class="btn btn-primary">导入文档需求</button>
+                <button id="exportJsonBtn" class="btn btn-secondary" style="display:none;">导出需求清单</button>
+                <button id="saveProjectBtn" class="btn btn-warning" style="display:none;">💾 保存状态</button>
+                <button id="packageProjectBtn" class="btn btn-success" style="display:none;">打包项目</button>
+                <button id="importPackageBtn" class="btn btn-info" style="display:none;">导入项目</button>
+                <button id="projectManageBtn" class="btn btn-secondary" style="display:none;">管理结构</button>
+                <button id="zipUploadBtn" class="btn btn-info" style="display:none;">导入文档</button>
+                <button id="generateReportBtn" class="btn btn-info" style="display:none;">生成报告</button>
+                <button id="confirmAcceptanceBtn" class="btn btn-success" style="display:none;">✅ 确认验收</button>
+                <button id="downloadPackageBtn" class="btn btn-primary" style="display:none;">📦 打包下载</button>
+                <button id="checkComplianceBtn" class="btn btn-warning" style="display:none;">检查异常</button>
+                <button id="deleteProjectBtn" class="btn btn-danger" style="display:none;">删除项目</button>
+            </div>
+        </header>
+
+        <!-- 顶部周期进度导航 -->
+        <div id="cycleNavBar" class="cycle-nav-bar">
+            <div id="cycleNavList" class="cycle-nav-list">
+                <span class="placeholder">请先选择项目</span>
+            </div>
+        </div>
+
+        <!-- 主容器 -->
+        <div class="main-layout">
+            <!-- 左侧面板：周期和文档类型 -->
+            <aside class="left-panel">
+                <div class="cycles-panel">
+                    <h2>📋 项目周期</h2>
+                    <div class="cycle-selector">
+                        <h3>选择周期</h3>
+                        <select id="cycleSelect" class="full-width-select">
+                            <option value="">-- 选择周期 --</option>
+                        </select>
+                    </div>
+                </div>
+            </aside>
+            
+            <!-- 文档管理区域 -->
+            <main class="right-panel">
+                <div id="contentArea" class="content-area">
+                    <div class="welcome-message">
+                        <h2>欢迎使用项目文档管理中心</h2>
+                        <p>请在顶部选择项目，加载配置文件</p>
+                        <p>然后在顶部周期导航中选择周期，管理文档</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 底部固定面板：操作进度和日志 -->
+    <div id="fixedBottomPanel" class="fixed-bottom-panel">
+        <div class="fixed-panel-header">
+            <span>📊 操作进度</span>
+            <button class="btn btn-sm btn-secondary" onclick="toggleOperationLog()">查看日志</button>
+        </div>
+        <div id="operationProgress" class="fixed-panel-content">
+            <p class="placeholder">暂无进行中的操作</p>
+        </div>
+        <div id="operationLog" class="operation-log" style="display: none;">
+            <!-- 拖拽调整高度手柄 -->
+            <div class="log-resize-handle" id="logResizeHandle"></div>
+            <div class="log-header">
+                <span>操作日志</span>
+                <button class="btn btn-sm btn-secondary" onclick="refreshOperationLog()">刷新</button>
+            </div>
+            <div id="logContent" class="log-content"></div>
+        </div>
+    </div>
+
+    <!-- 确认弹窗 -->
+    <div id="confirmModal" class="modal">
+        <div class="modal-content modal-sm">
+            <span class="close" onclick="closeConfirmModal()">&times;</span>
+            <h2 id="confirmTitle">确认</h2>
+            <p id="confirmMessage"></p>
+            <div class="modal-actions">
+                <button id="confirmCancelBtn" class="btn btn-secondary">取消</button>
+                <button id="confirmOkBtn" class="btn btn-danger">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用输入框模态框 -->
+    <div id="inputModal" class="modal">
+        <div class="modal-content modal-sm">
+            <span class="close" onclick="closeInputModal()">&times;</span>
+            <h2 id="inputModalTitle">输入</h2>
+            <div id="inputModalFields"></div>
+            <div class="modal-actions">
+                <button id="inputModalCancelBtn" class="btn btn-secondary" onclick="closeInputModal()">取消</button>
+                <button id="inputModalOkBtn" class="btn btn-primary">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文档详情弹窗 -->
+    <div id="documentModal" class="modal">
+        <div class="modal-content wide" style="max-width: 1400px; width: 98%; max-height: 95vh;">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle"></h2>
+            
+            <div class="doc-modal-layout" style="overflow-y: auto;">
+                <!-- 左侧：文件来源 + 上传表单 -->
+                <div class="doc-modal-left">
+                    <!-- 文件来源 Tab 切换 -->
+                    <div class="upload-source-tabs">
+                        <button type="button" class="upload-tab-btn active" data-tab="local">📁 本地上传</button>
+                        <button type="button" class="upload-tab-btn" data-tab="zip">🗜️ 从ZIP中选择</button>
+                    </div>
+
+                    <!-- 本地上传面板 -->
+                    <div id="uploadSourceLocal" class="upload-source-panel active">
+                        <form id="uploadForm" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label>选择文件 *</label>
+                                <input type="file" id="fileInput" name="file" required>
+                                <small>支持文件格式：PDF、Word、Excel、图片等</small>
+                            </div>
+
+
+                            <!-- 公共字段（下面 ZIP 面板共用，通过 JS 读取） -->
+                            <div id="uploadMetaFields">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>文档日期</label>
+                                        <input type="date" id="docDate" name="doc_date">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>签字日期</label>
+                                        <input type="date" id="signDate" name="sign_date">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>签字人</label>
+                                        <input type="text" id="signer" name="signer" placeholder="输入签字人名称">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>签字状态</label>
+                                        <div class="checkbox-group">
+                                            <label class="checkbox-item">
+                                                <input type="checkbox" id="noSignature" name="no_signature">
+                                                <span>不涉及签字</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>盖章标记</label>
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="hasSeal" name="has_seal">
+                                            <span>已盖章</span>
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="partyASeal" name="party_a_seal">
+                                            <span>甲方盖章</span>
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="partyBSeal" name="party_b_seal">
+                                            <span>乙方盖章</span>
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="noSeal" name="no_seal">
+                                            <span>不涉及盖章</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>其它盖章（标注）</label>
+                                    <input type="text" id="otherSeal" name="other_seal" placeholder="如：监理单位盖章、项目章等">
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-success" id="uploadBtn">确认归档</button>
+                        </form>
+                    </div>
+
+                    <!-- 从ZIP中选择面板 -->
+                    <div id="uploadSourceZip" class="upload-source-panel" style="display:none;">
+                        <!-- 多ZIP包选择器（有多个包时显示） -->
+                        <div id="zipPackageSelector" class="zip-package-selector" style="display:none;">
+                            <label>选择ZIP包：</label>
+                            <select id="zipPackageSelect"></select>
+                            <button type="button" class="btn btn-danger btn-sm" id="deleteZipPackageBtn" style="margin-left: 10px;">🗑️ 删除</button>
+                        </div>
+                        <div class="zip-search-bar">
+                            <input type="text" id="zipFileSearch" placeholder="输入文件名关键词过滤..." autocomplete="off">
+                            <button type="button" class="btn btn-primary btn-sm" id="zipSearchBtn">搜索</button>
+                        </div>
+                        <div id="zipFileList" class="zip-file-list">
+                            <p class="placeholder">加载中...</p>
+                        </div>
+                        <div id="zipSelectedInfo" class="zip-selected-info" style="display:none;">
+                            <span id="zipSelectedName"></span>
+                            <button type="button" class="btn btn-sm btn-secondary" id="zipClearSelectedBtn">✕ 清除</button>
+                        </div>
+                        <button type="button" class="btn btn-success" id="zipArchiveBtn" disabled>✅ 确认选择</button>
+                    </div>
+                </div>
+
+                <!-- 宽度调整器 -->
+                <div class="doc-modal-resizer" id="docModalResizer"></div>
+
+                <!-- 右侧：已上传文档列表 -->
+                <div class="doc-modal-right">
+                    <!-- 已上传文档列表 -->
+                    <div class="uploaded-documents">
+                        <h3>📁 已归档文档（<span id="docCount">0</span>个）</h3>
+                        <div id="documentsList" class="documents-list">
+                        </div>
+                    </div>
+                    <!-- 确认文档无误按钮 -->
+                    <div class="confirm-docs-section">
+                        <button type="button" class="btn btn-success" id="confirmAllDocsBtn" onclick="confirmAllDocuments()">
+                            ✅ 确认当前周期文档无误
+                        </button>
+                        <p class="confirm-hint">点击确认当前周期所有文档已完成归档</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 报告弹窗 -->
+    <div id="reportModal" class="modal">
+        <div class="modal-content wide">
+            <span class="close">&times;</span>
+            <h2>文档管理报告</h2>
+
+            <div id="reportContent" class="report-content">
+            </div>
+
+            <button class="btn btn-primary" id="exportReportBtn">导出报告</button>
+        </div>
+    </div>
+
+    <!-- 文档预览弹窗 -->
+    <div id="previewModal" class="modal">
+        <div class="modal-content wide" style="max-width: 90%; height: 85vh;">
+            <span class="close" onclick="closePreviewModal()">&times;</span>
+            <div class="preview-header">
+                <h2 id="previewTitle">文档预览</h2>
+                <a id="previewDownloadBtn" class="btn btn-primary" href="#" target="_blank">下载文件</a>
+            </div>
+            <div id="previewContent" class="preview-content">
+                <!-- 预览内容将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载项目弹窗 -->
+    <div id="loadProjectModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>导入文档需求</h2>
+            
+            <form id="loadProjectForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>选择需求清单文件（Excel或JSON格式）*</label>
+                    <input type="file" id="projectFile" name="file" accept=".xlsx,.xls,.json" required>
+                    <small>
+                        支持格式：Excel (.xlsx, .xls) 或 JSON (.json)
+                        <br>
+                        Excel要求：
+                        <ul>
+                            <li>第一列：项目周期/分类</li>
+                            <li>第三列：文档名称</li>
+                            <li>第四列：文档要求/备注</li>
+                        </ul>
+                    </small>
+                </div>
+
+                <button type="submit" class="btn btn-success">导入需求清单</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 新建项目弹窗 -->
+    <div id="newProjectModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>新建项目</h2>
+            
+            <form id="newProjectForm">
+                <div class="form-group">
+                    <label>项目名称 *</label>
+                    <input type="text" id="newProjectName" required placeholder="输入项目名称">
+                </div>
+                <div class="form-group">
+                    <label>项目描述</label>
+                    <textarea id="newProjectDesc" placeholder="输入项目描述（可选）" rows="3"></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-success">创建项目</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 导入项目包弹窗 -->
+    <div id="importPackageModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>导入项目</h2>
+            <p>从打包的项目文件导入（包含配置和文档）</p>
+
+            <form id="importPackageForm">
+                <div class="form-group">
+                    <label>选择ZIP包文件</label>
+                    <input type="file" id="packageFile" accept=".zip" required>
+                </div>
+
+                <!-- 冲突处理选项 -->
+                <div class="form-group" id="conflictOptions" style="display:none;">
+                    <label>同名项目处理方式</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="conflictAction" value="overwrite" checked>
+                            覆盖已有项目
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="conflictAction" value="rename">
+                            重命名为新项目（自动加日期）
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="conflictAction" value="manual">
+                            手动编辑名称
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>新项目名称</label>
+                    <input type="text" id="importPackageName" placeholder="留空则使用原名称">
+                    <small id="importPackageNameHint" style="color:#666;display:none;"></small>
+                </div>
+
+                <button type="submit" class="btn btn-success">导入项目包</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 项目结构管理弹窗 -->
+    <div id="projectManageModal" class="modal">
+        <div class="modal-content wide">
+            <span class="close">&times;</span>
+            <h2>项目结构管理</h2>
+            
+            <div class="project-manage-tabs">
+                <button class="tab-btn active" data-tab="cycles">周期管理</button>
+                <button class="tab-btn" data-tab="documents">文档管理</button>
+            </div>
+            
+            <!-- 周期管理 -->
+            <div id="cyclesTab" class="tab-content active">
+                <div class="manage-section">
+                    <h3>添加周期</h3>
+                    <form id="addCycleForm" class="inline-form">
+                        <input type="text" id="newCycleName" placeholder="新周期名称">
+                        <button type="submit" class="btn btn-success btn-sm">添加</button>
+                    </form>
+                </div>
+                
+                <div class="manage-section">
+                    <h3>周期列表（拖拽排序）</h3>
+                    <div id="cyclesSortableList" class="sortable-list"></div>
+                </div>
+            </div>
+            
+            <!-- 文档管理 -->
+            <div id="documentsTab" class="tab-content">
+                <div class="manage-section">
+                    <h3>选择周期</h3>
+                    <select id="docManageCycleSelect" class="full-width-select">
+                        <option value="">-- 选择周期 --</option>
+                    </select>
+                </div>
+                
+                <div class="manage-section" id="docManageSection" style="display:none;">
+                    <h3>添加文档类型</h3>
+                    <form id="addDocForm" class="inline-form">
+                        <input type="text" id="addDocName" placeholder="文档名称" style="flex:1;">
+                        <input type="text" id="addDocRequirement" placeholder="文档要求（如：签名、盖章）" style="flex:1;">
+                        <button type="submit" class="btn btn-success btn-sm">添加</button>
+                    </form>
+                    
+                    <h3 style="margin-top:20px;">文档类型列表（拖拽排序）</h3>
+                    <div id="docsSortableList" class="sortable-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 压缩包上传弹窗 -->
+    <div id="zipUploadModal" class="modal">
+        <div class="modal-content wide">
+            <span class="close">&times;</span>
+            <h2>导入文档</h2>
+            <p>导入待归档的文档压缩包，系统会自动根据文件名匹配文档类型</p>
+            
+            <form id="zipUploadForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>选择ZIP压缩包 *</label>
+                    <input type="file" id="zipFile" name="file" accept=".zip" required>
+                    <small>
+                        将文档整理成ZIP压缩包上传，系统会根据文件名自动匹配到对应的文档类型。<br>
+                        例如："项目合同.pdf" 会自动匹配到 "项目合同" 文档类型。
+                    </small>
+                </div>
+
+                <button type="submit" class="btn btn-primary">解析压缩包</button>
+            </form>
+            
+            <div id="zipMatchResult" class="zip-match-result" style="display:none;">
+                <h3>匹配结果</h3>
+                <div id="matchedFiles" class="matched-files"></div>
+                <div id="unmatchedFiles" class="unmatched-files"></div>
+                <button class="btn btn-success" id="importMatchedBtn">导入匹配的文件</button>
+            </div>
+            
+            <!-- 待确认文件列表 -->
+            <div id="pendingFilesSection" class="pending-files-section" style="display:none; margin-top: 20px; border-top: 2px solid #ddd; padding-top: 15px;">
+                <h3>待确认文件（需要您审核是否合格）</h3>
+                <div id="pendingFilesList" class="pending-files-list"></div>
+                <div class="pending-files-actions" style="margin-top: 15px;">
+                    <button type="button" class="btn btn-success" id="confirmPendingBtn" disabled>确认选中文件</button>
+                    <button type="button" class="btn btn-secondary" id="rejectPendingBtn" disabled>移除选中文件</button>
+                    <span id="pendingSelectedCount" style="margin-left: 10px; color: #666;">已选 0 个文件</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+            <!-- 文档编辑弹窗 -->
+    <div id="editDocModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>编辑文档信息</h2>
+            
+            <form id="editDocForm">
+                <input type="hidden" id="editDocId">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>文档日期</label>
+                        <input type="date" id="editDocDate">
+                    </div>
+                    <div class="form-group">
+                        <label>签字日期</label>
+                        <input type="date" id="editSignDate">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>签字人</label>
+                        <input type="text" id="editSigner" placeholder="输入签字人名称">
+                    </div>
+                    <div class="form-group">
+                        <label>签字状态</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="editNoSignature">
+                                <span>不涉及签字</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>盖章标记</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="editHasSeal">
+                            <span>已盖章</span>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="editPartyASeal">
+                            <span>甲方盖章</span>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="editPartyBSeal">
+                            <span>乙方盖章</span>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="editNoSeal">
+                            <span>不涉及盖章</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>其它盖章（标注）</label>
+                    <input type="text" id="editOtherSeal" placeholder="如：监理单位盖章、项目章等">
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">保存修改</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 文档替换弹窗 -->
+    <div id="replaceDocModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>替换文档</h2>
+            
+            <form id="replaceDocForm" enctype="multipart/form-data">
+                <input type="hidden" id="replaceDocId">
+                
+                <div class="form-group">
+                    <label>选择新文件 *</label>
+                    <input type="file" id="replaceFile" name="file" required>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>文档日期</label>
+                        <input type="date" id="replaceDocDate">
+                    </div>
+                    <div class="form-group">
+                        <label>签字日期</label>
+                        <input type="date" id="replaceSignDate">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>签字人</label>
+                        <input type="text" id="replaceSigner" placeholder="输入签字人名称">
+                    </div>
+                    <div class="form-group">
+                        <label>签字状态</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="replaceNoSignature">
+                                <span>不涉及签字</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>盖章标记</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="replaceHasSeal">
+                            <span>已盖章</span>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="replacePartyASeal">
+                            <span>甲方盖章</span>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="replacePartyBSeal">
+                            <span>乙方盖章</span>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="replaceNoSeal">
+                            <span>不涉及盖章</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>其它盖章（标注）</label>
+                    <input type="text" id="replaceOtherSeal" placeholder="如：监理单位盖章、项目章等">
+                </div>
+
+                <button type="submit" class="btn btn-warning">替换文档</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 加载指示器 -->
+    <div id="loadingIndicator" class="loading-indicator">
+        <div class="spinner"></div>
+        <p>加载中...</p>
+    </div>
+
+    <!-- 提示信息 -->
+    <div id="notification" class="notification"></div>
+
+    <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+</body>
+</html>
