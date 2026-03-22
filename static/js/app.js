@@ -1014,6 +1014,60 @@ function renderCycles() {
 }
 
 /**
+ * 计算周期状态
+ * 返回: 'complete' (绿色-完整无误), 'partial' (橙色-文件对属性不对), 'incomplete' (红色-文件不完整)
+ */
+async function calculateCycleStatus(cycle) {
+    const docsInfo = appState.projectConfig.documents[cycle];
+    if (!docsInfo) return 'incomplete';
+
+    const requiredDocs = docsInfo.required_docs || [];
+    const uploadedDocs = await getCycleDocuments(cycle);
+    
+    // 按文档类型分组
+    const docsByName = {};
+    for (const doc of uploadedDocs) {
+        const key = doc.doc_name;
+        if (!docsByName[key]) docsByName[key] = [];
+        docsByName[key].push(doc);
+    }
+
+    let allFilesComplete = true;
+    let allAttributesComplete = true;
+
+    for (const doc of requiredDocs) {
+        const docsList = docsByName[doc.name] || [];
+        const requirement = doc.requirement || '';
+        
+        // 检查文件数量
+        if (docsList.length === 0) {
+            allFilesComplete = false;
+            allAttributesComplete = false;
+            break;
+        }
+
+        // 检查附加属性
+        const requireSigner = requirement.includes('签名') || requirement.includes('签字');
+        const requireSeal = requirement.includes('盖章') || requirement.includes('章');
+        
+        if (requireSigner && !docsList.some(d => d.signer)) {
+            allAttributesComplete = false;
+        }
+        if (requireSeal && !docsList.some(d => d.has_seal_marked || d.has_seal || d.party_a_seal || d.party_b_seal)) {
+            allAttributesComplete = false;
+        }
+    }
+
+    if (!allFilesComplete) {
+        return 'incomplete';
+    } else if (!allAttributesComplete) {
+        return 'partial';
+    } else {
+        return 'complete';
+    }
+}
+
+/**
  * 刷新周期进度显示（从当前项目配置重新加载）
  */
 async function refreshCycleProgress() {
@@ -1027,24 +1081,27 @@ async function refreshCycleProgress() {
  * 加载所有周期的进度
  */
 async function loadCycleProgresses(cycles, docsData) {
-    // 并行获取所有周期的进度
-    const progressPromises = cycles.map(async (cycle) => {
+    // 并行获取所有周期的状态和进度
+    const statusPromises = cycles.map(async (cycle) => {
+        const status = await calculateCycleStatus(cycle);
         try {
             const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}`);
             const result = await response.json();
             const progressPercent = result.total_required > 0
                 ? Math.round((result.completed_count / result.total_required) * 100)
                 : 0;
-            return { cycle, progress: progressPercent, data: result };
+            return { cycle, status, progress: progressPercent, data: result };
         } catch (e) {
             console.error(`获取周期 ${cycle} 进度失败:`, e);
-            return { cycle, progress: 0, data: null };
+            return { cycle, status, progress: 0, data: null };
         }
     });
 
-    const progressResults = await Promise.all(progressPromises);
+    const statusResults = await Promise.all(statusPromises);
+    const statusMap = {};
     const progressMap = {};
-    progressResults.forEach(r => {
+    statusResults.forEach(r => {
+        statusMap[r.cycle] = r.status;
         progressMap[r.cycle] = r.progress;
     });
 
@@ -1052,43 +1109,28 @@ async function loadCycleProgresses(cycles, docsData) {
     elements.cycleNavList.innerHTML = cycles.map((cycle, index) => {
         const cycleConfirmed = appState.projectConfig.cycle_confirmed?.[cycle];
         const isAccepted = cycleConfirmed?.confirmed;
+        const status = statusMap[cycle] || 'incomplete';
         const progress = progressMap[cycle] || 0;
         const acceptedBadge = isAccepted
-            ? `<span class="cycle-accepted-badge" title="确认时间: ${cycleConfirmed.confirmed_time}">✓ 已确认</span>`
+            ? `<span class="cycle-accepted-badge" style="font-size:11px;margin-top:4px;">✓ 已确认</span>`
             : '';
 
-        // 进度颜色：0-33%红色，34-66%黄色，67-99%浅绿，100%深绿
-        let progressColor;
-        if (progress >= 100) {
-            progressColor = '#28a745'; // 深绿
-        } else if (progress >= 67) {
-            progressColor = '#8bc34a'; // 浅绿
-        } else if (progress >= 34) {
-            progressColor = '#ffc107'; // 黄色
+        // 状态文本
+        let statusText;
+        if (status === 'complete') {
+            statusText = '完整无误';
+        } else if (status === 'partial') {
+            statusText = '属性待补';
         } else {
-            progressColor = '#dc3545'; // 红色
+            statusText = '文件不全';
         }
 
-        // 进度条背景阶梯效果
-        const steps = 10;
-        const filledSteps = Math.ceil(progress / 10);
-
         return `
-            <div class="cycle-nav-item ${isAccepted ? 'cycle-accepted' : ''}" data-cycle="${cycle}" data-progress="${progress}">
-                <div class="cycle-progress-bar-container">
-                    <div class="cycle-progress-bar-bg">
-                        ${Array.from({length: steps}, (_, i) =>
-                            `<div class="cycle-progress-step ${i < filledSteps ? 'filled' : ''}"
-                                 style="${i < filledSteps ? `background: ${progressColor}` : ''}"></div>`
-                        ).join('')}
-                    </div>
-                    <div class="cycle-progress-label-overlay">
-                        <span class="cycle-index">${index + 1}</span>
-                        <span class="cycle-name">${cycle}</span>
-                        <span class="cycle-progress-text">${progress}%</span>
-                        ${acceptedBadge}
-                    </div>
-                </div>
+            <div class="cycle-nav-item status-${status}" data-cycle="${cycle}" data-status="${status}">
+                <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
+                <span class="cycle-name" style="text-align:center;">${cycle}</span>
+                <span class="cycle-progress-text" style="font-size:11px;margin-top:4px;">${statusText}</span>
+                ${acceptedBadge}
             </div>
         `;
     }).join('<span class="cycle-nav-arrow">→</span>');
@@ -1184,22 +1226,6 @@ async function renderCycleDocuments(cycle) {
     // 按序号排序
     const requiredDocs = (docsInfo.required_docs || []).sort((a, b) => (a.index || 0) - (b.index || 0));
 
-    // 获取进度数据
-    const progressData = await calculateCycleProgress(cycle);
-    
-    // 使用完成数计算进度（更准确）
-    const totalRequired = progressData.total_required || requiredDocs.length;
-    const completedCount = progressData.completed_count || 0;
-    const progressPercent = totalRequired > 0 ? Math.round((completedCount / totalRequired) * 100) : 0;
-    
-    // 计算色阶颜色 (红->黄->绿)
-    const getProgressColor = (p) => {
-        if (p < 33) return '#dc3545'; // 红色
-        if (p < 66) return '#ffc107'; // 黄色
-        return '#28a745'; // 绿色
-    };
-    const progressColor = getProgressColor(progressPercent);
-
     // 获取已上传的文档
     const uploadedDocs = await getCycleDocuments(cycle);
     
@@ -1211,188 +1237,122 @@ async function renderCycleDocuments(cycle) {
         docsByName[key].push(doc);
     }
 
-    // 计算每个文档类型的完成状态
-    // 根据文档要求(requirement)决定是否显示签名/盖章
-    const getDocProgress = (docName, docsList, requirement) => {
-        const requireSigner = requirement && (requirement.includes('签名') || requirement.includes('签字'));
-        const requireSeal = requirement && (requirement.includes('盖章') || requirement.includes('章'));
-        const noRequirement = !requirement || requirement.trim() === '';
-        
-        if (!docsList || docsList.length === 0) {
-            // 无文档时：无要求则显示灰色待处理，有要求则显示红色
-            return { 
-                percent: 0, 
-                color: noRequirement ? '#6c757d' : '#dc3545', 
-                hasSigner: false, 
-                hasSeal: false,
-                showSigner: requireSigner,
-                showSeal: requireSeal,
-                noRequirement: noRequirement,
-                isComplete: false
-            };
-        }
-        
-        const hasSigner = docsList.some(doc => doc.signer);
-        const hasSeal = docsList.some(doc => doc.has_seal_marked || doc.has_seal || doc.party_a_seal || doc.party_b_seal);
-        
-        // 无要求时，只要有文档就算完成
-        if (noRequirement) {
-            return { 
-                percent: 100, 
-                color: '#28a745', // 绿色 - 完成
-                hasSigner: false, 
-                hasSeal: false,
-                showSigner: false,
-                showSeal: false,
-                noRequirement: true,
-                isComplete: true
-            };
-        }
-        
-        // 有要求时，计算进度
-        let percent = 33; // 有文档基础分
-        
-        // 根据实际要求计算进度
-        const totalRequirements = (requireSigner ? 1 : 0) + (requireSeal ? 1 : 0);
-        
-        if (totalRequirements === 0) {
-            // 没有要求，有文档就算完成
-            percent = 100;
-        } else {
-            // 按要求数量分配分数
-            const baseScore = 33;
-            const perRequirementScore = (100 - baseScore) / totalRequirements;
-            
-            if (requireSigner && hasSigner) percent += perRequirementScore;
-            if (requireSeal && hasSeal) percent += perRequirementScore;
-        }
-        
-        // 确保百分比在合理范围内
-        percent = Math.min(100, Math.max(0, percent));
-        
-        return { 
-            percent, 
-            color: getProgressColor(percent), 
-            hasSigner, 
-            hasSeal,
-            showSigner: requireSigner,
-            showSeal: requireSeal,
-            noRequirement: false,
-            isComplete: percent >= 100
-        };
-    };
-
-    // 渲染横向进度条布局
+    // 新布局：左侧组织机构人员，中间文件名+附加属性，右侧确认按钮
     const html = `
         <h2>📋 ${cycle} - 文档管理</h2>
         
-        <!-- 整体进度条 -->
-        <div class="cycle-progress-container">
-            <div class="cycle-progress-label">
-                <span>文档完整度</span>
-                <span class="cycle-progress-percent">${progressPercent}%</span>
-            </div>
-            <div class="cycle-progress-bar">
-                <div class="cycle-progress-fill" style="width: ${progressPercent}%; background: ${progressColor};"></div>
-            </div>
-            <div class="cycle-progress-stats">
-                <span>✓ 已完成: ${completedCount}/${totalRequired}</span>
-                <span>📄 已上传: ${progressData.doc_count}/${totalRequired}</span>
-            </div>
-        </div>
-        
-        <!-- 横向进度条布局：每个文档类型一行 -->
-        <div class="documents-horizontal">
-            ${requiredDocs.map(doc => {
-                const docsList = docsByName[doc.name] || [];
-                const docProgress = getDocProgress(doc.name, docsList, doc.requirement);
-                const isComplete = docProgress.percent >= 100;
-                
-                // 无要求时显示特殊样式
-                const noReq = docProgress.noRequirement;
-                
-                // 获取文档信息用于显示
-                const docInfo = docsList.length > 0 ? docsList[0] : null;
-                
-                // 生成文件信息显示
-                const fileInfoHtml = docsList.length > 0 ? docsList.map(d => {
-                    const infoParts = [];
-                    if (d.doc_date) infoParts.push(`📅 ${formatDateToMonth(d.doc_date)}`);
-                    if (d.signer) infoParts.push(`✍️ ${d.signer}`);
-                    if (d.sign_date) infoParts.push(`📆 ${formatDateToMonth(d.sign_date)}`);
-                    if (d.no_signature) infoParts.push('❌ 不涉及签字');
-                    if (d.party_a_seal) infoParts.push('🏢甲');
-                    if (d.party_b_seal) infoParts.push('🏭乙');
-                    if (d.has_seal_marked || d.has_seal) infoParts.push('🔖');
-                    if (d.no_seal) infoParts.push('❌ 不涉及盖章');
-                    if (d.other_seal) infoParts.push(`📍${d.other_seal}`);
-                    return `<div class="doc-file-info">
-                        <span class="doc-file-name" onclick="previewDocument('${d.id}')" title="点击预览文件: ${d.original_filename || d.filename}" style="cursor: pointer; text-decoration: underline;">${d.original_filename || d.filename}</span>
-                        ${infoParts.length > 0 ? `<span class="doc-file-tags">${infoParts.join(' ')}</span>` : ''}
-                    </div>`;
-                }).join('') : '';
-                
-                // 状态显示
-                let statusHtml = '';
-                if (docsList.length === 0) {
-                    if (noReq) {
-                        statusHtml = '<span class="badge badge-success">✓ 无要求</span>';
-                    } else {
-                        statusHtml = '<span class="badge badge-danger">未上传</span>';
-                    }
-                } else if (isComplete) {
-                    statusHtml = '<span class="badge badge-success">✓ 已完成</span>';
-                } else {
-                    statusHtml = '<span class="badge badge-warning">进行中</span>';
-                }
-
-                // 左侧颜色：无要求直接绿色（跳过），有文档完成绿色，进行中有文档黄色，无文档未完成红色
-                const leftColor = isComplete ? '#28a745' : (docsList.length > 0 ? '#ffc107' : (noReq ? '#28a745' : '#dc3545'));
-                
-                return `
-                <div class="document-row">
-                    <!-- 文档类型名称 - 变绿色表示完成 -->
-                    <div class="doc-type-progress" 
-                         style="background: ${leftColor};"
-                         onclick="openDocumentModal('${cycle}', '${doc.name}')"
-                         title="${doc.requirement || '无特定要求'}&#10;点击上传/管理文档">
-                        <div class="doc-type-progress-fill" style="width: ${docProgress.percent}%;"></div>
-                        <span class="doc-type-index">${doc.index || ''}</span>
-                        <span class="doc-type-name">${doc.name}</span>
-                        ${isComplete ? '<span class="complete-icon">✓</span>' : ''}
-                    </div>
-                    
-                    <!-- 已匹配文件名和详情 -->
-                    <div class="doc-file-area">
-                        ${docsList.length > 0 ?
-                            `<div class="doc-file-list-full">${fileInfoHtml}</div>` :
-                            `<span class="doc-file-placeholder" style="color: ${noReq ? '#28a745' : '#999'}">${noReq ? '✓ 无要求' : '点击左侧上传文档'}</span>`
-                        }
-                    </div>
-                    
-                    <!-- 状态标签 -->
-                    <div class="doc-status-area">
-                        <div class="doc-status-badges">
-                            ${statusHtml}
-                            ${docProgress.showSigner ? (docProgress.hasSigner ? '<span class="badge badge-success">✓ 已签名</span>' : '<span class="badge badge-secondary">待签名</span>') : ''}
-                            ${docProgress.showSeal ? (docProgress.hasSeal ? '<span class="badge badge-success">✓ 已盖章</span>' : '<span class="badge badge-secondary">待盖章</span>') : ''}
-                            ${noReq && docsList.length > 0 ? '<span class="badge badge-secondary">无要求</span>' : ''}
-                        </div>
-                    </div>
-                </div>
-                `;
-            }).join('')}
+        <!-- 新文档管理布局 -->
+        <div class="new-documents-layout">
+            <table class="documents-table">
+                <thead>
+                    <tr>
+                        <th class="col-org">组织机构/文档类型</th>
+                        <th class="col-files">文件列表</th>
+                        <th class="col-action">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${requiredDocs.map(doc => {
+                        const docsList = docsByName[doc.name] || [];
+                        
+                        // 检查是否已归档
+                        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
+                        
+                        // 生成文件列表显示
+                        const fileListHtml = docsList.length > 0 ? docsList.map(d => {
+                            const attrParts = [];
+                            if (d.doc_date) attrParts.push(`📅${formatDateToMonth(d.doc_date)}`);
+                            if (d.signer) attrParts.push(`✍️${d.signer}`);
+                            if (d.sign_date) attrParts.push(`📆${formatDateToMonth(d.sign_date)}`);
+                            if (d.no_signature) attrParts.push('❌不签字');
+                            if (d.party_a_seal) attrParts.push('🏢甲');
+                            if (d.party_b_seal) attrParts.push('🏭乙');
+                            if (d.has_seal_marked || d.has_seal) attrParts.push('🔖');
+                            if (d.no_seal) attrParts.push('❌不盖章');
+                            if (d.other_seal) attrParts.push(`📍${d.other_seal}`);
+                            
+                            return `<div class="doc-file-row">
+                                <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
+                                      title="点击预览文件" 
+                                      style="cursor: pointer; text-decoration: underline;">
+                                    ${d.original_filename || d.filename}
+                                </span>
+                                ${attrParts.length > 0 ? `<span class="doc-attrs">${attrParts.join(' ')}</span>` : ''}
+                            </div>`;
+                        }).join('') : '<span class="doc-no-files">暂无文件</span>';
+                        
+                        return `
+                        <tr class="doc-row ${isArchived ? 'archived' : ''}">
+                            <td class="col-org">
+                                <div class="org-cell" onclick="openDocumentModal('${cycle}', '${doc.name}')" 
+                                     title="点击上传/管理文档">
+                                    <span class="doc-index">${doc.index || ''}</span>
+                                    <span class="doc-name">${doc.name}</span>
+                                    ${isArchived ? '<span class="archived-badge">已归档</span>' : ''}
+                                </div>
+                                ${doc.requirement ? `<div class="doc-req">${doc.requirement}</div>` : ''}
+                            </td>
+                            <td class="col-files">
+                                <div class="files-container">
+                                    ${fileListHtml}
+                                </div>
+                            </td>
+                            <td class="col-action">
+                                ${!isArchived && docsList.length > 0 ? 
+                                    `<button class="btn btn-success btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
+                                        确认归档
+                                    </button>` : 
+                                    (isArchived ? '<span class="status-text">已归档</span>' : 
+                                     '<span class="status-text">等待上传</span>')
+                                }
+                            </td>
+                        </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
         </div>
     `;
 
     elements.contentArea.innerHTML = html;
+}
 
-    // 添加点击打开选择文件对话框的功能
-    document.querySelectorAll('.upload-area').forEach(area => {
-        area.addEventListener('click', () => {
-            openDocumentModal(area.dataset.cycle, area.dataset.docName);
+/**
+ * 确认归档文档
+ */
+async function archiveDocument(cycle, docName) {
+    if (!appState.projectConfig.documents_archived) {
+        appState.projectConfig.documents_archived = {};
+    }
+    if (!appState.projectConfig.documents_archived[cycle]) {
+        appState.projectConfig.documents_archived[cycle] = {};
+    }
+    
+    appState.projectConfig.documents_archived[cycle][docName] = {
+        archived: true,
+        archived_time: new Date().toISOString()
+    };
+    
+    // 保存到服务器
+    try {
+        const response = await fetch('/api/projects/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(appState.projectConfig)
         });
-    });
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showNotification(`文档 "${docName}" 已归档`, 'success');
+            renderCycleDocuments(cycle);
+            refreshCycleProgress();
+        } else {
+            showNotification('归档失败: ' + result.message, 'error');
+        }
+    } catch (e) {
+        console.error('归档失败:', e);
+        showNotification('归档失败', 'error');
+    }
 }
 
 /**

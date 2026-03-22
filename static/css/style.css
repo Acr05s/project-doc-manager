@@ -289,33 +289,57 @@ body {
 .cycle-nav-list {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 0;
 }
 
 .cycle-nav-item {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border: 1px solid var(--border-color);
-    border-radius: 20px;
+    justify-content: center;
+    padding: 16px 10px;
+    width: 140px;
+    min-width: 140px;
+    max-width: 140px;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
+    border: 2px solid transparent;
+    border-radius: 12px;
+}
+
+.cycle-nav-item.status-complete {
+    background: #28a745;
+    color: white;
+}
+
+.cycle-nav-item.status-partial {
+    background: #ffc107;
+    color: #212529;
+}
+
+.cycle-nav-item.status-incomplete {
+    background: #dc3545;
+    color: white;
 }
 
 .cycle-nav-item:hover {
-    background: #e9ecef;
     transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .cycle-nav-item.active {
-    background: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
+    border-color: #dc3545;
+    box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.3);
+}
+
+.cycle-nav-arrow {
+    font-size: 20px;
+    color: #666;
+    margin: 0 5px;
+    font-weight: bold;
 }
 
 .cycle-nav-item .cycle-progress {
@@ -760,4 +784,156 @@ body {
     padding: 20px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* 新文档管理布局 - 表格样式 */
+.new-documents-layout {
+    margin-top: 20px;
+}
+
+.documents-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.documents-table thead {
+    background: linear-gradient(135deg, #0066cc 0%, #004d99 100%);
+    color: white;
+}
+
+.documents-table th {
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.documents-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: top;
+}
+
+.documents-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.documents-table tbody tr.archived {
+    background: #e8f5e9;
+}
+
+.documents-table tbody tr.archived:hover {
+    background: #c8e6c9;
+}
+
+/* 列宽 */
+.documents-table .col-org {
+    width: 25%;
+    min-width: 200px;
+}
+
+.documents-table .col-files {
+    width: 55%;
+}
+
+.documents-table .col-action {
+    width: 20%;
+    min-width: 120px;
+    text-align: center;
+}
+
+/* 组织机构/文档类型列 */
+.org-cell {
+    cursor: pointer;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.org-cell:hover {
+    background: #e9ecef;
+    transform: translateX(2px);
+}
+
+.doc-index {
+    font-weight: bold;
+    color: #666;
+    min-width: 24px;
+}
+
+.doc-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.archived-badge {
+    background: #28a745;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+}
+
+.doc-req {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #666;
+    padding: 4px 8px;
+    background: #fff3cd;
+    border-radius: 4px;
+}
+
+/* 文件列表列 */
+.files-container {
+    min-height: 40px;
+}
+
+.doc-file-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px dashed #e9ecef;
+}
+
+.doc-file-row:last-child {
+    border-bottom: none;
+}
+
+.doc-file-name {
+    color: #0066cc;
+    font-size: 14px;
+}
+
+.doc-attrs {
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.doc-no-files {
+    color: #999;
+    font-size: 13px;
+    font-style: italic;
+}
+
+/* 操作列 */
+.status-text {
+    font-size: 13px;
+    color: #666;
+}
+
+.btn-sm {
+    padding: 6px 14px;
+    font-size: 13px;
 }

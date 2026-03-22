@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目文档管理中心</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032201">
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032201"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032302">
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032302"></script>
 </head>
 <body>
     <div class="container">
@@ -42,21 +42,8 @@
 
         <!-- 主容器 -->
         <div class="main-layout">
-            <!-- 左侧面板：周期和文档类型 -->
-            <aside class="left-panel">
-                <div class="cycles-panel">
-                    <h2>📋 项目周期</h2>
-                    <div class="cycle-selector">
-                        <h3>选择周期</h3>
-                        <select id="cycleSelect" class="full-width-select">
-                            <option value="">-- 选择周期 --</option>
-                        </select>
-                    </div>
-                </div>
-            </aside>
-            
             <!-- 文档管理区域 -->
-            <main class="right-panel">
+            <main class="right-panel" style="flex:1;width:100%;">
                 <div id="contentArea" class="content-area">
                     <div class="welcome-message">
                         <h2>欢迎使用项目文档管理中心</h2>
