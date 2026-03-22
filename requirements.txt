@@ -16,4 +16,4 @@ Flask-Celery==3.0.0
 celery==5.3.4
 redis==5.0.1
 Flask-SocketIO==5.3.4
-eventlet==0.33.3
+eventlet==0.40.3
