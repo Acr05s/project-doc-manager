@@ -5,19 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目文档管理中心</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032201">
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032201"></script>
+    <script type="module" src="{{ url_for('static', filename='js/app.js') }}?v=2026032301"></script>
 </head>
 <body>
     <div class="container">
         <!-- 顶部导航 -->
         <header class="header">
-            <h1>📁 项目文档管理中心</h1>
-            <div class="header-actions">
+            <div class="header-left">
+                <h1>📁 项目文档管理中心</h1>
                 <!-- 项目选择下拉菜单 -->
                 <select id="projectSelect" class="project-dropdown">
                     <option value="">-- 选择项目 --</option>
                 </select>
                 <button id="newProjectBtn" class="btn btn-success">新建项目</button>
+            </div>
+            <div class="header-right">
                 <button id="loadProjectBtn" class="btn btn-primary">导入文档需求</button>
                 <button id="exportJsonBtn" class="btn btn-secondary" style="display:none;">导出需求清单</button>
                 <button id="saveProjectBtn" class="btn btn-warning" style="display:none;">💾 保存状态</button>
@@ -42,26 +44,37 @@
 
         <!-- 主容器 -->
         <div class="main-layout">
-            <!-- 左侧面板：周期和文档类型 -->
-            <aside class="left-panel">
-                <div class="cycles-panel">
-                    <h2>📋 项目周期</h2>
-                    <div class="cycle-selector">
-                        <h3>选择周期</h3>
-                        <select id="cycleSelect" class="full-width-select">
-                            <option value="">-- 选择周期 --</option>
-                        </select>
-                    </div>
-                </div>
-            </aside>
-            
             <!-- 文档管理区域 -->
-            <main class="right-panel">
+            <main class="right-panel full-width">
                 <div id="contentArea" class="content-area">
                     <div class="welcome-message">
                         <h2>欢迎使用项目文档管理中心</h2>
                         <p>请在顶部选择项目，加载配置文件</p>
                         <p>然后在顶部周期导航中选择周期，管理文档</p>
+                    </div>
+                    
+                    <!-- 文档清单区域 -->
+                    <div id="documentListArea" class="document-list-area" style="display:none;">
+                        <h2 id="cycleTitle"></h2>
+                        
+                        <!-- 文档完整度进度 -->
+                        <div class="cycle-progress-container">
+                            <div class="cycle-progress-label">
+                                <span>文档完整度</span>
+                                <span id="progressPercentage">0%</span>
+                            </div>
+                            <div class="cycle-progress-bar">
+                                <div class="cycle-progress-fill" id="progressBar" style="width: 0%;"></div>
+                            </div>
+                            <div class="cycle-progress-stats">
+                                <span id="completedDocs">已完成: 0/0</span>
+                                <span id="uploadedDocs">已上传: 0/0</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 文档列表 -->
+                        <div id="documentsList" class="documents-list">
+                        </div>
                     </div>
                 </div>
             </main>
@@ -234,13 +247,7 @@
                         <div id="documentsList" class="documents-list">
                         </div>
                     </div>
-                    <!-- 确认文档无误按钮 -->
-                    <div class="confirm-docs-section">
-                        <button type="button" class="btn btn-success" id="confirmAllDocsBtn" onclick="confirmAllDocuments()">
-                            ✅ 确认当前周期文档无误
-                        </button>
-                        <p class="confirm-hint">点击确认当前周期所有文档已完成归档</p>
-                    </div>
+
                 </div>
             </div>
         </div>
@@ -604,6 +611,19 @@
     <div id="loadingIndicator" class="loading-indicator">
         <div class="spinner"></div>
         <p>加载中...</p>
+    </div>
+
+    <!-- 欢迎模态框 -->
+    <div id="welcomeModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeWelcomeModal()">&times;</span>
+            <h2>欢迎使用项目文档管理中心</h2>
+            <p>请在顶部选择项目，加载配置文件</p>
+            <p>然后在顶部周期导航中选择周期，管理文档</p>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="closeWelcomeModal()">开始使用</button>
+            </div>
+        </div>
     </div>
 
     <!-- 提示信息 -->

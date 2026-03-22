@@ -1,1398 +1,505 @@
-/**
- * 项目文档管理中心 - 主应用脚本
- */
+// 导入模块
+import { initProjectManager, addProject, updateProjectSelect, selectProject, createProject, saveProjectState } from './project.js';
 
-// 全局状态
-let appState = {
+// 应用状态
+const appState = {
+    currentProjectId: '',
     projectConfig: null,
-    currentProjectId: null,
-    currentCycle: null,
-    currentDocument: null,
-    documents: {},
-    zipSelectedFile: null,       // 从ZIP中选择的单个文件（兼容旧代码）
-    zipSelectedFiles: [],        // 从ZIP中选择的多个文件数组 [{path, name}]
-    currentZipPackagePath: '',   // 当前选中的ZIP包路径
-    currentZipPackageName: ''    // 当前选中的ZIP包名称
+    projects: [],
+    currentCycle: '',
+    currentDocument: '',
+    zipSelectedFile: null,
+    zipSelectedFiles: [],
+    currentZipPackagePath: '',
+    currentZipPackageName: ''
 };
 
-// DOM元素缓存（延迟获取，避免在DOM加载前访问）
+// DOM 元素
 const elements = {
-    // 按钮 - 使用 getter 延迟获取
-    get newProjectBtn() { return document.getElementById('newProjectBtn'); },
-    get loadProjectBtn() { return document.getElementById('loadProjectBtn'); },
-    get importJsonBtn() { return document.getElementById('importJsonBtn'); },
-    get exportJsonBtn() { return document.getElementById('exportJsonBtn'); },
-    get packageProjectBtn() { return document.getElementById('packageProjectBtn'); },
-    get importPackageBtn() { return document.getElementById('importPackageBtn'); },
-    get projectManageBtn() { return document.getElementById('projectManageBtn'); },
-    get zipUploadBtn() { return document.getElementById('zipUploadBtn'); },
-    get generateReportBtn() { return document.getElementById('generateReportBtn'); },
-    get checkComplianceBtn() { return document.getElementById('checkComplianceBtn'); },
-    get deleteProjectBtn() { return document.getElementById('deleteProjectBtn'); },
-    get saveProjectBtn() { return document.getElementById('saveProjectBtn'); },
-    get uploadBtn() { return document.getElementById('uploadBtn'); },
-    get exportReportBtn() { return document.getElementById('exportReportBtn'); },
-    get confirmAcceptanceBtn() { return document.getElementById('confirmAcceptanceBtn'); },
-    get downloadPackageBtn() { return document.getElementById('downloadPackageBtn'); },
-
-    // 输入框
-    get fileInput() { return document.getElementById('fileInput'); },
-    get projectFile() { return document.getElementById('projectFile'); },
-    get docDate() { return document.getElementById('docDate'); },
-    get signDate() { return document.getElementById('signDate'); },
-    get signer() { return document.getElementById('signer'); },
-    get hasSeal() { return document.getElementById('hasSeal'); },
-    get partyASeal() { return document.getElementById('partyASeal'); },
-    get partyBSeal() { return document.getElementById('partyBSeal'); },
-    get otherSeal() { return document.getElementById('otherSeal'); },
-
-    // 容器
-    get contentArea() { return document.getElementById('contentArea'); },
-    get cycleNavList() { return document.getElementById('cycleNavList'); },
-    get projectSelect() { return document.getElementById('projectSelect'); },
-    get documentsList() { return document.getElementById('documentsList'); },
-    get reportContent() { return document.getElementById('reportContent'); },
-    get modalTitle() { return document.getElementById('modalTitle'); },
-    get docCount() { return document.getElementById('docCount'); },
-
-    // 表单
-    get uploadForm() { return document.getElementById('uploadForm'); },
-    get loadProjectForm() { return document.getElementById('loadProjectForm'); },
-
-    // 模态框
-    get documentModal() { return document.getElementById('documentModal'); },
-    get reportModal() { return document.getElementById('reportModal'); },
-    get loadProjectModal() { return document.getElementById('loadProjectModal'); },
-    get newProjectModal() { return document.getElementById('newProjectModal'); },
-    get importJsonModal() { return document.getElementById('importJsonModal'); },
-    get importPackageModal() { return document.getElementById('importPackageModal'); },
-    get projectManageModal() { return document.getElementById('projectManageModal'); },
-    get zipUploadModal() { return document.getElementById('zipUploadModal'); },
-    get editDocModal() { return document.getElementById('editDocModal'); },
-    get replaceDocModal() { return document.getElementById('replaceDocModal'); },
-
-    // 其他
-    get loadingIndicator() { return document.getElementById('loadingIndicator'); },
-    get notification() { return document.getElementById('notification'); }
+    contentArea: document.getElementById('contentArea'),
+    loadingIndicator: document.getElementById('loadingIndicator'),
+    notification: document.getElementById('notification'),
+    modalTitle: document.getElementById('modalTitle'),
+    uploadForm: document.getElementById('uploadForm'),
+    fileInput: document.getElementById('fileInput'),
+    documentModal: document.getElementById('documentModal'),
+    reportModal: document.getElementById('reportModal'),
+    reportContent: document.getElementById('reportContent'),
+    editDocModal: document.getElementById('editDocModal'),
+    replaceDocModal: document.getElementById('replaceDocModal')
 };
 
 /**
  * 初始化应用
  */
-async function initApp() {
-    console.log('开始初始化应用...');
-    setupEventListeners();
-    console.log('事件监听器已设置');
-    await loadProjectsList();
-    console.log('项目列表已加载');
+function initApp() {
+    // 初始化项目管理
+    initProjectManager(appState);
     
-    // 初始化宽度调整器
-    initDocModalResizer();
+    // 加载项目配置
+    loadProjectConfig();
     
-    // 修复ZIP文件选择问题
-    fixZipSelectionIssue();
-
-    // 检查URL参数是否有项目ID
-    const urlParams = new URLSearchParams(window.location.search);
-    const projectId = urlParams.get('project');
-    console.log('URL中的projectId:', projectId);
-
-    // 使用document.getElementById而不是elements缓存
-    const projectSelect = document.getElementById('projectSelect');
-
-    if (projectId) {
-        // 等待项目列表加载完成后再检查
-        setTimeout(() => {
-            // 检查项目是否存在于列表中
-            const option = projectSelect ? projectSelect.querySelector(`option[value="${projectId}"]`) : null;
-
-            if (option) {
-                // 项目在列表中，直接选中
-                console.log('项目在列表中，选中它');
-                projectSelect.value = projectId;
-                selectProject(projectId);
-            } else {
-                // 项目不在列表中，尝试直接从服务器加载
-                console.log('项目不在列表中，尝试直接加载:', projectId);
-                try {
-                    fetch(`/api/projects/${projectId}`)
-                        .then(response => response.json())
-                        .then(result => {
-                            console.log('API响应:', result);
-                            if (result.status === 'success') {
-                                appState.currentProjectId = projectId;
-                                appState.projectConfig = result.project;
-
-                                // 更新下拉菜单
-                                if (projectSelect) {
-                                    const newOption = document.createElement('option');
-                                    newOption.value = projectId;
-                                    newOption.textContent = result.project.name + ' (已加载)';
-                                    projectSelect.appendChild(newOption);
-                                    projectSelect.value = projectId;
-                                }
-
-                                // 渲染周期
-                                renderCycles();
-
-                                showProjectButtons();
-                                showNotification('已自动加载项目: ' + result.project.name, 'success');
-                            } else {
-                                showNotification('无法加载项目: ' + result.message, 'error');
-                            }
-                        })
-                        .catch(error => {
-                            console.error('自动加载项目失败:', error);
-                            showNotification('自动加载项目失败', 'error');
-                        });
-                } catch (error) {
-                    console.error('自动加载项目失败:', error);
-                    showNotification('自动加载项目失败', 'error');
-                }
-            }
-        }, 100); // 等待100ms确保DOM更新完成
-    }
-
-    console.log('应用初始化完成');
+    // 绑定事件
+    bindEvents();
+    
+    // 更新项目选择下拉框
+    updateProjectSelect(appState);
 }
 
 /**
- * 设置事件监听器
+ * 加载项目配置
  */
-function setupEventListeners() {
-    console.log('设置事件监听器...');
-
-    // 新建项目 - 使用document.getElementById确保获取到元素
-    const newProjectBtn = document.getElementById('newProjectBtn');
-    const newProjectModal = document.getElementById('newProjectModal');
-    console.log('newProjectBtn:', newProjectBtn);
-    console.log('newProjectModal:', newProjectModal);
-    if (newProjectBtn && newProjectModal) {
-        newProjectBtn.addEventListener('click', () => {
-            console.log('点击了新建项目按钮');
-            openModal(newProjectModal);
-        });
-    }
-
-    // 新建项目表单提交
-    const newProjectForm = document.getElementById('newProjectForm');
-    if (newProjectForm) {
-        newProjectForm.addEventListener('submit', handleCreateProject);
-    }
-
-    // 加载项目配置（Excel）
-    const loadProjectBtn = document.getElementById('loadProjectBtn');
-    const loadProjectModal = document.getElementById('loadProjectModal');
-    if (loadProjectBtn && loadProjectModal) {
-        loadProjectBtn.addEventListener('click', () => {
-            openModal(loadProjectModal);
-        });
-    }
-
-    // 加载项目表单提交
-    const loadProjectForm = document.getElementById('loadProjectForm');
-    if (loadProjectForm) {
-        loadProjectForm.addEventListener('submit', handleLoadProject);
-    }
-
-    // 导入JSON
-    const importJsonBtn = document.getElementById('importJsonBtn');
-    const importJsonModal = document.getElementById('importJsonModal');
-    if (importJsonBtn && importJsonModal) {
-        importJsonBtn.addEventListener('click', () => {
-            openModal(importJsonModal);
-        });
-    }
-
-    // 导入JSON表单提交
-    const importJsonForm = document.getElementById('importJsonForm');
-    if (importJsonForm) {
-        importJsonForm.addEventListener('submit', handleImportJson);
-    }
-
-    // 导出JSON
-    const exportJsonBtn = document.getElementById('exportJsonBtn');
-    if (exportJsonBtn) {
-        exportJsonBtn.addEventListener('click', handleExportJson);
-    }
-
-    // 保存项目状态
-    const saveProjectBtn = document.getElementById('saveProjectBtn');
-    if (saveProjectBtn) {
-        saveProjectBtn.addEventListener('click', handleSaveProject);
-    }
-
-    // 打包项目
-    const packageProjectBtn = document.getElementById('packageProjectBtn');
-    if (packageProjectBtn) {
-        packageProjectBtn.addEventListener('click', handlePackageProject);
-    }
-
-    // 导入包按钮
-    const importPackageBtn = document.getElementById('importPackageBtn');
-    const importPackageModal = document.getElementById('importPackageModal');
-    if (importPackageBtn && importPackageModal) {
-        importPackageBtn.addEventListener('click', () => {
-            resetImportPackageModal();
-            openModal(importPackageModal);
-        });
-    }
-
-    // 导入包弹窗 - 冲突处理选项联动
-    document.querySelectorAll('input[name="conflictAction"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            const nameInput = document.getElementById('importPackageName');
-            if (e.target.value === 'manual') {
-                nameInput.disabled = false;
-                nameInput.focus();
-            } else if (e.target.value === 'overwrite') {
-                nameInput.disabled = true;
-            } else if (e.target.value === 'rename') {
-                nameInput.disabled = true;
-                nameInput.value = '';
-            }
-        });
-    });
-
-    console.log('事件监听器设置完成');
-
-
-    // ---- 日志框拖拽调整高度 ----
-    initLogResize();
-
-    // ---- ESC 键关闭弹窗 ----
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            document.querySelectorAll('.modal.show').forEach(modal => {
-                modal.classList.remove('show');
-            });
+async function loadProjectConfig() {
+    try {
+        const response = await fetch('/api/project/config');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            appState.projectConfig = result.data;
+            renderProjectDashboard();
         }
-    });
-
-    // ---- 文档上传弹窗：文件来源 Tab 切换 ----
-    document.querySelectorAll('.upload-tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => switchUploadTab(btn.dataset.tab));
-    });
-
-    // ZIP 包选择器
-            const zipPackageSelect = document.getElementById('zipPackageSelect');
-            if (zipPackageSelect) {
-                zipPackageSelect.addEventListener('change', () => {
-                    const selectedOption = zipPackageSelect.options[zipPackageSelect.selectedIndex];
-                    appState.currentZipPackagePath = zipPackageSelect.value;
-                    appState.currentZipPackageName = selectedOption ? selectedOption.textContent.replace(/（\d+个文件）$/, '').trim() : '';
-                    // 切换包后重置多选状态，重新搜索
-                    appState.zipSelectedFile = null;
-                    appState.zipSelectedFiles = [];
-                    const si = document.getElementById('zipSelectedInfo');
-                    const ab = document.getElementById('zipArchiveBtn');
-                    if (si) si.style.display = 'none';
-                    if (ab) {
-                        ab.disabled = true;
-                        ab.textContent = '✅ 确认选择';
-                    }
-                    const kw = document.getElementById('zipFileSearch')?.value?.trim() || '';
-                    searchZipFiles(kw, zipPackageSelect.value);
-                });
-            }
-
-            // ZIP 包删除按钮
-            const deleteZipBtn = document.getElementById('deleteZipPackageBtn');
-            if (deleteZipBtn) {
-                deleteZipBtn.addEventListener('click', () => {
-                    if (appState.currentZipPackagePath) {
-                        showConfirmModal(
-                            '确认删除',
-                            '确定要删除这个ZIP包吗？此操作不可恢复。',
-                            async () => {
-                                try {
-                                    const response = await fetch('/api/documents/delete-zip-package', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ package_path: appState.currentZipPackagePath })
-                                    });
-                                    const result = await response.json();
-                                    
-                                    if (result.status === 'success') {
-                                        showNotification('ZIP包删除成功', 'success');
-                                        // 重新加载ZIP包列表
-                                        loadZipPackages();
-                                    } else {
-                                        showNotification('删除失败: ' + result.message, 'error');
-                                    }
-                                } catch (error) {
-                                    console.error('删除ZIP包失败:', error);
-                                    showNotification('删除失败: ' + error.message, 'error');
-                                }
-                            }
-                        );
-                    } else {
-                        showNotification('请先选择一个ZIP包', 'warning');
-                    }
-                });
-            }
-
-    // ZIP 搜索按钮
-    const zipSearchBtn = document.getElementById('zipSearchBtn');
-    if (zipSearchBtn) {
-        zipSearchBtn.addEventListener('click', () => {
-            const kw = document.getElementById('zipFileSearch')?.value?.trim() || '';
-            searchZipFiles(kw, appState.currentZipPackagePath || '');
-        });
+    } catch (error) {
+        console.error('加载项目配置失败:', error);
     }
+}
 
-    // ZIP 搜索框回车触发搜索
-    const zipFileSearch = document.getElementById('zipFileSearch');
-    if (zipFileSearch) {
-        zipFileSearch.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                searchZipFiles(zipFileSearch.value.trim(), appState.currentZipPackagePath || '');
-            }
-        });
-        // 输入时实时搜索（300ms 防抖）
-        let zipSearchTimer = null;
-        zipFileSearch.addEventListener('input', () => {
-            clearTimeout(zipSearchTimer);
-            zipSearchTimer = setTimeout(() => {
-                searchZipFiles(zipFileSearch.value.trim(), appState.currentZipPackagePath || '');
-            }, 300);
-        });
-    }
-
-    // ZIP 清除已选
-    const zipClearSelectedBtn = document.getElementById('zipClearSelectedBtn');
-    if (zipClearSelectedBtn) {
-        zipClearSelectedBtn.addEventListener('click', () => {
-            appState.zipSelectedFile = null;
-            appState.zipSelectedFiles = [];
-            // 清除所有复选框和选中状态
-            document.querySelectorAll('.zip-file-item').forEach(i => {
-                i.classList.remove('selected');
-                const cb = i.querySelector('.zip-file-checkbox');
-                if (cb) cb.checked = false;
-            });
-            const si = document.getElementById('zipSelectedInfo');
-            const ab = document.getElementById('zipArchiveBtn');
-            if (si) si.style.display = 'none';
-            if (ab) {
-                ab.disabled = true;
-                ab.textContent = '✅ 确认选择';
-            }
-        });
-    }
-
-    // ZIP 确认归档
-    const zipArchiveBtn = document.getElementById('zipArchiveBtn');
-    if (zipArchiveBtn) {
-        zipArchiveBtn.addEventListener('click', handleZipArchive);
-    }
-
-
-
-    // 导入包表单
-    document.getElementById('importPackageForm').addEventListener('submit', handleImportPackage);
-
-    // 项目管理
-    const projectManageBtn = document.getElementById('projectManageBtn');
-    const projectManageModal = document.getElementById('projectManageModal');
-    if (projectManageBtn && projectManageModal) {
-        projectManageBtn.addEventListener('click', () => {
-            populateProjectManageSelects();
-            openModal(projectManageModal);
-        });
-    }
-
-    // 项目管理Tab切换
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(btn.dataset.tab + 'Tab').classList.add('active');
-        });
-    });
-
-    // 添加周期
-    const addCycleForm = document.getElementById('addCycleForm');
-    if (addCycleForm) addCycleForm.addEventListener('submit', handleAddCycle);
-
-    // 重命名周期
-    const renameCycleForm = document.getElementById('renameCycleForm');
-    if (renameCycleForm) renameCycleForm.addEventListener('submit', handleRenameCycle);
-
-    // 删除周期
-    const deleteCycleForm = document.getElementById('deleteCycleForm');
-    if (deleteCycleForm) deleteCycleForm.addEventListener('submit', handleDeleteCycle);
-
-    // 添加文档
-    const addDocForm = document.getElementById('addDocForm');
-    if (addDocForm) addDocForm.addEventListener('submit', handleAddDoc);
-
-    // 删除文档
-    const deleteDocForm = document.getElementById('deleteDocForm');
-    if (deleteDocForm) deleteDocForm.addEventListener('submit', handleDeleteDoc);
-
-    // 周期选择变化时更新文档下拉框
-    const deleteDocCycleSelect = document.getElementById('deleteDocCycleSelect');
-    if (deleteDocCycleSelect) {
-        deleteDocCycleSelect.addEventListener('change', (e) => {
-            populateDocSelect(e.target.value, 'deleteDocSelect');
-        });
-    }
-
-    // 批量导入ZIP
-    const zipUploadBtn = document.getElementById('zipUploadBtn');
-    const zipUploadModal = document.getElementById('zipUploadModal');
-    if (zipUploadBtn && zipUploadModal) {
-        zipUploadBtn.addEventListener('click', () => {
-            openModal(zipUploadModal);
-        });
-    }
-
-    // ZIP上传表单提交
-    document.getElementById('zipUploadForm').addEventListener('submit', handleZipUpload);
-
-    // 导入匹配文件按钮
-    document.getElementById('importMatchedBtn').addEventListener('click', handleImportMatchedFiles);
-
-    // 确认待确认文件按钮
-    const confirmPendingBtn = document.getElementById('confirmPendingBtn');
-    if (confirmPendingBtn) {
-        confirmPendingBtn.addEventListener('click', handleConfirmPendingFiles);
-    }
-
-    // 拒绝待确认文件按钮
-    const rejectPendingBtn = document.getElementById('rejectPendingBtn');
-    if (rejectPendingBtn) {
-        rejectPendingBtn.addEventListener('click', handleRejectPendingFiles);
-    }
-
-    // 生成报告
-    const generateReportBtn = document.getElementById('generateReportBtn');
-    if (generateReportBtn) {
-        generateReportBtn.addEventListener('click', handleGenerateReport);
-    }
-
-    // 检查异常
-    const checkComplianceBtn = document.getElementById('checkComplianceBtn');
-    if (checkComplianceBtn) {
-        checkComplianceBtn.addEventListener('click', handleCheckCompliance);
-    }
-
-    // 确认验收
-    const confirmAcceptanceBtn = document.getElementById('confirmAcceptanceBtn');
-    if (confirmAcceptanceBtn) {
-        confirmAcceptanceBtn.addEventListener('click', handleConfirmAcceptance);
-    }
-
-    // 打包下载
-    const downloadPackageBtn = document.getElementById('downloadPackageBtn');
-    if (downloadPackageBtn) {
-        downloadPackageBtn.addEventListener('click', handleDownloadPackage);
-    }
-
-    // 删除项目
-    const deleteProjectBtn = document.getElementById('deleteProjectBtn');
-    if (deleteProjectBtn) {
-        deleteProjectBtn.addEventListener('click', () => {
-            if (appState.currentProjectId) {
-                deleteProject(appState.currentProjectId);
-            } else {
-                showNotification('请先选择一个项目', 'warning');
-            }
-        });
-    }
-
-    // 文档上传表单提交
-    const uploadForm = document.getElementById('uploadForm');
-    if (uploadForm) {
-        uploadForm.addEventListener('submit', handleUploadDocument);
-    }
-
-    // 文件选择后显示预览
-    const fileInput = document.getElementById('fileInput');
-    if (fileInput) {
-        fileInput.addEventListener('change', handleFileSelect);
-    }
-
-    // 替换文件按钮
-    const replaceArchiveBtn = document.getElementById('replaceArchiveBtn');
-    if (replaceArchiveBtn) {
-        replaceArchiveBtn.addEventListener('click', handleReplaceArchive);
-    }
-
-    // 文档编辑表单提交
-    const editDocForm = document.getElementById('editDocForm');
-    if (editDocForm) {
-        editDocForm.addEventListener('submit', handleEditDocument);
-    }
-
-    // 文档替换表单提交
-    const replaceDocForm = document.getElementById('replaceDocForm');
-    if (replaceDocForm) {
-        replaceDocForm.addEventListener('submit', handleReplaceDocument);
-    }
-
-    // 导出报告
-    const exportReportBtn = document.getElementById('exportReportBtn');
-    if (exportReportBtn) {
-        exportReportBtn.addEventListener('click', handleExportReport);
-    }
-
-    // 关闭模态框
-    document.querySelectorAll('.close').forEach(closeBtn => {
-        closeBtn.addEventListener('click', (e) => {
-            const modal = e.target.closest('.modal');
-            closeModal(modal);
-        });
-    });
-
-    // 点击模态框外部关闭
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeModal(modal);
-            }
-        });
-    });
-
-    // 设置今天的日期为默认值
-    const today = new Date().toISOString().split('T')[0];
-    elements.docDate.value = today;
-    elements.signDate.value = today;
+/**
+ * 渲染项目仪表盘
+ */
+function renderProjectDashboard() {
+    if (!appState.projectConfig) return;
     
-    // 项目下拉菜单选择
+    const cycles = appState.projectConfig.cycles || [];
+    const html = `
+        <h1>📁 ${appState.projectConfig.project_name || '未命名项目'} - 文档管理</h1>
+        
+        <div class="cycles-container">
+            ${cycles.map((cycle, index) => `
+                <div class="cycle-card"
+                     onclick="selectCycle('${cycle}')"
+                     data-cycle="${cycle}">
+                    <div class="cycle-number">${index + 1}</div>
+                    <div class="cycle-info">
+                        <h3>${cycle}</h3>
+                        <p>点击查看文档</p>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    
+    elements.contentArea.innerHTML = html;
+}
+
+/**
+ * 选择周期
+ */
+async function selectCycle(cycle) {
+    appState.currentCycle = cycle;
+    await renderCycleDocuments(cycle);
+}
+
+/**
+ * 绑定事件
+ */
+function bindEvents() {
+    // 绑定文件选择事件
+    if (elements.fileInput) {
+        elements.fileInput.addEventListener('change', handleFileSelect);
+    }
+    
+    // 绑定表单提交事件
+    if (elements.uploadForm) {
+        elements.uploadForm.addEventListener('submit', handleUploadDocument);
+    }
+    
+    // 绑定拖放事件
+    document.querySelectorAll('.upload-area').forEach(area => {
+        area.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            area.classList.add('drag-over');
+        });
+        
+        area.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            area.classList.remove('drag-over');
+        });
+        
+        area.addEventListener('drop', handleFileDrop);
+    });
+    
+    // 绑定项目选择事件
     const projectSelect = document.getElementById('projectSelect');
     if (projectSelect) {
         projectSelect.addEventListener('change', (e) => {
             const projectId = e.target.value;
             if (projectId) {
-                selectProject(projectId);
+                selectProject(appState, projectId, renderProjectDashboard);
             } else {
-                // 选择了"-- 选择项目 --"
-                appState.currentProjectId = null;
+                appState.currentProjectId = '';
                 appState.projectConfig = null;
-                appState.currentCycle = null;
-                if (elements.cycleNavList) elements.cycleNavList.innerHTML = '';
-                hideProjectButtons();
-                // 清除URL参数
-                const url = new URL(window.location);
-                url.searchParams.delete('project');
-                window.history.replaceState({}, '', url);
+                elements.contentArea.innerHTML = `
+                    <div class="welcome-message">
+                        <h2>欢迎使用项目文档管理中心</h2>
+                        <p>请在顶部选择项目，加载配置文件</p>
+                        <p>然后在顶部周期导航中选择周期，管理文档</p>
+                    </div>
+                `;
+                saveProjectState(appState);
             }
         });
     }
-}
-
-/**
- * 初始化文档模态框宽度调整器
- */
-function initDocModalResizer() {
-    const resizer = document.getElementById('docModalResizer');
-    if (!resizer) return;
     
-    let isResizing = false;
-    let startX, startWidth;
-    
-    resizer.addEventListener('mousedown', (e) => {
-        isResizing = true;
-        startX = e.clientX;
-        const leftPanel = resizer.previousElementSibling;
-        startWidth = leftPanel.offsetWidth;
-        
-        // 添加全局鼠标事件监听
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-        
-        // 防止文本选择
-        e.preventDefault();
-    });
-    
-    function handleMouseMove(e) {
-        if (!isResizing) return;
-        
-        const deltaX = e.clientX - startX;
-        const leftPanel = resizer.previousElementSibling;
-        const rightPanel = resizer.nextElementSibling;
-        const container = resizer.parentElement;
-        const containerWidth = container.offsetWidth;
-        const newLeftWidth = startWidth + deltaX;
-        
-        // 限制最小宽度和最大宽度
-        if (newLeftWidth > 400 && newLeftWidth < containerWidth - 350) {
-            leftPanel.style.width = newLeftWidth + 'px';
-            leftPanel.style.flex = 'none';
-            
-            // 计算右侧面板的新宽度
-            const newRightWidth = containerWidth - newLeftWidth - resizer.offsetWidth;
-            rightPanel.style.width = newRightWidth + 'px';
-            rightPanel.style.flex = 'none';
-        }
-    }
-    
-    function handleMouseUp() {
-        isResizing = false;
-        // 移除全局鼠标事件监听
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-    }
-}
-
-/**
- * 修复ZIP文件选择问题，确保选中的文件能够正确保存和显示
- */
-function fixZipSelectionIssue() {
-    // 确保zipSelectedFiles数组正确保存所有选中的文件
-    const originalSearchZipFiles = searchZipFiles;
-    searchZipFiles = function(keyword, packagePath) {
-        // 调用原始函数
-        originalSearchZipFiles(keyword, packagePath);
-        
-        // 重新应用选中状态
-        setTimeout(() => {
-            const zipFileItems = document.querySelectorAll('.zip-file-item');
-            zipFileItems.forEach(item => {
-                const filePath = item.dataset.path;
-                if (appState.zipSelectedFiles.some(f => f.path === filePath)) {
-                    item.classList.add('selected');
-                    const checkbox = item.querySelector('.zip-file-checkbox');
-                    if (checkbox) checkbox.checked = true;
-                }
-            });
-        }, 100);
-    };
-    
-    // 修复确认选择按钮的状态更新
-    const originalHandleZipArchive = handleZipArchive;
-    handleZipArchive = function() {
-        // 确保所有选中的文件都被正确处理
-        const selectedCheckboxes = document.querySelectorAll('.zip-file-checkbox:checked');
-        const selectedFiles = Array.from(selectedCheckboxes).map(cb => {
-            const item = cb.closest('.zip-file-item');
-            return {
-                path: item.dataset.path,
-                name: item.dataset.name
-            };
-        });
-        
-        appState.zipSelectedFiles = selectedFiles;
-        
-        // 调用原始函数
-        originalHandleZipArchive();
-    };
-}
-
-/**
- * 加载项目列表
- */
-async function loadProjectsList() {
-    try {
-        const response = await fetch('/api/projects/list');
-        const result = await response.json();
-        
-        if (result.status === 'success' && result.projects) {
-            renderProjectsList(result.projects);
-        } else {
-            renderProjectsList([]);
-        }
-    } catch (error) {
-        console.error('加载项目列表失败:', error);
-        renderProjectsList([]);
-    }
-}
-
-/**
- * 渲染项目列表（下拉菜单）
- */
-function renderProjectsList(projects) {
-    const projectSelect = document.getElementById('projectSelect');
-    if (!projectSelect) return;
-    
-    // 保存当前选中的值
-    const currentValue = projectSelect.value;
-    
-    // 清空并添加默认选项
-    projectSelect.innerHTML = '<option value="">-- 选择项目 --</option>';
-    
-    if (!projects || projects.length === 0) {
-        return;
-    }
-    
-    // 添加项目选项
-    projects.forEach(project => {
-        const option = document.createElement('option');
-        option.value = project.id;
-        option.textContent = project.name;
-        option.title = project.description || project.name;
-        projectSelect.appendChild(option);
-    });
-    
-    // 恢复选中状态
-    if (currentValue) {
-        projectSelect.value = currentValue;
-    } else if (appState.currentProjectId) {
-        projectSelect.value = appState.currentProjectId;
-    }
-}
-
-/**
- * 选择项目
- */
-async function selectProject(projectId) {
-    try {
-        const response = await fetch(`/api/projects/${projectId}`);
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            appState.currentProjectId = projectId;
-            appState.projectConfig = result.project;
-            
-            // 更新下拉菜单选中状态
-            if (elements.projectSelect) {
-                elements.projectSelect.value = projectId;
+    // 绑定新建项目按钮事件
+    const newProjectBtn = document.getElementById('newProjectBtn');
+    if (newProjectBtn) {
+        newProjectBtn.addEventListener('click', () => {
+            const newProjectModal = document.getElementById('newProjectModal');
+            if (newProjectModal) {
+                newProjectModal.classList.add('show');
             }
-            
-            // 更新URL参数
-            const url = new URL(window.location);
-            url.searchParams.set('project', projectId);
-            window.history.replaceState({}, '', url);
-            
-            // 渲染周期
-            renderCycles();
-            
-            showProjectButtons();
-            showNotification('已加载项目: ' + result.project.name, 'success');
-        } else {
-            showNotification('加载项目失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('选择项目失败:', error);
-        showNotification('加载项目失败', 'error');
+        });
     }
-}
-
-/**
- * 删除项目（使用确认弹窗）
- */
-async function deleteProject(projectId) {
-    showConfirmModal(
-        '确认删除',
-        '确定要删除这个项目吗？此操作不可恢复。',
-        async () => {
-            try {
-                const response = await fetch(`/api/projects/${projectId}`, {
-                    method: 'DELETE'
-                });
-                const result = await response.json();
+    
+    // 绑定新建项目表单提交事件
+    const newProjectForm = document.getElementById('newProjectForm');
+    if (newProjectForm) {
+        newProjectForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const projectName = document.getElementById('newProjectName').value.trim();
+            const projectDesc = document.getElementById('newProjectDesc').value.trim();
+            
+            if (projectName) {
+                const project = createProject(appState, projectName, projectDesc);
+                addProject(appState, project);
                 
-                if (result.status === 'success') {
-                    showNotification('项目已删除', 'success');
-                    
-                    // 如果删除的是当前项目，清除状态
-                    if (appState.currentProjectId === projectId) {
-                        appState.currentProjectId = null;
-                        appState.projectConfig = null;
-                        appState.currentCycle = null;
-                        const projectSelectEl = document.getElementById('projectSelect');
-                        if (projectSelectEl) projectSelectEl.value = '';
-                        const cycleNavListEl = document.getElementById('cycleNavList');
-                        if (cycleNavListEl) cycleNavListEl.innerHTML = '';
-                        hideProjectButtons();
-                        // 清除URL参数
-                        const url = new URL(window.location);
-                        url.searchParams.delete('project');
-                        window.history.replaceState({}, '', url);
-                    }
-                    
-                    // 刷新项目列表
-                    loadProjectsList();
-                } else {
-                    showNotification('删除失败: ' + result.message, 'error');
+                // 关闭模态框
+                const newProjectModal = document.getElementById('newProjectModal');
+                if (newProjectModal) {
+                    newProjectModal.classList.remove('show');
                 }
-            } catch (error) {
-                console.error('删除项目失败:', error);
-                showNotification('删除项目失败', 'error');
+                
+                // 重置表单
+                newProjectForm.reset();
+                
+                showNotification('项目创建成功！', 'success');
             }
-        }
-    );
-}
-
-/**
- * 显示确认弹窗
- */
-function showConfirmModal(title, message, onConfirm) {
-    const modal = document.getElementById('confirmModal');
-    const titleEl = document.getElementById('confirmTitle');
-    const messageEl = document.getElementById('confirmMessage');
-    const cancelBtn = document.getElementById('confirmCancelBtn');
-    const okBtn = document.getElementById('confirmOkBtn');
-    
-    titleEl.textContent = title;
-    messageEl.textContent = message;
-    
-    // 清除之前的绑定，避免重复绑定
-    const newCancelBtn = cancelBtn.cloneNode(true);
-    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    const newOkBtn = okBtn.cloneNode(true);
-    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
-    
-    // 取消按钮
-    newCancelBtn.addEventListener('click', () => {
-        closeConfirmModal();
-    });
-    
-    // 确认按钮
-    newOkBtn.addEventListener('click', () => {
-        closeConfirmModal();
-        if (onConfirm) onConfirm();
-    });
-    
-    modal.classList.add('show');
-}
-
-/**
- * 关闭确认弹窗
- */
-function closeConfirmModal() {
-    const modal = document.getElementById('confirmModal');
-    modal.classList.remove('show');
-}
-
-/**
- * 显示通用输入框模态框
- * @param {string} title - 弹窗标题
- * @param {Array} fields - 字段数组，每项格式：{ label, key, value, placeholder }
- * @param {Function} onConfirm - 确认回调，参数为 { key: value } 对象
- */
-function showInputModal(title, fields, onConfirm) {
-    const modal = document.getElementById('inputModal');
-    const titleEl = document.getElementById('inputModalTitle');
-    const fieldsEl = document.getElementById('inputModalFields');
-    const okBtn = document.getElementById('inputModalOkBtn');
-
-    titleEl.textContent = title;
-
-    // 渲染字段
-    fieldsEl.innerHTML = fields.map(f => `
-        <div class="input-modal-field">
-            <label class="input-modal-label">${f.label}</label>
-            <input type="text" class="input-modal-input" data-key="${f.key}"
-                value="${(f.value || '').replace(/"/g, '&quot;')}"
-                placeholder="${(f.placeholder || '').replace(/"/g, '&quot;')}" />
-        </div>
-    `).join('');
-
-    // 聚焦第一个输入框
-    const firstInput = fieldsEl.querySelector('input');
-    if (firstInput) setTimeout(() => firstInput.focus(), 80);
-
-    // 重绑确认按钮（cloneNode 避免重复事件）
-    const newOkBtn = okBtn.cloneNode(true);
-    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
-
-    const doConfirm = () => {
-        const result = {};
-        fieldsEl.querySelectorAll('input[data-key]').forEach(inp => {
-            result[inp.dataset.key] = inp.value;
         });
-        closeInputModal();
-        if (onConfirm) onConfirm(result);
-    };
-
-    newOkBtn.addEventListener('click', doConfirm);
-
-    // 回车确认
-    fieldsEl.addEventListener('keydown', function handler(e) {
-        if (e.key === 'Enter') {
-            fieldsEl.removeEventListener('keydown', handler);
-            doConfirm();
-        }
-    });
-
-    modal.classList.add('show');
-}
-
-/**
- * 关闭输入框模态框
- */
-function closeInputModal() {
-    document.getElementById('inputModal').classList.remove('show');
-}
-
-/**
- * 处理加载项目
- */
-async function handleLoadProject(e) {
-    e.preventDefault();
-
-    const file = elements.projectFile.files[0];
-    if (!file) {
-        showNotification('请选择文件', 'error');
-        return;
-    }
-
-    // 检查是否选择了项目
-    if (!appState.currentProjectId) {
-        showNotification('请先选择项目或新建项目', 'error');
-        return;
-    }
-
-    const progress = showOperationProgress('load-' + Date.now(), '正在导入文档需求...');
-    progress.update(20, '正在上传文件...');
-
-    showLoading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-        const response = await fetch('/api/project/load', {
-            method: 'POST',
-            body: formData
-        });
-
-        progress.update(50, '正在解析文件...');
-
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            progress.update(70, '正在保存配置...');
-            
-            // 更新当前选中的项目
-            result.data.id = appState.currentProjectId;
-            result.data.name = appState.projectConfig ? appState.projectConfig.name : '未命名项目';
-            
-            // 保存项目配置
-            const saveResponse = await fetch(`/api/projects/${appState.currentProjectId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(result.data)
-            });
-            
-            if (!saveResponse.ok) {
-                console.error('保存项目配置失败');
-                showNotification('保存配置失败', 'error');
-                return;
-            }
-            
-            appState.projectConfig = result.data;
-            renderCycles();
-            renderInitialContent();
-            closeModal(elements.loadProjectModal);
-            elements.loadProjectForm.reset();
-            
-            progress.complete('文档需求导入成功');
-            showNotification('文档结构更新成功！', 'success');
-            console.log('项目配置:', appState.projectConfig);
-        } else {
-            progress.error('导入失败: ' + result.message);
-            showNotification('加载失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('加载项目错误:', error);
-        progress.error('导入失败: ' + error.message);
-        showNotification('加载项目出错: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
     }
 }
 
 /**
- * 渲染项目周期列表
- */
-function renderCycles() {
-    if (!appState.projectConfig || !appState.projectConfig.cycles) {
-        elements.cycleNavList.innerHTML = '<span class="placeholder">无可用周期</span>';
-        return;
-    }
-
-    const cycles = appState.projectConfig.cycles;
-    const docsData = appState.projectConfig.documents || {};
-
-    // 异步加载每个周期的进度
-    loadCycleProgresses(cycles, docsData);
-}
-
-/**
- * 刷新周期进度显示（从当前项目配置重新加载）
+ * 刷新周期进度显示
  */
 async function refreshCycleProgress() {
-    if (!appState.projectConfig || !appState.projectConfig.cycles) return;
-    const cycles = appState.projectConfig.cycles;
-    const docsData = appState.projectConfig.documents || {};
-    await loadCycleProgresses(cycles, docsData);
+    if (!appState.currentCycle) return;
+    
+    try {
+        // 重新渲染当前周期的文档列表
+        await renderCycleDocuments(appState.currentCycle);
+    } catch (error) {
+        console.error('刷新周期进度失败:', error);
+    }
 }
 
 /**
- * 加载所有周期的进度
+ * 渲染周期文档列表
  */
-async function loadCycleProgresses(cycles, docsData) {
-    // 并行获取所有周期的进度
-    const progressPromises = cycles.map(async (cycle) => {
-        try {
-            const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}`);
-            const result = await response.json();
-            const progressPercent = result.total_required > 0
-                ? Math.round((result.completed_count / result.total_required) * 100)
-                : 0;
-            return { cycle, progress: progressPercent, data: result };
-        } catch (e) {
-            console.error(`获取周期 ${cycle} 进度失败:`, e);
-            return { cycle, progress: 0, data: null };
+async function renderCycleDocuments(cycle) {
+    if (!appState.projectConfig) return;
+    
+    appState.currentCycle = cycle;
+    
+    try {
+        // 获取当前周期的文档要求
+        const docsInfo = appState.projectConfig.documents[cycle];
+        if (!docsInfo) {
+            elements.contentArea.innerHTML = `<h2>📋 ${cycle} - 文档管理</h2><p>该周期暂无文档要求</p>`;
+            return;
         }
-    });
-
-    const progressResults = await Promise.all(progressPromises);
-    const progressMap = {};
-    progressResults.forEach(r => {
-        progressMap[r.cycle] = r.progress;
-    });
-
-    // 渲染顶部导航栏：横向排列，用箭头连接
-    elements.cycleNavList.innerHTML = cycles.map((cycle, index) => {
-        const cycleConfirmed = appState.projectConfig.cycle_confirmed?.[cycle];
-        const isAccepted = cycleConfirmed?.confirmed;
-        const progress = progressMap[cycle] || 0;
-        const acceptedBadge = isAccepted
-            ? `<span class="cycle-accepted-badge" title="确认时间: ${cycleConfirmed.confirmed_time}">✓ 已确认</span>`
-            : '';
-
-        // 进度颜色：0-33%红色，34-66%黄色，67-99%浅绿，100%深绿
-        let progressColor;
-        if (progress >= 100) {
-            progressColor = '#28a745'; // 深绿
-        } else if (progress >= 67) {
-            progressColor = '#8bc34a'; // 浅绿
-        } else if (progress >= 34) {
-            progressColor = '#ffc107'; // 黄色
+        
+        const requiredDocs = docsInfo.required_docs || [];
+        const totalRequired = requiredDocs.length;
+        
+        // 获取已上传的文档
+        const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}`);
+        const result = await response.json();
+        
+        const docs = result.data || [];
+        
+        // 按文档类型分组
+        const docsByName = {};
+        docs.forEach(doc => {
+            const docName = doc.doc_name;
+            if (!docsByName[docName]) {
+                docsByName[docName] = [];
+            }
+            docsByName[docName].push(doc);
+        });
+        
+        // 计算进度
+        let completedCount = 0;
+        const cycleConfirmed = appState.projectConfig.cycle_confirmed?.[cycle]; 
+        
+        if (cycleConfirmed?.confirmed) {
+            completedCount = totalRequired;
         } else {
-            progressColor = '#dc3545'; // 红色
+            for (const doc of requiredDocs) {
+                const docsList = docsByName[doc.name] || [];
+                const docProgress = getDocProgress(doc.name, docsList, doc.requirement);
+                if (docProgress.isComplete) {
+                    completedCount++;
+                }
+            }
         }
-
-        // 进度条背景阶梯效果
-        const steps = 10;
-        const filledSteps = Math.ceil(progress / 10);
-
-        return `
-            <div class="cycle-nav-item ${isAccepted ? 'cycle-accepted' : ''}" data-cycle="${cycle}" data-progress="${progress}">
-                <div class="cycle-progress-bar-container">
-                    <div class="cycle-progress-bar-bg">
-                        ${Array.from({length: steps}, (_, i) =>
-                            `<div class="cycle-progress-step ${i < filledSteps ? 'filled' : ''}"
-                                 style="${i < filledSteps ? `background: ${progressColor}` : ''}"></div>`
-                        ).join('')}
+        
+        const progressPercent = totalRequired > 0 ? Math.round((completedCount / totalRequired) * 100) : 0;
+        let progressColor = '#dc3545';
+        if (progressPercent >= 100) progressColor = '#28a745';
+        else if (progressPercent >= 50) progressColor = '#ffc107';
+        
+        // 计算已上传的文档数
+        let uploadedCount = 0;
+        for (const doc of requiredDocs) {
+            const docsList = docsByName[doc.name] || [];
+            if (docsList.length > 0) {
+                uploadedCount++;
+            }
+        }
+        
+        // 显示文档清单区域
+        const html = `
+            <h2>📋 ${cycle} - 文档管理</h2>
+            
+            <!-- 整体进度 -->
+            <div class="cycle-progress-container">
+                <div class="cycle-progress-label">
+                    <span>文档完整度</span>
+                    <span class="cycle-progress-percent">${progressPercent}%</span>
+                </div>
+                <div class="cycle-progress-bar">
+                    <div class="cycle-progress-fill" style="width: ${progressPercent}%; background: ${progressColor};"></div>
+                </div>
+                <div class="cycle-progress-stats">
+                    <span>✅ 已完成 ${completedCount}/${totalRequired}</span>
+                    <span>📄 已上传 ${uploadedCount}/${totalRequired}</span>
+                </div>
+            </div>
+            
+            <!-- 文档列表 -->
+            <div class="documents-list">
+                <div id="documentListArea">
+                    <h3 id="cycleTitle">📋 ${cycle} - 文档管理</h3>
+                    <div class="progress-section">
+                        <div class="progress-info">
+                            <span>进度: <strong id="progressPercentage">${progressPercent}%</strong></span>
+                            <span id="completedDocs">✅ 已完成 ${completedCount}/${totalRequired}</span>
+                            <span id="uploadedDocs">📄 已上传 ${uploadedCount}/${totalRequired}</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="progressBar" style="width: ${progressPercent}%; background: ${progressColor};"></div>
+                        </div>
                     </div>
-                    <div class="cycle-progress-label-overlay">
-                        <span class="cycle-index">${index + 1}</span>
-                        <span class="cycle-name">${cycle}</span>
-                        <span class="cycle-progress-text">${progress}%</span>
-                        ${acceptedBadge}
+                    <div id="documentsList">
+                        ${requiredDocs.map(doc => {
+                            const docsList = docsByName[doc.name] || [];
+                            const docProgress = getDocProgress(doc.name, docsList, doc.requirement);
+                            const isComplete = docProgress.percent >= 100;
+                            
+                            // 无要求时显示特殊样式
+                            const noReq = docProgress.noRequirement;
+                            
+                            // 生成文件信息显示
+                            const fileInfoHtml = docsList.length > 0 ? docsList.map(d => {
+                                const infoParts = [];
+                                if (d.doc_date) infoParts.push(`📅 ${formatDateToMonth(d.doc_date)}`);
+                                if (d.signer) infoParts.push(`✍️ ${d.signer}`);
+                                if (d.sign_date) infoParts.push(`📆 ${formatDateToMonth(d.sign_date)}`);
+                                if (d.no_signature) infoParts.push('📝 不涉及签名');
+                                if (d.party_a_seal) infoParts.push('🏢 甲方章');
+                                if (d.party_b_seal) infoParts.push('🏭 乙方章');
+                                if (d.has_seal_marked || d.has_seal) infoParts.push('🔖 已盖章');
+                                if (d.no_seal) infoParts.push('📝 不涉及盖章');
+                                if (d.other_seal) infoParts.push(`📍${d.other_seal}`);
+                                return `<div class="doc-file-info">
+                                    <span class="doc-file-name" onclick="previewDocument('${d.id}')" title="点击预览文件: ${d.original_filename || d.filename}" style="cursor: pointer; text-decoration: underline;">${d.original_filename || d.filename}</span>
+                                    ${infoParts.length > 0 ? `<span class="doc-file-tags">${infoParts.join(' ')}</span>` : ''}
+                                    ${doc.requirement ? `<div class="doc-requirements" style="font-size: 12px; color: #666; margin-top: 4px;">📋 ${doc.requirement}</div>` : ''}
+                                </div>`;
+                            }).join('') : '';
+                            
+                            // 状态显示
+                            let statusHtml = '';
+                            if (docsList.length === 0) {
+                                if (noReq) {
+                                    statusHtml = '<span class="badge badge-success">✅ 无要求</span>';
+                                } else {
+                                    statusHtml = '<span class="badge badge-danger">未上传</span>';
+                                }
+                            } else if (isComplete) {
+                                statusHtml = '<span class="badge badge-success">✅ 已完成</span>';
+                            } else {
+                                statusHtml = '<span class="badge badge-warning">进行中</span>';
+                            }
+
+                            // 左侧颜色：无要求直接绿色（跳过），有文档完成绿色，进行中有文档黄色，无文档未完成红色
+                            const leftColor = isComplete ? '#28a745' : (docsList.length > 0 ? '#ffc107' : (noReq ? '#28a745' : '#dc3545'));
+                            
+                            return `
+                            <div class="document-row">
+                                <!-- 文档类型名称 - 变绿色表示完成 -->
+                                <div class="doc-type-progress" 
+                                     style="background: ${leftColor};">
+                                    <div class="doc-type-progress-fill" style="width: ${docProgress.percent}%;"></div>
+                                    <span class="doc-type-index">${doc.index || ''}</span>
+                                    <span class="doc-type-name" 
+                                          onclick="openDocumentModal('${cycle}', '${doc.name}')"
+                                          title="${doc.requirement || '无特定要求'}\n点击上传/管理文档">
+                                        ${doc.name}
+                                    </span>
+                                    ${isComplete ? '<span class="complete-icon">✅</span>' : ''}
+                                </div>
+                                
+                                <!-- 已匹配文件名和详情 -->
+                                <div class="doc-file-area">
+                                    ${docsList.length > 0 ?
+                                        `<div class="doc-file-list-full">${fileInfoHtml}</div>` :
+                                        `<span class="doc-file-placeholder" style="color: ${noReq ? '#28a745' : '#999'}">${noReq ? '✅ 无要求' : '点击左侧上传文档'}</span>`
+                                    }
+                                </div>
+                                
+                                <!-- 状态标签 -->
+                                <div class="doc-status-area">
+                                    <div class="doc-status-badges">
+                                        ${statusHtml}
+                                        ${docProgress.showSigner ? (docProgress.hasSigner ? '<span class="badge badge-success">✅ 已签名</span>' : '<span class="badge badge-secondary">待签名</span>') : ''}
+                                        ${docProgress.showSeal ? (docProgress.hasSeal ? '<span class="badge badge-success">✅ 已盖章</span>' : '<span class="badge badge-secondary">待盖章</span>') : ''}
+                                        ${noReq && docsList.length > 0 ? '<span class="badge badge-secondary">无要求</span>' : ''}
+                                    </div>
+                                </div>
+                            </div>
+                            `;
+                        }).join('')}
                     </div>
                 </div>
             </div>
         `;
-    }).join('<span class="cycle-nav-arrow">→</span>');
-
-    // 添加周期点击事件
-    document.querySelectorAll('.cycle-nav-item').forEach(item => {
-        item.addEventListener('click', () => {
-            selectCycle(item.dataset.cycle);
+        
+        elements.contentArea.innerHTML = html;
+        
+        // 显示确认文档无误按钮
+        const documentsList = document.getElementById('documentsList');
+        const confirmSection = document.createElement('div');
+        confirmSection.className = 'confirm-docs-section';
+        confirmSection.innerHTML = `
+            <button class="btn btn-success" onclick="confirmAllDocuments('${cycle}')">
+                ✅ 确认当前周期文档无误
+            </button>
+            <p class="confirm-hint">点击确认当前周期所有文档已完成归档</p>
+        `;
+        documentsList.appendChild(confirmSection);
+        
+        // 添加点击打开选择文件对话框的功能
+        document.querySelectorAll('.doc-type-name').forEach(element => {
+            element.style.cursor = 'pointer';
         });
-    });
-
-    // 只有在没有选中任何周期时才默认选中第一个
-    // 这样刷新进度时不会改变当前选中的周期
-    const currentCycle = appState.currentCycle;
-    if (!currentCycle && cycles.length > 0) {
-        selectCycle(cycles[0]);
-    } else if (currentCycle) {
-        // 确保当前选中周期仍然可见
-        const currentItem = document.querySelector(`.cycle-nav-item[data-cycle="${currentCycle}"]`);
-        if (currentItem) {
-            currentItem.classList.add('active');
-        }
+        
+    } catch (error) {
+        console.error('渲染周期文档失败:', error);
+        elements.contentArea.innerHTML = `<h2>📋 ${cycle} - 文档管理</h2><p>加载文档失败: ${error.message}</p>`;
     }
 }
 
 /**
- * 选定一个周期
+ * 获取文档进度信息
  */
-function selectCycle(cycle) {
-    appState.currentCycle = cycle;
-
-    // 更新顶部导航UI
-    document.querySelectorAll('.cycle-nav-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    document.querySelector(`.cycle-nav-item[data-cycle="${cycle}"]`).classList.add('active');
-
-    // 渲染该周期的文档
-    renderCycleDocuments(cycle);
-}
-
-/**
- * 渲染初始内容
- */
-function renderInitialContent() {
-    if (!appState.projectConfig) return;
-
-    const cycles = appState.projectConfig.cycles;
-    if (cycles.length > 0) {
-        selectCycle(cycles[0]);
-    }
-}
-
-/**
- * 计算周期文档完成进度
- * 进度 = (文档数 + 签名数 + 盖章数) / (需求文档数 × 3) × 100%
- */
-async function calculateCycleProgress(cycle) {
-    try {
-        const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}`);
-        const result = await response.json();
-        return result;
-    } catch (e) {
-        console.error('获取进度失败:', e);
-        return { doc_count: 0, signer_count: 0, seal_count: 0, total_required: 0 };
-    }
-}
-
-/**
- * 获取周期内所有文档列表
- */
-async function getCycleDocuments(cycle) {
-    try {
-        const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}`);
-        const result = await response.json();
-        return result.data || [];
-    } catch (e) {
-        console.error('获取文档列表失败:', e);
-        return [];
-    }
-}
-
-/**
- * 渲染周期内的文档
- */
-async function renderCycleDocuments(cycle) {
-    const docsInfo = appState.projectConfig.documents[cycle];
-    if (!docsInfo) {
-        elements.contentArea.innerHTML = '<p class="placeholder">该周期暂无文档</p>';
-        return;
-    }
-
-    // 按序号排序
-    const requiredDocs = (docsInfo.required_docs || []).sort((a, b) => (a.index || 0) - (b.index || 0));
-
-    // 获取进度数据
-    const progressData = await calculateCycleProgress(cycle);
-    
-    // 使用完成数计算进度（更准确）
-    const totalRequired = progressData.total_required || requiredDocs.length;
-    const completedCount = progressData.completed_count || 0;
-    const progressPercent = totalRequired > 0 ? Math.round((completedCount / totalRequired) * 100) : 0;
-    
-    // 计算色阶颜色 (红->黄->绿)
-    const getProgressColor = (p) => {
-        if (p < 33) return '#dc3545'; // 红色
-        if (p < 66) return '#ffc107'; // 黄色
-        return '#28a745'; // 绿色
-    };
-    const progressColor = getProgressColor(progressPercent);
-
-    // 获取已上传的文档
-    const uploadedDocs = await getCycleDocuments(cycle);
-    
-    // 按文档类型分组
-    const docsByName = {};
-    for (const doc of uploadedDocs) {
-        const key = doc.doc_name;
-        if (!docsByName[key]) docsByName[key] = [];
-        docsByName[key].push(doc);
-    }
-
-    // 计算每个文档类型的完成状态
-    // 根据文档要求(requirement)决定是否显示签名/盖章
-    const getDocProgress = (docName, docsList, requirement) => {
-        const requireSigner = requirement && (requirement.includes('签名') || requirement.includes('签字'));
-        const requireSeal = requirement && (requirement.includes('盖章') || requirement.includes('章'));
-        const noRequirement = !requirement || requirement.trim() === '';
-        
-        if (!docsList || docsList.length === 0) {
-            // 无文档时：无要求则显示灰色待处理，有要求则显示红色
-            return { 
-                percent: 0, 
-                color: noRequirement ? '#6c757d' : '#dc3545', 
-                hasSigner: false, 
-                hasSeal: false,
-                showSigner: requireSigner,
-                showSeal: requireSeal,
-                noRequirement: noRequirement,
-                isComplete: false
-            };
-        }
-        
-        const hasSigner = docsList.some(doc => doc.signer);
-        const hasSeal = docsList.some(doc => doc.has_seal_marked || doc.has_seal || doc.party_a_seal || doc.party_b_seal);
-        
-        // 无要求时，只要有文档就算完成
-        if (noRequirement) {
-            return { 
-                percent: 100, 
-                color: '#28a745', // 绿色 - 完成
-                hasSigner: false, 
-                hasSeal: false,
-                showSigner: false,
-                showSeal: false,
-                noRequirement: true,
-                isComplete: true
-            };
-        }
-        
-        // 有要求时，计算进度
-        let percent = 33; // 有文档基础分
-        
-        // 根据实际要求计算进度
-        const totalRequirements = (requireSigner ? 1 : 0) + (requireSeal ? 1 : 0);
-        
-        if (totalRequirements === 0) {
-            // 没有要求，有文档就算完成
-            percent = 100;
-        } else {
-            // 按要求数量分配分数
-            const baseScore = 33;
-            const perRequirementScore = (100 - baseScore) / totalRequirements;
-            
-            if (requireSigner && hasSigner) percent += perRequirementScore;
-            if (requireSeal && hasSeal) percent += perRequirementScore;
-        }
-        
-        // 确保百分比在合理范围内
-        percent = Math.min(100, Math.max(0, percent));
-        
-        return { 
-            percent, 
-            color: getProgressColor(percent), 
-            hasSigner, 
-            hasSeal,
-            showSigner: requireSigner,
-            showSeal: requireSeal,
-            noRequirement: false,
-            isComplete: percent >= 100
+function getDocProgress(docName, docsList, requirement) {
+    if (!docsList || docsList.length === 0) {
+        return {
+            percent: 0,
+            isComplete: false,
+            noRequirement: !requirement || requirement.trim() === '',
+            showSigner: false,
+            hasSigner: false,
+            showSeal: false,
+            hasSeal: false
         };
+    }
+    
+    // 检查是否有要求
+    const noRequirement = !requirement || requirement.trim() === '';
+    if (noRequirement) {
+        return {
+            percent: 100,
+            isComplete: true,
+            noRequirement: true,
+            showSigner: false,
+            hasSigner: false,
+            showSeal: false,
+            hasSeal: false
+        };
+    }
+    
+    // 检查签名要求
+    const requireSigner = requirement.includes('签名') || requirement.includes('签字');
+    const requireSeal = requirement.includes('盖章') || requirement.includes('章');
+    
+    // 检查是否满足要求
+    let hasSigner = false;
+    let hasSeal = false;
+    
+    for (const doc of docsList) {
+        if (requireSigner) {
+            if (doc.signer || doc.no_signature) {
+                hasSigner = true;
+            }
+        }
+        
+        if (requireSeal) {
+            if (doc.has_seal || doc.has_seal_marked || doc.party_a_seal || doc.party_b_seal || doc.no_seal) {
+                hasSeal = true;
+            }
+        }
+    }
+    
+    // 计算完成度
+    let completedRequirements = 0;
+    let totalRequirements = 0;
+    
+    if (requireSigner) {
+        totalRequirements++;
+        if (hasSigner) completedRequirements++;
+    }
+    
+    if (requireSeal) {
+        totalRequirements++;
+        if (hasSeal) completedRequirements++;
+    }
+    
+    // 至少有一个文档就认为基本完成
+    if (totalRequirements === 0) {
+        return {
+            percent: 100,
+            isComplete: true,
+            noRequirement: false,
+            showSigner: false,
+            hasSigner: false,
+            showSeal: false,
+            hasSeal: false
+        };
+    }
+    
+    const percent = Math.round((completedRequirements / totalRequirements) * 100);
+    
+    return {
+        percent: percent,
+        isComplete: percent >= 100,
+        noRequirement: false,
+        showSigner: requireSigner,
+        hasSigner: hasSigner,
+        showSeal: requireSeal,
+        hasSeal: hasSeal
     };
-
-    // 渲染横向进度条布局
-    const html = `
-        <h2>📋 ${cycle} - 文档管理</h2>
-        
-        <!-- 整体进度条 -->
-        <div class="cycle-progress-container">
-            <div class="cycle-progress-label">
-                <span>文档完整度</span>
-                <span class="cycle-progress-percent">${progressPercent}%</span>
-            </div>
-            <div class="cycle-progress-bar">
-                <div class="cycle-progress-fill" style="width: ${progressPercent}%; background: ${progressColor};"></div>
-            </div>
-            <div class="cycle-progress-stats">
-                <span>✓ 已完成: ${completedCount}/${totalRequired}</span>
-                <span>📄 已上传: ${progressData.doc_count}/${totalRequired}</span>
-            </div>
-        </div>
-        
-        <!-- 横向进度条布局：每个文档类型一行 -->
-        <div class="documents-horizontal">
-            ${requiredDocs.map(doc => {
-                const docsList = docsByName[doc.name] || [];
-                const docProgress = getDocProgress(doc.name, docsList, doc.requirement);
-                const isComplete = docProgress.percent >= 100;
-                
-                // 无要求时显示特殊样式
-                const noReq = docProgress.noRequirement;
-                
-                // 获取文档信息用于显示
-                const docInfo = docsList.length > 0 ? docsList[0] : null;
-                
-                // 生成文件信息显示
-                const fileInfoHtml = docsList.length > 0 ? docsList.map(d => {
-                    const infoParts = [];
-                    if (d.doc_date) infoParts.push(`📅 ${formatDateToMonth(d.doc_date)}`);
-                    if (d.signer) infoParts.push(`✍️ ${d.signer}`);
-                    if (d.sign_date) infoParts.push(`📆 ${formatDateToMonth(d.sign_date)}`);
-                    if (d.no_signature) infoParts.push('❌ 不涉及签字');
-                    if (d.party_a_seal) infoParts.push('🏢甲');
-                    if (d.party_b_seal) infoParts.push('🏭乙');
-                    if (d.has_seal_marked || d.has_seal) infoParts.push('🔖');
-                    if (d.no_seal) infoParts.push('❌ 不涉及盖章');
-                    if (d.other_seal) infoParts.push(`📍${d.other_seal}`);
-                    return `<div class="doc-file-info">
-                        <span class="doc-file-name" onclick="previewDocument('${d.id}')" title="点击预览文件: ${d.original_filename || d.filename}" style="cursor: pointer; text-decoration: underline;">${d.original_filename || d.filename}</span>
-                        ${infoParts.length > 0 ? `<span class="doc-file-tags">${infoParts.join(' ')}</span>` : ''}
-                    </div>`;
-                }).join('') : '';
-                
-                // 状态显示
-                let statusHtml = '';
-                if (docsList.length === 0) {
-                    if (noReq) {
-                        statusHtml = '<span class="badge badge-success">✓ 无要求</span>';
-                    } else {
-                        statusHtml = '<span class="badge badge-danger">未上传</span>';
-                    }
-                } else if (isComplete) {
-                    statusHtml = '<span class="badge badge-success">✓ 已完成</span>';
-                } else {
-                    statusHtml = '<span class="badge badge-warning">进行中</span>';
-                }
-
-                // 左侧颜色：无要求直接绿色（跳过），有文档完成绿色，进行中有文档黄色，无文档未完成红色
-                const leftColor = isComplete ? '#28a745' : (docsList.length > 0 ? '#ffc107' : (noReq ? '#28a745' : '#dc3545'));
-                
-                return `
-                <div class="document-row">
-                    <!-- 文档类型名称 - 变绿色表示完成 -->
-                    <div class="doc-type-progress" 
-                         style="background: ${leftColor};"
-                         onclick="openDocumentModal('${cycle}', '${doc.name}')"
-                         title="${doc.requirement || '无特定要求'}&#10;点击上传/管理文档">
-                        <div class="doc-type-progress-fill" style="width: ${docProgress.percent}%;"></div>
-                        <span class="doc-type-index">${doc.index || ''}</span>
-                        <span class="doc-type-name">${doc.name}</span>
-                        ${isComplete ? '<span class="complete-icon">✓</span>' : ''}
-                    </div>
-                    
-                    <!-- 已匹配文件名和详情 -->
-                    <div class="doc-file-area">
-                        ${docsList.length > 0 ?
-                            `<div class="doc-file-list-full">${fileInfoHtml}</div>` :
-                            `<span class="doc-file-placeholder" style="color: ${noReq ? '#28a745' : '#999'}">${noReq ? '✓ 无要求' : '点击左侧上传文档'}</span>`
-                        }
-                    </div>
-                    
-                    <!-- 状态标签 -->
-                    <div class="doc-status-area">
-                        <div class="doc-status-badges">
-                            ${statusHtml}
-                            ${docProgress.showSigner ? (docProgress.hasSigner ? '<span class="badge badge-success">✓ 已签名</span>' : '<span class="badge badge-secondary">待签名</span>') : ''}
-                            ${docProgress.showSeal ? (docProgress.hasSeal ? '<span class="badge badge-success">✓ 已盖章</span>' : '<span class="badge badge-secondary">待盖章</span>') : ''}
-                            ${noReq && docsList.length > 0 ? '<span class="badge badge-secondary">无要求</span>' : ''}
-                        </div>
-                    </div>
-                </div>
-                `;
-            }).join('')}
-        </div>
-    `;
-
-    elements.contentArea.innerHTML = html;
-
-    // 添加点击打开选择文件对话框的功能
-    document.querySelectorAll('.upload-area').forEach(area => {
-        area.addEventListener('click', () => {
-            openDocumentModal(area.dataset.cycle, area.dataset.docName);
-        });
-    });
 }
 
 /**
@@ -1401,13 +508,13 @@ async function renderCycleDocuments(cycle) {
 function handleFileDrop(e) {
     e.preventDefault();
     e.target.closest('.upload-area').classList.remove('drag-over');
-
+    
     const files = e.dataTransfer.files;
     if (files.length > 0) {
         const uploadArea = e.target.closest('.upload-area');
         const cycle = uploadArea.dataset.cycle;
         const docName = uploadArea.dataset.docName;
-
+        
         // 打开模态框并设置文件
         openDocumentModal(cycle, docName, files[0]);
     }
@@ -1419,14 +526,14 @@ function handleFileDrop(e) {
 function openDocumentModal(cycle, docName, draggedFile = null) {
     appState.currentCycle = cycle;
     appState.currentDocument = docName;
-
+    
     elements.modalTitle.textContent = `文档管理 - ${cycle} - ${docName}`;
     elements.uploadForm.dataset.cycle = cycle;
     elements.uploadForm.dataset.docName = docName;
     
     // 加载并显示分类管理
     loadCategories(cycle, docName);
-
+    
     // 获取当前文档的要求，根据要求显示/隐藏签名和盖章字段
     const docsInfo = appState.projectConfig?.documents?.[cycle];
     const docConfig = docsInfo?.required_docs?.find(d => d.name === docName);
@@ -1435,39 +542,16 @@ function openDocumentModal(cycle, docName, draggedFile = null) {
     // 更详细的要求识别
     const requireSigner = requirement.includes('签名') || requirement.includes('签字');
     const requireSeal = requirement.includes('盖章') || requirement.includes('章');
-    const requirePartyASigner = requirement.includes('甲方') && (requirement.includes('签名') || requirement.includes('签字'));
-    const requirePartyBSigner = requirement.includes('乙方') && (requirement.includes('签名') || requirement.includes('签字'));
-    const requirePartyASeal = requirement.includes('甲方') && (requirement.includes('盖章') || requirement.includes('章'));
-    const requirePartyBSeal = requirement.includes('乙方') && (requirement.includes('盖章') || requirement.includes('章'));
-    const requireOwnerSigner = requirement.includes('业主') && (requirement.includes('签名') || requirement.includes('签字'));
     
     // 根据要求显示/隐藏签名和盖章字段
-    const signerGroup = document.getElementById('uploadForm').querySelector('#signer')?.closest('.form-group') || 
-                        document.querySelector('#uploadForm .form-group:has(#signer)');
-    const sealGroup = document.querySelector('#uploadForm .form-group:has(#hasSeal)');
-    
-    // 显示/隐藏签名相关字段
     const signerFields = document.querySelectorAll('#uploadForm .form-group:has(#signer), #uploadForm .form-group:has(#signDate)');
     signerFields.forEach(el => el.style.display = requireSigner ? 'block' : 'none');
     
-    // 显示/隐藏盖章相关字段
+    const sealGroup = document.querySelector('#uploadForm .form-group:has(#hasSeal)');
     if (sealGroup) {
         sealGroup.style.display = requireSeal ? 'block' : 'none';
     }
     
-    // 根据要求自动设置默认值
-    if (requirePartyASeal) {
-        document.getElementById('partyASeal').checked = true;
-    } else {
-        document.getElementById('partyASeal').checked = false;
-    }
-    
-    if (requirePartyBSeal) {
-        document.getElementById('partyBSeal').checked = true;
-    } else {
-        document.getElementById('partyBSeal').checked = false;
-    }
-
     // 如果从拖放传入了文件
     if (draggedFile) {
         const dataTransfer = new DataTransfer();
@@ -1476,25 +560,25 @@ function openDocumentModal(cycle, docName, draggedFile = null) {
     } else {
         elements.fileInput.value = '';
     }
-
+    
     // 重置 ZIP 搜索面板状态
     resetZipPanel();
-
+    
     // 默认切到本地上传 Tab
     switchUploadTab('local');
-
+    
     // 加载已上传的文档
     loadUploadedDocuments(cycle, docName);
-
+    
     // 更新文件预览
     updateFilePreview();
-
+    
     // 自动将文档名称填入ZIP搜索框
     const zipFileSearch = document.getElementById('zipFileSearch');
     if (zipFileSearch) {
         zipFileSearch.value = docName;
     }
-
+    
     openModal(elements.documentModal);
 }
 
@@ -1509,7 +593,7 @@ function switchUploadTab(tab) {
     const zipPanel = document.getElementById('uploadSourceZip');
     if (localPanel) localPanel.style.display = tab === 'local' ? 'block' : 'none';
     if (zipPanel) zipPanel.style.display = tab === 'zip' ? 'block' : 'none';
-
+    
     // 切到 ZIP 面板时自动加载
     if (tab === 'zip') {
         loadZipPackages();
@@ -1530,25 +614,25 @@ function switchUploadTab(tab) {
 async function loadZipPackages() {
     const fileList = document.getElementById('zipFileList');
     const packageSelector = document.getElementById('zipPackageSelector');
-    if (fileList) fileList.innerHTML = '<p class="placeholder">加载中...</p>';
-
+    if (fileList) fileList.innerHTML = '<p class="placeholder">加载中..</p>';
+    
     try {
         const res = await fetch('/api/documents/list-zip-packages');
         const result = await res.json();
-
+        
         if (result.status !== 'success') {
             if (fileList) fileList.innerHTML = `<p class="zip-no-result">加载失败: ${result.message}</p>`;
             return;
         }
-
+        
         const packages = result.packages || [];
-
+        
         if (packages.length === 0) {
             if (packageSelector) packageSelector.style.display = 'none';
             if (fileList) fileList.innerHTML = '<p class="zip-no-result">暂无已上传的ZIP文件，请先点顶部"批量导入ZIP"上传</p>';
             return;
         }
-
+        
         if (packages.length === 1) {
             // 只有一个包，直接展示文件
             if (packageSelector) packageSelector.style.display = 'none';
@@ -1589,8 +673,6 @@ async function loadZipPackages() {
     }
 }
 
-
-
 /**
  * 重置 ZIP 搜索面板
  */
@@ -1601,7 +683,7 @@ function resetZipPanel() {
     const archiveBtn = document.getElementById('zipArchiveBtn');
     const packageSelector = document.getElementById('zipPackageSelector');
     if (searchInput) searchInput.value = '';
-    if (fileList) fileList.innerHTML = '<p class="placeholder">加载中...</p>';
+    if (fileList) fileList.innerHTML = '<p class="placeholder">加载中..</p>';
     if (packageSelector) packageSelector.style.display = 'none';
     
     // 清空所有选择状态
@@ -1624,30 +706,30 @@ function resetZipPanel() {
 async function searchZipFiles(keyword, packagePath) {
     const fileList = document.getElementById('zipFileList');
     if (!fileList) return;
-
+    
     // 使用传入的 packagePath，或者当前选中的包路径
     const pkg = packagePath !== undefined ? packagePath : (appState.currentZipPackagePath || '');
-
-    fileList.innerHTML = '<p class="placeholder">搜索中...</p>';
-
+    
+    fileList.innerHTML = '<p class="placeholder">搜索中..</p>';
+    
     try {
         let url = `/api/documents/search-zip-files?keyword=${encodeURIComponent(keyword || '')}`;
         if (pkg) url += `&package_path=${encodeURIComponent(pkg)}`;
-
+        
         const response = await fetch(url);
         const result = await response.json();
-
+        
         if (result.status !== 'success') {
             fileList.innerHTML = `<p class="zip-no-result">搜索失败: ${result.message}</p>`;
             return;
         }
-
+        
         const files = result.files || [];
         if (files.length === 0) {
             fileList.innerHTML = `<p class="zip-no-result">${keyword ? '未找到匹配文件' : '该ZIP包中暂无文件'}</p>`;
             return;
         }
-
+        
         const kw = keyword || '';
         fileList.innerHTML = files.map(f => {
             let icon = '📄';
@@ -1656,41 +738,41 @@ async function searchZipFiles(keyword, packagePath) {
             else if (['.xls', '.xlsx'].includes(f.ext)) icon = '📊';
             else if (['.jpg', '.jpeg', '.png', '.gif'].includes(f.ext)) icon = '🖼️';
             else if (['.ppt', '.pptx'].includes(f.ext)) icon = '📊';
-
+            
             const sizeStr = f.size > 1024 * 1024
                 ? (f.size / 1024 / 1024).toFixed(1) + ' MB'
                 : (f.size / 1024).toFixed(1) + ' KB';
-
-            // 高亮关键词
+            
+            // 高亮关键字
             let displayName = escapeHtml(f.name);
             if (kw) {
                 const re = new RegExp(escapeRegExp(kw), 'gi');
                 displayName = displayName.replace(re, m => `<mark>${m}</mark>`);
             }
-
+            
             // 显示相对于ZIP包内的路径（去掉包名前缀）
             let relInPkg = f.rel_path;
             const pkgName = appState.currentZipPackageName || '';
             if (pkgName && relInPkg.startsWith(pkgName)) {
-                relInPkg = relInPkg.slice(pkgName.length).replace(/^[\\/]/, '');
+                relInPkg = relInPkg.slice(pkgName.length).replace(/^[\/]/, '');
             }
             // 只显示目录部分（不含文件名）
-            const parts = relInPkg.replace(/\\/g, '/').split('/');
+            const parts = relInPkg.replace(/\/g, '/').split('/');
             const dirPart = parts.length > 1 ? parts.slice(0, -1).join(' / ') : '';
-
+            
             // 检查是否已选中
             const isSelected = appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === f.path);
             const checkedAttr = isSelected ? 'checked' : '';
-
+            
             // 已归档的文件特殊样式
             const isArchived = f.archived === true;
             const archivedClass = isArchived ? 'archived' : '';
             const archivedBadge = isArchived ? '<span class="zip-file-badge archived-badge">已归档</span>' : '';
-
+            
             // 已归档的文件禁用选择
             const disabledAttr = isArchived ? 'disabled' : '';
             const archivedStyle = isArchived ? 'opacity: 0.5; background: #f5f5f5;' : '';
-
+            
             return `<div class="zip-file-item ${isSelected ? 'selected' : ''} ${archivedClass}" data-path="${escapeHtml(f.path)}" data-name="${escapeHtml(f.name)}" style="${archivedStyle}">
                         <input type="checkbox" class="zip-file-checkbox" ${checkedAttr} ${disabledAttr}
                             onclick="event.stopPropagation(); toggleZipFileSelect(this, ${JSON.stringify(f.path)}, ${JSON.stringify(f.name)})">
@@ -1702,16 +784,14 @@ async function searchZipFiles(keyword, packagePath) {
                         <span class="zip-file-size">${sizeStr}</span>
                     </div>`;
         }).join('');
-
+        
         // 渲染完成后更新按钮状态
         updateZipSelectedUI();
-
+        
     } catch (e) {
         fileList.innerHTML = `<p class="zip-no-result">请求失败: ${e.message}</p>`;
     }
 }
-
-
 
 /**
  * 切换 ZIP 文件多选状态（通过复选框）
@@ -1721,10 +801,10 @@ function toggleZipFileSelect(checkbox, filePath, fileName) {
         if (!appState.zipSelectedFiles) {
             appState.zipSelectedFiles = [];
         }
-
+        
         const existingIndex = appState.zipSelectedFiles.findIndex(sf => sf.path === filePath);
         const itemEl = checkbox.closest('.zip-file-item');
-
+        
         if (checkbox.checked) {
             // 添加到已选列表
             if (existingIndex === -1) {
@@ -1738,7 +818,7 @@ function toggleZipFileSelect(checkbox, filePath, fileName) {
             }
             if (itemEl) itemEl.classList.remove('selected');
         }
-
+        
         // 更新界面
         updateZipSelectedUI();
     } catch (e) {
@@ -1764,44 +844,22 @@ function toggleZipFileCheck(divEl) {
 }
 
 /**
- * 选择 ZIP 文件（单选兼容）
- */
-function selectZipFile(el, filePath, fileName) {
-    // 切换复选框状态
-    const checkbox = el.querySelector('.zip-file-checkbox');
-    if (checkbox) {
-        checkbox.checked = !checkbox.checked;
-        toggleZipFileSelect(checkbox, filePath, fileName);
-    } else {
-        // 降级：单选模式
-        document.querySelectorAll('.zip-file-item').forEach(i => i.classList.remove('selected'));
-        el.classList.add('selected');
-        appState.zipSelectedFile = { path: filePath, name: fileName };
-        if (!appState.zipSelectedFiles) appState.zipSelectedFiles = [];
-        if (!appState.zipSelectedFiles.some(sf => sf.path === filePath)) {
-            appState.zipSelectedFiles.push({ path: filePath, name: fileName });
-        }
-        updateZipSelectedUI();
-    }
-}
-
-/**
  * 更新 ZIP 已选文件 UI 状态
  */
 function updateZipSelectedUI() {
     try {
         const files = appState.zipSelectedFiles || [];
         const count = files.length;
-
+        
         const selectedInfo = document.getElementById('zipSelectedInfo');
         const selectedName = document.getElementById('zipSelectedName');
         const archiveBtn = document.getElementById('zipArchiveBtn');
-
+        
         if (count > 0) {
             if (selectedInfo) selectedInfo.style.display = 'flex';
             if (selectedName) {
                 if (count === 1) {
-                    selectedName.textContent = '✅ 已选择：' + files[0].name;
+                    selectedName.textContent = `✅ 已选择: ${files[0].name}`;
                 } else {
                     selectedName.textContent = `✅ 已选择 ${count} 个文件`;
                 }
@@ -1836,14 +894,14 @@ async function handleZipArchive() {
             return;
         }
     }
-
+    
     const archiveBtn = document.getElementById('zipArchiveBtn');
     if (archiveBtn) archiveBtn.disabled = true;
-
+    
     showLoading(true);
     let successCount = 0;
     let failCount = 0;
-
+    
     try {
         for (const file of files) {
             const payload = {
@@ -1861,27 +919,27 @@ async function handleZipArchive() {
                 other_seal: document.getElementById('otherSeal')?.value || '',
                 project_id: appState.currentProjectId
             };
-
+            
             const response = await fetch('/api/documents/archive-from-zip', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             const result = await response.json();
-
+            
             if (result.status === 'success') {
                 successCount++;
             } else {
                 failCount++;
             }
         }
-
+        
         if (failCount === 0) {
             showNotification(`成功归档 ${successCount} 个文件！`, 'success');
         } else {
             showNotification(`归档完成：成功 ${successCount}，失败 ${failCount}`, failCount > 0 ? 'warning' : 'success');
         }
-
+        
         resetZipPanel();
         loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
         // 刷新周期进度显示
@@ -1981,15 +1039,23 @@ async function loadUploadedDocuments(cycle, docName) {
     try {
         const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}&doc_name=${encodeURIComponent(docName)}`);
         const result = await response.json();
-
+        
         if (result.status === 'success') {
             const docs = result.data || [];
-            elements.docCount.textContent = docs.length;
-
+            const docCountEl = document.getElementById('docCount');
+            if (docCountEl) docCountEl.textContent = docs.length;
+            
+            // 获取模态框内的文档列表元素
+            const modalDocumentsList = document.querySelector('#documentModal #documentsList');
+            if (!modalDocumentsList) {
+                console.error('找不到模态框内的文档列表元素');
+                return;
+            }
+            
             if (docs.length === 0) {
-                elements.documentsList.innerHTML = '<p class="placeholder">暂无已上传的文档</p>';
+                modalDocumentsList.innerHTML = '<p class="placeholder">暂无已上传的文档</p>';
             } else {
-                // 按分类分组文档
+                // 按分类分组文件
                 const docsByCategory = {};
                 docs.forEach(doc => {
                     const category = doc.category || '未分类';
@@ -2004,12 +1070,12 @@ async function loadUploadedDocuments(cycle, docName) {
                         <input type="checkbox" id="selectAllDocs" onchange="toggleSelectAll()" style="width: 18px; height: 18px;">
                         <label for="selectAllDocs" style="margin: 0; cursor: pointer;">全选</label>
                         <button class="btn btn-primary btn-sm" onclick="batchUpdateDocuments('seal')" disabled id="batchSealBtn" style="margin-left: 10px;">批量标记已盖章</button>
-                        <button class="btn btn-success btn-sm" onclick="batchUpdateDocuments('sign')" disabled id="batchSignBtn" style="margin-left: 5px;">批量标记已签字</button>
+                        <button class="btn btn-success btn-sm" onclick="batchUpdateDocuments('sign')" disabled id="batchSignBtn" style="margin-left: 5px;">批量标记已签名</button>
                         <button class="btn btn-danger btn-sm" onclick="batchDeleteDocuments()" disabled id="batchDeleteBtn" style="margin-left: auto;">批量删除</button>
                     </div>
                 `;
                 
-                // 渲染每个分类的文档
+                // 渲染每个分类的文件
                 for (const [category, categoryDocs] of Object.entries(docsByCategory)) {
                     html += `
                         <div style="margin-bottom: 20px;">
@@ -2024,15 +1090,15 @@ async function loadUploadedDocuments(cycle, docName) {
                                     <div class="document-info">
                                         <div class="file-name" onclick="previewDocument('${doc.id}')" title="点击预览文件: ${doc.original_filename || doc.filename}" style="cursor: pointer; text-decoration: underline;">📎 ${doc.original_filename || doc.filename}</div>
                                         <div class="file-meta">
-                                            上传于: ${new Date(doc.upload_time).toLocaleString('zh-CN')}
+                                            上传时间 ${new Date(doc.upload_time).toLocaleString('zh-CN')}
                                             <span style="margin-left:10px;">大小: ${formatFileSize(doc.file_size)}</span>
                                         </div>
                                         <div class="document-badges">
-                                            ${doc.no_signature ? `<span class="badge badge-secondary">❌ 不涉及签字</span>` : ''}
-                                            ${doc.signer ? `<span class="badge badge-success">✅ 签署人: ${doc.signer}</span>` : ''}
+                                            ${doc.no_signature ? `<span class="badge badge-secondary">📝 不涉及签名</span>` : ''}
+                                            ${doc.signer ? `<span class="badge badge-success">✍️ 签署人: ${doc.signer}</span>` : ''}
                                             ${doc.doc_date ? `<span class="badge badge-info">📅 文档日期: ${formatDateToMonth(doc.doc_date)}</span>` : ''}
                                             ${doc.sign_date && !doc.no_signature ? `<span class="badge badge-info">✍️ 签字日期: ${formatDateToMonth(doc.sign_date)}</span>` : ''}
-                                            ${doc.no_seal ? `<span class="badge badge-secondary">❌ 不涉及盖章</span>` : ''}
+                                            ${doc.no_seal ? `<span class="badge badge-secondary">📝 不涉及盖章</span>` : ''}
                                             ${doc.has_seal_marked ? `<span class="badge badge-success">🔖 已盖章</span>` : ''}
                                             ${doc.party_a_seal ? `<span class="badge badge-success">🏢 甲方盖章</span>` : ''}
                                             ${doc.party_b_seal ? `<span class="badge badge-success">🏭 乙方盖章</span>` : ''}
@@ -2051,18 +1117,18 @@ async function loadUploadedDocuments(cycle, docName) {
                     `;
                 }
                 
-                elements.documentsList.innerHTML = html;
+                modalDocumentsList.innerHTML = html;
             }
         }
     } catch (error) {
         console.error('加载文档列表错误:', error);
-        elements.documentsList.innerHTML = '<p class="placeholder">加载文档列表失败</p>';
+        const modalDocumentsList = document.querySelector('#documentModal #documentsList');
+        if (modalDocumentsList) {
+            modalDocumentsList.innerHTML = '<p class="placeholder">加载文档列表失败</p>';
+        }
     }
 }
 
-/**
- * 预览文档
- */
 /**
  * 预览文档
  */
@@ -2071,12 +1137,12 @@ function previewDocument(docId) {
     const title = document.getElementById('previewTitle');
     const content = document.getElementById('previewContent');
     const downloadBtn = document.getElementById('previewDownloadBtn');
-
+    
     title.textContent = '正在加载预览...';
     downloadBtn.href = `/api/documents/download/${encodeURIComponent(docId)}`;
     content.innerHTML = '<div class="preview-loading"><div class="spinner"></div><p>正在加载预览...</p></div>';
     modal.classList.add('show');
-
+    
     fetch(`/api/documents/preview/${encodeURIComponent(docId)}`)
         .then(response => response.json())
         .then(result => {
@@ -2104,21 +1170,21 @@ function previewDocument(docId) {
 function renderPreviewContent(result, content) {
     const type = result.type;
     const data = result.content;
-
+    
     switch (type) {
         case 'image':
             content.innerHTML = `<div class="image-preview-container">
                 <img src="${data}" alt="文档预览" style="max-width:100%;max-height:80vh;object-fit:contain;">
             </div>`;
             break;
-
+        
         case 'pdf':
             if (Array.isArray(data) && data.length > 0) {
                 let html = '<div class="pdf-preview-container">';
                 data.forEach((img, index) => {
                     html += `<div class="pdf-page">
                         <p style="font-size:12px;color:#666;margin-bottom:5px;">第 ${index + 1} 页</p>
-                        <img src="${img}" alt="第${index + 1}页" style="max-width:100%;">
+                        <img src="${img}" alt="第 ${index + 1}页" style="max-width:100%;">
                     </div>`;
                 });
                 html += '</div>';
@@ -2130,7 +1196,7 @@ function renderPreviewContent(result, content) {
                 </div>`;
             }
             break;
-
+        
         case 'docx':
             content.innerHTML = `<div class="docx-preview-wrapper">
                 <style>
@@ -2143,7 +1209,7 @@ function renderPreviewContent(result, content) {
                 ${data}
             </div>`;
             break;
-
+        
         case 'xlsx':
             content.innerHTML = `<div class="xlsx-preview-wrapper">
                 <style>
@@ -2157,13 +1223,13 @@ function renderPreviewContent(result, content) {
                 ${data}
             </div>`;
             break;
-
+        
         case 'text':
             content.innerHTML = `<div class="text-preview-container">
                 <pre style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.5; padding: 20px; background: #f5f5f5; border-radius: 4px; overflow: auto; max-height: 70vh;">${escapeHtml(data)}</pre>
             </div>`;
             break;
-
+        
         case 'unsupported':
             content.innerHTML = `<div class="preview-placeholder">
                 <p style="font-size:48px;margin-bottom:20px;">📄</p>
@@ -2171,22 +1237,12 @@ function renderPreviewContent(result, content) {
                 <p style="font-size:14px;margin-top:10px;">请使用下载按钮查看文件</p>
             </div>`;
             break;
-
+        
         default:
             content.innerHTML = `<div class="preview-error">
                 <p>未知的预览类型: ${type}</p>
             </div>`;
     }
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function openPreviewModal(docId, fileName, fileExt, filePath) {
-    previewDocument(docId);
 }
 
 /**
@@ -2205,17 +1261,17 @@ function closePreviewModal() {
  */
 async function handleUploadDocument(e) {
     e.preventDefault();
-
+    
     const file = elements.fileInput.files[0];
     if (!file) {
         showNotification('请选择文件', 'error');
         return;
     }
-
+    
     // 文件大小阈值：10MB，超过则使用分片上传
     const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
     const fileSize = file.size;
-
+    
     if (fileSize > CHUNK_SIZE) {
         // 使用分片上传
         await handleChunkedUpload(file);
@@ -2238,36 +1294,36 @@ async function handleNormalUpload(file) {
     formData.append('cycle', appState.currentCycle);
     formData.append('doc_name', appState.currentDocument);
     formData.append('category', category);
-    formData.append('doc_date', elements.docDate.value);
-    formData.append('sign_date', elements.signDate.value);
-    formData.append('signer', elements.signer.value);
+    formData.append('doc_date', document.getElementById('docDate')?.value || '');
+    formData.append('sign_date', document.getElementById('signDate')?.value || '');
+    formData.append('signer', document.getElementById('signer')?.value || '');
     formData.append('no_signature', document.getElementById('noSignature')?.checked || false);
-    formData.append('has_seal', elements.hasSeal.checked);
-    formData.append('party_a_seal', elements.partyASeal.checked);
-    formData.append('party_b_seal', elements.partyBSeal.checked);
+    formData.append('has_seal', document.getElementById('hasSeal')?.checked || false);
+    formData.append('party_a_seal', document.getElementById('partyASeal')?.checked || false);
+    formData.append('party_b_seal', document.getElementById('partyBSeal')?.checked || false);
     formData.append('no_seal', document.getElementById('noSeal')?.checked || false);
-    formData.append('other_seal', elements.otherSeal.value);
+    formData.append('other_seal', document.getElementById('otherSeal')?.value || '');
     formData.append('project_id', appState.currentProjectId || '');
-
+    
     showLoading(true);
-
+    
     try {
         const response = await fetch('/api/documents/upload', {
             method: 'POST',
             body: formData
         });
-
+        
         const result = await response.json();
-
+        
         if (result.status === 'success') {
             showNotification('文档归档成功！', 'success');
             elements.uploadForm.reset();
-
+            
             // 设置今天的日期为默认值
             const today = new Date().toISOString().split('T')[0];
-            elements.docDate.value = today;
-            elements.signDate.value = today;
-
+            document.getElementById('docDate').value = today;
+            document.getElementById('signDate').value = today;
+            
             // 刷新已上传文档列表
             loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
             
@@ -2276,8 +1332,6 @@ async function handleNormalUpload(file) {
             
             // 刷新周期进度显示
             refreshCycleProgress();
-
-            console.log('文档信息:', result.metadata);
         } else {
             showNotification('上传失败: ' + result.message, 'error');
         }
@@ -2304,7 +1358,7 @@ async function handleChunkedUpload(file) {
     if (uploadArea) {
         uploadArea.appendChild(progressContainer);
     }
-
+    
     try {
         // 1. 初始化上传会话
         const initResponse = await fetch('/api/upload/init', {
@@ -2316,274 +1370,125 @@ async function handleChunkedUpload(file) {
                 file_size: file.size
             })
         });
-
+        
         const initResult = await initResponse.json();
         if (initResult.status !== 'success') {
             throw new Error(initResult.message);
         }
-
-        const uploadId = initResult.upload_id;
-
-        // 2. 检查断点续传（已有上传历史）
-        let uploadedChunks = [];
-        try {
-            const checkResponse = await fetch(`/api/upload/check?upload_id=${uploadId}`);
-            const checkResult = await checkResponse.json();
-            if (checkResult.status === 'success') {
-                uploadedChunks = checkResult.uploaded_chunks || [];
-            }
-        } catch (e) {
-            // 如果检查失败，从头开始上传
-            console.log('未找到之前的上传进度，将从头开始');
-        }
-
-        // 3. 逐个上传分片
-        const startChunk = uploadedChunks.length;
         
-        for (let i = startChunk; i < totalChunks; i++) {
+        const uploadId = initResult.upload_id;
+        
+        // 2. 上传各个分片
+        for (let i = 0; i < totalChunks; i++) {
             const start = i * CHUNK_SIZE;
             const end = Math.min(start + CHUNK_SIZE, file.size);
             const chunk = file.slice(start, end);
-
+            
             const formData = new FormData();
+            formData.append('file', chunk);
             formData.append('upload_id', uploadId);
             formData.append('chunk_index', i);
-            formData.append('file', chunk);
-
+            
             const chunkResponse = await fetch('/api/upload/chunk', {
                 method: 'POST',
                 body: formData
             });
-
-            const chunkResult = await chunkResponse.json();
             
+            const chunkResult = await chunkResponse.json();
             if (chunkResult.status !== 'success') {
-                throw new Error(`分片 ${i + 1} 上传失败: ${chunkResult.message}`);
+                throw new Error(chunkResult.message);
             }
-
+            
             // 更新进度
             const progress = ((i + 1) / totalChunks) * 100;
-            progressBar.style.width = progress + '%';
-            progressText.textContent = `上传中 ${formatFileSize(end)} / ${formatFileSize(file.size)} (${Math.round(progress)}%)`;
+            if (progressBar) progressBar.style.width = `${progress}%`;
+            if (progressText) progressText.textContent = `上传中: ${Math.round(progress)}%`;
         }
-
-        // 4. 合并分片
-        progressText.textContent = '正在处理文件...';
         
-        // 获取选中的分类
-        const selectedCategory = document.querySelector('input[name="documentCategory"]:checked');
-        const category = selectedCategory ? selectedCategory.value : '';
-        
-        const mergeResponse = await fetch('/api/upload/merge', {
+        // 3. 完成上传
+        const completeResponse = await fetch('/api/upload/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 upload_id: uploadId,
                 cycle: appState.currentCycle,
                 doc_name: appState.currentDocument,
-                category: category,
-                doc_date: elements.docDate.value,
-                sign_date: elements.signDate.value,
-                signer: elements.signer.value,
-                has_seal: elements.hasSeal.checked,
-                party_a_seal: elements.partyASeal.checked,
-                party_b_seal: elements.partyBSeal.checked,
-                other_seal: elements.otherSeal.value,
+                doc_date: document.getElementById('docDate')?.value || '',
+                sign_date: document.getElementById('signDate')?.value || '',
+                signer: document.getElementById('signer')?.value || '',
+                no_signature: document.getElementById('noSignature')?.checked || false,
+                has_seal: document.getElementById('hasSeal')?.checked || false,
+                party_a_seal: document.getElementById('partyASeal')?.checked || false,
+                party_b_seal: document.getElementById('partyBSeal')?.checked || false,
+                no_seal: document.getElementById('noSeal')?.checked || false,
+                other_seal: document.getElementById('otherSeal')?.value || '',
                 project_id: appState.currentProjectId || ''
             })
         });
-
-        const mergeResult = await mergeResponse.json();
-
-        if (mergeResult.status === 'success') {
-            showNotification('文档上传成功！', 'success');
-            elements.uploadForm.reset();
-
-            // 设置今天的日期为默认值
-            const today = new Date().toISOString().split('T')[0];
-            elements.docDate.value = today;
-            elements.signDate.value = today;
-
-            // 刷新已上传文档列表
-            loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
-            
-            // 刷新周期进度显示
-            refreshCycleProgress();
-
-            console.log('文档信息:', mergeResult.metadata);
-        } else {
-            throw new Error(mergeResult.message);
+        
+        const completeResult = await completeResponse.json();
+        if (completeResult.status !== 'success') {
+            throw new Error(completeResult.message);
         }
-
+        
+        // 上传成功
+        if (progressText) progressText.textContent = '上传完成！';
+        showNotification('文档上传成功！', 'success');
+        
+        // 清理进度显示
+        setTimeout(() => {
+            if (progressContainer && progressContainer.parentNode) {
+                progressContainer.parentNode.removeChild(progressContainer);
+            }
+        }, 2000);
+        
+        // 重置表单
+        elements.uploadForm.reset();
+        
+        // 设置今天的日期为默认值
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('docDate').value = today;
+        document.getElementById('signDate').value = today;
+        
+        // 刷新已上传文档列表
+        loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
+        
+        // 重置文件预览
+        updateFilePreview();
+        
+        // 刷新周期进度显示
+        refreshCycleProgress();
+        
     } catch (error) {
-        console.error('分片上传错误:', error);
+        console.error('分片上传失败:', error);
+        if (progressText) progressText.textContent = '上传失败';
         showNotification('上传失败: ' + error.message, 'error');
-    } finally {
-        // 移除进度条
-        if (progressContainer && progressContainer.parentNode) {
-            progressContainer.parentNode.removeChild(progressContainer);
-        }
+        
+        // 清理进度显示
+        setTimeout(() => {
+            if (progressContainer && progressContainer.parentNode) {
+                progressContainer.parentNode.removeChild(progressContainer);
+            }
+        }, 2000);
     }
 }
 
 /**
- * 创建进度条容器
+ * 创建进度显示容器
  */
-function createProgressContainer(filename) {
+function createProgressContainer(fileName) {
     const container = document.createElement('div');
-    container.className = 'upload-progress-container';
+    container.className = 'upload-progress';
     container.innerHTML = `
-        <div class="progress-info">
-            <span class="progress-filename">${filename}</span>
+        <div class="progress-header">
+            <span>${fileName}</span>
             <span class="progress-text">准备上传...</span>
         </div>
-        <div class="progress-bar-bg">
-            <div class="progress-bar" style="width: 0%"></div>
+        <div class="progress-bar-container">
+            <div class="progress-bar" style="width: 0%;"></div>
         </div>
     `;
     return container;
-}
-
-/**
- * 删除文档
- */
-async function deleteDocument(docId) {
-    console.log('deleteDocument 被调用，docId:', docId);
-    showConfirmModal('确认删除', '确定要删除此文档吗？', async () => {
-        console.log('确认删除回调执行');
-        try {
-            const response = await fetch(`/api/documents/${docId}`, {
-                method: 'DELETE'
-            });
-            console.log('删除响应状态:', response.status);
-
-            const result = await response.json();
-            console.log('删除结果:', result);
-
-            if (result.status === 'success') {
-                showNotification('文档已删除', 'success');
-                // 刷新列表
-                const cycle = appState.currentCycle;
-                const docName = appState.currentDocument;
-                console.log('刷新列表，cycle:', cycle, 'docName:', docName);
-                loadUploadedDocuments(cycle, docName);
-                // 刷新周期进度显示
-                refreshCycleProgress();
-            } else {
-                showNotification('删除失败: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('删除文档错误:', error);
-            showNotification('删除文档出错: ' + error.message, 'error');
-        }
-    });
-}
-
-/**
- * 切换全选/取消全选
- */
-function toggleSelectAll() {
-    const selectAllCheckbox = document.getElementById('selectAllDocs');
-    const checkboxes = document.querySelectorAll('.doc-checkbox');
-    
-    checkboxes.forEach(checkbox => {
-        checkbox.checked = selectAllCheckbox.checked;
-    });
-    
-    updateBatchButtons();
-}
-
-/**
- * 更新批量操作按钮状态
- */
-function updateBatchButtons() {
-    const checkboxes = document.querySelectorAll('.doc-checkbox:checked');
-    const selectedCount = checkboxes.length;
-    
-    document.getElementById('batchSealBtn').disabled = selectedCount === 0;
-    document.getElementById('batchSignBtn').disabled = selectedCount === 0;
-    document.getElementById('batchDeleteBtn').disabled = selectedCount === 0;
-}
-
-/**
- * 批量更新文档属性
- */
-async function batchUpdateDocuments(action) {
-    const checkboxes = document.querySelectorAll('.doc-checkbox:checked');
-    const selectedDocIds = Array.from(checkboxes).map(cb => cb.dataset.docId);
-    
-    if (selectedDocIds.length === 0) {
-        showNotification('请先选择要操作的文档', 'error');
-        return;
-    }
-    
-    showConfirmModal('批量操作', `确定要${action === 'seal' ? '标记已盖章' : '标记已签字'}选中的 ${selectedDocIds.length} 个文档吗？`, async () => {
-        try {
-            const response = await fetch('/api/documents/batch-update', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    doc_ids: selectedDocIds,
-                    action: action
-                })
-            });
-
-            const result = await response.json();
-
-            if (result.status === 'success') {
-                showNotification(`已成功${action === 'seal' ? '标记已盖章' : '标记已签字'}选中的文档`, 'success');
-                // 刷新文档列表
-                if (appState.currentCycle && appState.currentDocument) {
-                    loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
-                }
-            } else {
-                showNotification(result.message || '操作失败', 'error');
-            }
-        } catch (error) {
-            console.error('批量操作失败:', error);
-            showNotification('批量操作时发生错误', 'error');
-        }
-    });
-}
-
-/**
- * 批量删除文档
- */
-async function batchDeleteDocuments() {
-    const checkboxes = document.querySelectorAll('.doc-checkbox:checked');
-    const selectedDocIds = Array.from(checkboxes).map(cb => cb.dataset.docId);
-    
-    if (selectedDocIds.length === 0) {
-        showNotification('请先选择要删除的文档', 'error');
-        return;
-    }
-    
-    showConfirmModal('批量删除', `确定要删除选中的 ${selectedDocIds.length} 个文档吗？`, async () => {
-        try {
-            const response = await fetch('/api/documents/batch-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    doc_ids: selectedDocIds
-                })
-            });
-
-            const result = await response.json();
-
-            if (result.status === 'success') {
-                showNotification(`已成功删除 ${selectedDocIds.length} 个文档`, 'success');
-                // 刷新文档列表
-                if (appState.currentCycle && appState.currentDocument) {
-                    loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
-                }
-            } else {
-                showNotification(result.message || '删除失败', 'error');
-            }
-        } catch (error) {
-            console.error('批量删除失败:', error);
-            showNotification('批量删除时发生错误', 'error');
-        }
-    });
 }
 
 /**
@@ -2595,8 +1500,22 @@ async function loadCategories(cycle, docName) {
         const result = await response.json();
         
         if (result.status === 'success') {
-            const categories = result.data || [];
-            renderCategoryManagement(categories, cycle, docName);
+            const categories = result.categories || [];
+            const categoryContainer = document.getElementById('documentCategories');
+            
+            if (categoryContainer) {
+                if (categories.length === 0) {
+                    categoryContainer.innerHTML = '<p class="placeholder">暂无分类</p>';
+                } else {
+                    categoryContainer.innerHTML = categories.map(category => `
+                        <div class="category-item">
+                            <input type="radio" name="documentCategory" value="${escapeHtml(category)}" id="category-${escapeHtml(category)}">
+                            <label for="category-${escapeHtml(category)}">${escapeHtml(category)}</label>
+                            <button class="btn btn-danger btn-sm" onclick="deleteCategory('${escapeHtml(cycle)}', '${escapeHtml(docName)}', '${escapeHtml(category)}')">删除</button>
+                        </div>
+                    `).join('');
+                }
+            }
         }
     } catch (error) {
         console.error('加载分类失败:', error);
@@ -2604,54 +1523,9 @@ async function loadCategories(cycle, docName) {
 }
 
 /**
- * 渲染分类管理界面
+ * 添加分类
  */
-function renderCategoryManagement(categories, cycle, docName) {
-    // 检查是否已存在分类管理区域
-    let categorySection = document.getElementById('categoryManagement');
-    if (!categorySection) {
-        // 创建分类管理区域
-        categorySection = document.createElement('div');
-        categorySection.id = 'categoryManagement';
-        categorySection.style.marginTop = '20px';
-        categorySection.style.padding = '15px';
-        categorySection.style.background = '#f8f9fa';
-        categorySection.style.borderRadius = '8px';
-        
-        // 插入到上传表单之前
-        const uploadForm = document.getElementById('uploadForm');
-        uploadForm.parentNode.insertBefore(categorySection, uploadForm);
-    }
-    
-    // 渲染分类管理内容
-    categorySection.innerHTML = `
-        <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 15px; color: #333;">分类管理</h3>
-        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-            <input type="text" id="newCategoryName" placeholder="输入新分类名称" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-            <button class="btn btn-primary btn-sm" onclick="createCategory('${cycle}', '${docName}')">添加分类</button>
-        </div>
-        <div id="categoriesList" style="margin-bottom: 15px;">
-            ${categories.length > 0 ? 
-                categories.map(category => `
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px; padding: 8px; background: white; border-radius: 4px;">
-                        <input type="radio" name="documentCategory" value="${category}" style="margin: 0;">
-                        <span>${category}</span>
-                        <button class="btn btn-danger btn-sm" onclick="deleteCategory('${cycle}', '${docName}', '${category}')" style="margin-left: auto;">删除</button>
-                    </div>
-                `).join('') : 
-                '<p style="color: #666; font-size: 13px;">暂无分类，点击添加分类按钮创建</p>'
-            }
-        </div>
-        <div style="font-size: 12px; color: #666;">
-            <p>说明：创建分类后，上传文档时会自动按分类组织文件</p>
-        </div>
-    `;
-}
-
-/**
- * 创建分类
- */
-async function createCategory(cycle, docName) {
+async function addCategory(cycle, docName) {
     const categoryName = document.getElementById('newCategoryName').value.trim();
     if (!categoryName) {
         showNotification('请输入分类名称', 'error');
@@ -2687,7 +1561,7 @@ async function createCategory(cycle, docName) {
  * 删除分类
  */
 async function deleteCategory(cycle, docName, category) {
-    showConfirmModal('确认删除', `确定要删除分类 "${category}" 吗？`, async () => {
+    showConfirmModal('确认删除', `确定要删除分类"${category}" 吗？`, async () => {
         try {
             const response = await fetch('/api/documents/category', {
                 method: 'DELETE',
@@ -2721,12 +1595,9 @@ async function handleGenerateReport() {
         showNotification('请先加载项目配置', 'error');
         return;
     }
-
-    const progress = showOperationProgress('report-' + Date.now(), '正在生成报告...');
-    progress.update(20, '正在收集数据...');
-
+    
     showLoading(true);
-
+    
     try {
         const response = await fetch('/api/report', {
             method: 'POST',
@@ -2737,2572 +1608,17 @@ async function handleGenerateReport() {
                 project_config: appState.projectConfig
             })
         });
-
-        progress.update(60, '正在生成报告...');
-
+        
         const result = await response.json();
-
+        
         if (result.status === 'success') {
-            progress.complete('报告生成成功');
             renderReport(result.data);
             openModal(elements.reportModal);
         } else {
-            progress.error('生成失败: ' + result.message);
             showNotification('生成报告失败: ' + result.message, 'error');
         }
     } catch (error) {
         console.error('生成报告错误:', error);
-        progress.error('生成失败: ' + error.message);
         showNotification('生成报告出错: ' + error.message, 'error');
     } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 渲染报告
- */
-function renderReport(reportData) {
-    const cyclesDetail = reportData.cycles_detail || {};
-    const projectName = reportData.project_name || '未命名项目';
-    
-    // 获取周期顺序（从项目配置）
-    const cycleOrder = appState.projectConfig?.cycles || Object.keys(cyclesDetail);
-    
-    // 按顺序遍历周期
-    const cyclesHTML = cycleOrder.map(cycle => {
-        const stats = cyclesDetail[cycle];
-        if (!stats) return '';
-        const completionRate = stats.completion_rate || 0;
-        return `
-            <div class="cycle-report">
-                <h4>${cycle}</h4>
-                <div class="cycle-report-bar">
-                    <div class="cycle-report-progress" style="width: ${completionRate}%">
-                        ${completionRate.toFixed(1)}%
-                    </div>
-                </div>
-                <div class="cycle-report-stats">
-                    <span>✅ 已上传: ${stats.uploaded}个</span>
-                    <span>📋 需要: ${stats.required}个</span>
-                    <span>❌ 缺失: ${stats.missing}个</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    const html = `
-        <h2>📊 ${projectName} - 文档管理报告</h2>
-        <div class="report-summary">
-            <div class="summary-item highlight">
-                <div class="label">总体完成率</div>
-                <div class="value">${reportData.completion_rate.toFixed(1)}%</div>
-            </div>
-            <div class="summary-item">
-                <div class="label">项目周期数</div>
-                <div class="value">${reportData.total_cycles}</div>
-            </div>
-            <div class="summary-item">
-                <div class="label">已上传文档</div>
-                <div class="value">${reportData.total_uploaded_documents}</div>
-            </div>
-            <div class="summary-item">
-                <div class="label">需求文档总数</div>
-                <div class="value">${reportData.total_required_documents}</div>
-            </div>
-        </div>
-
-        <h3>各周期详情</h3>
-        ${cyclesHTML}
-    `;
-
-    elements.reportContent.innerHTML = html;
-}
-
-/**
- * 导出报告
- */
-async function handleExportReport() {
-    if (!appState.projectConfig) {
-        showNotification('请先加载项目配置', 'error');
-        return;
-    }
-
-    try {
-        const response = await fetch('/api/report', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                project_config: appState.projectConfig
-            })
-        });
-
-        const reportData = await response.json();
-
-        if (reportData.status === 'success') {
-            const html = generateReportHTML(reportData.data);
-            downloadHTML(html, '文档管理报告.html');
-            showNotification('报告已导出', 'success');
-        }
-    } catch (error) {
-        console.error('导出报告错误:', error);
-        showNotification('导出报告出错: ' + error.message, 'error');
-    }
-}
-
-/**
- * 生成报告HTML
- */
-function generateReportHTML(reportData) {
-    const cyclesDetail = reportData.cycles_detail || {};
-    const projectName = reportData.project_name || '未命名项目';
-    
-    // 获取周期顺序（从项目配置）
-    const cycleOrder = appState.projectConfig?.cycles || Object.keys(cyclesDetail);
-    
-    // 按顺序遍历周期
-    const cyclesHTML = cycleOrder.map(cycle => {
-        const stats = cyclesDetail[cycle];
-        if (!stats) return '';
-        const completionRate = stats.completion_rate || 0;
-        return `
-            <tr>
-                <td>${cycle}</td>
-                <td>${stats.required}</td>
-                <td>${stats.uploaded}</td>
-                <td>${stats.missing}</td>
-                <td>${completionRate.toFixed(1)}%</td>
-            </tr>
-        `;
-    }).join('');
-
-    return `
-        <!DOCTYPE html>
-        <html lang="zh-CN">
-        <head>
-            <meta charset="UTF-8">
-            <title>${projectName} - 文档管理报告</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    margin: 20px;
-                    color: #333;
-                }
-                h1 {
-                    color: #0066cc;
-                    border-bottom: 2px solid #0066cc;
-                    padding-bottom: 10px;
-                }
-                .summary {
-                    background: #f5f5f5;
-                    padding: 15px;
-                    border-radius: 5px;
-                    margin: 20px 0;
-                }
-                .summary-item {
-                    display: inline-block;
-                    margin-right: 30px;
-                }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 20px;
-                }
-                th {
-                    background: #0066cc;
-                    color: white;
-                    padding: 12px;
-                    text-align: left;
-                }
-                td {
-                    padding: 10px;
-                    border-bottom: 1px solid #ddd;
-                }
-                tr:hover {
-                    background: #f9f9f9;
-                }
-                .footer {
-                    margin-top: 30px;
-                    font-size: 12px;
-                    color: #666;
-                }
-            </style>
-        </head>
-        <body>
-            <h1>${projectName} - 文档管理报告</h1>
-            
-            <div class="summary">
-                <div class="summary-item"><strong>报告生成时间:</strong> ${new Date(reportData.generate_time).toLocaleString('zh-CN')}</div>
-                <div class="summary-item"><strong>总体完成率:</strong> ${reportData.completion_rate.toFixed(1)}%</div>
-            </div>
-
-            <h2>统计摘要</h2>
-            <p>
-                <strong>项目周期数:</strong> ${reportData.total_cycles}<br>
-                <strong>已上传文档:</strong> ${reportData.total_uploaded_documents}<br>
-                <strong>需求文档总数:</strong> ${reportData.total_required_documents}
-            </p>
-
-            <h2>各周期详情</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>周期</th>
-                        <th>需求文档数</th>
-                        <th>已上传数</th>
-                        <th>缺失数</th>
-                        <th>完成率</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${cyclesHTML}
-                </tbody>
-            </table>
-
-            <div class="footer">
-                <p>此报告由项目文档管理中心自动生成</p>
-            </div>
-        </body>
-        </html>
-    `;
-}
-
-/**
- * 下载HTML文件
- */
-function downloadHTML(html, filename) {
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
-}
-
-/**
- * 打开模态框
- */
-function openModal(modal) {
-    modal.classList.add('show');
-    document.body.style.overflow = 'hidden';
-}
-
-/**
- * 关闭模态框
- */
-function closeModal(modal) {
-    modal.classList.remove('show');
-    document.body.style.overflow = 'auto';
-}
-
-/**
- * 显示加载指示器
- */
-function showLoading(show = true) {
-    if (show) {
-        elements.loadingIndicator.classList.add('show');
-    } else {
-        elements.loadingIndicator.classList.remove('show');
-    }
-}
-
-/**
- * 显示通知
- */
-function showNotification(message, type = 'info') {
-    elements.notification.textContent = message;
-    elements.notification.className = `notification show ${type}`;
-
-    // 3秒后自动隐藏
-    setTimeout(() => {
-        elements.notification.classList.remove('show');
-    }, 3000);
-}
-
-/**
- * 根据文件名获取文件图标
- */
-function getFileIcon(filename) {
-    if (!filename) return '📄';
-    if (filename.endsWith('.pdf')) return '📕';
-    if (filename.match(/\.(doc|docx)$/i)) return '📝';
-    if (filename.match(/\.(xls|xlsx)$/i)) return '📊';
-    if (filename.match(/\.(jpg|jpeg|png|gif|bmp)$/i)) return '🖼️';
-    if (filename.match(/\.(ppt|pptx)$/i)) return '📊';
-    if (filename.match(/\.zip$/i)) return '🗜️';
-    if (filename.match(/\.txt$/i)) return '📃';
-    return '📄';
-}
-
-/**
- * 格式化日期为年月格式（YYYY年MM月）
- * @param {string} dateStr - 日期字符串，格式为 YYYY-MM-DD
- * @returns {string} 格式化后的日期，如 "2021年3月"
- */
-function formatDateToMonth(dateStr) {
-    if (!dateStr) return '';
-    try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return dateStr;
-        const year = date.getFullYear();
-        const month = date.getMonth() + 1;
-        return `${year}年${month}月`;
-    } catch (e) {
-        return dateStr;
-    }
-}
-
-/**
- * 格式化文件大小
- */
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
-
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', initApp);
-
-/**
- * 打开文档编辑弹窗
- */
-async function openEditModal(docId) {
-    try {
-        const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(appState.currentCycle)}&doc_name=${encodeURIComponent(appState.currentDocument)}`);
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            const doc = result.data.find(d => d.id === docId);
-            if (!doc) {
-                showNotification('文档不存在', 'error');
-                return;
-            }
-            
-            document.getElementById('editDocId').value = docId;
-            document.getElementById('editDocDate').value = doc.doc_date || '';
-            document.getElementById('editSignDate').value = doc.sign_date || '';
-            document.getElementById('editSigner').value = doc.signer || '';
-            document.getElementById('editNoSignature').checked = doc.no_signature || false;
-            document.getElementById('editHasSeal').checked = doc.has_seal_marked || false;
-            document.getElementById('editPartyASeal').checked = doc.party_a_seal || false;
-            document.getElementById('editPartyBSeal').checked = doc.party_b_seal || false;
-            document.getElementById('editNoSeal').checked = doc.no_seal || false;
-            document.getElementById('editOtherSeal').value = doc.other_seal || '';
-            
-            openModal(elements.editDocModal);
-        }
-    } catch (error) {
-        console.error('获取文档信息失败:', error);
-        showNotification('获取文档信息失败', 'error');
-    }
-}
-
-/**
- * 关闭编辑弹窗
- */
-function closeEditModal() {
-    closeModal(elements.editDocModal);
-}
-
-/**
- * 处理文档编辑
- */
-async function handleEditDocument(e) {
-    e.preventDefault();
-    
-    const docId = document.getElementById('editDocId').value;
-    const data = {
-        doc_date: document.getElementById('editDocDate').value,
-        sign_date: document.getElementById('editSignDate').value,
-        signer: document.getElementById('editSigner').value,
-        no_signature: document.getElementById('editNoSignature').checked,
-        has_seal_marked: document.getElementById('editHasSeal').checked,
-        party_a_seal: document.getElementById('editPartyASeal').checked,
-        party_b_seal: document.getElementById('editPartyBSeal').checked,
-        no_seal: document.getElementById('editNoSeal').checked,
-        other_seal: document.getElementById('editOtherSeal').value
-    };
-    
-    try {
-        const response = await fetch(`/api/documents/${docId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification('文档信息已更新', 'success');
-            closeEditModal();
-            loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
-        } else {
-            showNotification('更新失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('更新文档失败:', error);
-        showNotification('更新文档失败', 'error');
-    }
-}
-
-/**
- * 打开文档替换弹窗
- */
-async function openReplaceModal(docId) {
-    try {
-        const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(appState.currentCycle)}&doc_name=${encodeURIComponent(appState.currentDocument)}`);
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            const doc = result.data.find(d => d.id === docId);
-            if (!doc) {
-                showNotification('文档不存在', 'error');
-                return;
-            }
-            
-            document.getElementById('replaceDocId').value = docId;
-            document.getElementById('replaceDocDate').value = doc.doc_date || '';
-            document.getElementById('replaceSignDate').value = doc.sign_date || '';
-            document.getElementById('replaceSigner').value = doc.signer || '';
-            document.getElementById('replaceNoSignature').checked = doc.no_signature || false;
-            document.getElementById('replaceHasSeal').checked = doc.has_seal_marked || false;
-            document.getElementById('replacePartyASeal').checked = doc.party_a_seal || false;
-            document.getElementById('replacePartyBSeal').checked = doc.party_b_seal || false;
-            document.getElementById('replaceNoSeal').checked = doc.no_seal || false;
-            document.getElementById('replaceOtherSeal').value = doc.other_seal || '';
-            
-            openModal(elements.replaceDocModal);
-        }
-    } catch (error) {
-        console.error('获取文档信息失败:', error);
-        showNotification('获取文档信息失败', 'error');
-    }
-}
-
-/**
- * 处理文档替换
- */
-async function handleReplaceDocument(e) {
-    e.preventDefault();
-    
-    const docId = document.getElementById('replaceDocId').value;
-    const file = document.getElementById('replaceFile').files[0];
-    
-    if (!file) {
-        showNotification('请选择文件', 'error');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('doc_date', document.getElementById('replaceDocDate').value);
-    formData.append('sign_date', document.getElementById('replaceSignDate').value);
-    formData.append('signer', document.getElementById('replaceSigner').value);
-    formData.append('no_signature', document.getElementById('replaceNoSignature').checked || false);
-    formData.append('has_seal', document.getElementById('replaceHasSeal').checked);
-    formData.append('party_a_seal', document.getElementById('replacePartyASeal').checked);
-    formData.append('party_b_seal', document.getElementById('replacePartyBSeal').checked);
-    formData.append('no_seal', document.getElementById('replaceNoSeal').checked || false);
-    formData.append('other_seal', document.getElementById('replaceOtherSeal').value);
-    
-    try {
-        const response = await fetch(`/api/documents/${docId}/replace`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification('文档已替换', 'success');
-            closeModal(elements.replaceDocModal);
-            document.getElementById('replaceDocForm').reset();
-            loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
-        } else {
-            showNotification('替换失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('替换文档失败:', error);
-        showNotification('替换文档失败', 'error');
-    }
-}
-
-/**
- * 处理ZIP上传（支持分片上传）
- */
-async function handleZipUpload(e) {
-    e.preventDefault();
-
-    // 检查是否选择了项目
-    if (!appState.currentProjectId || !appState.projectConfig) {
-        showNotification('请先选择项目再上传ZIP文件', 'error');
-        return;
-    }
-
-    // 检查项目是否有文档配置
-    if (!appState.projectConfig.documents || Object.keys(appState.projectConfig.documents).length === 0) {
-        showNotification('当前项目没有配置文档要求，请先导入Excel配置', 'error');
-        return;
-    }
-
-    const file = document.getElementById('zipFile').files[0];
-    if (!file) {
-        showNotification('请选择ZIP文件', 'error');
-        return;
-    }
-
-    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-    
-    // 如果文件超过分片阈值，使用分片上传
-    if (file.size > CHUNK_SIZE) {
-        await handleZipChunkedUpload(file);
-    } else {
-        await handleZipNormalUpload(file);
-    }
-}
-
-/**
- * 普通ZIP上传（小文件）
- */
-async function handleZipNormalUpload(file) {
-    // 创建进度显示
-    const progress = showOperationProgress('zip-upload-' + Date.now(), '正在上传并解压: ' + file.name);
-    progress.update(10, '正在上传文件...');
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    if (appState.projectConfig) {
-        formData.append('project_config', JSON.stringify(appState.projectConfig));
-    }
-    
-    // 添加项目ID用于跟踪待确认文件
-    if (appState.currentProjectId) {
-        formData.append('project_id', appState.currentProjectId);
-    }
-
-    try {
-        const response = await fetch('/api/documents/zip-upload', {
-            method: 'POST',
-            body: formData
-        });
-
-        progress.update(50, '正在匹配文档...');
-
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            // 新逻辑：文件进入待确认状态，不自动导入
-            if (result.new_matched_files && result.new_matched_files.length > 0) {
-                progress.update(100, `匹配完成: ${result.new_matched_files.length} 个文件需要确认`);
-                progress.complete(`解压完成，新匹配 ${result.new_matched_files.length} 个待确认文件`);
-                showNotification(result.message, 'success');
-                // 渲染待确认文件列表
-                renderPendingFiles(result.new_matched_files);
-            } else if (result.already_confirmed_files && result.already_confirmed_files.length > 0) {
-                progress.update(100, `所有文件已确认过`);
-                progress.complete(`${result.already_confirmed_files.length} 个文件已确认过，无需重复操作`);
-                showNotification(`${result.already_confirmed_files.length} 个文件已确认过`, 'info');
-            } else {
-                progress.update(100, `匹配完成`);
-                progress.complete('没有新匹配的文件');
-                showNotification('没有新匹配的文件', 'info');
-            }
-            
-            // 同时显示已确认过的文件提示
-            if (result.already_confirmed_files && result.already_confirmed_files.length > 0) {
-                renderAlreadyConfirmedFiles(result.already_confirmed_files);
-            }
-            
-            // 刷新日志
-            refreshOperationLog();
-        } else {
-            progress.error(result.message);
-            showNotification('解析失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('上传ZIP失败:', error);
-        progress.error(error.message);
-        showNotification('上传ZIP失败', 'error');
-    }
-}
-
-/**
- * 分片上传ZIP（大文件支持断点续传）
- */
-async function handleZipChunkedUpload(file) {
-    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-    // 使用新的进度显示面板
-    const chunkedProgress = showOperationProgress('zip-chunked-' + Date.now(), '正在上传: ' + file.name);
-
-    try {
-        // 1. 先创建临时上传（不解压）然后手动处理
-        // 这里我们使用简化的方式：分片上传到临时目录
-        
-        const initResponse = await fetch('/api/upload/init', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                filename: file.name,
-                total_chunks: totalChunks,
-                file_size: file.size
-            })
-        });
-
-        const initResult = await initResponse.json();
-        if (initResult.status !== 'success') {
-            throw new Error(initResult.message);
-        }
-
-        const uploadId = initResult.upload_id;
-
-        // 2. 逐个上传分片
-        for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
-            const chunk = file.slice(start, end);
-
-            const formData = new FormData();
-            formData.append('upload_id', uploadId);
-            formData.append('chunk_index', i);
-            formData.append('file', chunk);
-
-            const chunkResponse = await fetch('/api/upload/chunk', {
-                method: 'POST',
-                body: formData
-            });
-
-            const chunkResult = await chunkResponse.json();
-            
-            if (chunkResult.status !== 'success') {
-                throw new Error(`分片 ${i + 1} 上传失败: ${chunkResult.message}`);
-            }
-
-            // 更新进度
-            const progressPercent = ((i + 1) / totalChunks) * 100;
-            chunkedProgress.update(progressPercent, `上传中 ${formatFileSize(end)} / ${formatFileSize(file.size)}`);
-        }
-
-        // 3. 合并分片
-        chunkedProgress.update(90, '正在解压ZIP文件...');
-
-        // 调用merge API，但传递特殊参数让后端返回文件路径而不是直接上传文档
-        const mergeResponse = await fetch('/api/upload/merge', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                upload_id: uploadId,
-                cycle: '_temp_',
-                doc_name: '_temp_zip_'
-            })
-        });
-
-        const mergeResult = await mergeResponse.json();
-
-        if (mergeResult.status !== 'success') {
-            throw new Error(mergeResult.message || '合并分片失败');
-        }
-
-        const mergedFilePath = mergeResult.file_path;
-
-        if (!mergedFilePath) {
-            throw new Error('无法获取上传的文件');
-        }
-
-        // 4. 调用后端API进行解压和匹配
-        const zipFormData = new FormData();
-        // 添加一个标记，让后端知道从哪里读取已上传的文件
-        zipFormData.append('uploaded_file_path', mergedFilePath);
-        if (appState.projectConfig) {
-            zipFormData.append('project_config', JSON.stringify(appState.projectConfig));
-        }
-
-        const processResponse = await fetch('/api/documents/zip-upload', {
-            method: 'POST',
-            body: zipFormData
-        });
-
-        const processResult = await processResponse.json();
-
-        if (processResult.status === 'success') {
-            chunkedProgress.update(100, '匹配完成');
-            chunkedProgress.complete(`解压完成，匹配 ${processResult.matched_files?.length || 0} 个文件`);
-            showNotification(processResult.message, 'success');
-            renderZipMatchResult(processResult);
-            refreshOperationLog();
-        } else {
-            chunkedProgress.error(processResult.message);
-            showNotification('解析失败: ' + processResult.message, 'error');
-        }
-
-    } catch (error) {
-        console.error('ZIP分片上传错误:', error);
-        if (chunkedProgress) {
-            chunkedProgress.error(error.message);
-        }
-        showNotification('ZIP上传失败: ' + error.message, 'error');
-    }
-}
-
-/**
- * 渲染ZIP匹配结果 - 按文档类型分组显示
- */
-function renderZipMatchResult(result) {
-    const matchResultDiv = document.getElementById('zipMatchResult');
-    const matchedDiv = document.getElementById('matchedFiles');
-    const unmatchedDiv = document.getElementById('unmatchedFiles');
-
-    // 按周期和文档类型分组匹配结果
-    const groupedMatches = {};
-    const matchedFiles = result.matched_files || result.new_matched || [];
-    if (matchedFiles.length > 0) {
-        matchedFiles.forEach(file => {
-            const key = `${file.cycle}|${file.doc_name}`;
-            if (!groupedMatches[key]) {
-                groupedMatches[key] = {
-                    cycle: file.cycle,
-                    doc_name: file.doc_name,
-                    files: []
-                };
-            }
-            groupedMatches[key].files.push(file);
-        });
-    }
-
-    // 构建分组HTML
-    let matchedHtml = '';
-    if (Object.keys(groupedMatches).length > 0) {
-        matchedHtml = `<h4>✅ 已匹配文档 (${Object.keys(groupedMatches).length}种)</h4>`;
-
-        for (const key in groupedMatches) {
-            const group = groupedMatches[key];
-            const groupId = `group_${key.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            matchedHtml += `
-                <div class="match-group">
-                    <div class="match-group-header">
-                        <label class="match-group-title">
-                            <input type="checkbox" class="match-group-checkbox" data-group="${groupId}" checked>
-                            <span class="cycle-badge">${group.cycle}</span>
-                            <span class="doc-name">${group.doc_name}</span>
-                            <span class="file-count">(${group.files.length}个文件)</span>
-                        </label>
-                    </div>
-                    <div class="match-group-files" id="${groupId}">
-                        ${group.files.map((file, idx) => {
-                            try {
-                                const fileJson = JSON.stringify(file);
-                                const escapedJson = fileJson.replace(/"/g, '&quot;');
-                                return `
-                                    <div class="file-match-item">
-                                        <input type="checkbox"
-                                               id="match_${groupId}_${idx}"
-                                               data-file="${escapedJson}"
-                                               class="match-file-checkbox"
-                                               data-group="${groupId}"
-                                               checked>
-                                        <div class="file-match-info">
-                                            <div class="filename">${file.filename}</div>
-                                        </div>
-                                    </div>
-                                `;
-                            } catch (e) {
-                                console.error('序列化文件数据失败:', e, file);
-                                return '';
-                            }
-                        }).join('')}
-                    </div>
-                </div>
-            `;
-        }
-    } else {
-        matchedHtml = '<p class="no-match">没有匹配到任何文档</p>';
-    }
-
-    matchedDiv.innerHTML = matchedHtml;
-
-    // 添加分组全选/全取消功能
-    document.querySelectorAll('.match-group-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', (e) => {
-            const groupId = e.target.dataset.group;
-            const groupFiles = document.querySelectorAll(`.match-file-checkbox[data-group="${groupId}"]`);
-            groupFiles.forEach(cb => cb.checked = e.target.checked);
-        });
-    });
-
-    // 文件checkbox状态变化时更新分组checkbox状态
-    document.querySelectorAll('.match-file-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', (e) => {
-            const groupId = e.target.dataset.group;
-            const groupFiles = document.querySelectorAll(`.match-file-checkbox[data-group="${groupId}"]`);
-            const groupCheckbox = document.querySelector(`.match-group-checkbox[data-group="${groupId}"]`);
-            const checkedCount = Array.from(groupFiles).filter(cb => cb.checked).length;
-            groupCheckbox.checked = checkedCount === groupFiles.length;
-            groupCheckbox.indeterminate = checkedCount > 0 && checkedCount < groupFiles.length;
-        });
-    });
-
-    // 构建文档类型下拉选项（按序号排序）
-    let docTypeOptions = '';
-    if (appState.projectConfig && appState.projectConfig.documents) {
-        for (const [cycle, docsInfo] of Object.entries(appState.projectConfig.documents)) {
-            // 按序号排序
-            const docs = (docsInfo.required_docs || []).sort((a, b) => (a.index || 0) - (b.index || 0));
-            for (const doc of docs) {
-                docTypeOptions += `<option value="${cycle}|${doc.name}">${doc.index || ''}. ${cycle} - ${doc.name}</option>`;
-            }
-        }
-    }
-
-    // 显示未匹配的文件
-    const unmatchedFiles = result.unmatched_files || result.unmatched || [];
-    if (unmatchedFiles.length > 0) {
-        unmatchedDiv.innerHTML = `
-            <h4>⚠️ 未匹配到文档的文件 (${unmatchedFiles.length}个) - 可手动选择文档类型</h4>
-            <div class="unmatched-files-list">
-                ${unmatchedFiles.map((file, idx) => {
-                    try {
-                        const fileJson = JSON.stringify(file);
-                        const escapedJson = fileJson.replace(/"/g, '&quot;');
-                        return `
-                            <div class="unmatched-file-item manual-match">
-                                <input type="checkbox" id="unmatched_${idx}" data-file="${escapedJson}">
-                                <span class="filename">${file.filename}</span>
-                                <select class="doc-type-select" data-idx="${idx}">
-                                    <option value="">-- 选择文档类型 --</option>
-                                    ${docTypeOptions}
-                                </select>
-                            </div>
-                        `;
-                    } catch (e) {
-                        console.error('序列化文件数据失败:', e, file);
-                        return '';
-                    }
-                }).join('')}
-            </div>
-            <p class="manual-match-hint">💡 提示：选择文件后，在下拉框中选择对应的文档类型，然后点击"导入"按钮</p>
-        `;
-    } else {
-        unmatchedDiv.innerHTML = '<p class="all-matched">所有文件都已匹配！</p>';
-    }
-
-    // 显示结果区域
-    matchResultDiv.style.display = 'block';
-
-
-    // 保存匹配结果到全局状态
-    appState.zipMatchResult = result;
-}
-
-/**
- * 渲染待确认文件列表
- */
-function renderPendingFiles(pendingFiles) {
-    const section = document.getElementById('pendingFilesSection');
-    const listDiv = document.getElementById('pendingFilesList');
-    const confirmBtn = document.getElementById('confirmPendingBtn');
-    const rejectBtn = document.getElementById('rejectPendingBtn');
-    const countSpan = document.getElementById('pendingSelectedCount');
-    
-    if (!pendingFiles || pendingFiles.length === 0) {
-        section.style.display = 'none';
-        return;
-    }
-    
-    // 保存待确认文件到全局状态
-    appState.pendingFiles = pendingFiles;
-    
-    let html = '';
-    pendingFiles.forEach((file, idx) => {
-        const uploadTime = file.upload_time ? new Date(file.upload_time).toLocaleString('zh-CN') : '';
-        const fileIcon = getFileIcon(file.filename);
-        html += `
-            <div class="pending-file-item">
-                <input type="checkbox" class="pending-file-checkbox" data-idx="${idx}" id="pending_${idx}">
-                <div class="file-icon">${fileIcon}</div>
-                <div class="pending-file-info">
-                    <div class="filename" title="${escapeHtml(file.filename)}">${file.filename}</div>
-                    <div class="match-detail">
-                        <span class="cycle-badge">${file.cycle}</span>
-                        <span class="doc-name">${file.doc_name}</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    
-    listDiv.innerHTML = html;
-    section.style.display = 'block';
-    
-    // 添加checkbox事件监听
-    document.querySelectorAll('.pending-file-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', updatePendingSelection);
-    });
-    
-    updatePendingSelection();
-}
-
-/**
- * 更新待确认文件选择状态
- */
-function updatePendingSelection() {
-    const checkboxes = document.querySelectorAll('.pending-file-checkbox:checked');
-    const count = checkboxes.length;
-    const confirmBtn = document.getElementById('confirmPendingBtn');
-    const rejectBtn = document.getElementById('rejectPendingBtn');
-    const countSpan = document.getElementById('pendingSelectedCount');
-    
-    // 保存选中的索引
-    appState.selectedPendingIndexes = Array.from(checkboxes).map(cb => parseInt(cb.dataset.idx));
-    
-    if (confirmBtn) confirmBtn.disabled = count === 0;
-    if (rejectBtn) rejectBtn.disabled = count === 0;
-    if (countSpan) countSpan.textContent = `已选 ${count} 个文件`;
-}
-
-/**
- * 确认选中的待确认文件
- */
-async function handleConfirmPendingFiles() {
-    if (!appState.currentProjectId) {
-        showNotification('请先选择项目', 'error');
-        return;
-    }
-    
-    if (!appState.selectedPendingIndexes || appState.selectedPendingIndexes.length === 0) {
-        showNotification('请选择要确认的文件', 'error');
-        return;
-    }
-    
-    const confirmBtn = document.getElementById('confirmPendingBtn');
-    const originalText = confirmBtn.textContent;
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = '确认中...';
-    
-    try {
-        const response = await fetch('/api/documents/confirm-pending', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project_id: appState.currentProjectId,
-                file_ids: appState.selectedPendingIndexes
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification(result.message, 'success');
-            
-            // 从本地待确认列表中移除已确认的文件
-            const remainingPending = appState.pendingFiles.filter((_, idx) => !appState.selectedPendingIndexes.includes(idx));
-            
-            // 重新渲染待确认列表
-            if (remainingPending.length > 0) {
-                renderPendingFiles(remainingPending);
-            } else {
-                document.getElementById('pendingFilesSection').style.display = 'none';
-                appState.pendingFiles = [];
-            }
-            
-            // 刷新文档列表显示
-            if (typeof loadProjectDocuments === 'function') {
-                loadProjectDocuments();
-            }
-            
-            refreshOperationLog();
-        } else {
-            showNotification(result.message, 'error');
-        }
-    } catch (error) {
-        console.error('确认文件失败:', error);
-        showNotification('确认文件失败', 'error');
-    } finally {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = originalText;
-    }
-}
-
-/**
- * 拒绝选中的待确认文件
- */
-async function handleRejectPendingFiles() {
-    if (!appState.currentProjectId) {
-        showNotification('请先选择项目', 'error');
-        return;
-    }
-    
-    if (!appState.selectedPendingIndexes || appState.selectedPendingIndexes.length === 0) {
-        showNotification('请选择要移除的文件', 'error');
-        return;
-    }
-    
-    const rejectBtn = document.getElementById('rejectPendingBtn');
-    const originalText = rejectBtn.textContent;
-    rejectBtn.disabled = true;
-    rejectBtn.textContent = '移除中...';
-    
-    try {
-        const response = await fetch('/api/documents/reject-pending', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project_id: appState.currentProjectId,
-                file_ids: appState.selectedPendingIndexes
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification(result.message, 'success');
-            
-            // 从本地待确认列表中移除
-            const remainingPending = appState.pendingFiles.filter((_, idx) => !appState.selectedPendingIndexes.includes(idx));
-            
-            if (remainingPending.length > 0) {
-                renderPendingFiles(remainingPending);
-            } else {
-                document.getElementById('pendingFilesSection').style.display = 'none';
-                appState.pendingFiles = [];
-            }
-        } else {
-            showNotification(result.message, 'error');
-        }
-    } catch (error) {
-        console.error('拒绝文件失败:', error);
-        showNotification('拒绝文件失败', 'error');
-    } finally {
-        rejectBtn.disabled = false;
-        rejectBtn.textContent = originalText;
-    }
-}
-
-/**
- * 渲染已确认过的文件提示
- */
-function renderAlreadyConfirmedFiles(files) {
-    if (!files || files.length === 0) return;
-    
-    let html = '<div class="already-confirmed-notice" style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 6px; color: #2e7d32;">';
-    html += `<strong>以下 ${files.length} 个文件已确认过，不会重复匹配：</strong><ul style="margin: 5px 0 0 20px;">`;
-    files.forEach(file => {
-        html += `<li>${file.filename} (${file.cycle} - ${file.doc_name})</li>`;
-    });
-    html += '</ul></div>';
-    
-    // 插入到匹配结果后面
-    const matchResult = document.getElementById('zipMatchResult');
-    if (matchResult) {
-        const noticeDiv = matchResult.querySelector('.already-confirmed-notice');
-        if (noticeDiv) noticeDiv.remove();
-        matchResult.insertAdjacentHTML('beforeend', html);
-    }
-}
-
-/**
- * 导入匹配的文件
- */
-async function handleImportMatchedFiles() {
-    console.log('开始导入文件...');
-
-    // 获取导入按钮并显示进度
-    const importBtn = document.getElementById('importMatchedBtn');
-    const originalBtnText = importBtn.innerHTML;
-    importBtn.disabled = true;
-
-    // 按钮进度条动画
-    let progressInterval = null;
-    let progressPercent = 0;
-    const startButtonProgress = () => {
-        importBtn.innerHTML = `<span class="btn-progress-text">正在处理... 0%</span>
-            <span class="btn-progress-bar" style="width: 0%"></span>`;
-        progressInterval = setInterval(() => {
-            progressPercent += Math.random() * 15;
-            if (progressPercent > 90) progressPercent = 90;
-            importBtn.querySelector('.btn-progress-text').textContent = `正在处理... ${Math.floor(progressPercent)}%`;
-            importBtn.querySelector('.btn-progress-bar').style.width = progressPercent + '%';
-        }, 200);
-    };
-    const stopButtonProgress = (success) => {
-        if (progressInterval) clearInterval(progressInterval);
-        if (success) {
-            importBtn.querySelector('.btn-progress-bar').style.backgroundColor = '#28a745';
-            importBtn.querySelector('.btn-progress-text').textContent = '完成!';
-            importBtn.querySelector('.btn-progress-bar').style.width = '100%';
-        } else {
-            importBtn.querySelector('.btn-progress-bar').style.backgroundColor = '#dc3545';
-            importBtn.querySelector('.btn-progress-text').textContent = '失败';
-        }
-        setTimeout(() => {
-            importBtn.innerHTML = originalBtnText;
-            importBtn.disabled = false;
-        }, 1500);
-    };
-
-    // 选择已匹配文件中的checkbox
-    const matchedCheckboxes = document.querySelectorAll('#matchedFiles input.match-file-checkbox:checked');
-    console.log('选中的checkbox数量:', matchedCheckboxes.length);
-
-    // 选择未匹配文件中已选中且有选择文档类型的checkbox
-    const unmatchedCheckboxes = document.querySelectorAll('#unmatchedFiles input[type="checkbox"]:checked');
-    const manualMatchedFiles = [];
-    for (const cb of unmatchedCheckboxes) {
-        const select = cb.closest('.unmatched-file-item')?.querySelector('.doc-type-select');
-        const docType = select?.value;
-        if (!docType) {
-            showNotification('请为所有选中的文件选择文档类型', 'error');
-            stopButtonProgress(false);
-            return;
-        }
-        try {
-            const [cycle, doc_name] = docType.split('|');
-            // 检查data-file属性是否存在且不为空
-            if (!cb.dataset.file) {
-                console.error('文件数据为空');
-                return;
-            }
-            const fileData = JSON.parse(cb.dataset.file);
-            manualMatchedFiles.push({
-                ...fileData,
-                cycle: cycle,
-                doc_name: doc_name,
-                is_manual_match: true
-            });
-        } catch (e) {
-            console.error('解析文件数据失败:', e, '数据:', cb.dataset.file);
-        }
-    }
-
-    if (matchedCheckboxes.length === 0 && manualMatchedFiles.length === 0) {
-        showNotification('请选择要导入的文件', 'error');
-        stopButtonProgress(false);
-        return;
-    }
-
-    const filesToImport = [];
-    for (const cb of matchedCheckboxes) {
-        try {
-            // 检查data-file属性是否存在且不为空
-            if (!cb.dataset.file) {
-                console.error('文件数据为空');
-                continue;
-            }
-            const fileData = JSON.parse(cb.dataset.file);
-            filesToImport.push(fileData);
-        } catch (e) {
-            console.error('解析文件数据失败:', e, '数据:', cb.dataset.file);
-        }
-    }
-    // 添加手动匹配的文件
-    filesToImport.push(...manualMatchedFiles);
-
-    console.log('要导入的文件:', filesToImport);
-
-    if (filesToImport.length === 0) {
-        showNotification('没有有效的文件数据', 'error');
-        stopButtonProgress(false);
-        return;
-    }
-
-    // 创建进度显示
-    const progress = showOperationProgress('zip-import-' + Date.now(), '正在导入文件...');
-    progress.update(10, '准备导入文件...');
-    startButtonProgress();
-
-    showLoading(true);
-
-    try {
-        // 获取项目名称
-        const projectName = appState.projectConfig ? appState.projectConfig.name : '';
-        const projectId = appState.currentProjectId;
-
-        console.log('发送导入请求, 项目:', projectName, projectId);
-
-        const response = await fetch('/api/documents/zip-import', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                files: filesToImport,
-                project_name: projectName,
-                project_id: projectId
-            })
-        });
-
-        console.log('响应状态:', response.status);
-
-        progress.update(50, '正在保存文件...');
-
-        const result = await response.json();
-        console.log('导入结果:', result);
-
-        if (result.status === 'success') {
-            progress.update(100, '导入完成');
-            progress.complete(`成功导入 ${result.imported_count} 个文件`);
-            stopButtonProgress(true);
-            showNotification(result.message, 'success');
-            document.getElementById('zipMatchResult').style.display = 'none';
-            document.getElementById('zipUploadForm').reset();
-            closeModal(elements.zipUploadModal);
-
-            // 刷新当前周期的文档列表
-            if (appState.currentCycle) {
-                renderCycleDocuments(appState.currentCycle);
-            }
-            
-            // 刷新周期进度显示
-            refreshCycleProgress();
-            
-            // 刷新日志
-            refreshOperationLog();
-        } else {
-            progress.error(result.message);
-            stopButtonProgress(false);
-            showNotification('导入失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('导入文件失败:', error);
-        progress.error(error.message);
-        stopButtonProgress(false);
-        showNotification('导入文件失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 检查文档合规性（异常检测）
- */
-async function handleCheckCompliance() {
-    if (!appState.projectConfig) {
-        showNotification('请先加载项目配置', 'error');
-        return;
-    }
-    
-    const progress = showOperationProgress('check-' + Date.now(), '正在检查异常...');
-    progress.update(20, '正在分析文档状态...');
-    
-    showLoading(true);
-    
-    try {
-        const response = await fetch('/api/documents/compliance', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ project_config: appState.projectConfig })
-        });
-        
-        progress.update(60, '正在生成异常报告...');
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            progress.complete('异常检查完成');
-            renderComplianceResult(result.data);
-        } else {
-            progress.error('检查失败: ' + result.message);
-            showNotification('检查失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('检查合规性失败:', error);
-        progress.error('检查失败: ' + error.message);
-        showNotification('检查合规性失败', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 渲染合规性检查结果
- */
-function renderComplianceResult(data) {
-    let html = '<div class="compliance-report">';
-    
-    for (const [cycle, docs] of Object.entries(data)) {
-        html += `<h3>${cycle}</h3>`;
-        
-        for (const docInfo of docs) {
-            const hasException = docInfo.documents.some(d => !d.is_compliant);
-            const exceptionCount = docInfo.documents.filter(d => !d.is_compliant).length;
-            
-            html += `
-                <div class="document-category ${hasException ? 'exception' : ''}">
-                    <h4>${docInfo.doc_name}</h4>
-                    <div class="doc-requirement">
-                        <strong>要求：</strong> ${docInfo.requirement || '无特殊要求'}
-                    </div>
-                    <div>已上传: ${docInfo.uploaded_count}个</div>
-                    ${hasException ? `<div class="exception-count">异常: ${exceptionCount}个</div>` : ''}
-            `;
-            
-            if (hasException) {
-                html += '<ul class="exception-list">';
-                for (const doc of docInfo.documents) {
-                    if (!doc.is_compliant) {
-                        html += `<li>${doc.filename}: ${doc.issues.join(', ')}</li>`;
-                    }
-                }
-                html += '</ul>';
-            }
-            
-            html += '</div>';
-        }
-    }
-    
-    html += '</div>';
-    
-    // 在内容区域显示结果
-    elements.contentArea.innerHTML = `
-        <h2>📋 文档合规性检查结果</h2>
-        ${html}
-        <button class="btn btn-primary" onclick="selectCycle(appState.currentCycle)" style="margin-top:20px;">返回文档列表</button>
-    `;
-}
-
-// ========== 项目管理功能 ==========
-
-/**
- * 创建新项目
- */
-async function handleCreateProject(e) {
-    e.preventDefault();
-    
-    const name = document.getElementById('newProjectName').value;
-    const description = document.getElementById('newProjectDesc').value;
-    
-    if (!name) {
-        showNotification('请输入项目名称', 'error');
-        return;
-    }
-    
-    showLoading(true);
-    
-    try {
-        const response = await fetch('/api/projects/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification('项目创建成功', 'success');
-            closeModal(elements.newProjectModal);
-            document.getElementById('newProjectForm').reset();
-            
-            // 加载新创建的项目
-            appState.projectConfig = result.project;
-            appState.currentProjectId = result.project.id;
-            
-            // 刷新项目列表并选中
-            loadProjectsList();
-            
-            // 更新下拉菜单选中状态
-            if (elements.projectSelect) {
-                elements.projectSelect.value = result.project.id;
-            }
-            
-            // 更新URL参数
-            const url = new URL(window.location);
-            url.searchParams.set('project', result.project.id);
-            window.history.replaceState({}, '', url);
-            
-            renderCycles();
-            renderInitialContent();
-            showProjectButtons();
-            
-            console.log('项目配置:', appState.projectConfig);
-        } else {
-            showNotification('创建失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('创建项目错误:', error);
-        showNotification('创建项目出错', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 导入JSON
- */
-async function handleImportJson(e) {
-    e.preventDefault();
-    
-    const fileInput = document.getElementById('jsonFile');
-    const jsonContent = document.getElementById('jsonContent').value.trim();
-    const newName = document.getElementById('importProjectName').value;
-    
-    let jsonData = null;
-    
-    // 优先使用文件上传
-    if (fileInput.files.length > 0) {
-        const file = fileInput.files[0];
-        const reader = new FileReader();
-        try {
-            jsonData = JSON.parse(await new Promise((resolve, reject) => {
-                reader.onload = e => resolve(e.target.result);
-                reader.onerror = reject;
-                reader.readAsText(file);
-            }));
-        } catch (err) {
-            showNotification('无效的JSON文件', 'error');
-            return;
-        }
-    } else if (jsonContent) {
-        try {
-            jsonData = JSON.parse(jsonContent);
-        } catch (err) {
-            showNotification('无效的JSON内容', 'error');
-            return;
-        }
-    } else {
-        showNotification('请选择JSON文件或输入JSON内容', 'error');
-        return;
-    }
-    
-    showLoading(true);
-    
-    try {
-        const response = await fetch('/api/projects/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...jsonData, name: newName || undefined })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification('项目导入成功', 'success');
-            closeModal(elements.importJsonModal);
-            document.getElementById('importJsonForm').reset();
-            
-            // 加载导入的项目
-            appState.projectConfig = result.project;
-            appState.currentProjectId = result.project.id;
-            
-            // 刷新项目列表并更新下拉菜单选中状态
-            loadProjectsList();
-            if (elements.projectSelect) {
-                elements.projectSelect.value = appState.currentProjectId;
-            }
-            
-            // 更新URL参数
-            const url = new URL(window.location);
-            url.searchParams.set('project', result.project.id);
-            window.history.replaceState({}, '', url);
-            
-            renderCycles();
-            renderInitialContent();
-            showProjectButtons();
-            
-            console.log('项目配置:', appState.projectConfig);
-        } else {
-            showNotification('导入失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('导入JSON错误:', error);
-        showNotification('导入JSON出错', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 保存项目状态
- */
-async function handleSaveProject() {
-    if (!appState.currentProjectId || !appState.projectConfig) {
-        showNotification('请先创建或加载项目', 'error');
-        return;
-    }
-    
-    showLoading(true);
-    
-    try {
-        // 调用保存API
-        const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(appState.projectConfig)
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            showNotification('项目状态已保存！', 'success');
-        } else {
-            showNotification('保存失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('保存项目错误:', error);
-        showNotification('保存项目出错: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 导出JSON
- */
-async function handleExportJson() {
-    if (!appState.currentProjectId) {
-        showNotification('请先创建或加载项目', 'error');
-        return;
-    }
-    
-    const progress = showOperationProgress('export-' + Date.now(), '正在导出需求清单...');
-    progress.update(20, '正在准备数据...');
-    
-    showLoading(true);
-    
-    try {
-        // 使用新的导出需求清单API
-        const response = await fetch(`/api/project/export-requirements?project_id=${encodeURIComponent(appState.currentProjectId)}`);
-        
-        progress.update(60, '正在生成文件...');
-        
-        if (!response.ok) {
-            throw new Error('导出失败');
-        }
-        
-        // 直接从响应下载文件
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        
-        // 从响应头获取文件名或使用默认名称
-        const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = 'requirements.json';
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-            if (filenameMatch) {
-                filename = filenameMatch[1];
-            }
-        }
-        link.download = filename;
-        link.click();
-        URL.revokeObjectURL(url);
-            
-        progress.complete('需求清单导出成功');
-        showNotification('需求清单导出成功', 'success');
-    } catch (error) {
-        console.error('导出需求清单错误:', error);
-        progress.error('导出需求清单出错');
-        showNotification('导出需求清单出错', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 打包项目（导出配置+文档）
- */
-async function handlePackageProject() {
-    if (!appState.currentProjectId) {
-        showNotification('请先创建或加载项目', 'error');
-        return;
-    }
-    
-    const progress = showOperationProgress('package-' + Date.now(), '正在打包项目...');
-    progress.update(10, '正在准备项目文件...');
-    
-    showLoading(true);
-    showNotification('正在打包项目，请稍候...', 'info');
-    
-    try {
-        const response = await fetch(`/api/projects/${appState.currentProjectId}/package`);
-        
-        progress.update(50, '正在压缩文件...');
-        
-        // 检查响应状态
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `服务器错误: ${response.status}`);
-        }
-        
-        // 检查内容类型
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('zip')) {
-            const text = await response.text().catch(() => '');
-            throw new Error('服务器返回的不是ZIP文件: ' + (text.substring(0, 200) || contentType));
-        }
-        
-        progress.update(80, '正在生成下载链接...');
-        
-        // 获取ZIP二进制数据
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        
-        // 触发下载
-        const link = document.createElement('a');
-        link.href = url;
-        const projectName = appState.projectConfig?.name || 'project';
-        link.download = `${projectName}_backup.zip`;
-        link.click();
-        URL.revokeObjectURL(url);
-        
-        progress.complete('项目打包成功');
-        showNotification('项目打包成功', 'success');
-    } catch (error) {
-        console.error('打包项目错误:', error);
-        progress.error('打包失败: ' + error.message);
-        showNotification('打包项目失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 确认验收
- */
-async function handleConfirmAcceptance() {
-    if (!appState.currentProjectId) {
-        showNotification('请先加载项目', 'error');
-        return;
-    }
-
-    const cycles = appState.projectConfig?.cycles || [];
-    if (cycles.length === 0) {
-        showNotification('没有可验收的周期', 'warning');
-        return;
-    }
-
-    // 使用模态框让用户选择验收范围
-    showConfirmModal(
-        '确认验收',
-        `确定要验收"${appState.projectConfig.name}"吗？<br><br>将验收所有 ${cycles.length} 个周期的文档。`,
-        async () => {
-            try {
-                showLoading(true);
-                const response = await fetch(`/api/projects/${appState.currentProjectId}/confirm-acceptance`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const result = await response.json();
-
-                if (result.status === 'success') {
-                    showNotification(result.message, 'success');
-                    // 重新加载项目配置刷新状态
-                    await selectProject(appState.currentProjectId);
-                } else {
-                    showNotification(result.message || '验收失败', 'error');
-                }
-            } catch (error) {
-                console.error('验收失败:', error);
-                showNotification('验收失败: ' + error.message, 'error');
-            } finally {
-                showLoading(false);
-            }
-        }
-    );
-}
-
-/**
- * 打包下载项目所有文档
- */
-async function handleDownloadPackage() {
-    if (!appState.currentProjectId) {
-        showNotification('请先加载项目', 'error');
-        return;
-    }
-
-    try {
-        showLoading(true);
-        const response = await fetch(`/api/projects/${appState.currentProjectId}/download-package`);
-
-        if (!response.ok) {
-            const err = await response.json();
-            showNotification(err.message || '打包失败', 'error');
-            return;
-        }
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        const projectName = appState.projectConfig?.name || 'project';
-        link.download = `${projectName}_${new Date().toISOString().slice(0, 10)}.zip`;
-        link.click();
-        URL.revokeObjectURL(url);
-
-        showNotification('打包下载成功！', 'success');
-    } catch (error) {
-        console.error('打包下载失败:', error);
-        showNotification('打包下载失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 导入项目包
- */
-async function handleImportPackage(e) {
-    e.preventDefault();
-
-    const fileInput = document.getElementById('packageFile');
-    const nameInput = document.getElementById('importPackageName');
-    const conflictOptions = document.getElementById('conflictOptions');
-    const conflictAction = document.querySelector('input[name="conflictAction"]:checked')?.value || 'rename';
-
-    if (!fileInput.files[0]) {
-        showNotification('请选择ZIP文件', 'error');
-        return;
-    }
-
-    const progress = showOperationProgress('import-' + Date.now(), '正在导入项目...');
-    progress.update(10, '正在上传文件...');
-
-    showLoading(true);
-
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-    if (nameInput.value) {
-        formData.append('name', nameInput.value);
-    }
-    formData.append('conflict_action', conflictAction);
-
-    try {
-        const response = await fetch('/api/projects/package/import', {
-            method: 'POST',
-            body: formData
-        });
-
-        progress.update(50, '正在解析项目文件...');
-
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            progress.update(80, '正在加载项目...');
-            
-            showNotification(result.message, 'success');
-            closeModal(elements.importPackageModal);
-
-            // 隐藏冲突选项
-            if (conflictOptions) conflictOptions.style.display = 'none';
-
-            // 加载新导入的项目
-            appState.currentProjectId = result.project_id;
-            await loadProject(result.project_id);
-            await loadProjectsList();
-
-            // 更新URL参数
-            const url = new URL(window.location);
-            url.searchParams.set('project', result.project_id);
-            window.history.replaceState({}, '', url);
-            
-            progress.complete('项目导入成功');
-        } else if (result.status === 'conflict') {
-            // 显示冲突选项
-            if (conflictOptions) {
-                conflictOptions.style.display = 'block';
-                const hint = document.getElementById('importPackageNameHint');
-                if (hint) {
-                    hint.textContent = `检测到同名项目: "${result.existing_name}"`;
-                    hint.style.display = 'block';
-                }
-            }
-            progress.error('检测到同名项目，请选择处理方式');
-            showNotification(result.message, 'warning');
-        } else {
-            progress.error('导入失败: ' + result.message);
-            showNotification('导入失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('导入项目包错误:', error);
-        progress.error('导入项目包失败');
-        showNotification('导入项目包失败', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-/**
- * 重置导入包弹窗状态
- */
-function resetImportPackageModal() {
-    const fileInput = document.getElementById('packageFile');
-    const nameInput = document.getElementById('importPackageName');
-    const conflictOptions = document.getElementById('conflictOptions');
-    const hint = document.getElementById('importPackageNameHint');
-
-    if (fileInput) fileInput.value = '';
-    if (nameInput) {
-        nameInput.value = '';
-        nameInput.disabled = false;
-    }
-    if (conflictOptions) conflictOptions.style.display = 'none';
-    if (hint) hint.style.display = 'none';
-}
-
-/**
- * 显示项目相关按钮
- */
-function showProjectButtons() {
-    const btns = ['exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
-                   'projectManageBtn', 'zipUploadBtn', 'generateReportBtn', 'checkComplianceBtn',
-                   'deleteProjectBtn', 'confirmAcceptanceBtn', 'downloadPackageBtn'];
-    btns.forEach(btnName => {
-        const btn = elements[btnName];
-        if (btn) btn.style.display = 'inline-block';
-    });
-}
-
-/**
- * 隐藏项目相关按钮
- */
-function hideProjectButtons() {
-    const btns = ['exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
-                   'projectManageBtn', 'zipUploadBtn', 'generateReportBtn', 'checkComplianceBtn',
-                   'deleteProjectBtn', 'confirmAcceptanceBtn', 'downloadPackageBtn'];
-    btns.forEach(btnName => {
-        const btn = elements[btnName];
-        if (btn) btn.style.display = 'none';
-    });
-}
-
-/**
- * 填充项目管理下拉框
- */
-function populateProjectManageSelects() {
-    if (!appState.projectConfig) return;
-    
-    const cycles = appState.projectConfig.cycles || [];
-    
-    // 填充周期选择下拉框
-    const docManageCycleSelect = document.getElementById('docManageCycleSelect');
-    
-    const options = cycles.map(c => `<option value="${c}">${c}</option>`).join('');
-    docManageCycleSelect.innerHTML = '<option value="">-- 选择周期 --</option>' + options;
-    
-    // 渲染周期排序列表
-    renderCyclesSortableList();
-    
-    // 周期选择变更时渲染文档列表
-    docManageCycleSelect.addEventListener('change', function() {
-        const selectedCycle = this.value;
-        const docManageSection = document.getElementById('docManageSection');
-        if (selectedCycle) {
-            docManageSection.style.display = 'block';
-            renderDocsSortableList(selectedCycle);
-        } else {
-            docManageSection.style.display = 'none';
-        }
-    });
-}
-
-/**
- * 渲染周期排序列表
- */
-function renderCyclesSortableList() {
-    const container = document.getElementById('cyclesSortableList');
-    const cycles = appState.projectConfig.cycles || [];
-    const docsInfo = appState.projectConfig.documents || {};
-    
-    container.innerHTML = cycles.map((cycle, index) => {
-        const docCount = docsInfo[cycle]?.required_docs?.length || 0;
-        return `
-            <div class="sortable-item" draggable="true" data-cycle="${cycle}" data-index="${index}">
-                <span class="drag-handle">☰</span>
-                <div class="item-content">
-                    <div class="item-name">${cycle}</div>
-                    <div class="item-meta">包含 ${docCount} 个文档类型</div>
-                </div>
-                <div class="item-actions">
-                    <button class="btn btn-primary btn-sm" onclick="openEditCycleModal('${cycle}')">编辑</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteCycle('${cycle}')">删除</button>
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    initSortable(container, 'cycles');
-}
-
-/**
- * 渲染文档排序列表
- */
-function renderDocsSortableList(cycle) {
-    const container = document.getElementById('docsSortableList');
-    const docs = appState.projectConfig.documents[cycle]?.required_docs || [];
-    
-    container.innerHTML = docs.map((doc, index) => `
-        <div class="sortable-item" draggable="true" data-doc-name="${doc.name}" data-index="${index}">
-            <span class="drag-handle">☰</span>
-            <div class="item-content">
-                <div class="item-name">${doc.index || (index + 1)}. ${doc.name}</div>
-                <div class="item-meta">要求: ${doc.requirement || '无'}</div>
-            </div>
-            <div class="item-actions">
-                <button class="btn btn-primary btn-sm" onclick="openEditDocModal('${cycle}', '${doc.name}')">编辑</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteDoc('${cycle}', '${doc.name}')">删除</button>
-            </div>
-        </div>
-    `).join('');
-    
-    initSortable(container, 'docs', cycle);
-}
-
-/**
- * 初始化拖拽排序
- */
-function initSortable(container, type, cycle = null) {
-    let draggedItem = null;
-    
-    container.querySelectorAll('.sortable-item').forEach(item => {
-        item.addEventListener('dragstart', function(e) {
-            draggedItem = this;
-            this.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-        });
-        
-        item.addEventListener('dragend', function() {
-            this.classList.remove('dragging');
-            draggedItem = null;
-            
-            // 保存排序结果
-            if (type === 'cycles') {
-                saveCyclesOrder();
-            } else if (type === 'docs' && cycle) {
-                saveDocsOrder(cycle);
-            }
-        });
-        
-        item.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-        });
-        
-        item.addEventListener('drop', function(e) {
-            e.preventDefault();
-            if (draggedItem && draggedItem !== this) {
-                const allItems = [...container.querySelectorAll('.sortable-item')];
-                const draggedIndex = allItems.indexOf(draggedItem);
-                const dropIndex = allItems.indexOf(this);
-                
-                if (draggedIndex < dropIndex) {
-                    this.after(draggedItem);
-                } else {
-                    this.before(draggedItem);
-                }
-            }
-        });
-    });
-}
-
-/**
- * 保存周期排序
- */
-async function saveCyclesOrder() {
-    const container = document.getElementById('cyclesSortableList');
-    const items = container.querySelectorAll('.sortable-item');
-    const newOrder = Array.from(items).map(item => item.dataset.cycle);
-    
-    appState.projectConfig.cycles = newOrder;
-    
-    // 重新排序documents中的顺序
-    const newDocs = {};
-    newOrder.forEach(cycle => {
-        if (appState.projectConfig.documents[cycle]) {
-            newDocs[cycle] = appState.projectConfig.documents[cycle];
-        }
-    });
-    appState.projectConfig.documents = newDocs;
-    
-    await updateProjectConfig();
-    renderCycles();
-    showNotification('周期顺序已更新', 'success');
-}
-
-/**
- * 保存文档排序
- */
-async function saveDocsOrder(cycle) {
-    const container = document.getElementById('docsSortableList');
-    const items = container.querySelectorAll('.sortable-item');
-    const newOrder = Array.from(items).map(item => item.dataset.docName);
-    
-    const docs = appState.projectConfig.documents[cycle]?.required_docs || [];
-    const reorderedDocs = newOrder.map(name => docs.find(d => d.name === name)).filter(d => d);
-    
-    // 更新序号
-    reorderedDocs.forEach((doc, index) => {
-        doc.index = index + 1;
-    });
-    
-    appState.projectConfig.documents[cycle].required_docs = reorderedDocs;
-    
-    await updateProjectConfig();
-    renderCycles();
-    showNotification('文档顺序已更新', 'success');
-}
-
-/**
- * 更新项目配置
- */
-async function updateProjectConfig() {
-    try {
-        await fetch(`/api/projects/${appState.currentProjectId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(appState.projectConfig)
-        });
-    } catch (error) {
-        console.error('保存配置失败:', error);
-    }
-}
-
-/**
- * 编辑周期弹窗
- */
-function openEditCycleModal(cycleName) {
-    showInputModal(
-        '编辑周期名称',
-        [{ label: '周期名称', key: 'name', value: cycleName, placeholder: '请输入周期名称' }],
-        ({ name }) => {
-            if (name && name !== cycleName) {
-                handleRenameCycleDirect(cycleName, name);
-            }
-        }
-    );
-}
-
-/**
- * 直接重命名周期
- */
-async function handleRenameCycleDirect(oldName, newName) {
-    const result = await updateProjectStructure('rename_cycle', { 
-        old_name: oldName, 
-        new_name: newName 
-    });
-    
-    if (result.status === 'success') {
-        showNotification('周期重命名成功', 'success');
-        populateProjectManageSelects();
-        renderCycles();
-    } else {
-        showNotification(result.message, 'error');
-    }
-}
-
-/**
- * 删除周期
- */
-async function deleteCycle(cycleName) {
-    showConfirmModal('确认删除', `确定要删除周期"${cycleName}"吗？`, async () => {
-        const result = await updateProjectStructure('delete_cycle', { cycle_name: cycleName });
-        if (result.status === 'success') {
-            showNotification('周期删除成功', 'success');
-            populateProjectManageSelects();
-            renderCycles();
-        } else {
-            showNotification(result.message, 'error');
-        }
-    });
-}
-
-/**
- * 编辑文档弹窗
- */
-function openEditDocModal(cycle, docName) {
-    const docs = appState.projectConfig.documents[cycle]?.required_docs || [];
-    const doc = docs.find(d => d.name === docName);
-    if (!doc) return;
-
-    showInputModal(
-        '编辑文档',
-        [
-            { label: '文档名称', key: 'name', value: docName, placeholder: '请输入文档名称' },
-            { label: '文档要求（如：签名、盖章）', key: 'requirement', value: doc.requirement || '', placeholder: '可留空' }
-        ],
-        ({ name, requirement }) => {
-            if (name !== docName || requirement !== doc.requirement) {
-                handleEditDocDirect(cycle, docName, name, requirement);
-            }
-        }
-    );
-}
-
-/**
- * 直接编辑文档
- */
-async function handleEditDocDirect(cycle, oldName, newName, newRequirement) {
-    // 更新文档名称
-    const docs = appState.projectConfig.documents[cycle]?.required_docs || [];
-    const doc = docs.find(d => d.name === oldName);
-    if (doc) {
-        doc.name = newName || oldName;
-        doc.requirement = newRequirement || '';
-    }
-    
-    await updateProjectConfig();
-    populateProjectManageSelects();
-    renderCycles();
-    showNotification('文档更新成功', 'success');
-}
-
-/**
- * 删除文档
- */
-async function deleteDoc(cycle, docName) {
-    showConfirmModal('确认删除', `确定要删除文档类型"${docName}"吗？`, async () => {
-        const result = await updateProjectStructure('delete_doc', { 
-            cycle_name: cycle, 
-            doc_name: docName 
-        });
-        
-        if (result.status === 'success') {
-            showNotification('文档删除成功', 'success');
-            populateProjectManageSelects();
-            renderCycles();
-        } else {
-            showNotification(result.message, 'error');
-        }
-    });
-}
-
-/**
- * 填充文档选择下拉框
- */
-function populateDocSelect(cycle, selectId) {
-    if (!appState.projectConfig || !cycle) return;
-    
-    const select = document.getElementById(selectId);
-    const docs = appState.projectConfig.documents[cycle]?.required_docs || [];
-    select.innerHTML = docs.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
-}
-
-/**
- * 添加周期
- */
-async function handleAddCycle(e) {
-    e.preventDefault();
-    
-    const cycleName = document.getElementById('newCycleName').value;
-    
-    if (!cycleName) {
-        showNotification('请输入周期名称', 'error');
-        return;
-    }
-    
-    const result = await updateProjectStructure('add_cycle', { cycle_name: cycleName });
-    
-    if (result.status === 'success') {
-        showNotification('周期添加成功', 'success');
-        document.getElementById('newCycleName').value = '';
-        populateProjectManageSelects();
-        renderCycles();
-    } else {
-        showNotification(result.message, 'error');
-    }
-}
-
-/**
- * 重命名周期
- */
-async function handleRenameCycle(e) {
-    e.preventDefault();
-    
-    const oldName = document.getElementById('renameCycleSelect').value;
-    const newName = document.getElementById('renameCycleNewName').value;
-    
-    if (!newName) {
-        showNotification('请输入新名称', 'error');
-        return;
-    }
-    
-    const result = await updateProjectStructure('rename_cycle', { 
-        old_name: oldName, 
-        new_name: newName 
-    });
-    
-    if (result.status === 'success') {
-        showNotification('周期重命名成功', 'success');
-        document.getElementById('renameCycleNewName').value = '';
-        populateProjectManageSelects();
-        renderCycles();
-    } else {
-        showNotification(result.message, 'error');
-    }
-}
-
-/**
- * 删除周期
- */
-async function handleDeleteCycle(e) {
-    e.preventDefault();
-    
-    const cycleName = document.getElementById('deleteCycleSelect').value;
-    
-    showConfirmModal('确认删除', `确定要删除周期"${cycleName}"吗？`, async () => {
-        const result = await updateProjectStructure('delete_cycle', { cycle_name: cycleName });
-        
-        if (result.status === 'success') {
-            showNotification('周期删除成功', 'success');
-            populateProjectManageSelects();
-            renderCycles();
-        } else {
-            showNotification(result.message, 'error');
-        }
-    });
-}
-
-/**
- * 添加文档
- */
-async function handleAddDoc(e) {
-    e.preventDefault();
-    
-    const cycleName = document.getElementById('docManageCycleSelect').value;
-    const docName = document.getElementById('addDocName').value;
-    const requirement = document.getElementById('addDocRequirement').value;
-    
-    if (!cycleName) {
-        showNotification('请先选择周期', 'error');
-        return;
-    }
-    
-    if (!docName) {
-        showNotification('请输入文档名称', 'error');
-        return;
-    }
-    
-    const result = await updateProjectStructure('add_doc', { 
-        cycle_name: cycleName, 
-        doc_name: docName,
-        requirement: requirement
-    });
-    
-    if (result.status === 'success') {
-        showNotification('文档添加成功', 'success');
-        document.getElementById('addDocName').value = '';
-        document.getElementById('addDocRequirement').value = '';
-        populateProjectManageSelects();
-        // 保持当前选中周期
-        document.getElementById('docManageCycleSelect').value = cycleName;
-        document.getElementById('docManageSection').style.display = 'block';
-        renderDocsSortableList(cycleName);
-        renderCycleDocuments(cycleName);
-    } else {
-        showNotification(result.message, 'error');
-    }
-}
-
-/**
- * 删除文档
- */
-async function handleDeleteDoc(e) {
-    e.preventDefault();
-    
-    const cycleName = document.getElementById('deleteDocCycleSelect').value;
-    const docName = document.getElementById('deleteDocSelect').value;
-    
-    showConfirmModal('确认删除', `确定要删除文档"${docName}"吗？`, async () => {
-        const result = await updateProjectStructure('delete_doc', { 
-            cycle_name: cycleName, 
-            doc_name: docName 
-        });
-        
-        if (result.status === 'success') {
-            showNotification('文档删除成功', 'success');
-            populateProjectManageSelects();
-            renderCycleDocuments(cycleName);
-        } else {
-            showNotification(result.message, 'error');
-        }
-    });
-}
-
-/**
- * 更新项目结构
- */
-async function updateProjectStructure(action, data) {
-    if (!appState.currentProjectId) {
-        return { status: 'error', message: '请先创建项目' };
-    }
-    
-    try {
-        const response = await fetch(`/api/projects/${appState.currentProjectId}/structure`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, ...data })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            // 更新本地配置
-            appState.projectConfig = result.project;
-        }
-
-        return result;
-    } catch (error) {
-        console.error('更新项目结构错误:', error);
-        return { status: 'error', message: '更新失败' };
-    }
-}
-
-/**
- * 切换操作日志显示
- */
-function toggleOperationLog() {
-    const logPanel = document.getElementById('operationLog');
-    if (logPanel.style.display === 'none') {
-        logPanel.style.display = 'block';
-        refreshOperationLog();
-    } else {
-        logPanel.style.display = 'none';
-    }
-}
-
-/**
- * 刷新操作日志
- */
-async function refreshOperationLog() {
-    try {
-        const response = await fetch('/api/logs?limit=50');
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            renderOperationLogs(result.logs);
-        }
-    } catch (error) {
-        console.error('获取操作日志失败:', error);
-    }
-}
-
-/**
- * 渲染操作日志
- */
-function renderOperationLogs(logs) {
-    const logContent = document.getElementById('logContent');
-
-    if (!logs || logs.length === 0) {
-        logContent.innerHTML = '<p class="placeholder">暂无操作日志</p>';
-        return;
-    }
-
-    let html = '';
-    // 最新的显示在前面
-    for (let i = logs.length - 1; i >= 0; i--) {
-        const log = logs[i];
-        const statusClass = log.status === 'success' ? 'success' : (log.status === 'error' ? 'error' : 'info');
-        html += `
-            <div class="log-entry">
-                <span class="log-time">${log.timestamp}</span>
-                <span class="log-status ${statusClass}">${log.status}</span>
-                <span class="log-operation">${log.operation}</span>
-                ${log.details ? `<span class="log-details"> - ${log.details}</span>` : ''}
-            </div>
-        `;
-    }
-
-    logContent.innerHTML = html;
-}
-
-/**
- * 显示操作进度
- */
-function showOperationProgress(operationId, message) {
-    const progressContainer = document.getElementById('operationProgress');
-
-    const progressItem = document.createElement('div');
-    progressItem.className = 'operation-progress-item';
-    progressItem.id = `progress-${operationId}`;
-    progressItem.innerHTML = `
-        <div class="progress-info">
-            <div class="progress-text">${message}</div>
-            <div class="progress-bar-bg">
-                <div class="progress-bar" style="width: 0%"></div>
-            </div>
-        </div>
-        <span class="progress-percent">0%</span>
-    `;
-
-    progressContainer.appendChild(progressItem);
-
-    return {
-        update: (percent, message) => {
-            const item = document.getElementById(`progress-${operationId}`);
-            if (item) {
-                item.querySelector('.progress-bar').style.width = percent + '%';
-                item.querySelector('.progress-percent').textContent = percent + '%';
-                if (message) {
-                    item.querySelector('.progress-text').textContent = message;
-                }
-            }
-        },
-        complete: (message) => {
-            const item = document.getElementById(`progress-${operationId}`);
-            if (item) {
-                item.querySelector('.progress-bar').style.width = '100%';
-                item.querySelector('.progress-percent').textContent = '完成';
-                if (message) {
-                    item.querySelector('.progress-text').textContent = message;
-                }
-                // 3秒后移除
-                setTimeout(() => {
-                    item.remove();
-                    // 如果没有其他进度项，显示占位符
-                    const container = document.getElementById('operationProgress');
-                    if (container.children.length === 0) {
-                        container.innerHTML = '<p class="placeholder">暂无进行中的操作</p>';
-                    }
-                }, 3000);
-            }
-        },
-        error: (message) => {
-            const item = document.getElementById(`progress-${operationId}`);
-            if (item) {
-                item.querySelector('.progress-bar').style.background = 'linear-gradient(90deg, #dc3545 0%, #c82333 100%)';
-                item.querySelector('.progress-text').textContent = '失败: ' + message;
-                item.querySelector('.progress-percent').textContent = '错误';
-            }
-        }
-    };
-}
-
-/**
- * 确认当前周期所有文档无误
- */
-async function confirmAllDocuments() {
-    if (!appState.currentCycle) {
-        showNotification('请先选择一个周期', 'error');
-        return;
-    }
-
-    const cycle = appState.currentCycle;
-    const docName = appState.currentDocument;
-    
-    // 获取当前周期已上传的文档
-    try {
-        let url = `/api/documents/list?cycle=${encodeURIComponent(cycle)}`;
-        if (docName) {
-            url += `&doc_name=${encodeURIComponent(docName)}`;
-        }
-        const response = await fetch(url);
-        const result = await response.json();
-        
-        const uploadedDocs = result.data || [];
-        
-        if (uploadedDocs.length === 0) {
-            showNotification('当前周期没有任何已归档的文档', 'error');
-            return;
-        }
-
-        showConfirmModal('确认文档无误', `确定要确认当前周期"${cycle}"的所有 ${uploadedDocs.length} 个文档已归档无误吗？`, async () => {
-            try {
-                // 标记周期为已确认
-                const response = await fetch(`/api/projects/${appState.currentProjectId}/confirm-cycle`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cycle_name: cycle })
-                });
-
-                const result = await response.json();
-
-                if (result.status === 'success') {
-                    showNotification(`已确认周期"${cycle}"的全部文档`, 'success');
-                    // 刷新显示
-                    if (appState.projectConfig.cycles) {
-                        const cycleIndex = appState.projectConfig.cycles.indexOf(cycle);
-                        if (cycleIndex !== -1 && !appState.projectConfig.cycle_confirmed) {
-                            appState.projectConfig.cycle_confirmed = {};
-                        }
-                        if (appState.projectConfig.cycle_confirmed) {
-                            appState.projectConfig.cycle_confirmed[cycle] = {
-                                confirmed: true,
-                                confirmed_time: new Date().toISOString()
-                            };
-                        }
-                    }
-                    renderCycles();
-                } else {
-                    showNotification(result.message || '确认失败', 'error');
-                }
-            } catch (error) {
-                console.error('确认文档失败:', error);
-                showNotification('确认文档时发生错误', 'error');
-            }
-        });
-    } catch (error) {
-        console.error('检查已归档文档失败:', error);
-        showNotification('检查已归档文档失败', 'error');
-    }
-}
-
-/**
- * 初始化日志框拖拽调整高度
- */
-function initLogResize() {
-    const resizeHandle = document.getElementById('logResizeHandle');
-    const operationLog = document.getElementById('operationLog');
-    const logContent = document.getElementById('logContent');
-
-    if (!resizeHandle || !operationLog || !logContent) return;
-
-    let isResizing = false;
-    let startY = 0;
-    let startHeight = 0;
-
-    // 最小和最大高度
-    const MIN_HEIGHT = 100;
-    const MAX_HEIGHT = 600;
-    const DEFAULT_HEIGHT = 200;
-
-    // 初始化日志内容高度
-    logContent.style.maxHeight = DEFAULT_HEIGHT + 'px';
-
-    resizeHandle.addEventListener('mousedown', (e) => {
-        isResizing = true;
-        startY = e.clientY;
-        startHeight = logContent.offsetHeight;
-        document.body.style.cursor = 'ns-resize';
-        document.body.style.userSelect = 'none';
-        e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!isResizing) return;
-
-        const deltaY = e.clientY - startY;
-        let newHeight = startHeight + deltaY;
-
-        // 限制范围
-        newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, newHeight));
-
-        logContent.style.maxHeight = newHeight + 'px';
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (isResizing) {
-            isResizing = false;
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-        }
-    });
-
-    // 双击重置大小
-    resizeHandle.addEventListener('dblclick', () => {
-        logContent.style.maxHeight = DEFAULT_HEIGHT + 'px';
-        showNotification('日志框已重置为默认大小', 'info');
-    });
-}
+        showLoading
