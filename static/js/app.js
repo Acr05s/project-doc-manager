@@ -1107,14 +1107,8 @@ async function loadCycleProgresses(cycles, docsData) {
 
     // 渲染顶部导航栏：横向排列，用箭头连接
     elements.cycleNavList.innerHTML = cycles.map((cycle, index) => {
-        const cycleConfirmed = appState.projectConfig.cycle_confirmed?.[cycle];
-        const isAccepted = cycleConfirmed?.confirmed;
         const status = statusMap[cycle] || 'incomplete';
-        const progress = progressMap[cycle] || 0;
-        const acceptedBadge = isAccepted
-            ? `<span class="cycle-accepted-badge" style="font-size:11px;margin-top:4px;">✓ 已确认</span>`
-            : '';
-
+        
         // 状态文本
         let statusText;
         if (status === 'complete') {
@@ -1130,10 +1124,24 @@ async function loadCycleProgresses(cycles, docsData) {
                 <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
                 <span class="cycle-name" style="text-align:center;">${cycle}</span>
                 <span class="cycle-progress-text" style="font-size:11px;margin-top:4px;">${statusText}</span>
-                ${acceptedBadge}
             </div>
         `;
-    }).join('<span class="cycle-nav-arrow">→</span>');
+    }).join('') + `
+        <div class="cycle-status-legend">
+            <div class="cycle-status-item">
+                <div class="cycle-status-color" style="background:#28a745;"></div>
+                <span>完整无误</span>
+            </div>
+            <div class="cycle-status-item">
+                <div class="cycle-status-color" style="background:#ffc107;"></div>
+                <span>属性待补</span>
+            </div>
+            <div class="cycle-status-item">
+                <div class="cycle-status-color" style="background:#dc3545;"></div>
+                <span>文件不全</span>
+            </div>
+        </div>
+    `;
 
     // 添加周期点击事件
     document.querySelectorAll('.cycle-nav-item').forEach(item => {
