@@ -274,6 +274,11 @@ function setupEventListeners() {
         btn.addEventListener('click', () => switchUploadTab(btn.dataset.tab));
     });
 
+    // ---- 主标签页切换 ----
+    document.querySelectorAll('.main-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => switchMainTab(btn.dataset.tab));
+    });
+
     // ZIP 包选择器
             const zipPackageSelect = document.getElementById('zipPackageSelect');
             if (zipPackageSelect) {
@@ -559,8 +564,12 @@ function setupEventListeners() {
 
     // 设置今天的日期为默认值
     const today = new Date().toISOString().split('T')[0];
-    elements.docDate.value = today;
-    elements.signDate.value = today;
+    if (elements.docDate) {
+        elements.docDate.value = today;
+    }
+    if (elements.signDate) {
+        elements.signDate.value = today;
+    }
     
     // 项目下拉菜单选择
     const projectSelect = document.getElementById('projectSelect');
@@ -700,8 +709,13 @@ async function loadProjectsList() {
         const response = await fetch('/api/projects/list');
         const result = await response.json();
         
-        if (result.status === 'success' && result.projects) {
+        // 检查响应格式，兼容不同的API返回格式
+        if (result.projects) {
+            // 直接返回projects数组的格式
             renderProjectsList(result.projects);
+        } else if (result.status === 'success' && result.data && result.data.projects) {
+            // 包含status和data的格式
+            renderProjectsList(result.data.projects);
         } else {
             renderProjectsList([]);
         }
@@ -1582,6 +1596,50 @@ function switchUploadTab(tab) {
                 searchZipFiles(kw, appState.currentZipPackagePath || '');
             }
         }, 500);
+    }
+}
+
+/**
+ * 切换主标签页
+ */
+function switchMainTab(tabName) {
+    document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');
+    
+    document.querySelector(`.main-tab-btn[data-tab="${tabName}"]`).classList.add('active');
+    
+    // 处理标签页ID，将upload-select转换为uploadSelectTab
+    let tabId;
+    if (tabName === 'upload-select') {
+        tabId = 'uploadSelectTab';
+    } else {
+        tabId = `${tabName}Tab`;
+    }
+    
+    document.getElementById(tabId).style.display = 'block';
+    
+    // 如果切换到维护标签页，更新已选择文档列表
+    if (tabName === 'maintain') {
+        updateSelectedDocumentsList();
+    }
+}
+
+/**
+ * 更新已选择文档列表
+ */
+function updateSelectedDocumentsList() {
+    // 当切换到维护标签页时，加载实际的已归档文档
+    const cycle = appState.currentCycle;
+    const docName = appState.currentDocument;
+    if (cycle && docName) {
+        loadUploadedDocuments(cycle, docName);
+    }
+    
+    // 更新选择计数
+    const selectedCount = document.getElementById('selectedCount');
+    if (selectedCount) {
+        // 这里可以根据实际选择的文档数量更新
+        selectedCount.textContent = '已选择 0 个文档';
     }
 }
 
@@ -2510,6 +2568,14 @@ function createProgressContainer(filename) {
  */
 async function deleteDocument(docId) {
     console.log('deleteDocument 被调用，docId:', docId);
+    
+    // 确保确认模态框显示在最上层
+    const confirmModal = document.getElementById('confirmModal');
+    if (confirmModal) {
+        confirmModal.style.zIndex = '9999';
+        confirmModal.style.position = 'fixed';
+    }
+    
     showConfirmModal('确认删除', '确定要删除此文档吗？', async () => {
         console.log('确认删除回调执行');
         try {
@@ -2527,9 +2593,15 @@ async function deleteDocument(docId) {
                 const cycle = appState.currentCycle;
                 const docName = appState.currentDocument;
                 console.log('刷新列表，cycle:', cycle, 'docName:', docName);
-                loadUploadedDocuments(cycle, docName);
-                // 刷新周期进度显示
-                refreshCycleProgress();
+                
+                // 强制刷新文档列表
+                if (cycle && docName) {
+                    await loadUploadedDocuments(cycle, docName);
+                    // 刷新周期进度显示
+                    refreshCycleProgress();
+                    // 重新计算已选择文档数量
+                    updateBatchButtons();
+                }
             } else {
                 showNotification('删除失败: ' + result.message, 'error');
             }
@@ -2561,9 +2633,16 @@ function updateBatchButtons() {
     const checkboxes = document.querySelectorAll('.doc-checkbox:checked');
     const selectedCount = checkboxes.length;
     
-    document.getElementById('batchSealBtn').disabled = selectedCount === 0;
-    document.getElementById('batchSignBtn').disabled = selectedCount === 0;
-    document.getElementById('batchDeleteBtn').disabled = selectedCount === 0;
+    // 更新批量操作按钮状态
+    const batchEditBtn = document.getElementById('batchEditBtn');
+    const batchReplaceBtn = document.getElementById('batchReplaceBtn');
+    const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+    const selectedCountEl = document.getElementById('selectedCount');
+    
+    if (batchEditBtn) batchEditBtn.disabled = selectedCount === 0;
+    if (batchReplaceBtn) batchReplaceBtn.disabled = selectedCount === 0;
+    if (batchDeleteBtn) batchDeleteBtn.disabled = selectedCount === 0;
+    if (selectedCountEl) selectedCountEl.textContent = `已选择 ${selectedCount} 个文档`;
 }
 
 /**

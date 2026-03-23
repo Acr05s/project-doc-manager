@@ -607,7 +607,7 @@ body {
     width: 100%;
     height: 100%;
     background: rgba(0,0,0,0.5);
-    z-index: 1000;
+    z-index: 9999;
     justify-content: center;
     align-items: center;
 }
@@ -820,6 +820,227 @@ body {
     background: #f8f9fa;
     border-radius: 6px;
     border: 1px solid var(--border-color);
+}
+
+/* 主标签页样式 */
+.main-tabs {
+    display: flex;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.main-tab-btn {
+    padding: 12px 24px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 3px solid transparent;
+    color: #666;
+}
+
+.main-tab-btn:hover {
+    background: #f8f9fa;
+    color: var(--text-color);
+}
+
+.main-tab-btn.active {
+    background: white;
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.main-tab-content {
+    min-height: 500px;
+}
+
+/* 上传/选择文档界面样式 */
+.upload-container {
+    padding: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.category-management {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+}
+
+.category-management h3 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.category-form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.category-form input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.category-hint {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.category-tip {
+    font-size: 12px;
+    color: #999;
+    font-style: italic;
+}
+
+.file-selection {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+}
+
+.file-selection h3 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.file-selection input[type="file"] {
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.file-format {
+    font-size: 12px;
+    color: #666;
+}
+
+.document-info {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+}
+
+.document-info h3 {
+    font-size: 16px;
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.document-info .form-row {
+    margin-bottom: 12px;
+}
+
+.document-info .form-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.document-info label {
+    font-size: 14px;
+    font-weight: 500;
+    min-width: 100px;
+}
+
+.document-info input[type="date"],
+.document-info input[type="text"] {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.document-info input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
+.upload-guide {
+    background: #e3f2fd;
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #bbdefb;
+}
+
+.upload-guide h3 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: #1976d2;
+}
+
+.upload-guide ul {
+    margin-left: 20px;
+    margin-bottom: 10px;
+}
+
+.upload-guide li {
+    margin-bottom: 5px;
+    font-size: 14px;
+}
+
+.upload-guide p {
+    font-size: 14px;
+    color: #333;
+}
+
+/* 维护标签页样式 */
+.maintain-section {
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.batch-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.uploaded-documents {
+    background: white;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.documents-list {
+    margin-top: 15px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.single-document-actions ul {
+    margin-top: 10px;
+    margin-left: 20px;
+}
+
+.single-document-actions li {
+    margin-bottom: 5px;
+    color: #666;
 }
 
 /* 文档预览 */

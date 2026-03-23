@@ -109,127 +109,96 @@
             <span class="close">&times;</span>
             <h2 id="modalTitle"></h2>
             
-            <div class="doc-modal-layout" style="overflow-y: auto;">
-                <!-- 左侧：文件来源 + 上传表单 -->
-                <div class="doc-modal-left">
-                    <!-- 文件来源 Tab 切换 -->
-                    <div class="upload-source-tabs">
-                        <button type="button" class="upload-tab-btn active" data-tab="local">📁 本地上传</button>
-                        <button type="button" class="upload-tab-btn" data-tab="zip">🗜️ 从ZIP中选择</button>
+            <!-- 主标签页切换 -->
+            <div class="main-tabs">
+                <button type="button" class="main-tab-btn active" data-tab="upload-select">📤 上传/选择文档</button>
+                <button type="button" class="main-tab-btn" data-tab="maintain">🛠️ 维护已选择文档</button>
+            </div>
+            
+            <!-- 上传/选择标签页 -->
+            <div id="uploadSelectTab" class="main-tab-content active" style="overflow-y: auto;">
+                <div class="upload-container">
+                    <!-- 分类管理 -->
+                    <div class="category-management">
+                        <h3>分类管理</h3>
+                        <div class="category-form">
+                            <input type="text" placeholder="输入分类名称" id="categoryName">
+                            <button type="button" class="btn btn-sm btn-primary" id="addCategoryBtn">添加分类</button>
+                        </div>
+                        <p class="category-hint">暂无分类，点击添加分类按钮创建</p>
+                        <p class="category-tip">说明：创建分类后，上传文档时会自动按分类归档文件</p>
                     </div>
 
-                    <!-- 本地上传面板 -->
-                    <div id="uploadSourceLocal" class="upload-source-panel active">
-                        <form id="uploadForm" enctype="multipart/form-data">
+                    <!-- 选择文件 -->
+                    <div class="file-selection">
+                        <h3>选择文件 *</h3>
+                        <input type="file" id="fileInput" name="file" required>
+                        <p class="file-format">支持文件格式：PDF、Word、Excel、图片等</p>
+                    </div>
+
+                    <!-- 文档信息 -->
+                    <div class="document-info">
+                        <h3>文档信息</h3>
+                        
+                        <div class="form-row">
                             <div class="form-group">
-                                <label>选择文件 *</label>
-                                <input type="file" id="fileInput" name="file" required>
-                                <small>支持文件格式：PDF、Word、Excel、图片等</small>
+                                <label>文档日期</label>
+                                <input type="date" id="docDate" name="doc_date">
                             </div>
+                        </div>
 
-
-                            <!-- 公共字段（下面 ZIP 面板共用，通过 JS 读取） -->
-                            <div id="uploadMetaFields">
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>文档日期</label>
-                                        <input type="date" id="docDate" name="doc_date">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>签字日期</label>
-                                        <input type="date" id="signDate" name="sign_date">
-                                    </div>
-                                </div>
-
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>签字人</label>
-                                        <input type="text" id="signer" name="signer" placeholder="输入签字人名称">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>签字状态</label>
-                                        <div class="checkbox-group">
-                                            <label class="checkbox-item">
-                                                <input type="checkbox" id="noSignature" name="no_signature">
-                                                <span>不涉及签字</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>盖章标记</label>
-                                    <div class="checkbox-group">
-                                        <label class="checkbox-item">
-                                            <input type="checkbox" id="hasSeal" name="has_seal">
-                                            <span>已盖章</span>
-                                        </label>
-                                        <label class="checkbox-item">
-                                            <input type="checkbox" id="partyASeal" name="party_a_seal">
-                                            <span>甲方盖章</span>
-                                        </label>
-                                        <label class="checkbox-item">
-                                            <input type="checkbox" id="partyBSeal" name="party_b_seal">
-                                            <span>乙方盖章</span>
-                                        </label>
-                                        <label class="checkbox-item">
-                                            <input type="checkbox" id="noSeal" name="no_seal">
-                                            <span>不涉及盖章</span>
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>其它盖章（标注）</label>
-                                    <input type="text" id="otherSeal" name="other_seal" placeholder="如：监理单位盖章、项目章等">
-                                </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>签字状态</label>
+                                <input type="checkbox" id="noSignature" name="no_signature">
+                                <label for="noSignature">不涉及签字</label>
                             </div>
+                        </div>
 
-                            <button type="submit" class="btn btn-success" id="uploadBtn">确认归档</button>
-                        </form>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>其它盖章（标注）</label>
+                                <input type="text" id="otherSeal" name="other_seal" placeholder="如：监理单位盖章、项目章等">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-success" id="uploadBtn">确认归档</button>
                     </div>
 
-                    <!-- 从ZIP中选择面板 -->
-                    <div id="uploadSourceZip" class="upload-source-panel" style="display:none;">
-                        <!-- 多ZIP包选择器（有多个包时显示） -->
-                        <div id="zipPackageSelector" class="zip-package-selector" style="display:none;">
-                            <label>选择ZIP包：</label>
-                            <select id="zipPackageSelect"></select>
-                            <button type="button" class="btn btn-danger btn-sm" id="deleteZipPackageBtn" style="margin-left: 10px;">🗑️ 删除</button>
-                        </div>
-                        <div class="zip-search-bar">
-                            <input type="text" id="zipFileSearch" placeholder="输入文件名关键词过滤..." autocomplete="off">
-                            <button type="button" class="btn btn-primary btn-sm" id="zipSearchBtn">搜索</button>
-                        </div>
-                        <div id="zipFileList" class="zip-file-list">
-                            <p class="placeholder">加载中...</p>
-                        </div>
-                        <div id="zipSelectedInfo" class="zip-selected-info" style="display:none;">
-                            <span id="zipSelectedName"></span>
-                            <button type="button" class="btn btn-sm btn-secondary" id="zipClearSelectedBtn">✕ 清除</button>
-                        </div>
-                        <button type="button" class="btn btn-success" id="zipArchiveBtn" disabled>✅ 确认选择</button>
+                    <!-- 上传指南 -->
+                    <div class="upload-guide">
+                        <h3>上传指南</h3>
+                        <p>请选择以下方式之一上传文档：</p>
+                        <ul>
+                            <li><strong>本地上传</strong>：直接从本地选择文件</li>
+                            <li><strong>从ZIP中选择</strong>：从已上传的ZIP包中选择文件</li>
+                        </ul>
+                        <p>上传完成后，文档会显示在 <strong>维护已选择文档</strong> 标签页中进行管理。</p>
                     </div>
                 </div>
-
-                <!-- 宽度调整器 -->
-                <div class="doc-modal-resizer" id="docModalResizer"></div>
-
-                <!-- 右侧：已上传文档列表 -->
-                <div class="doc-modal-right">
-                    <!-- 已上传文档列表 -->
+            </div>
+            
+            <!-- 维护标签页 -->
+            <div id="maintainTab" class="main-tab-content" style="display:none; overflow-y: auto;">
+                <div class="maintain-section">
+                    <h3>📋 已选择文档管理</h3>
+                    
+                    <!-- 批量操作工具栏 -->
+                    <div class="batch-actions">
+                        <button type="button" class="btn btn-primary" id="batchEditBtn">📝 批量编辑属性</button>
+                        <button type="button" class="btn btn-warning" id="batchReplaceBtn">🔄 批量替换文件</button>
+                        <button type="button" class="btn btn-danger" id="batchDeleteBtn">🗑️ 批量删除</button>
+                        <span id="selectedCount" style="margin-left: 15px; color: #666;">已选择 0 个文档</span>
+                    </div>
+                    
+                    <!-- 已归档文档列表 -->
                     <div class="uploaded-documents">
                         <h3>📁 已归档文档（<span id="docCount">0</span>个）</h3>
                         <div id="documentsList" class="documents-list">
                         </div>
                     </div>
-                    <!-- 确认文档无误按钮 -->
-                    <div class="confirm-docs-section">
-                        <button type="button" class="btn btn-success" id="confirmAllDocsBtn" onclick="confirmAllDocuments()">
-                            ✅ 确认当前周期文档无误
-                        </button>
-                        <p class="confirm-hint">点击确认当前周期所有文档已完成归档</p>
-                    </div>
+                    
+
                 </div>
             </div>
         </div>
