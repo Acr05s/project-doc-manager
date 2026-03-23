@@ -1150,22 +1150,28 @@ async function loadCycleProgresses(cycles, docsData) {
         }
     });
 
-    elements.cycleNavList.innerHTML = html + `
-        <div class="cycle-status-legend">
-            <div class="cycle-status-item">
-                <div class="cycle-status-color" style="background:#28a745;"></div>
-                <span>完整无误</span>
-            </div>
-            <div class="cycle-status-item">
-                <div class="cycle-status-color" style="background:#ffc107;"></div>
-                <span>属性待补</span>
-            </div>
-            <div class="cycle-status-item">
-                <div class="cycle-status-color" style="background:#dc3545;"></div>
-                <span>文件不全</span>
+    // 添加颜色说明方块作为最后一个周期项
+    html += `
+        <div class="cycle-nav-item status-legend">
+            <span class="cycle-index" style="font-size:11px;opacity:0.8;"></span>
+            <div class="status-legend-content">
+                <div class="status-item">
+                    <span class="status-dot" style="background:#28a745;"></span>
+                    <span>完整无误</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-dot" style="background:#ffc107;"></span>
+                    <span>属性待补</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-dot" style="background:#dc3545;"></span>
+                    <span>文件不全</span>
+                </div>
             </div>
         </div>
     `;
+
+    elements.cycleNavList.innerHTML = html;
 
     // 添加周期点击事件
     document.querySelectorAll('.cycle-nav-item').forEach(item => {
