@@ -1135,7 +1135,7 @@ async function loadCycleProgresses(cycles, docsData) {
                 <span class="cycle-progress-text" style="font-size:11px;margin-top:4px;">${statusText}</span>
             </div>
         `;
-    }).join('') + `
+    }).join('<span class="cycle-nav-arrow">→</span>') + `
         <div class="cycle-status-legend">
             <div class="cycle-status-item">
                 <div class="cycle-status-color" style="background:#28a745;"></div>

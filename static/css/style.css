@@ -45,21 +45,44 @@ body {
     overflow-x: auto;
 }
 
-.header h1 {
-    font-size: 18px;
-    white-space: nowrap;
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap;
     flex-shrink: 0;
-    margin-right: 16px;
 }
 
-.header-actions {
+.header-right {
     display: flex;
     gap: 6px;
     flex-wrap: nowrap;
     align-items: center;
 }
 
-.header-actions .btn {
+.header h1 {
+    font-size: 18px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.project-dropdown {
+    padding: 6px 10px;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    font-size: 13px;
+    background: rgba(255,255,255,0.1);
+    color: white;
+    min-width: 180px;
+}
+
+.project-dropdown option {
+    background: #004d99;
+    color: white;
+}
+
+.header-left .btn,
+.header-right .btn {
     white-space: nowrap;
     padding: 8px 12px;
     font-size: 13px;
@@ -288,11 +311,16 @@ body {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 20px;
 }
 
 .cycle-nav-arrow {
-    display: none;
+    display: block;
+    font-size: 20px;
+    color: #dc3545;
+    font-weight: bold;
+    flex-shrink: 0;
+    margin: 0 5px;
 }
 
 .cycle-status-legend {
