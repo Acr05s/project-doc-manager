@@ -1322,8 +1322,8 @@ async function renderCycleDocuments(cycle) {
                         return `
                         <tr class="doc-row ${isArchived ? 'archived' : ''}">
                             <td class="col-org">
-                                <div class="org-cell" onclick="openDocumentModal('${cycle}', '${doc.name}')" 
-                                     title="点击上传/管理文档">
+                                <div class="org-cell" onclick="${isArchived ? `confirmUnarchive('${cycle}', '${doc.name}')` : `openDocumentModal('${cycle}', '${doc.name}')`}" 
+                                     title="${isArchived ? '点击撤销归档并管理文档' : '点击上传/管理文档'}">
                                     <span class="doc-index">${doc.index || ''}</span>
                                     <span class="doc-name">${doc.name}</span>
                                     ${isArchived ? '<span class="archived-badge">已归档</span>' : ''}
@@ -1397,6 +1397,22 @@ async function archiveDocument(cycle, docName) {
         console.error('归档失败:', e);
         showNotification('归档失败', 'error');
     }
+}
+
+/**
+ * 确认撤销归档
+ */
+function confirmUnarchive(cycle, docName) {
+    showConfirmModal(
+        '确认撤销归档',
+        '当前文档已归档，需要编辑状态需撤销归档。是否撤销？',
+        async () => {
+            // 撤销归档
+            await unarchiveDocument(cycle, docName);
+            // 进入文件选择/上传界面
+            openDocumentModal(cycle, docName);
+        }
+    );
 }
 
 /**
