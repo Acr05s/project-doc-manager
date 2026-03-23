@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentManager:
-    """项目文档管理器"""
+    """项目文档管理器 - 新版（基于文档清单JSON）"""
     
     def __init__(self, config: Optional[Dict] = None):
         """初始化文档管理器
@@ -35,13 +35,26 @@ class DocumentManager:
         """
         self.config = config or {}
         self.name = "项目文档管理中心"
-        self.version = "1.0.0"
+        self.version = "2.0.0"
         
-        # 设置上传文件夹
-        self.upload_folder = Path(self.config.get('upload_folder', 'uploads'))
+        # 设置项目根目录
+        self.base_dir = Path(self.config.get('base_dir', 
+                               _os.path.dirname(_os.path.abspath(__file__))).parent.parent)
+        
+        # 新版目录结构
+        # db/ - 项目基础信息数据库
+        self.db_folder = self.base_dir / 'db'
+        self.db_folder.mkdir(parents=True, exist_ok=True)
+        
+        # projects/项目名/ - 每个项目的独立目录
+        self.projects_base_folder = self.base_dir / 'projects'
+        self.projects_base_folder.mkdir(parents=True, exist_ok=True)
+        
+        # 兼容旧版：upload_folder保留用于临时文件和旧版兼容
+        self.upload_folder = self.base_dir / 'uploads'
         self.upload_folder.mkdir(parents=True, exist_ok=True)
         
-        # 项目配置存储路径
+        # 项目配置存储路径（兼容旧版）
         self.projects_folder = self.upload_folder / 'projects'
         self.projects_folder.mkdir(parents=True, exist_ok=True)
         
@@ -280,6 +293,640 @@ class DocumentManager:
 
         # 返回最新的日志
         return logs[-limit:] if len(logs) > limit else logs
+    
+    # ========== 新版：基于文档清单JSON的存储方法 ==========
+    
+    def remove_leading_number(self, filename: str) -> str:
+        """删除文件名中第一个中文字符前的内容
+        
+        例如: "1.1关于项目的报告.pdf" → "关于项目的报告.pdf"
+              "01-可行性研究报告.docx" → "可行性研究报告.docx"
+        
+        Args:
+            filename: 原文件名
+            
+        Returns:
+            str: 处理后的文件名
+        """
+        import re
+        
+        # 找到第一个中文字符的位置
+        match = re.search(r'[\u4e00-\u9fff]', filename)
+        if match:
+            return filename[match.start():]
+        else:
+            # 如果没有中文字符，尝试删除开头的数字和符号
+            match = re.match(r'^[\d\.\-\_\s]+', filename)
+            if match:
+                return filename[match.end():]
+        return filename
+    
+    def generate_doc_number(self, project_name: str, cycle_index: int, doc_index: int, 
+                           file_index: int = None) -> str:
+        """生成文档编号
+        
+        规则：
+        - 周期是第4个，第1个文档类型，只有1个文件 → 4.1_文件名
+        - 周期是第4个，第2个文档类型，多个文件 → 4.2_文件类型/4.2.1_文件名
+        
+        Args:
+            project_name: 项目名称
+            cycle_index: 周期索引（从1开始）
+            doc_index: 文档类型索引（从1开始）
+            file_index: 文件索引（可选，从1开始），如果有多个文件需要
+            
+        Returns:
+            str: 文档编号，如 "4.1" 或 "4.2.1"
+        """
+        if file_index is None:
+            return f"{cycle_index}.{doc_index}"
+        else:
+            return f"{cycle_index}.{doc_index}.{file_index}"
+    
+    def get_project_folder(self, project_name: str) -> Path:
+        """获取项目文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: 项目文件夹路径
+        """
+        # 清理项目名称中的非法字符
+        safe_name = self._sanitize_filename(project_name)
+        project_folder = self.projects_base_folder / safe_name
+        project_folder.mkdir(parents=True, exist_ok=True)
+        return project_folder
+    
+    def get_documents_folder(self, project_name: str) -> Path:
+        """获取项目文档上传文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: 文档文件夹路径
+        """
+        project_folder = self.get_project_folder(project_name)
+        docs_folder = project_folder / 'uploads'
+        docs_folder.mkdir(parents=True, exist_ok=True)
+        return docs_folder
+    
+    def get_document_list_folder(self, project_name: str) -> Path:
+        """获取项目文档清单文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: 文档清单文件夹路径
+        """
+        project_folder = self.get_project_folder(project_name)
+        list_folder = project_folder / '文档清单'
+        list_folder.mkdir(parents=True, exist_ok=True)
+        return list_folder
+    
+    def get_document_list_path(self, project_name: str) -> Path:
+        """获取项目文档清单JSON文件路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: 文档清单JSON文件路径
+        """
+        safe_name = self._sanitize_filename(project_name)
+        list_folder = self.get_document_list_folder(project_name)
+        return list_folder / f"{safe_name}_文档清单.json"
+    
+    def _sanitize_filename(self, filename: str) -> str:
+        """清理文件名中的非法字符
+        
+        Args:
+            filename: 原文件名
+            
+        Returns:
+            str: 清理后的文件名
+        """
+        # 替换Windows文件名中的非法字符
+        illegal_chars = '<>:"/\\|?*'
+        for char in illegal_chars:
+            filename = filename.replace(char, '_')
+        return filename
+    
+    def create_document_list(self, project_name: str, project_info: Dict, 
+                           cycles: List[Dict], documents: Dict) -> Dict[str, Any]:
+        """创建新的文档清单JSON文件
+        
+        Args:
+            project_name: 项目名称
+            project_info: 项目基本信息
+            cycles: 周期列表 [{"序号": 1, "名称": "准备阶段"}, ...]
+            documents: 文档需求 {"周期名称": [{"文档名": "...", "要求": "..."}]}
+            
+        Returns:
+            dict: 创建结果
+        """
+        try:
+            safe_name = self._sanitize_filename(project_name)
+            
+            # 构建文档清单结构
+            doc_list = {
+                "项目信息": {
+                    "名称": project_name,
+                    "甲方": project_info.get('甲方', ''),
+                    "乙方": project_info.get('乙方', ''),
+                    "创建时间": datetime.now().isoformat(),
+                    "更新时间": datetime.now().isoformat()
+                },
+                "周期列表": cycles,
+                "文档需求": documents,
+                "归档文档": {}  # 初始为空，后续归档时填充
+            }
+            
+            # 保存到文件
+            doc_list_path = self.get_document_list_path(project_name)
+            with open(doc_list_path, 'w', encoding='utf-8') as f:
+                json.dump(doc_list, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"创建文档清单: {doc_list_path}")
+            
+            return {
+                'status': 'success',
+                'message': '文档清单创建成功',
+                'path': str(doc_list_path)
+            }
+            
+        except Exception as e:
+            logger.error(f"创建文档清单失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    def load_document_list(self, project_name: str) -> Dict[str, Any]:
+        """加载文档清单JSON文件
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            dict: 文档清单内容
+        """
+        try:
+            doc_list_path = self.get_document_list_path(project_name)
+            if not doc_list_path.exists():
+                return {'status': 'error', 'message': '文档清单不存在'}
+            
+            with open(doc_list_path, 'r', encoding='utf-8') as f:
+                doc_list = json.load(f)
+            
+            return {
+                'status': 'success',
+                'data': doc_list
+            }
+            
+        except Exception as e:
+            logger.error(f"加载文档清单失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    def save_document_list(self, project_name: str, doc_list: Dict) -> Dict[str, Any]:
+        """保存文档清单JSON文件
+        
+        Args:
+            project_name: 项目名称
+            doc_list: 文档清单内容
+            
+        Returns:
+            dict: 保存结果
+        """
+        try:
+            # 更新时间戳
+            if '项目信息' in doc_list:
+                doc_list['项目信息']['更新时间'] = datetime.now().isoformat()
+            
+            doc_list_path = self.get_document_list_path(project_name)
+            with open(doc_list_path, 'w', encoding='utf-8') as f:
+                json.dump(doc_list, f, ensure_ascii=False, indent=2)
+            
+            return {
+                'status': 'success',
+                'message': '文档清单保存成功'
+            }
+            
+        except Exception as e:
+            logger.error(f"保存文档清单失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    def archive_document(self, project_name: str, cycle_name: str, doc_name: str,
+                        file_path: str, source_info: Dict) -> Dict[str, Any]:
+        """归档文档到项目
+        
+        Args:
+            project_name: 项目名称
+            cycle_name: 周期名称
+            doc_name: 文档名称
+            file_path: 源文件路径
+            source_info: 来源信息 {"类型": "上传/ZIP", "文件名": "...", "日期": "...", "签字人": "...", "盖章": {...}}
+            
+        Returns:
+            dict: 归档结果
+        """
+        try:
+            # 加载文档清单
+            result = self.load_document_list(project_name)
+            if result['status'] != 'success':
+                return result
+            
+            doc_list = result['data']
+            
+            # 计算文档编号
+            cycle_index = self._get_cycle_index(doc_list, cycle_name)
+            doc_index = self._get_doc_index(doc_list, cycle_name, doc_name)
+            
+            # 检查该文档类型下已有多少文件
+            existing_files = self._get_existing_files(doc_list, cycle_name, doc_name)
+            file_index = len(existing_files) + 1
+            
+            # 生成文档编号
+            doc_number = self.generate_doc_number(project_name, cycle_index, doc_index, file_index if file_index > 1 else None)
+            
+            # 准备目标文件名
+            original_filename = Path(file_path).name
+            # 先删除原文件名的编号
+            clean_filename = self.remove_leading_number(Path(file_path).stem)
+            file_ext = Path(file_path).suffix
+            new_filename = f"{doc_number}_{clean_filename}{file_ext}"
+            
+            # 确定目标路径
+            docs_folder = self.get_documents_folder(project_name)
+            
+            # 如果有多个文件，需要创建子目录
+            if file_index > 1:
+                # 第一个文件已经在根目录，后续文件需要放到子目录
+                subdir_name = f"{cycle_index}.{doc_index}_{clean_filename}"
+                target_dir = docs_folder / subdir_name
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target_path = target_dir / new_filename
+            else:
+                # 第一个文件直接放到周期目录下
+                cycle_folder = docs_folder / cycle_name.replace('/', '_')
+                cycle_folder.mkdir(parents=True, exist_ok=True)
+                target_path = cycle_folder / new_filename
+            
+            # 复制文件
+            shutil.copy2(file_path, target_path)
+            
+            # 构建归档文档信息
+            archive_info = {
+                "序号": doc_number,
+                "文件": new_filename,
+                "文件路径": str(target_path),
+                "来源": source_info.get('类型', '上传'),
+                "来源文件名": source_info.get('文件名', original_filename),
+                "日期": source_info.get('日期', ''),
+                "签字人": source_info.get('签字人', ''),
+                "盖章": source_info.get('盖章', {}),
+                "归档时间": datetime.now().isoformat()
+            }
+            
+            # 更新文档清单
+            if '归档文档' not in doc_list:
+                doc_list['归档文档'] = {}
+            if cycle_name not in doc_list['归档文档']:
+                doc_list['归档文档'][cycle_name] = {}
+            if doc_name not in doc_list['归档文档'][cycle_name]:
+                doc_list['归档文档'][cycle_name][doc_name] = []
+            
+            # 如果是单一文件，直接存储对象；如果是多个文件，存储列表
+            if file_index == 1:
+                doc_list['归档文档'][cycle_name][doc_name] = archive_info
+            else:
+                if isinstance(doc_list['归档文档'][cycle_name][doc_name], dict):
+                    # 从单一对象转换为列表
+                    doc_list['归档文档'][cycle_name][doc_name] = [doc_list['归档文档'][cycle_name][doc_name]]
+                doc_list['归档文档'][cycle_name][doc_name].append(archive_info)
+            
+            # 保存文档清单
+            self.save_document_list(project_name, doc_list)
+            
+            return {
+                'status': 'success',
+                'message': '文档归档成功',
+                'archive_info': archive_info
+            }
+            
+        except Exception as e:
+            logger.error(f"归档文档失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    def _get_cycle_index(self, doc_list: Dict, cycle_name: str) -> int:
+        """获取周期在列表中的索引
+        
+        Args:
+            doc_list: 文档清单
+            cycle_name: 周期名称
+            
+        Returns:
+            int: 周期索引（从1开始）
+        """
+        cycles = doc_list.get('周期列表', [])
+        for i, cycle in enumerate(cycles, 1):
+            if cycle.get('名称') == cycle_name:
+                return i
+        return len(cycles) + 1
+    
+    def _get_doc_index(self, doc_list: Dict, cycle_name: str, doc_name: str) -> int:
+        """获取文档在列表中的索引
+        
+        Args:
+            doc_list: 文档清单
+            cycle_name: 周期名称
+            doc_name: 文档名称
+            
+        Returns:
+            int: 文档索引（从1开始）
+        """
+        documents = doc_list.get('文档需求', {}).get(cycle_name, [])
+        for i, doc in enumerate(documents, 1):
+            if doc.get('文档名') == doc_name:
+                return i
+        return len(documents) + 1
+    
+    def _get_existing_files(self, doc_list: Dict, cycle_name: str, doc_name: str) -> List:
+        """获取已归档的同名文档列表
+        
+        Args:
+            doc_list: 文档清单
+            cycle_name: 周期名称
+            doc_name: 文档名称
+            
+        Returns:
+            list: 已归档文件列表
+        """
+        archived = doc_list.get('归档文档', {}).get(cycle_name, {}).get(doc_name)
+        if archived is None:
+            return []
+        if isinstance(archived, list):
+            return archived
+        return [archived]
+    
+    def export_documents_package(self, project_name: str) -> Dict[str, Any]:
+        """根据文档清单打包所有归档文档
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            dict: 打包结果，包含ZIP文件路径
+        """
+        try:
+            # 加载文档清单
+            result = self.load_document_list(project_name)
+            if result['status'] != 'success':
+                return result
+            
+            doc_list = result['data']
+            
+            # 创建打包目录
+            package_folder = self.base_dir / 'packages'
+            package_folder.mkdir(parents=True, exist_ok=True)
+            
+            # 生成打包文件名
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safe_name = self._sanitize_filename(project_name)
+            package_path = package_folder / f"{safe_name}_归档文档_{timestamp}.zip"
+            
+            # 创建ZIP文件
+            import zipfile
+            with zipfile.ZipFile(str(package_path), 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                # 1. 添加文档清单JSON
+                doc_list_json = json.dumps(doc_list, ensure_ascii=False, indent=2)
+                zip_file.writestr(f"{safe_name}_文档清单.json", doc_list_json)
+                
+                # 2. 添加归档文档
+                docs_folder = self.get_documents_folder(project_name)
+                archived_count = 0
+                
+                archived_docs = doc_list.get('归档文档', {})
+                for cycle_name, documents in archived_docs.items():
+                    for doc_name, doc_info in documents.items():
+                        if isinstance(doc_info, list):
+                            # 多个文件
+                            for item in doc_info:
+                                file_path = item.get('文件路径')
+                                if file_path and Path(file_path).exists():
+                                    arcname = f"文档/{cycle_name}/{doc_name}/{item.get('文件')}"
+                                    zip_file.write(file_path, arcname)
+                                    archived_count += 1
+                        else:
+                            # 单个文件
+                            file_path = doc_info.get('文件路径')
+                            if file_path and Path(file_path).exists():
+                                arcname = f"文档/{cycle_name}/{doc_name}/{doc_info.get('文件')}"
+                                zip_file.write(file_path, arcname)
+                                archived_count += 1
+            
+            return {
+                'status': 'success',
+                'message': f'打包完成，共 {archived_count} 个文件',
+                'package_path': str(package_path),
+                'download_name': f"{safe_name}_归档文档.zip"
+            }
+            
+        except Exception as e:
+            logger.error(f"打包文档失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    # ========== 兼容旧版方法 - 自动识别新旧格式 ==========
+    
+    def load_project_with_fallback(self, project_id: str = None, project_name: str = None) -> Dict[str, Any]:
+        """加载项目配置（兼容新旧版）
+        
+        优先尝试新版文档清单格式，如果不存在则回退到旧版格式
+        
+        Args:
+            project_id: 项目ID（旧版）
+            project_name: 项目名称（新版）
+            
+        Returns:
+            dict: 项目配置
+        """
+        # 优先尝试新版
+        if project_name:
+            result = self.load_document_list(project_name)
+            if result['status'] == 'success':
+                # 转换为旧版兼容格式
+                return self._convert_new_to_old_format(project_name, result['data'])
+        
+        # 回退到旧版
+        if project_id:
+            return self.load_project(project_id)
+        
+        return {'status': 'error', 'message': '项目不存在'}
+    
+    def _convert_new_to_old_format(self, project_name: str, doc_list: Dict) -> Dict[str, Any]:
+        """将新版文档清单转换为旧版兼容格式
+        
+        Args:
+            project_name: 项目名称
+            doc_list: 新版文档清单
+            
+        Returns:
+            dict: 旧版兼容格式的项目配置
+        """
+        project_info = doc_list.get('项目信息', {})
+        
+        # 构建旧版格式
+        old_config = {
+            'id': project_name,
+            'name': project_info.get('名称', project_name),
+            'description': '',
+            'created_time': project_info.get('创建时间', ''),
+            'updated_time': project_info.get('更新时间', ''),
+            'cycles': [],
+            'documents': {}
+        }
+        
+        # 转换周期列表
+        cycles = doc_list.get('周期列表', [])
+        for cycle in cycles:
+            cycle_name = cycle.get('名称')
+            if cycle_name:
+                old_config['cycles'].append(cycle_name)
+                old_config['documents'][cycle_name] = {
+                    'required_docs': [],
+                    'uploaded_docs': []
+                }
+        
+        # 转换文档需求
+        documents = doc_list.get('文档需求', {})
+        for cycle_name, docs in documents.items():
+            if cycle_name not in old_config['documents']:
+                old_config['documents'][cycle_name] = {'required_docs': [], 'uploaded_docs': []}
+            
+            for doc in docs:
+                old_config['documents'][cycle_name]['required_docs'].append({
+                    'name': doc.get('文档名', ''),
+                    'requirement': doc.get('要求', ''),
+                    'status': 'pending'
+                })
+        
+        # 转换归档文档
+        archived = doc_list.get('归档文档', {})
+        for cycle_name, docs in archived.items():
+            if cycle_name not in old_config['documents']:
+                old_config['documents'][cycle_name] = {'required_docs': [], 'uploaded_docs': []}
+            
+            for doc_name, doc_info in docs.items():
+                if isinstance(doc_info, list):
+                    for item in doc_info:
+                        old_config['documents'][cycle_name]['uploaded_docs'].append({
+                            'doc_name': doc_name,
+                            'filename': item.get('文件', ''),
+                            'file_path': item.get('文件路径', ''),
+                            'doc_date': item.get('日期', ''),
+                            'signer': item.get('签字人', ''),
+                            'has_seal': item.get('盖章', {}).get('甲方', False) or item.get('盖章', {}).get('乙方', False),
+                            'party_a_seal': item.get('盖章', {}).get('甲方', False),
+                            'party_b_seal': item.get('盖章', {}).get('乙方', False),
+                            'upload_time': item.get('归档时间', '')
+                        })
+                else:
+                    old_config['documents'][cycle_name]['uploaded_docs'].append({
+                        'doc_name': doc_name,
+                        'filename': doc_info.get('文件', ''),
+                        'file_path': doc_info.get('文件路径', ''),
+                        'doc_date': doc_info.get('日期', ''),
+                        'signer': doc_info.get('签字人', ''),
+                        'has_seal': doc_info.get('盖章', {}).get('甲方', False) or doc_info.get('盖章', {}).get('乙方', False),
+                        'party_a_seal': doc_info.get('盖章', {}).get('甲方', False),
+                        'party_b_seal': doc_info.get('盖章', {}).get('乙方', False),
+                        'upload_time': doc_info.get('归档时间', '')
+                    })
+        
+        return {
+            'status': 'success',
+            'project': old_config
+        }
+    
+    def save_project_with_fallback(self, project_id: str = None, project_name: str = None, 
+                                  project_config: Dict = None) -> Dict[str, Any]:
+        """保存项目配置（兼容新旧版）
+        
+        自动同步到新版文档清单
+        
+        Args:
+            project_id: 项目ID（旧版）
+            project_name: 项目名称（新版）
+            project_config: 项目配置
+            
+        Returns:
+            dict: 保存结果
+        """
+        # 如果是新版格式（project_name），同步到文档清单
+        if project_name and project_config:
+            result = self._sync_to_document_list(project_name, project_config)
+            if result['status'] != 'success':
+                return result
+        
+        # 同时保存旧版格式（兼容）
+        if project_id:
+            return self.save_project(project_config)
+        
+        return {'status': 'success', 'message': '保存成功'}
+    
+    def _sync_to_document_list(self, project_name: str, project_config: Dict) -> Dict[str, Any]:
+        """将旧版项目配置同步到新版文档清单
+        
+        Args:
+            project_name: 项目名称
+            project_config: 旧版项目配置
+            
+        Returns:
+            dict: 同步结果
+        """
+        try:
+            # 尝试加载现有文档清单
+            result = self.load_document_list(project_name)
+            
+            if result['status'] == 'success':
+                doc_list = result['data']
+            else:
+                # 创建新的文档清单
+                doc_list = {
+                    "项目信息": {
+                        "名称": project_name,
+                        "甲方": "",
+                        "乙方": "",
+                        "创建时间": datetime.now().isoformat(),
+                        "更新时间": datetime.now().isoformat()
+                    },
+                    "周期列表": [],
+                    "文档需求": {},
+                    "归档文档": {}
+                }
+            
+            # 同步周期
+            cycles = project_config.get('cycles', [])
+            doc_list['周期列表'] = [{"序号": i+1, "名称": c} for i, c in enumerate(cycles)]
+            
+            # 同步文档需求
+            documents = project_config.get('documents', {})
+            doc_list['文档需求'] = {}
+            for cycle_name, cycle_data in documents.items():
+                doc_list['文档需求'][cycle_name] = []
+                for doc in cycle_data.get('required_docs', []):
+                    doc_list['文档需求'][cycle_name].append({
+                        '文档名': doc.get('name', ''),
+                        '要求': doc.get('requirement', '')
+                    })
+            
+            # 保存
+            return self.save_document_list(project_name, doc_list)
+            
+        except Exception as e:
+            logger.error(f"同步到文档清单失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    # ========== 旧版兼容方法 ==========
     
     def _load_projects_index(self):
         """加载项目索引，并自动扫描目录补全缺失项目"""

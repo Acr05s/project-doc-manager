@@ -1,5 +1,7 @@
 """项目管理相关路由"""
 
+import json
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from app.utils.document_manager import DocumentManager
 
@@ -38,19 +40,23 @@ def create_project():
 
 @project_bp.route('/<project_id>', methods=['GET'])
 def get_project(project_id):
-    """获取项目详情"""
+    """获取项目详情（兼容新旧版）"""
     try:
-        result = doc_manager.load_project(project_id)
+        # 尝试使用兼容方法加载
+        result = doc_manager.load_project_with_fallback(project_id=project_id, project_name=project_id)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @project_bp.route('/<project_id>', methods=['PUT'])
 def update_project(project_id):
-    """更新项目"""
+    """更新项目（兼容新旧版）"""
     try:
         data = request.get_json()
-        result = doc_manager.save_project(data)
+        # 使用兼容保存方法
+        result = doc_manager.save_project_with_fallback(project_id=project_id, 
+                                                        project_name=data.get('name', project_id),
+                                                        project_config=data)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -434,14 +440,29 @@ def confirm_cycle_acceptance(project_id):
 
 @project_bp.route('/<project_id>/download-package', methods=['GET'])
 def download_project_package(project_id):
-    """打包下载项目所有文档"""
+    """打包下载项目所有文档（优先使用新版导出）"""
     try:
         import io
         import zipfile
         from pathlib import Path
-        from flask import send_file
+        from flask import send_file, make_response
         from datetime import datetime
 
+        project_name = project_id  # 新版使用project_id作为项目名称
+
+        # 优先尝试新版导出
+        result = doc_manager.export_documents_package(project_name)
+        if result['status'] == 'success':
+            # 使用新版导出结果
+            with open(result['package_path'], 'rb') as f:
+                file_data = f.read()
+            
+            response = make_response(file_data)
+            response.headers['Content-Type'] = 'application/zip'
+            response.headers['Content-Disposition'] = f'attachment; filename="{result["download_name"]}"'
+            return response
+
+        # 回退到旧版导出
         project_result = doc_manager.load_project(project_id)
         if project_result['status'] != 'success':
             return jsonify(project_result), 404
@@ -526,6 +547,135 @@ def get_external_logs():
             'logs': logs,
             'count': len(logs),
             'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ========== 新版文档清单模式API ==========
+
+@project_bp.route('/new/create', methods=['POST'])
+def create_new_project():
+    """创建新项目（新版文档清单模式）"""
+    try:
+        data = request.get_json()
+        project_name = data.get('name')
+        project_info = data.get('project_info', {})
+        cycles = data.get('cycles', [])  # [{"序号": 1, "名称": "准备阶段"}, ...]
+        documents = data.get('documents', {})  # {"周期名": [{"文档名": "...", "要求": "..."}]}
+        
+        if not project_name:
+            return jsonify({'status': 'error', 'message': '项目名称不能为空'}), 400
+        
+        # 创建文档清单
+        result = doc_manager.create_document_list(project_name, project_info, cycles, documents)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/new/<project_name>/load', methods=['GET'])
+def load_new_project(project_name):
+    """加载项目（新版文档清单模式）"""
+    try:
+        result = doc_manager.load_document_list(project_name)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/new/<project_name>/archive', methods=['POST'])
+def archive_new_document(project_name):
+    """归档文档（新版文档清单模式）"""
+    try:
+        data = request.get_json()
+        cycle_name = data.get('cycle_name')
+        doc_name = data.get('doc_name')
+        file_path = data.get('file_path')
+        source_info = data.get('source_info', {})
+        
+        if not cycle_name or not doc_name or not file_path:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        result = doc_manager.archive_document(project_name, cycle_name, doc_name, file_path, source_info)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/new/<project_name>/export', methods=['GET'])
+def export_new_project_package(project_name):
+    """导出归档文档包（新版文档清单模式）"""
+    try:
+        from flask import send_file, make_response
+        import io
+        
+        result = doc_manager.export_documents_package(project_name)
+        if result['status'] != 'success':
+            return jsonify(result), 400
+        
+        package_path = result['package_path']
+        download_name = result['download_name']
+        
+        # 读取文件并发送
+        with open(package_path, 'rb') as f:
+            file_data = f.read()
+        
+        response = make_response(file_data)
+        response.headers['Content-Type'] = 'application/zip'
+        response.headers['Content-Disposition'] = f'attachment; filename="{download_name}"'
+        
+        return response
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/new/list', methods=['GET'])
+def list_new_projects():
+    """获取所有项目列表（新版文档清单模式）"""
+    try:
+        projects = []
+        
+        # 扫描 projects 目录
+        for project_dir in doc_manager.projects_base_folder.iterdir():
+            if project_dir.is_dir():
+                # 检查是否存在文档清单
+                doc_list_path = doc_manager.get_document_list_path(project_dir.name)
+                if doc_list_path.exists():
+                    # 读取基本信息
+                    with open(doc_list_path, 'r', encoding='utf-8') as f:
+                        doc_list = json.load(f)
+                    
+                    projects.append({
+                        'name': project_dir.name,
+                        '项目信息': doc_list.get('项目信息', {}),
+                        '周期列表': doc_list.get('周期列表', []),
+                        '文档清单路径': str(doc_list_path)
+                    })
+        
+        return jsonify({
+            'status': 'success',
+            'projects': projects,
+            'count': len(projects)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/new/<project_name>', methods=['DELETE'])
+def delete_new_project(project_name):
+    """删除项目（新版文档清单模式）"""
+    try:
+        import shutil
+        
+        # 删除项目文件夹
+        project_folder = doc_manager.get_project_folder(project_name)
+        if project_folder.exists():
+            shutil.rmtree(project_folder)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'项目 "{project_name}" 已删除'
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
