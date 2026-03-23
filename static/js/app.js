@@ -1319,7 +1319,13 @@ async function renderCycleDocuments(cycle) {
                                     `<button class="btn btn-success btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
                                         确认归档
                                     </button>` : 
-                                    (isArchived ? '<span class="status-text">已归档</span>' : 
+                                    (isArchived ? 
+                                        `<div class="action-buttons">
+                                            <span class="status-text">已归档</span>
+                                            <button class="btn btn-warning btn-sm" onclick="unarchiveDocument('${cycle}', '${doc.name}')">
+                                                撤销归档
+                                            </button>
+                                        </div>` : 
                                      '<span class="status-text">等待上传</span>')
                                 }
                             </td>
@@ -1369,6 +1375,47 @@ async function archiveDocument(cycle, docName) {
     } catch (e) {
         console.error('归档失败:', e);
         showNotification('归档失败', 'error');
+    }
+}
+
+/**
+ * 撤销归档文档
+ */
+async function unarchiveDocument(cycle, docName) {
+    if (appState.projectConfig.documents_archived && 
+        appState.projectConfig.documents_archived[cycle]) {
+        delete appState.projectConfig.documents_archived[cycle][docName];
+        
+        // 如果该周期没有已归档文档，删除整个周期的归档记录
+        if (Object.keys(appState.projectConfig.documents_archived[cycle]).length === 0) {
+            delete appState.projectConfig.documents_archived[cycle];
+        }
+        
+        // 如果没有任何归档文档，删除整个归档记录
+        if (Object.keys(appState.projectConfig.documents_archived).length === 0) {
+            delete appState.projectConfig.documents_archived;
+        }
+    }
+    
+    // 保存到服务器
+    try {
+        const response = await fetch('/api/projects/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(appState.projectConfig)
+        });
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showNotification(`文档 "${docName}" 已撤销归档`, 'success');
+            renderCycleDocuments(cycle);
+            refreshCycleProgress();
+        } else {
+            showNotification('撤销归档失败: ' + result.message, 'error');
+        }
+    } catch (e) {
+        console.error('撤销归档失败:', e);
+        showNotification('撤销归档失败', 'error');
     }
 }
 
@@ -4534,7 +4581,7 @@ function resetImportPackageModal() {
  * 显示项目相关按钮
  */
 function showProjectButtons() {
-    const btns = ['exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
+    const btns = ['loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
                    'projectManageBtn', 'zipUploadBtn', 'generateReportBtn', 'checkComplianceBtn',
                    'deleteProjectBtn', 'confirmAcceptanceBtn', 'downloadPackageBtn'];
     btns.forEach(btnName => {
@@ -4547,7 +4594,7 @@ function showProjectButtons() {
  * 隐藏项目相关按钮
  */
 function hideProjectButtons() {
-    const btns = ['exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
+    const btns = ['loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
                    'projectManageBtn', 'zipUploadBtn', 'generateReportBtn', 'checkComplianceBtn',
                    'deleteProjectBtn', 'confirmAcceptanceBtn', 'downloadPackageBtn'];
     btns.forEach(btnName => {

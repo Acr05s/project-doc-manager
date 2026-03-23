@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目文档管理中心</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032305">
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032305"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032306">
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032306"></script>
 </head>
 <body>
     <div class="container">
@@ -18,9 +18,9 @@
                     <option value="">-- 选择项目 --</option>
                 </select>
                 <button id="newProjectBtn" class="btn btn-success">新建项目</button>
-                <button id="loadProjectBtn" class="btn btn-primary">导入文档需求</button>
             </div>
             <div class="header-right">
+                <button id="loadProjectBtn" class="btn btn-primary" style="display:none;">导入文档需求</button>
                 <button id="exportJsonBtn" class="btn btn-secondary" style="display:none;">导出需求清单</button>
                 <button id="saveProjectBtn" class="btn btn-warning" style="display:none;">💾 保存状态</button>
                 <button id="packageProjectBtn" class="btn btn-success" style="display:none;">打包项目</button>
