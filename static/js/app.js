@@ -575,6 +575,15 @@ function setupEventListeners() {
                 appState.projectConfig = null;
                 appState.currentCycle = null;
                 if (elements.cycleNavList) elements.cycleNavList.innerHTML = '';
+                if (elements.contentArea) {
+                    elements.contentArea.innerHTML = `
+                        <div class="welcome-message">
+                            <h2>欢迎使用项目文档管理中心</h2>
+                            <p>请在顶部选择项目，加载配置文件</p>
+                            <p>然后在顶部周期导航中选择周期，管理文档</p>
+                        </div>
+                    `;
+                }
                 hideProjectButtons();
                 // 清除URL参数
                 const url = new URL(window.location);
