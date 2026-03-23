@@ -339,6 +339,13 @@ body {
     transform: translateX(1px) translateY(1px);
 }
 
+.cycle-nav-placeholder {
+    display: block;
+    width: 30px;
+    flex-shrink: 0;
+    margin: 0 5px;
+}
+
 .cycle-status-legend {
     margin-top: 10px;
     display: flex;
