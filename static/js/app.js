@@ -1138,7 +1138,7 @@ async function loadCycleProgresses(cycles, docsData) {
         `;
         
         // 运维和其它之间不需要箭线
-        if (index < cycles.length - 1 && !(cycle === '运维' && cycles[index + 1] === '其它')) {
+        if (index < cycles.length - 1 && !((cycle.includes('运维') || cycle.includes('运营')) && (cycles[index + 1].includes('其它') || cycles[index + 1].includes('其他')))) {
             // 检查是否需要显示虚线箭线
             const isDashed = incompleteIndices.some(incompleteIndex => index >= incompleteIndex);
             html += `<span class="cycle-nav-arrow ${isDashed ? 'dashed' : ''}">→</span>`;
