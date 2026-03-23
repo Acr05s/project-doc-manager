@@ -1115,27 +1115,37 @@ async function loadCycleProgresses(cycles, docsData) {
     });
 
     // 渲染顶部导航栏：横向排列，用箭头连接
-    elements.cycleNavList.innerHTML = cycles.map((cycle, index) => {
+    // 计算哪些周期后面需要显示虚线箭线
+    const incompleteIndices = [];
+    cycles.forEach((cycle, index) => {
+        const status = statusMap[cycle] || 'incomplete';
+        if (status !== 'complete') {
+            incompleteIndices.push(index);
+        }
+    });
+
+    // 渲染周期和箭线
+    let html = '';
+    cycles.forEach((cycle, index) => {
         const status = statusMap[cycle] || 'incomplete';
         
-        // 状态文本
-        let statusText;
-        if (status === 'complete') {
-            statusText = '完整无误';
-        } else if (status === 'partial') {
-            statusText = '属性待补';
-        } else {
-            statusText = '文件不全';
-        }
-
-        return `
+        // 渲染周期项
+        html += `
             <div class="cycle-nav-item status-${status}" data-cycle="${cycle}" data-status="${status}">
                 <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
                 <span class="cycle-name" style="text-align:center;">${cycle}</span>
-                <span class="cycle-progress-text" style="font-size:11px;margin-top:4px;">${statusText}</span>
             </div>
         `;
-    }).join('<span class="cycle-nav-arrow">→</span>') + `
+        
+        // 运维和其它之间不需要箭线
+        if (index < cycles.length - 1 && !(cycle === '运维' && cycles[index + 1] === '其它')) {
+            // 检查是否需要显示虚线箭线
+            const isDashed = incompleteIndices.some(incompleteIndex => index >= incompleteIndex);
+            html += `<span class="cycle-nav-arrow ${isDashed ? 'dashed' : ''}">→</span>`;
+        }
+    });
+
+    elements.cycleNavList.innerHTML = html + `
         <div class="cycle-status-legend">
             <div class="cycle-status-item">
                 <div class="cycle-status-color" style="background:#28a745;"></div>

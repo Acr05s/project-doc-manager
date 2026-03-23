@@ -321,6 +321,22 @@ body {
     font-weight: bold;
     flex-shrink: 0;
     margin: 0 5px;
+    transition: all 0.3s ease;
+}
+
+.cycle-nav-arrow.dashed {
+    opacity: 0.6;
+    position: relative;
+}
+
+.cycle-nav-arrow.dashed::before {
+    content: '→';
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: #dc3545;
+    opacity: 0.3;
+    transform: translateX(1px) translateY(1px);
 }
 
 .cycle-status-legend {
