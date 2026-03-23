@@ -6,6 +6,7 @@
 import logging
 from typing import Dict, Any, Optional
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 
 # 配置日志
 logging.basicConfig(
@@ -14,6 +15,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 项目根目录（main.py 所在目录）
+import os as _os
+BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
+
 # Flask应用初始化
 def create_app(config: Optional[Dict] = None) -> Flask:
     """创建Flask应用"""
@@ -21,20 +26,27 @@ def create_app(config: Optional[Dict] = None) -> Flask:
                 template_folder='templates',
                 static_folder='static')
     
+    # 添加CORS支持
+    CORS(app)
+    
     # 移除文件大小限制（设为None表示无限制）
     app.config['MAX_CONTENT_LENGTH'] = None
-    app.config['UPLOAD_FOLDER'] = 'uploads'
+    # 使用绝对路径，避免因启动目录不同导致数据目录错误
+    app.config['UPLOAD_FOLDER'] = _os.path.join(BASE_DIR, 'uploads')
     app.config['SECRET_KEY'] = 'doc_manager_secret_key'
     
     # 分片上传配置
     app.config['CHUNK_SIZE'] = 1024 * 1024 * 10  # 每个分片10MB
-    app.config['TEMP_FOLDER'] = 'uploads/temp_chunks'
+    app.config['TEMP_FOLDER'] = _os.path.join(BASE_DIR, 'uploads', 'temp_chunks')
     
 
     
     # 创建文档管理器实例
     from app.utils.document_manager import DocumentManager
-    doc_manager = DocumentManager(config)
+    doc_manager = DocumentManager({
+        'upload_folder': app.config['UPLOAD_FOLDER'],
+        **(config or {})
+    })
     
     # 初始化任务系统（简化版）
     tasks_store = {}

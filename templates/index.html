@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目文档管理中心</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032313">
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=2026032313"></script>
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026032313"></script>
 </head>
 <body>
     <div class="container">
@@ -567,6 +567,5 @@
     <!-- 提示信息 -->
     <div id="notification" class="notification"></div>
 
-    <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
 </body>
 </html>

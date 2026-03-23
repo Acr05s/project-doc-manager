@@ -3214,6 +3214,13 @@ document.addEventListener('DOMContentLoaded', initApp);
  */
 async function openEditModal(docId) {
     try {
+        // 检查当前周期和文档是否存在
+        if (!appState.currentCycle || !appState.currentDocument) {
+            console.error('当前周期或文档未设置');
+            showNotification('请先选择周期和文档', 'error');
+            return;
+        }
+        
         const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(appState.currentCycle)}&doc_name=${encodeURIComponent(appState.currentDocument)}`);
         const result = await response.json();
         
@@ -3224,22 +3231,48 @@ async function openEditModal(docId) {
                 return;
             }
             
-            document.getElementById('editDocId').value = docId;
-            document.getElementById('editDocDate').value = doc.doc_date || '';
-            document.getElementById('editSignDate').value = doc.sign_date || '';
-            document.getElementById('editSigner').value = doc.signer || '';
-            document.getElementById('editNoSignature').checked = doc.no_signature || false;
-            document.getElementById('editHasSeal').checked = doc.has_seal_marked || false;
-            document.getElementById('editPartyASeal').checked = doc.party_a_seal || false;
-            document.getElementById('editPartyBSeal').checked = doc.party_b_seal || false;
-            document.getElementById('editNoSeal').checked = doc.no_seal || false;
-            document.getElementById('editOtherSeal').value = doc.other_seal || '';
+            // 使用 document.getElementById 确保获取到元素
+            const editDocId = document.getElementById('editDocId');
+            const editDocDate = document.getElementById('editDocDate');
+            const editSignDate = document.getElementById('editSignDate');
+            const editSigner = document.getElementById('editSigner');
+            const editNoSignature = document.getElementById('editNoSignature');
+            const editHasSeal = document.getElementById('editHasSeal');
+            const editPartyASeal = document.getElementById('editPartyASeal');
+            const editPartyBSeal = document.getElementById('editPartyBSeal');
+            const editNoSeal = document.getElementById('editNoSeal');
+            const editOtherSeal = document.getElementById('editOtherSeal');
+            const editDocModal = document.getElementById('editDocModal');
             
-            openModal(elements.editDocModal);
+            // 检查所有元素是否存在
+            if (!editDocId || !editDocDate || !editSignDate || !editSigner || !editNoSignature || 
+                !editHasSeal || !editPartyASeal || !editPartyBSeal || !editNoSeal || !editOtherSeal || !editDocModal) {
+                console.error('编辑模态框元素缺失');
+                showNotification('编辑模态框初始化失败', 'error');
+                return;
+            }
+            
+            editDocId.value = docId;
+            editDocDate.value = doc.doc_date || '';
+            editSignDate.value = doc.sign_date || '';
+            editSigner.value = doc.signer || '';
+            editNoSignature.checked = doc.no_signature || false;
+            editHasSeal.checked = doc.has_seal_marked || false;
+            editPartyASeal.checked = doc.party_a_seal || false;
+            editPartyBSeal.checked = doc.party_b_seal || false;
+            editNoSeal.checked = doc.no_seal || false;
+            editOtherSeal.value = doc.other_seal || '';
+            
+            // 直接使用获取到的模态框元素
+            editDocModal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        } else {
+            console.error('API 请求失败:', result.message);
+            showNotification('获取文档信息失败: ' + result.message, 'error');
         }
     } catch (error) {
         console.error('获取文档信息失败:', error);
-        showNotification('获取文档信息失败', 'error');
+        showNotification('获取文档信息失败: ' + error.message, 'error');
     }
 }
 
@@ -3247,7 +3280,11 @@ async function openEditModal(docId) {
  * 关闭编辑弹窗
  */
 function closeEditModal() {
-    closeModal(elements.editDocModal);
+    const editDocModal = document.getElementById('editDocModal');
+    if (editDocModal) {
+        editDocModal.classList.remove('show');
+        document.body.style.overflow = 'auto';
+    }
 }
 
 /**

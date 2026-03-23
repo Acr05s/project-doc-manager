@@ -282,7 +282,7 @@ class DocumentManager:
         return logs[-limit:] if len(logs) > limit else logs
     
     def _load_projects_index(self):
-        """加载项目索引"""
+        """加载项目索引，并自动扫描目录补全缺失项目"""
         index_file = self.projects_folder / 'projects_index.json'
         if index_file.exists():
             try:
@@ -290,6 +290,33 @@ class DocumentManager:
                     self.projects_db = json.load(f)
             except:
                 self.projects_db = {}
+        else:
+            self.projects_db = {}
+
+        # 扫描 projects 目录，发现索引中缺失的项目文件
+        index_changed = False
+        for project_file in self.projects_folder.glob('*.json'):
+            project_id = project_file.stem
+            if project_id == 'projects_index':
+                continue
+            if project_id not in self.projects_db:
+                try:
+                    with open(project_file, 'r', encoding='utf-8') as f:
+                        project_config = json.load(f)
+                    self.projects_db[project_id] = {
+                        'id': project_id,
+                        'name': project_config.get('name', project_id),
+                        'description': project_config.get('description', ''),
+                        'created_time': project_config.get('created_time', ''),
+                        'updated_time': project_config.get('updated_time', ''),
+                    }
+                    logger.info(f"自动发现并补全项目索引: {project_id} ({project_config.get('name', '')})")
+                    index_changed = True
+                except Exception as e:
+                    logger.warning(f"扫描项目文件失败 {project_file}: {e}")
+
+        if index_changed:
+            self._save_projects_index()
     
     def _save_projects_index(self):
         """保存项目索引"""
@@ -536,19 +563,74 @@ class DocumentManager:
         try:
             import json
             
-            # 创建导出配置（只导出需求清单，不上传的文档）
+            # 创建导出配置（符合模板格式，包含目录结构和匹配结果）
             export_config = {
-                'name': project_config.get('name', '未命名项目'),
-                'description': project_config.get('description', ''),
-                'cycles': project_config.get('cycles', []),
-                'documents': {}
+                "项目信息": {
+                    "项目名称": project_config.get('name', '未命名项目'),
+                    "创建时间": project_config.get('created_time', ''),
+                    "项目周期": project_config.get('cycles', []),
+                    "甲方": "",
+                    "乙方": "",
+                    "监理": ""
+                },
+                "资料需求": {
+                    "项目周期": project_config.get('cycles', []),
+                    "文档要求": {}
+                },
+                "目录结构": {},
+                "匹配结果": {}
             }
             
-            # 只导出required_docs，不导出uploaded_docs
+            # 构建目录结构和匹配结果
+            directory_structure = {}
+            matching_results = {}
+            
             for cycle, docs_info in project_config.get('documents', {}).items():
-                export_config['documents'][cycle] = {
-                    'required_docs': docs_info.get('required_docs', [])
+                # 构建文档要求
+                export_config["资料需求"]["文档要求"][cycle] = {
+                    'required_docs': docs_info.get('required_docs', []),
+                    "已匹配文档": []
                 }
+                
+                # 构建目录结构
+                directory_structure[cycle] = []
+                for doc in docs_info.get('required_docs', []):
+                    directory_structure[cycle].append({
+                        "文档名称": doc.get('name'),
+                        "子目录": doc.get('name')
+                    })
+                
+                # 构建匹配结果
+                matching_results[cycle] = {}
+                for doc in docs_info.get('required_docs', []):
+                    matching_results[cycle][doc.get('name')] = {
+                        "文档要求": doc.get('requirement'),
+                        "已匹配文件": [],
+                        "状态": doc.get('status')
+                    }
+                
+                # 添加已上传的文档到匹配结果
+                for uploaded_doc in docs_info.get('uploaded_docs', []):
+                    doc_name = uploaded_doc.get('doc_name')
+                    if doc_name in matching_results[cycle]:
+                        matching_results[cycle][doc_name]["已匹配文件"].append({
+                            "文件名": uploaded_doc.get('original_filename'),
+                            "文件路径": uploaded_doc.get('file_path'),
+                            "上传时间": uploaded_doc.get('upload_time'),
+                            "文档日期": uploaded_doc.get('doc_date'),
+                            "签字人": uploaded_doc.get('signer'),
+                            "签字日期": uploaded_doc.get('sign_date'),
+                            "盖章状态": {
+                                "通用盖章": uploaded_doc.get('has_seal', False),
+                                "甲方盖章": uploaded_doc.get('party_a_seal', False),
+                                "乙方盖章": uploaded_doc.get('party_b_seal', False),
+                                "其他盖章": uploaded_doc.get('other_seal', "")
+                            }
+                        })
+            
+            # 添加目录结构和匹配结果到导出配置
+            export_config["目录结构"] = directory_structure
+            export_config["匹配结果"] = matching_results
             
             return json.dumps(export_config, ensure_ascii=False, indent=2)
             
