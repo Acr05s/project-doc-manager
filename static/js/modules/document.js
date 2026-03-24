@@ -44,6 +44,7 @@ export async function handleUploadDocument(e) {
     formData.append('party_a_seal', partyASeal);
     formData.append('party_b_seal', partyBSeal);
     formData.append('other_seal', otherSeal);
+    formData.append('doc_name', appState.currentDocument);
     
     showLoading(true);
     try {
@@ -51,7 +52,14 @@ export async function handleUploadDocument(e) {
         
         if (result.status === 'success') {
             showNotification('文档上传成功', 'success');
-            elements.uploadForm.reset();
+            elements.fileInput.value = '';
+            elements.docDate.value = '';
+            elements.signDate.value = '';
+            elements.signer.value = '';
+            elements.hasSeal.checked = false;
+            elements.partyASeal.checked = false;
+            elements.partyBSeal.checked = false;
+            elements.otherSeal.value = '';
             // 刷新文档列表
             await renderCycleDocuments(appState.currentCycle);
         } else {
@@ -184,6 +192,8 @@ export async function handleDeleteDocument(docId) {
                     showNotification('文档删除成功', 'success');
                     // 刷新文档列表
                     await renderCycleDocuments(appState.currentCycle);
+                    // 刷新维护页面的文档列表
+                    await loadMaintainDocumentsList(appState.currentCycle, appState.currentDocument);
                 } else {
                     showNotification('删除失败: ' + result.message, 'error');
                 }
@@ -218,6 +228,26 @@ export async function renderCycleDocuments(cycle) {
         if (!docsByName[key]) docsByName[key] = [];
         docsByName[key].push(doc);
     }
+    
+    // 获取所有已上传文档的类型名称
+    const uploadedDocTypes = new Set(uploadedDocs.map(doc => doc.doc_name));
+    
+    // 合并required_docs和已上传的文档类型
+    const allDocTypes = [...requiredDocs];
+    
+    // 添加已上传但不在required_docs中的文档类型
+    uploadedDocTypes.forEach(docType => {
+        if (!requiredDocs.some(reqDoc => reqDoc.name === docType)) {
+            allDocTypes.push({
+                name: docType,
+                requirement: '无要求',
+                index: 9999 // 放在最后
+            });
+        }
+    });
+    
+    // 重新排序
+    allDocTypes.sort((a, b) => (a.index || 0) - (b.index || 0));
 
     // 新布局：左侧组织机构人员，中间文件名+附加属性，右侧确认按钮
     const html = `
@@ -234,7 +264,7 @@ export async function renderCycleDocuments(cycle) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${requiredDocs.map(doc => {
+                    ${allDocTypes.map(doc => {
                         const docsList = docsByName[doc.name] || [];
                         
                         // 检查是否已归档
@@ -320,46 +350,241 @@ export async function renderCycleDocuments(cycle) {
  */
 export async function previewDocument(docId) {
     try {
-        // 先检查文档是否存在
-        const response = await fetch(`/api/documents/preview/${docId}`);
-        const result = await response.json();
+        // 先获取文档信息
+        const docResponse = await fetch(`/api/documents/${docId}`);
+        const docResult = await docResponse.json();
         
-        if (result.status === 'error' && (result.message === '文件不存在' || result.message === '文档不存在')) {
-            // 文件不存在，显示提示，建议用户删除记录
+        if (docResult.status !== 'success') {
+            // 文档记录不存在
             showConfirmModal(
-                '文件不存在',
-                '该文档的文件不存在，可能是因为原始文件被删除。建议删除此记录以避免错误。',
+                '文档不存在',
+                '该文档记录不存在，可能是因为已经被删除。',
                 async () => {
-                    // 删除文档记录
-                    try {
-                        const deleteResponse = await fetch(`/api/documents/${docId}`, {
-                            method: 'DELETE'
-                        });
-                        const deleteResult = await deleteResponse.json();
-                        
-                        if (deleteResult.status === 'success') {
-                            showNotification('文档记录已删除', 'success');
-                            // 刷新文档列表
-                            if (appState.currentCycle) {
-                                await renderCycleDocuments(appState.currentCycle);
-                            }
-                        } else {
-                            showNotification('删除失败: ' + deleteResult.message, 'error');
-                        }
-                    } catch (error) {
-                        console.error('删除文档失败:', error);
-                        showNotification('删除失败: ' + error.message, 'error');
+                    // 刷新文档列表
+                    if (appState.currentCycle) {
+                        await renderCycleDocuments(appState.currentCycle);
                     }
                 }
             );
-        } else {
-            // 文件存在，正常预览
-            window.open(`/api/documents/preview/${docId}`, '_blank');
+            return;
         }
+        
+        const docInfo = docResult.data;
+        const filename = docInfo.original_filename || docInfo.filename;
+        const fileExt = filename.split('.').pop().toLowerCase();
+        
+        // 创建预览模态框
+        const modalContent = `
+            <div class="preview-modal-content">
+                <div class="preview-header">
+                    <h3>${filename}</h3>
+                    <button class="close-btn" onclick="document.getElementById('previewModal').style.display='none'">×</button>
+                </div>
+                <div class="preview-body">
+                    ${getPreviewContent(docId, fileExt)}
+                </div>
+            </div>
+        `;
+        
+        // 创建模态框元素
+        let modal = document.getElementById('previewModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'previewModal';
+            modal.className = 'preview-modal';
+            document.body.appendChild(modal);
+        }
+        
+        modal.innerHTML = modalContent;
+        modal.style.display = 'block';
+        
+        // 点击模态框外部关闭
+        modal.onclick = function(event) {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+        
     } catch (error) {
         console.error('预览文档失败:', error);
         showNotification('预览失败: ' + error.message, 'error');
     }
+}
+
+/**
+ * 根据文件类型生成预览内容
+ */
+function getPreviewContent(docId, fileExt) {
+    const viewUrl = `/api/documents/view/${docId}`;
+    
+    // 图片预览
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
+        return `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
+    }
+    
+    // PDF预览
+    if (fileExt === 'pdf') {
+        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onload="handleIframeLoad(this)" onerror="handlePreviewError(this)"></iframe>`;
+    }
+    
+    // Office文档预览（使用本地预览方案，避免网络问题）
+    if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(fileExt)) {
+        const localPreviewUrl = `/api/documents/preview-local/${docId}`;
+        return `
+            <div class="preview-office">
+                <div class="file-icon">📄</div>
+                <p>Office文档预览</p>
+                <div class="preview-options">
+                    <a href="${viewUrl}" class="btn btn-primary" target="_blank" onclick="handleDownloadClick(event, this)">下载文件</a>
+                    <button class="btn btn-secondary" onclick="tryLocalPreview('${docId}', '${localPreviewUrl}')">本地预览</button>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 其他文件类型，提供下载链接
+    return `
+        <div class="preview-other">
+            <div class="file-icon">📄</div>
+            <p>该文件类型不支持在线预览</p>
+            <a href="${viewUrl}" class="btn btn-primary" target="_blank" onclick="handleDownloadClick(event, this)">下载文件</a>
+        </div>
+    `;
+}
+
+/**
+ * 处理预览错误
+ */
+function handlePreviewError(element) {
+    // 显示文件不存在的提示
+    const errorMessage = `
+        <div class="preview-error">
+            <div class="error-icon">❌</div>
+            <h4>文件不存在</h4>
+            <p>该文档的文件不存在，可能是因为原始文件被删除。</p>
+            <button class="btn btn-danger" onclick="confirmDeleteDocument('${element.dataset.docId || element.src.split('/').pop()}')">删除此记录</button>
+        </div>
+    `;
+    
+    if (element.tagName === 'IMG') {
+        element.style.display = 'none';
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'error-container';
+        errorContainer.innerHTML = errorMessage;
+        element.parentNode.appendChild(errorContainer);
+    } else if (element.tagName === 'IFRAME') {
+        element.style.display = 'none';
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'error-container';
+        errorContainer.innerHTML = errorMessage;
+        element.parentNode.appendChild(errorContainer);
+    }
+}
+
+/**
+ * 处理iframe加载
+ */
+function handleIframeLoad(iframe) {
+    // 检查iframe内容是否是错误页面
+    try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        if (iframeDoc.body && iframeDoc.body.innerHTML.includes('文件不存在')) {
+            handlePreviewError(iframe);
+        }
+    } catch (e) {
+        // 跨域错误，忽略
+    }
+}
+
+/**
+ * 处理下载点击
+ */
+function handleDownloadClick(event, link) {
+    event.preventDefault();
+    const url = link.href;
+    
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                if (response.status === 404) {
+                    // 文件不存在
+                    showConfirmModal(
+                        '文件不存在',
+                        '该文档的文件不存在，可能是因为原始文件被删除。建议删除此记录以避免错误。',
+                        async () => {
+                            // 获取文档ID
+                            const docId = url.split('/').pop();
+                            // 删除文档记录
+                            try {
+                                const deleteResponse = await fetch(`/api/documents/${docId}`, {
+                                    method: 'DELETE'
+                                });
+                                const deleteResult = await deleteResponse.json();
+                                
+                                if (deleteResult.status === 'success') {
+                                    showNotification('文档记录已删除', 'success');
+                                    // 刷新文档列表
+                                    if (appState.currentCycle) {
+                                        await renderCycleDocuments(appState.currentCycle);
+                                    }
+                                } else {
+                                    showNotification('删除失败: ' + deleteResult.message, 'error');
+                                }
+                            } catch (error) {
+                                console.error('删除文档失败:', error);
+                                showNotification('删除失败: ' + error.message, 'error');
+                            }
+                        }
+                    );
+                } else {
+                    showNotification('下载失败: ' + response.statusText, 'error');
+                }
+                return;
+            }
+            // 下载成功，继续
+            window.open(url, '_blank');
+        })
+        .catch(error => {
+            console.error('下载失败:', error);
+            showNotification('下载失败: ' + error.message, 'error');
+        });
+}
+
+/**
+ * 确认删除文档
+ */
+function confirmDeleteDocument(docId) {
+    showConfirmModal(
+        '确认删除',
+        '该文档的文件不存在，建议删除此记录以避免错误。',
+        async () => {
+            // 删除文档记录
+            try {
+                const deleteResponse = await fetch(`/api/documents/${docId}`, {
+                    method: 'DELETE'
+                });
+                const deleteResult = await deleteResponse.json();
+                
+                if (deleteResult.status === 'success') {
+                    showNotification('文档记录已删除', 'success');
+                    // 刷新文档列表
+                    if (appState.currentCycle) {
+                        await renderCycleDocuments(appState.currentCycle);
+                    }
+                    // 关闭预览模态框
+                    const modal = document.getElementById('previewModal');
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                } else {
+                    showNotification('删除失败: ' + deleteResult.message, 'error');
+                }
+            } catch (error) {
+                console.error('删除文档失败:', error);
+                showNotification('删除失败: ' + error.message, 'error');
+            }
+        }
+    );
 }
 
 /**
@@ -453,36 +678,39 @@ export function initUploadMethodTabs() {
         });
     });
     
-    // 加载历史导入文档按钮
-    const loadImportedDocsBtn = document.getElementById('loadImportedDocsBtn');
-    if (loadImportedDocsBtn) {
-        loadImportedDocsBtn.addEventListener('click', loadImportedDocumentsList);
+    // 显示文档附加属性要求
+    displayDocumentRequirements();
+    
+    // 加载目录按钮
+    const loadDirectoriesBtn = document.getElementById('loadDirectoriesBtn');
+    if (loadDirectoriesBtn) {
+        loadDirectoriesBtn.addEventListener('click', loadDirectories);
     }
     
     // 搜索文件按钮
-    const searchZipBtn = document.getElementById('searchZipFilesBtn');
-    if (searchZipBtn) {
-        searchZipBtn.addEventListener('click', function() {
-            const keyword = document.getElementById('zipFileKeyword').value;
-            searchImportedFiles(keyword);
+    const searchFilesBtn = document.getElementById('searchFilesBtn');
+    if (searchFilesBtn) {
+        searchFilesBtn.addEventListener('click', function() {
+            const keyword = document.getElementById('selectFileKeyword').value;
+            searchFiles(keyword);
         });
     }
     
     // 自动搜索当前文档
     const currentDoc = appState.currentDocument;
     if (currentDoc) {
-        const keywordInput = document.getElementById('zipFileKeyword');
+        const keywordInput = document.getElementById('selectFileKeyword');
         if (keywordInput) {
             keywordInput.value = currentDoc;
             // 自动搜索
-            searchImportedFiles(currentDoc);
+            searchFiles(currentDoc);
         }
     }
     
-    // 确认选择ZIP文件按钮
-    const zipArchiveBtn = document.getElementById('zipArchiveBtn');
-    if (zipArchiveBtn) {
-        zipArchiveBtn.addEventListener('click', handleZipArchive);
+    // 确认选择文件按钮
+    const selectArchiveBtn = document.getElementById('selectArchiveBtn');
+    if (selectArchiveBtn) {
+        selectArchiveBtn.addEventListener('click', handleSelectArchive);
     }
     
     // 批量操作按钮
@@ -500,9 +728,216 @@ export function initUploadMethodTabs() {
     if (batchDeleteBtn) {
         batchDeleteBtn.addEventListener('click', handleBatchDelete);
     }
+}
+
+/**
+ * 显示文档附加属性要求
+ */
+function displayDocumentRequirements() {
+    const requirementText = document.getElementById('requirementText');
+    if (!requirementText) return;
     
-    // 修复ZIP选择问题
-    fixZipSelectionIssue();
+    // 从项目配置中获取文档要求
+    if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
+        const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
+        if (cycleDocs && cycleDocs.required_docs) {
+            const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
+            if (docInfo) {
+                requirementText.textContent = docInfo.requirement || '无特殊要求';
+                return;
+            }
+        }
+    }
+    
+    requirementText.textContent = '无特殊要求';
+}
+
+/**
+ * 加载目录
+ */
+async function loadDirectories() {
+    try {
+        showLoading(true);
+        
+        if (!appState.currentProjectId || !appState.projectConfig) {
+            showNotification('请先选择项目', 'error');
+            return;
+        }
+        
+        const response = await fetch(`/api/documents/directories?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}`);
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const directories = result.directories || [];
+            const directorySelect = document.getElementById('directorySelect');
+            if (directorySelect) {
+                directorySelect.innerHTML = '<option value="">-- 选择目录 --</option>';
+                directories.forEach(dir => {
+                    const option = document.createElement('option');
+                    option.value = dir.id;
+                    option.textContent = dir.name;
+                    directorySelect.appendChild(option);
+                });
+            }
+        } else {
+            showNotification('加载目录失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('加载目录失败:', error);
+        showNotification('加载目录失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 自动搜索文件
+ */
+function autoSearchFiles() {
+    const keywordInput = document.getElementById('selectFileKeyword');
+    if (keywordInput) {
+        const keyword = keywordInput.value;
+        if (keyword.length > 1) {
+            searchFiles(keyword);
+        }
+    }
+}
+
+/**
+ * 搜索文件
+ */
+async function searchFiles(keyword) {
+    try {
+        showLoading(true);
+        
+        if (!appState.currentProjectId || !appState.projectConfig) {
+            showNotification('请先选择项目', 'error');
+            return;
+        }
+        
+        const directorySelect = document.getElementById('directorySelect');
+        const directory = directorySelect ? directorySelect.value : '';
+        
+        const response = await fetch(`/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(directory)}&keyword=${encodeURIComponent(keyword)}`);
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const files = result.files || [];
+            displaySelectedFiles(files);
+        } else {
+            showNotification('搜索文件失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('搜索文件失败:', error);
+        showNotification('搜索文件失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 显示选择的文件列表
+ */
+export function displaySelectedFiles(files) {
+    const selectedFilesList = document.getElementById('selectedFilesList');
+    if (!selectedFilesList) return;
+    
+    if (files.length === 0) {
+        selectedFilesList.innerHTML = '<p class="placeholder">未找到匹配的文件</p>';
+    } else {
+        selectedFilesList.innerHTML = files.map(file => {
+            const isUsed = file.used || false;
+            return `
+                <div class="zip-file-item ${isUsed ? 'used' : ''}" data-path="${file.path}" data-name="${file.name}">
+                    <input type="checkbox" class="zip-file-checkbox" ${isUsed ? 'disabled' : ''} />
+                    <span class="zip-file-name">${file.name}</span>
+                    <span class="zip-file-path">${file.rel_path || file.path}</span>
+                    ${isUsed ? '<span class="file-used-badge">已被使用</span>' : ''}
+                </div>
+            `;
+        }).join('');
+        
+        // 添加复选框事件
+        document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', updateSelectedFilesCount);
+        });
+    }
+}
+
+/**
+ * 更新已选择文件数量
+ */
+function updateSelectedFilesCount() {
+    const selectedCheckboxes = document.querySelectorAll('.zip-file-checkbox:checked');
+    const selectedCount = selectedCheckboxes.length;
+    const selectedInfo = document.getElementById('selectedInfo');
+    const selectArchiveBtn = document.getElementById('selectArchiveBtn');
+    
+    if (selectedInfo) {
+        selectedInfo.style.display = selectedCount > 0 ? 'block' : 'none';
+        selectedInfo.textContent = `已选择 ${selectedCount} 个文件`;
+    }
+    
+    if (selectArchiveBtn) {
+        selectArchiveBtn.disabled = selectedCount === 0;
+    }
+}
+
+/**
+ * 处理选择文档归档
+ */
+async function handleSelectArchive() {
+    const selectedCheckboxes = document.querySelectorAll('.zip-file-checkbox:checked');
+    const selectedFiles = Array.from(selectedCheckboxes).map(cb => ({
+        path: cb.closest('.zip-file-item').dataset.path,
+        name: cb.closest('.zip-file-item').dataset.name
+    }));
+    
+    if (selectedFiles.length === 0) {
+        showNotification('请先选择文件', 'error');
+        return;
+    }
+    
+    if (!appState.currentProjectId || !appState.projectConfig || !appState.currentCycle || !appState.currentDocument) {
+        showNotification('请先选择项目、周期和文档类型', 'error');
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        
+        const response = await fetch('/api/documents/files/select', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                project_id: appState.currentProjectId,
+                project_name: appState.projectConfig.name,
+                cycle: appState.currentCycle,
+                doc_name: appState.currentDocument,
+                files: selectedFiles
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showNotification(`成功选择 ${selectedFiles.length} 个文件`, 'success');
+            
+            // 刷新文档列表
+            if (appState.currentCycle) {
+                await renderCycleDocuments(appState.currentCycle);
+            }
+        } else {
+            showNotification('选择文件失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('选择文件失败:', error);
+        showNotification('选择文件失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
 }
 
 /**
@@ -600,6 +1035,10 @@ export async function openEditModal(docId) {
     });
     
     // 加载已上传的文档
+    console.log('调用loadUploadedDocuments:', cycle, docName);
+    
+    // 无论是否有cycle和docName，都尝试加载文档列表
+    // 当没有cycle和docName时，loadUploadedDocuments会尝试加载所有文档
     await loadUploadedDocuments(cycle, docName);
     
     // 打开模态框
@@ -704,17 +1143,11 @@ export async function loadMaintainDocuments() {
         const cycle = urlParams.get('cycle');
         const docName = urlParams.get('doc_name');
         
-        if (cycle && docName) {
-            appState.currentCycle = cycle;
-            appState.currentDocument = docName;
-            await loadMaintainDocumentsList(cycle, docName);
-        } else {
-            // 没有找到周期和文档名称，显示提示
-            const documentsList = document.getElementById('documentsList');
-            if (documentsList) {
-                documentsList.innerHTML = '<p class="placeholder">请先选择一个文档类型，然后点击编辑按钮打开此页面</p>';
-            }
-        }
+        // 无论是否有cycle和docName，都尝试加载文档列表
+    // 当没有cycle和docName时，loadMaintainDocumentsList会尝试加载所有文档
+    appState.currentCycle = cycle;
+    appState.currentDocument = docName;
+    await loadMaintainDocumentsList(cycle, docName);
     }
 }
 
@@ -728,8 +1161,16 @@ export async function loadMaintainDocumentsList(cycle, docName) {
         // 尝试从API获取文档列表
         let documents = [];
         try {
-            if (cycle && docName && appState.currentProjectId) {
-                const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}&doc_name=${encodeURIComponent(docName)}&project_id=${encodeURIComponent(appState.currentProjectId)}`);
+            if (appState.currentProjectId) {
+                let apiUrl = `/api/documents/list?project_id=${encodeURIComponent(appState.currentProjectId)}`;
+                if (cycle) {
+                    apiUrl += `&cycle=${encodeURIComponent(cycle)}`;
+                }
+                if (docName) {
+                    apiUrl += `&doc_name=${encodeURIComponent(docName)}`;
+                }
+                
+                const response = await fetch(apiUrl);
                 const result = await response.json();
                 
                 console.log('API响应:', result);
@@ -738,26 +1179,33 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                     documents = result.data || [];
                 }
             } else {
-                console.log('缺少必要参数，尝试从本地配置获取');
+                console.log('缺少项目ID，尝试从本地配置获取');
             }
         } catch (apiError) {
             console.error('API获取文档失败:', apiError);
         }
         
         // 如果API没有返回文档，尝试从本地项目配置中获取
-        if (documents.length === 0 && appState.projectConfig) {
+        if (documents.length === 0 && appState.projectConfig && appState.projectConfig.documents) {
             console.log('从本地项目配置中获取文档');
-            if (cycle && docName) {
-                const cycleInfo = appState.projectConfig.documents?.[cycle];
-                if (cycleInfo && cycleInfo.uploaded_docs) {
-                    documents = cycleInfo.uploaded_docs.filter(doc => doc.doc_name === docName);
-                    console.log('从本地配置获取的文档:', documents);
+            
+            // 遍历所有周期和文档
+            for (const [cycleKey, cycleInfo] of Object.entries(appState.projectConfig.documents)) {
+                if (cycleInfo.uploaded_docs) {
+                    for (const doc of cycleInfo.uploaded_docs) {
+                        // 如果指定了周期和文档名称，只添加匹配的文档
+                        // 更灵活的匹配逻辑，处理不同的字段名称
+                        const docCycle = doc.cycle || doc.cycle_key || cycleKey;
+                        const docDocName = doc.doc_name || doc.name || doc.docName;
+                        
+                        if ((!cycle || docCycle === cycle) && (!docName || docDocName === docName)) {
+                            documents.push(doc);
+                        }
+                    }
                 }
-            } else {
-                // 不获取所有文档，只显示空状态
-                documents = [];
-                console.log('缺少cycle或docName，显示空状态');
             }
+            
+            console.log('从本地配置获取的文档:', documents);
         }
         
         const documentsList = document.getElementById('documentsList');
@@ -780,11 +1228,11 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                         <button class="btn btn-sm btn-warning" onclick="deselectAllMaintainDocuments()">反选</button>
                     </div>
                     ${documents.map(doc => {
-                        const docId = doc.id || doc.doc_id || `${doc.cycle || cycle}_${doc.doc_name || docName}_${doc.upload_time || doc.filename}`;
+                        const docId = doc.id || doc.doc_id || `${doc.cycle || doc.cycle_key || 'unknown'}_${doc.doc_name || doc.name || 'unknown'}_${doc.upload_time || doc.filename || Date.now()}`;
                         return `
                             <div class="document-item">
                                 <input type="checkbox" class="document-checkbox" data-doc-id="${docId}">
-                                <span class="document-name" onclick="previewDocument('${docId}')">${doc.original_filename || doc.filename}</span>
+                                <span class="document-name" onclick="previewDocument('${docId}')">${doc.original_filename || doc.filename || '未知文件名'}</span>
                                 <div class="document-actions">
                                     <button class="btn btn-sm btn-success" onclick="openEditModal('${docId}')">编辑</button>
                                     <button class="btn btn-sm btn-danger" onclick="handleDeleteDocument('${docId}')">删除</button>
@@ -837,11 +1285,40 @@ export async function loadUploadedDocuments(cycle, docName) {
     return loadMaintainDocumentsList(cycle, docName);
 }
 
+/**
+ * 尝试使用本地预览文档
+ */
+export function tryLocalPreview(docId, localPreviewUrl) {
+    // 创建新的预览内容
+    const previewContent = `
+        <div class="preview-local">
+            <div class="preview-header">
+                <h3>本地预览</h3>
+                <button class="close-btn" onclick="document.getElementById('previewModal').style.display='none'">×</button>
+            </div>
+            <div class="preview-body">
+                <iframe src="${localPreviewUrl}" class="preview-iframe" frameborder="0" onload="handleIframeLoad(this)" onerror="handlePreviewError(this)"></iframe>
+            </div>
+        </div>
+    `;
+    
+    // 更新模态框内容
+    const modal = document.getElementById('previewModal');
+    if (modal) {
+        modal.innerHTML = previewContent;
+    }
+}
+
 // 将函数暴露到全局范围
 if (typeof window !== 'undefined') {
     window.selectAllMaintainDocuments = selectAllMaintainDocuments;
     window.deselectAllMaintainDocuments = deselectAllMaintainDocuments;
     window.loadUploadedDocuments = loadUploadedDocuments;
+    window.handlePreviewError = handlePreviewError;
+    window.handleIframeLoad = handleIframeLoad;
+    window.handleDownloadClick = handleDownloadClick;
+    window.confirmDeleteDocument = confirmDeleteDocument;
+    window.tryLocalPreview = tryLocalPreview;
 }
 
 /**

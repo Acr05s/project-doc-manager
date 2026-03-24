@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime
 from app.utils.document_manager import DocumentManager
 from app.utils.zip_matcher import create_matcher
+from src.services.preview_service import PreviewService
 
 document_bp = Blueprint('document', __name__)
 doc_manager = None
@@ -62,6 +63,61 @@ def upload_document():
             project_name=project_name
         )
         
+        # 上传成功后，将文档添加到documents_db中
+        if result.get('status') == 'success':
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            doc_id = f"{cycle}_{doc_name}_{timestamp}"
+            
+            # 构建文档元数据
+            doc_metadata = {
+                'cycle': cycle,
+                'doc_name': doc_name,
+                'filename': result.get('saved_filename'),
+                'original_filename': result.get('original_filename'),
+                'file_path': result.get('path'),
+                'project_name': project_name,
+                'doc_date': doc_date or '',
+                'sign_date': sign_date or '',
+                'signer': signer or '',
+                'no_signature': no_signature,
+                'has_seal_marked': has_seal,
+                'party_a_seal': party_a_seal,
+                'party_b_seal': party_b_seal,
+                'no_seal': no_seal,
+                'other_seal': other_seal or '',
+                'upload_time': result.get('upload_time'),
+                'source': 'upload',
+                'file_size': result.get('size'),
+                'doc_id': doc_id
+            }
+            
+            # 添加到documents_db
+            doc_manager.documents_db[doc_id] = doc_metadata
+            
+            # 添加doc_id到结果中
+            result['doc_id'] = doc_id
+            
+            # 保存到项目配置中，记录文件路径
+            if project_id:
+                project_result = doc_manager.load_project(project_id)
+                if project_result.get('status') == 'success':
+                    project_config = project_result.get('project')
+                    if project_config:
+                        # 确保文档结构存在
+                        if 'documents' not in project_config:
+                            project_config['documents'] = {}
+                        if cycle not in project_config['documents']:
+                            project_config['documents'][cycle] = {'uploaded_docs': []}
+                        if 'uploaded_docs' not in project_config['documents'][cycle]:
+                            project_config['documents'][cycle]['uploaded_docs'] = []
+                        
+                        # 添加文档到项目配置
+                        project_config['documents'][cycle]['uploaded_docs'].append(doc_metadata)
+                        
+                        # 保存更新后的项目配置
+                        doc_manager.save_project(project_config)
+        
         return jsonify(result)
     
     except Exception as e:
@@ -76,7 +132,7 @@ def list_documents():
         project_id = request.args.get('project_id')
         
         # 首先尝试从内存中获取文档
-        docs = doc_manager.get_documents(cycle, doc_name)
+        docs = doc_manager.get_documents(cycle, doc_name, project_id)
         
         # 如果内存中没有文档，尝试从项目配置中加载
         if not docs and project_id:
@@ -93,11 +149,13 @@ def list_documents():
                         # 检查是否有已上传的文档
                         if 'uploaded_docs' in cycle_info:
                             for doc in cycle_info['uploaded_docs']:
+                                # 更灵活的文档名称匹配
+                                doc_doc_name = doc.get('doc_name') or doc.get('name') or doc.get('docName')
                                 # 过滤文档名称
-                                if doc_name and doc.get('doc_name') != doc_name:
+                                if doc_name and doc_doc_name != doc_name:
                                     continue
                                 # 确保文档有 ID
-                                doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc.get('doc_name')}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
+                                doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc_doc_name}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
                                 # 添加到结果列表
                                 docs.append({
                                     'id': doc_id,
@@ -159,6 +217,28 @@ def get_document(doc_id):
                                             'data': doc
                                         })
             
+            # 尝试从项目文件中查找
+            import json
+            from pathlib import Path
+            projects_dir = doc_manager.config.projects_base_folder
+            for project_file in projects_dir.glob('*.json'):
+                try:
+                    with open(project_file, 'r', encoding='utf-8') as f:
+                        project_data = json.load(f)
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for doc in cycle_info['uploaded_docs']:
+                                    if doc.get('doc_id') == doc_id:
+                                        # 将找到的文档信息添加到 documents_db
+                                        doc_manager.documents_db[doc_id] = doc
+                                        return jsonify({
+                                            'status': 'success',
+                                            'data': doc
+                                        })
+                except Exception as e:
+                    pass
+            
             return jsonify({'status': 'error', 'message': '文档不存在'}), 404
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -176,6 +256,97 @@ def preview_document(doc_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
 
+@document_bp.route('/preview-local/<doc_id>', methods=['GET'])
+def preview_document_local(doc_id):
+    """本地预览文档（使用Python库转换）"""
+    try:
+        import urllib.parse
+        doc_id = urllib.parse.unquote(doc_id)
+        
+        # 获取分页参数
+        page = request.args.get('page', 0, type=int)
+        
+        # 首先从 documents_db 中查找
+        if doc_id in doc_manager.documents_db:
+            metadata = doc_manager.documents_db[doc_id]
+        else:
+            # 尝试从项目配置中查找
+            doc = None
+            if hasattr(doc_manager, 'projects') and doc_manager.projects:
+                for project_id, project_data in doc_manager.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for d in cycle_info['uploaded_docs']:
+                                    if d.get('doc_id') == doc_id:
+                                        doc = d
+                                        break
+                                if doc:
+                                    break
+                        if doc:
+                            break
+            
+            # 尝试从项目文件中查找
+            if not doc:
+                import json
+                projects_dir = doc_manager.config.projects_base_folder
+                for project_file in projects_dir.glob('*.json'):
+                    try:
+                        with open(project_file, 'r', encoding='utf-8') as f:
+                            project_data = json.load(f)
+                        if 'documents' in project_data:
+                            for cycle, cycle_info in project_data['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    for d in cycle_info['uploaded_docs']:
+                                        if d.get('doc_id') == doc_id:
+                                            doc = d
+                                            break
+                                    if doc:
+                                        break
+                            if doc:
+                                break
+                    except Exception as e:
+                        pass
+            
+            if not doc:
+                return jsonify({'status': 'error', 'message': '文档不存在'}), 404
+            
+            metadata = doc
+        
+        file_path = metadata.get('file_path')
+        
+        # 处理相对路径
+        file_path_obj = Path(file_path)
+        if not file_path_obj.is_absolute():
+            # 相对路径，相对于项目的uploads目录
+            project_name = metadata.get('project_name')
+            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                project_name = doc_manager.current_project.get('name')
+            
+            if project_name:
+                project_uploads_dir = doc_manager.get_documents_folder(project_name)
+                file_path_obj = project_uploads_dir / file_path
+            else:
+                # 如果没有项目名称，尝试使用绝对路径
+                # 检查文件是否存在于uploads目录中
+                if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+                    upload_folder = doc_manager.config.upload_folder
+                else:
+                    upload_folder = Path('uploads')
+                file_path_obj = upload_folder / file_path
+        
+        if not file_path or not file_path_obj.exists():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        # 使用PreviewService生成预览
+        preview_service = PreviewService()
+        html_content = preview_service.get_full_preview(str(file_path_obj), page)
+        
+        return html_content
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
+
 @document_bp.route('/view/<doc_id>', methods=['GET'])
 def view_document(doc_id):
     """直接查看文档（用于PDF、图片等可直接在浏览器显示的文件）"""
@@ -183,16 +354,82 @@ def view_document(doc_id):
         import urllib.parse
         doc_id = urllib.parse.unquote(doc_id)
         
+        # 首先从 documents_db 中查找
         if doc_id not in doc_manager.documents_db:
-            return "文档不存在", 404
+            # 尝试从项目配置中查找
+            doc = None
+            if hasattr(doc_manager, 'projects') and doc_manager.projects:
+                for project_id, project_data in doc_manager.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for d in cycle_info['uploaded_docs']:
+                                    if d.get('doc_id') == doc_id:
+                                        doc = d
+                                        break
+                                if doc:
+                                    break
+                        if doc:
+                            break
+            
+            # 尝试从项目文件中查找
+            if not doc:
+                import json
+                projects_dir = doc_manager.config.projects_base_folder
+                for project_file in projects_dir.glob('*.json'):
+                    try:
+                        with open(project_file, 'r', encoding='utf-8') as f:
+                            project_data = json.load(f)
+                        if 'documents' in project_data:
+                            for cycle, cycle_info in project_data['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    for d in cycle_info['uploaded_docs']:
+                                        if d.get('doc_id') == doc_id:
+                                            doc = d
+                                            break
+                                    if doc:
+                                        break
+                            if doc:
+                                break
+                    except Exception as e:
+                        pass
+            
+            if not doc:
+                return jsonify({'status': 'error', 'message': '文档不存在'}), 404
+            
+            # 将找到的文档信息添加到 documents_db
+            doc_manager.documents_db[doc_id] = doc
+            metadata = doc
+        else:
+            metadata = doc_manager.documents_db[doc_id]
         
-        metadata = doc_manager.documents_db[doc_id]
         file_path = metadata.get('file_path')
         
-        if not file_path or not Path(file_path).exists():
-            return "文件不存在", 404
+        # 处理相对路径
+        file_path_obj = Path(file_path)
+        if not file_path_obj.is_absolute():
+            # 相对路径，相对于项目的uploads目录
+            project_name = metadata.get('project_name')
+            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                project_name = doc_manager.current_project.get('name')
+            
+            if project_name:
+                project_uploads_dir = doc_manager.get_documents_folder(project_name)
+                file_path_obj = project_uploads_dir / file_path
+            else:
+                # 如果没有项目名称，尝试使用绝对路径
+                # 检查文件是否存在于uploads目录中
+                if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+                    upload_folder = doc_manager.config.upload_folder
+                else:
+                    upload_folder = Path('uploads')
+                file_path_obj = upload_folder / file_path
         
-        file_ext = Path(file_path).suffix.lower()
+        if not file_path or not file_path_obj.exists():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        file_ext = file_path_obj.suffix.lower()
+        file_path = str(file_path_obj)
         
         mime_types = {
             '.pdf': 'application/pdf',
@@ -208,7 +445,7 @@ def view_document(doc_id):
         
         return send_file(file_path, mimetype=content_type)
     except Exception as e:
-        return f"查看失败: {str(e)}", 500
+        return jsonify({'status': 'error', 'message': f'查看失败: {str(e)}'}), 500
 
 @document_bp.route('/download/<doc_id>', methods=['GET'])
 def download_document(doc_id):
@@ -217,15 +454,82 @@ def download_document(doc_id):
         import urllib.parse
         doc_id = urllib.parse.unquote(doc_id)
         
+        # 首先从 documents_db 中查找
         if doc_id not in doc_manager.documents_db:
-            return "文档不存在", 404
+            # 尝试从项目配置中查找
+            doc = None
+            if hasattr(doc_manager, 'projects') and doc_manager.projects:
+                for project_id, project_data in doc_manager.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for d in cycle_info['uploaded_docs']:
+                                    if d.get('doc_id') == doc_id:
+                                        doc = d
+                                        break
+                                if doc:
+                                    break
+                        if doc:
+                            break
+            
+            # 尝试从项目文件中查找
+            if not doc:
+                import json
+                projects_dir = doc_manager.config.projects_base_folder
+                for project_file in projects_dir.glob('*.json'):
+                    try:
+                        with open(project_file, 'r', encoding='utf-8') as f:
+                            project_data = json.load(f)
+                        if 'documents' in project_data:
+                            for cycle, cycle_info in project_data['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    for d in cycle_info['uploaded_docs']:
+                                        if d.get('doc_id') == doc_id:
+                                            doc = d
+                                            break
+                                    if doc:
+                                        break
+                            if doc:
+                                break
+                    except Exception as e:
+                        pass
+            
+            if not doc:
+                return jsonify({'status': 'error', 'message': '文档不存在'}), 404
+            
+            # 将找到的文档信息添加到 documents_db
+            doc_manager.documents_db[doc_id] = doc
+            metadata = doc
+        else:
+            metadata = doc_manager.documents_db[doc_id]
         
-        metadata = doc_manager.documents_db[doc_id]
         file_path = metadata.get('file_path')
         filename = metadata.get('filename', 'document')
         
-        if not file_path or not Path(file_path).exists():
-            return "文件不存在", 404
+        # 处理相对路径
+        file_path_obj = Path(file_path)
+        if not file_path_obj.is_absolute():
+            # 相对路径，相对于项目的uploads目录
+            project_name = metadata.get('project_name')
+            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                project_name = doc_manager.current_project.get('name')
+            
+            if project_name:
+                project_uploads_dir = doc_manager.get_documents_folder(project_name)
+                file_path_obj = project_uploads_dir / file_path
+            else:
+                # 如果没有项目名称，尝试使用绝对路径
+                # 检查文件是否存在于uploads目录中
+                if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+                    upload_folder = doc_manager.config.upload_folder
+                else:
+                    upload_folder = Path('uploads')
+                file_path_obj = upload_folder / file_path
+        
+        if not file_path or not file_path_obj.exists():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        file_path = str(file_path_obj)
         
         return send_file(
             file_path,
@@ -233,7 +537,7 @@ def download_document(doc_id):
             download_name=filename
         )
     except Exception as e:
-        return f"下载失败: {str(e)}", 500
+        return jsonify({'status': 'error', 'message': f'下载失败: {str(e)}'}), 500
 
 @document_bp.route('/progress', methods=['GET'])
 def get_cycle_progress():
@@ -516,6 +820,190 @@ def replace_doc(doc_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@document_bp.route('/directories', methods=['GET'])
+def get_directories():
+    """获取可用目录列表"""
+    try:
+        import os
+        from pathlib import Path
+        
+        project_id = request.args.get('project_id')
+        project_name = request.args.get('project_name')
+        
+        if not project_id or not project_name:
+            return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
+        
+        # 获取项目的文档目录
+        docs_folder = doc_manager.get_documents_folder(project_name)
+        temp_folder = docs_folder / 'temp'
+        
+        # 确保temp目录存在
+        temp_folder.mkdir(parents=True, exist_ok=True)
+        
+        # 扫描temp目录下的子目录
+        directories = []
+        if temp_folder.exists():
+            for item in temp_folder.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    directories.append({
+                        'id': str(item.relative_to(docs_folder)),
+                        'name': item.name
+                    })
+        
+        return jsonify({
+            'status': 'success',
+            'directories': directories
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@document_bp.route('/files/search', methods=['GET'])
+def search_files():
+    """搜索文件"""
+    try:
+        import os
+        from pathlib import Path
+        from datetime import datetime
+        
+        project_id = request.args.get('project_id')
+        project_name = request.args.get('project_name')
+        directory = request.args.get('directory')
+        keyword = request.args.get('keyword', '').strip().lower()
+        
+        if not project_id or not project_name:
+            return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
+        
+        # 获取项目的文档目录
+        docs_folder = doc_manager.get_documents_folder(project_name)
+        search_dir = docs_folder
+        
+        if directory:
+            search_dir = docs_folder / directory
+            # 安全检查：确保目录在docs_folder下
+            try:
+                search_dir.relative_to(docs_folder)
+            except ValueError:
+                return jsonify({'status': 'error', 'message': '非法目录'}), 400
+        
+        # 支持的文件类型
+        allowed_exts = {'.pdf', '.doc', '.docx', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
+        
+        # 搜索文件
+        files = []
+        if search_dir.exists():
+            for file_path in search_dir.rglob('*'):
+                if file_path.is_file() and file_path.suffix.lower() in allowed_exts:
+                    # 检查关键词
+                    if keyword and keyword not in file_path.name.lower():
+                        continue
+                    
+                    # 检查是否已被其他文档使用
+                    is_used = any(
+                        meta.get('file_path') == str(file_path) or 
+                        meta.get('original_filename') == file_path.name
+                        for meta in doc_manager.documents_db.values()
+                    )
+                    
+                    files.append({
+                        'id': str(file_path.relative_to(docs_folder)),
+                        'name': file_path.name,
+                        'path': str(file_path),
+                        'rel_path': str(file_path.relative_to(docs_folder)),
+                        'size': file_path.stat().st_size,
+                        'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
+                        'used': is_used
+                    })
+        
+        return jsonify({
+            'status': 'success',
+            'files': files,
+            'total': len(files)
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@document_bp.route('/files/select', methods=['POST'])
+def select_files():
+    """选择文件进行归档"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        project_name = data.get('project_name')
+        cycle = data.get('cycle')
+        doc_name = data.get('doc_name')
+        files = data.get('files', [])
+        
+        if not project_id or not project_name or not cycle or not doc_name:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        # 处理每个选中的文件
+        results = []
+        for file_info in files:
+            file_path = Path(file_info.get('path'))
+            if not file_path.exists():
+                results.append({
+                    'status': 'error',
+                    'file': file_info.get('name'),
+                    'message': '文件不存在'
+                })
+                continue
+            
+            # 构建文档元数据
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            doc_id = f"{cycle}_{doc_name}_{timestamp}_{len(results)}"
+            
+            doc_metadata = {
+                'cycle': cycle,
+                'doc_name': doc_name,
+                'filename': file_path.name,
+                'original_filename': file_path.name,
+                'file_path': str(file_path),
+                'project_name': project_name,
+                'upload_time': datetime.now().isoformat(),
+                'source': 'select',
+                'file_size': file_path.stat().st_size,
+                'doc_id': doc_id
+            }
+            
+            # 添加到documents_db
+            doc_manager.documents_db[doc_id] = doc_metadata
+            
+            # 保存到项目配置中
+            project_result = doc_manager.load_project(project_id)
+            if project_result.get('status') == 'success':
+                project_config = project_result.get('project')
+                if project_config:
+                    # 确保文档结构存在
+                    if 'documents' not in project_config:
+                        project_config['documents'] = {}
+                    if cycle not in project_config['documents']:
+                        project_config['documents'][cycle] = {'uploaded_docs': []}
+                    if 'uploaded_docs' not in project_config['documents'][cycle]:
+                        project_config['documents'][cycle]['uploaded_docs'] = []
+                    
+                    # 添加文档到项目配置
+                    project_config['documents'][cycle]['uploaded_docs'].append(doc_metadata)
+                    
+                    # 保存更新后的项目配置
+                    doc_manager.save_project(project_config)
+            
+            results.append({
+                'status': 'success',
+                'file': file_info.get('name'),
+                'doc_id': doc_id
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'results': results
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # ========== ZIP 大文件断点续传上传 ==========
 
 @document_bp.route('/zip-chunk-upload', methods=['POST'])
@@ -680,11 +1168,15 @@ def start_zip_match():
                     MATCH_TASKS[task_id]['progress'] = progress
                     MATCH_TASKS[task_id]['message'] = message
                 
+                # 获取项目名称
+                project_name = project_config.get('name') if project_config else None
+                
                 # 执行匹配
                 result = matcher.extract_and_match(
                     zip_path, 
                     project_config,
-                    progress_callback
+                    progress_callback,
+                    project_name=project_name
                 )
                 
                 # 保存更新后的项目配置
@@ -935,6 +1427,176 @@ def delete_zip_package():
                 })
 
         # 检查项目配置中的引用
+        if hasattr(doc_manager, 'projects') and doc_manager.projects:
+            for project_id, project_data in doc_manager.projects.projects_db.items():
+                if 'documents' in project_data:
+                    for cycle, cycle_info in project_data['documents'].items():
+                        if 'uploaded_docs' in cycle_info:
+                            for doc in cycle_info['uploaded_docs']:
+                                source_path = doc.get('source_path') or doc.get('original_path')
+                                if source_path and package_path in source_path:
+                                    referenced_docs.append({
+                                        'id': doc.get('doc_id'),
+                                        'doc_name': doc.get('doc_name'),
+                                        'cycle': cycle,
+                                        'filename': doc.get('filename')
+                                    })
+
+        if not confirm_delete and referenced_docs:
+            return jsonify({
+                'status': 'warning',
+                'message': f'该ZIP包中的文件被 {len(referenced_docs)} 个文档引用',
+                'referenced_docs': referenced_docs,
+                'need_confirm': True
+            })
+
+        # 删除目录
+        shutil.rmtree(package_dir)
+
+        return jsonify({
+            'status': 'success',
+            'message': 'ZIP包删除成功'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/directories', methods=['GET'])
+def list_directories():
+    """获取文件目录列表"""
+    try:
+        from pathlib import Path
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
+        
+        # 定义目录列表
+        directories = [
+            {"id": "temp", "name": "临时上传目录", "path": str(upload_folder / "temp")},
+            {"id": "temp_extract", "name": "解压文件目录", "path": str(upload_folder / "temp_extract")},
+            {"id": "projects", "name": "项目文件目录", "path": str(upload_folder / "projects")}
+        ]
+        
+        # 确保目录存在
+        for directory in directories:
+            dir_path = Path(directory["path"])
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        return jsonify({
+            "status": "success",
+            "data": directories
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/files/search-imported', methods=['GET'])
+def search_imported_files():
+    """搜索导入的文件"""
+    try:
+        from pathlib import Path
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
+        
+        keyword = request.args.get('keyword', '').strip().lower()
+        directory = request.args.get('directory', 'temp')
+        
+        # 确定搜索目录
+        search_dirs = {
+            'temp': upload_folder / 'temp',
+            'temp_extract': upload_folder / 'temp_extract',
+            'projects': upload_folder / 'projects'
+        }
+        
+        search_path = search_dirs.get(directory, upload_folder / 'temp')
+        if not search_path.exists():
+            search_path.mkdir(parents=True, exist_ok=True)
+        
+        # 支持的文档格式
+        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
+                        '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
+        
+        results = []
+        for file_path in sorted(search_path.rglob('*')):
+            if not file_path.is_file():
+                continue
+            if file_path.name.startswith('.'):
+                continue
+            if file_path.suffix.lower() not in ALLOWED_EXTS:
+                continue
+            # 关键词过滤（空关键词返回全部）
+            if keyword and keyword not in file_path.name.lower():
+                continue
+            
+            try:
+                rel_path = file_path.relative_to(upload_folder)
+            except ValueError:
+                rel_path = file_path.name
+            
+            # 检查该文件是否已被归档（通过 original_filename 匹配）
+            is_archived = any(
+                meta.get('original_filename') == file_path.name or
+                meta.get('source_path') == str(file_path)
+                for meta in doc_manager.documents_db.values()
+            )
+            
+            results.append({
+                'id': str(file_path),
+                'name': file_path.name,
+                'path': str(file_path),
+                'rel_path': str(rel_path),
+                'size': file_path.stat().st_size,
+                'ext': file_path.suffix.lower(),
+                'archived': is_archived
+            })
+            
+            if len(results) >= 300:
+                break
+        
+        return jsonify({
+            "status": "success",
+            "data": results,
+            "total": len(results)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/files/select-imported', methods=['POST'])
+def select_imported_files():
+    """选择导入的文件进行归档"""
+    try:
+        data = request.get_json()
+        files = data.get('files', [])
+        cycle = data.get('cycle')
+        doc_name = data.get('doc_name')
+        project_id = data.get('project_id')
+        project_name = data.get('project_name')
+        
+        if not files or not cycle or not doc_name:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        selected_files = []
+        for file_info in files:
+            file_path = Path(file_info.get('path'))
+            if not file_path.exists():
+                continue
+            
+            # 处理文件选择逻辑
+            # 这里可以根据需要实现具体的文件处理
+            selected_files.append({
+                'name': file_info.get('name'),
+                'path': str(file_path)
+            })
+        
+        return jsonify({
+            "status": "success",
+            "message": f"成功选择 {len(selected_files)} 个文件",
+            "data": selected_files
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
         if hasattr(doc_manager, 'projects') and doc_manager.projects:
             for project_id, project_data in doc_manager.projects.projects_db.items():
                 if 'documents' in project_data:

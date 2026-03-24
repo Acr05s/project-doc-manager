@@ -714,51 +714,12 @@ class DocumentManager:
         """
         result = []
         
-        # 首先从内存中的 documents_db 中获取文档
-        for doc_id, doc in self.documents_db.items():
-            # 过滤周期
-            if cycle and doc.get('cycle') != cycle:
-                continue
-            # 过滤文档名称
-            if doc_name and doc.get('doc_name') != doc_name:
-                continue
-            # 添加到结果列表
-            result.append({
-                'id': doc_id,
-                **doc
-            })
-        
-        # 如果内存中没有文档，尝试从项目配置中加载
-        if not result:
-            # 优先使用传入的 project_id
-            if project_id:
-                project_result = self.load_project(project_id)
-                if project_result.get('status') == 'success':
-                    project_config = project_result.get('project')
-                    if project_config and 'documents' in project_config:
-                        documents = project_config['documents']
-                        # 遍历所有周期
-                        for doc_cycle, cycle_info in documents.items():
-                            # 过滤周期
-                            if cycle and doc_cycle != cycle:
-                                continue
-                            # 检查是否有已上传的文档
-                            if 'uploaded_docs' in cycle_info:
-                                for doc in cycle_info['uploaded_docs']:
-                                    # 过滤文档名称
-                                    if doc_name and doc.get('doc_name') != doc_name:
-                                        continue
-                                    # 确保文档有 ID
-                                    doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc.get('doc_name')}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
-                                    # 添加到结果列表
-                                    result.append({
-                                        'id': doc_id,
-                                        **doc
-                                    })
-            # 如果没有传入 project_id，尝试从当前项目配置中加载
-            elif hasattr(self, 'current_project') and self.current_project:
-                project_config = self.current_project
-                if 'documents' in project_config:
+        # 直接从项目配置中加载文档，确保只返回指定项目的文档
+        if project_id:
+            project_result = self.load_project(project_id)
+            if project_result.get('status') == 'success':
+                project_config = project_result.get('project')
+                if project_config and 'documents' in project_config:
                     documents = project_config['documents']
                     # 遍历所有周期
                     for doc_cycle, cycle_info in documents.items():
@@ -798,22 +759,32 @@ class DocumentManager:
             else:
                 deleted = False
             
-            # 然后从项目配置中删除
+            # 然后从项目配置文件中删除
             if hasattr(self, 'projects') and self.projects:
-                for project_id, project_data in self.projects.projects_db.items():
-                    if 'documents' in project_data:
-                        for cycle, cycle_info in project_data['documents'].items():
-                            if 'uploaded_docs' in cycle_info:
-                                # 过滤掉要删除的文档
-                                original_length = len(cycle_info['uploaded_docs'])
-                                cycle_info['uploaded_docs'] = [
-                                    doc for doc in cycle_info['uploaded_docs']
-                                    if doc.get('doc_id') != doc_id
-                                ]
-                                if len(cycle_info['uploaded_docs']) != original_length:
-                                    deleted = True
-                                    # 保存更新后的项目配置
-                                    self.projects.save(project_id, project_data)
+                # 遍历所有项目文件
+                projects_dir = self.config.projects_base_folder
+                for project_file in projects_dir.glob('*.json'):
+                    try:
+                        import json
+                        with open(project_file, 'r', encoding='utf-8') as f:
+                            project_data = json.load(f)
+                        
+                        if 'documents' in project_data:
+                            for cycle, cycle_info in project_data['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    # 过滤掉要删除的文档
+                                    original_length = len(cycle_info['uploaded_docs'])
+                                    cycle_info['uploaded_docs'] = [
+                                        doc for doc in cycle_info['uploaded_docs']
+                                        if doc.get('doc_id') != doc_id
+                                    ]
+                                    if len(cycle_info['uploaded_docs']) != original_length:
+                                        deleted = True
+                                        # 保存更新后的项目配置
+                                        with open(project_file, 'w', encoding='utf-8') as f:
+                                            json.dump(project_data, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        logger.warning(f"处理项目文件 {project_file} 时出错: {e}")
             
             if deleted:
                 return {'status': 'success'}
@@ -877,10 +848,30 @@ class DocumentManager:
                 file_path = doc.get('file_path')
                 if file_path:
                     from pathlib import Path
-                    if not Path(file_path).exists():
+                    # 处理相对路径
+                    file_path_obj = Path(file_path)
+                    if not file_path_obj.is_absolute():
+                        # 相对路径，相对于项目的uploads目录
+                        project_name = doc.get('project_name')
+                        if not project_name and hasattr(self, 'current_project') and self.current_project:
+                            project_name = self.current_project.get('name')
+                        
+                        if project_name:
+                            project_uploads_dir = self.get_documents_folder(project_name)
+                            file_path_obj = project_uploads_dir / file_path
+                        else:
+                            # 如果没有项目名称，尝试使用绝对路径
+                            # 检查文件是否存在于uploads目录中
+                            if hasattr(self, 'config') and hasattr(self.config, 'upload_folder'):
+                                upload_folder = self.config.upload_folder
+                            else:
+                                upload_folder = Path('uploads')
+                            file_path_obj = upload_folder / file_path
+                    
+                    if not file_path_obj.exists():
                         return {'status': 'error', 'message': '文件不存在'}
                     from src.services.preview_service import PreviewService
-                    return PreviewService.get_document_preview(file_path)
+                    return PreviewService.get_document_preview(str(file_path_obj))
                 else:
                     return {'status': 'error', 'message': '文件路径不存在'}
             else:
@@ -1118,6 +1109,43 @@ class DocumentManager:
                 return {'status': 'error', 'message': '文档不存在'}
         except Exception as e:
             logger.error(f"替换文档失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    def extract_zipfile(self, zip_path: str, project_config: Dict) -> Dict:
+        """解压ZIP文件并自动匹配文档
+        
+        Args:
+            zip_path: ZIP文件路径
+            project_config: 项目配置
+            
+        Returns:
+            Dict: 解压和匹配结果
+        """
+        try:
+            from .zip_matcher import create_matcher
+            
+            # 创建匹配器
+            matcher = create_matcher({'upload_folder': 'uploads'})
+            
+            # 获取项目名称
+            project_name = project_config.get('name') if project_config else None
+            
+            # 执行匹配
+            result = matcher.extract_and_match(
+                zip_path, 
+                project_config,
+                project_name=project_name
+            )
+            
+            # 保存更新后的项目配置
+            if project_config and result.get('status') == 'success':
+                project_id = project_config.get('id')
+                if project_id and self.projects:
+                    self.projects.save(project_id, project_config)
+            
+            return result
+        except Exception as e:
+            logger.error(f"解压ZIP文件失败: {e}")
             return {'status': 'error', 'message': str(e)}
 
 
