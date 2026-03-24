@@ -708,9 +708,12 @@ async function loadProjectsList() {
     try {
         const response = await fetch('/api/projects/list');
         const result = await response.json();
-        
+
         // 检查响应格式，兼容不同的API返回格式
-        if (result.projects) {
+        if (Array.isArray(result)) {
+            // 直接返回数组的格式（如 Flask 直接返回 list）
+            renderProjectsList(result);
+        } else if (result.projects) {
             // 直接返回projects数组的格式
             renderProjectsList(result.projects);
         } else if (result.status === 'success' && result.data && result.data.projects) {
@@ -784,8 +787,19 @@ async function selectProject(projectId) {
             // 渲染周期
             renderCycles();
             
+            // 更新当前项目名显示
+            updateCurrentProjectName();
+            
             showProjectButtons();
             showNotification('已加载项目: ' + result.project.name, 'success');
+            
+            // 检查项目是否有数据
+            if (result.project.cycles && result.project.cycles.length > 0) {
+                console.log('项目已有周期数据:', result.project.cycles);
+            }
+            if (result.project.documents && Object.keys(result.project.documents).length > 0) {
+                console.log('项目已有文档数据:', result.project.documents);
+            }
         } else {
             showNotification('加载项目失败: ' + result.message, 'error');
         }
@@ -829,7 +843,10 @@ async function deleteProject(projectId) {
                     }
                     
                     // 刷新项目列表
-                    loadProjectsList();
+                loadProjectsList();
+                
+                // 更新当前项目名显示
+                updateCurrentProjectName();
                 } else {
                     showNotification('删除失败: ' + result.message, 'error');
                 }
@@ -941,6 +958,22 @@ function showInputModal(title, fields, onConfirm) {
  */
 function closeInputModal() {
     document.getElementById('inputModal').classList.remove('show');
+}
+
+/**
+ * 更新当前项目名显示
+ */
+function updateCurrentProjectName() {
+    const projectNameElement = document.getElementById('currentProjectName');
+    if (projectNameElement) {
+        if (appState.projectConfig) {
+            projectNameElement.textContent = `当前项目: ${appState.projectConfig.name}`;
+            projectNameElement.style.display = 'block';
+        } else {
+            projectNameElement.textContent = '';
+            projectNameElement.style.display = 'none';
+        }
+    }
 }
 
 /**
@@ -4734,12 +4767,10 @@ function resetImportPackageModal() {
  * 显示项目相关按钮
  */
 function showProjectButtons() {
-    const btns = ['loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
-                   'projectManageBtn', 'zipUploadBtn', 'generateReportBtn', 'checkComplianceBtn',
-                   'deleteProjectBtn', 'confirmAcceptanceBtn', 'downloadPackageBtn'];
-    btns.forEach(btnName => {
-        const btn = elements[btnName];
-        if (btn) btn.style.display = 'inline-block';
+    const menus = ['documentRequirementsMenu', 'documentManagementMenu', 'dataBackupMenu', 'acceptanceMenu'];
+    menus.forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'inline-block';
     });
 }
 
@@ -4747,12 +4778,10 @@ function showProjectButtons() {
  * 隐藏项目相关按钮
  */
 function hideProjectButtons() {
-    const btns = ['loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn', 'importPackageBtn',
-                   'projectManageBtn', 'zipUploadBtn', 'generateReportBtn', 'checkComplianceBtn',
-                   'deleteProjectBtn', 'confirmAcceptanceBtn', 'downloadPackageBtn'];
-    btns.forEach(btnName => {
-        const btn = elements[btnName];
-        if (btn) btn.style.display = 'none';
+    const menus = ['documentRequirementsMenu', 'documentManagementMenu', 'dataBackupMenu', 'acceptanceMenu'];
+    menus.forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'none';
     });
 }
 

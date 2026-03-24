@@ -7,7 +7,7 @@ import { appState, elements } from './app-state.js';
 import { setupEventListeners, initDocModalResizer, showProjectButtons, showNotification, toggleOperationLog, refreshOperationLog, closeConfirmModal, closeInputModal } from './ui.js';
 import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage } from './api.js';
 import { handleUploadDocument, handleFileSelect, handleEditDocument, handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments, renderCycleDocuments, previewDocument, openUploadModal, openEditModal, archiveDocument, unarchiveDocument } from './document.js';
-import { renderProjectsList, selectProject, handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, handleSaveProject, handlePackageProject, handleImportPackage, handleConfirmAcceptance, handleDownloadPackage, handleDeleteProject, handleAddCycle, handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, populateProjectManageSelects, populateDocSelect, resetImportPackageModal } from './project.js';
+import { renderProjectsList, selectProject, handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, handleSaveProject, handlePackageProject, handleImportPackage, handleConfirmAcceptance, handleDownloadPackage, handleDeleteProject, handleAddCycle, handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, populateProjectManageSelects, populateDocSelect, resetImportPackageModal, openProjectSelectModal, closeProjectSelectModal, handleOpenProject, handleSoftDeleteProject, handleRestoreProject, handlePermanentDeleteProject, toggleDeletedProjects, openNewProjectModal } from './project.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { handleZipArchive, handleZipUpload, handleImportMatchedFiles, handleConfirmPendingFiles, handleRejectPendingFiles, loadZipPackagesList, searchZipFilesInPackage, fixZipSelectionIssue } from './zip.js';
 import { handleGenerateReport, handleCheckCompliance, handleExportReport } from './report.js';
@@ -46,60 +46,23 @@ export async function initApp() {
     const projectId = urlParams.get('project');
     console.log('URL中的projectId:', projectId);
 
-    // 使用document.getElementById而不是elements缓存
-    const projectSelect = document.getElementById('projectSelect');
-
     if (projectId) {
-        // 等待项目列表加载完成后再检查
-        setTimeout(() => {
-            // 检查项目是否存在于列表中
-            const option = projectSelect ? projectSelect.querySelector(`option[value="${projectId}"]`) : null;
-
-            if (option) {
-                // 项目在列表中，直接选中
-                console.log('项目在列表中，选中它');
-                projectSelect.value = projectId;
-                selectProject(projectId);
-            } else {
-                // 项目不在列表中，尝试直接从服务器加载
-                console.log('项目不在列表中，尝试直接加载:', projectId);
-                try {
-                    fetch(`/api/projects/${projectId}`)
-                        .then(response => response.json())
-                        .then(result => {
-                            console.log('API响应:', result);
-                            if (result.status === 'success') {
-                                appState.currentProjectId = projectId;
-                                appState.projectConfig = result.project;
-
-                                // 更新下拉菜单
-                                if (projectSelect) {
-                                    const newOption = document.createElement('option');
-                                    newOption.value = projectId;
-                                    newOption.textContent = result.project.name + ' (已加载)';
-                                    projectSelect.appendChild(newOption);
-                                    projectSelect.value = projectId;
-                                }
-
-                                // 渲染周期
-                                renderCycles();
-
-                                showProjectButtons();
-                                showNotification('已自动加载项目: ' + result.project.name, 'success');
-                            } else {
-                                showNotification('无法加载项目: ' + result.message, 'error');
-                            }
-                        })
-                        .catch(error => {
-                            console.error('自动加载项目失败:', error);
-                            showNotification('自动加载项目失败', 'error');
-                        });
-                } catch (error) {
-                    console.error('自动加载项目失败:', error);
-                    showNotification('自动加载项目失败', 'error');
-                }
+        // 直接使用selectProject加载项目
+        setTimeout(async () => {
+            try {
+                await selectProject(projectId);
+            } catch (err) {
+                console.error('通过URL加载项目失败:', err);
+                showNotification('加载项目失败: ' + err.message, 'error');
+                // 加载失败，显示项目选择模态框
+                openProjectSelectModal();
             }
-        }, 100); // 等待100ms确保DOM更新完成
+        }, 300);
+    } else {
+        // 没有指定项目ID，显示项目选择模态框
+        setTimeout(() => {
+            openProjectSelectModal();
+        }, 200);
     }
 
     console.log('应用初始化完成');

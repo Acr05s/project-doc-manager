@@ -10,7 +10,9 @@ import { renderCycleDocuments } from './document.js';
  * 渲染项目周期列表
  */
 export function renderCycles() {
-    if (!appState.projectConfig || !appState.projectConfig.cycles) {
+    if (!elements.cycleNavList) return;
+    
+    if (!appState.projectConfig || !appState.projectConfig.cycles || appState.projectConfig.cycles.length === 0) {
         elements.cycleNavList.innerHTML = '<span class="placeholder">无可用周期</span>';
         return;
     }
@@ -177,7 +179,9 @@ export async function loadCycleProgresses(cycles, docsData) {
         </div>
     `;
 
-    elements.cycleNavList.innerHTML = html;
+    if (elements.cycleNavList) {
+        elements.cycleNavList.innerHTML = html;
+    }
 
     // 添加周期点击事件
     document.querySelectorAll('.cycle-nav-item').forEach(item => {
@@ -207,10 +211,18 @@ export function selectCycle(cycle) {
     appState.currentCycle = cycle;
 
     // 更新顶部导航UI
-    document.querySelectorAll('.cycle-nav-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    document.querySelector(`.cycle-nav-item[data-cycle="${cycle}"]`).classList.add('active');
+    const cycleNavItems = document.querySelectorAll('.cycle-nav-item');
+    if (cycleNavItems) {
+        cycleNavItems.forEach(item => {
+            if (item) {
+                item.classList.remove('active');
+            }
+        });
+    }
+    const cycleItem = document.querySelector(`.cycle-nav-item[data-cycle="${cycle}"]`);
+    if (cycleItem) {
+        cycleItem.classList.add('active');
+    }
 
     // 渲染该周期的文档
     renderCycleDocuments(cycle);
@@ -223,7 +235,7 @@ export function renderInitialContent() {
     if (!appState.projectConfig) return;
 
     const cycles = appState.projectConfig.cycles;
-    if (cycles.length > 0) {
+    if (cycles && cycles.length > 0) {
         selectCycle(cycles[0]);
     }
 }

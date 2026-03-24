@@ -61,6 +61,9 @@ export async function searchZipFilesInPackage(keyword, packagePath) {
                 document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
                     checkbox.addEventListener('change', handleZipFileSelect);
                 });
+                
+                // 恢复已选中状态
+                fixZipSelectionIssue();
             }
         }
     } catch (error) {
@@ -138,28 +141,46 @@ export async function handleZipArchive() {
     
     showLoading(true);
     try {
-        const response = await fetch('/api/documents/archive-from-zip', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project_id: appState.currentProjectId,
-                cycle: appState.currentCycle,
-                package_path: appState.currentZipPackagePath,
-                files: appState.zipSelectedFiles
-            })
-        });
+        // 对每个选中的文件进行归档
+        let successCount = 0;
+        let errorCount = 0;
         
-        const result = await response.json();
+        for (const file of appState.zipSelectedFiles) {
+            try {
+                const response = await fetch('/api/documents/archive-from-zip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: appState.currentProjectId,
+                        cycle: appState.currentCycle,
+                        source_path: file.path,
+                        doc_name: appState.currentDocument
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    successCount++;
+                } else {
+                    errorCount++;
+                }
+            } catch (error) {
+                console.error('归档文件失败:', file.name, error);
+                errorCount++;
+            }
+        }
         
-        if (result.status === 'success') {
-            showNotification('文件归档成功', 'success');
+        if (successCount > 0) {
+            showNotification(`成功归档 ${successCount} 个文件`, 'success');
             // 清空选中状态
             appState.zipSelectedFiles = [];
             updateZipSelectedInfo();
             // 刷新文档列表
             await renderCycleDocuments(appState.currentCycle);
-        } else {
-            showNotification('归档失败: ' + result.message, 'error');
+        }
+        
+        if (errorCount > 0) {
+            showNotification(`有 ${errorCount} 个文件归档失败`, 'error');
         }
     } catch (error) {
         console.error('归档ZIP文件失败:', error);
@@ -169,46 +190,234 @@ export async function handleZipArchive() {
     }
 }
 
+// 分片上传配置
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+
+// 存储当前上传的文件路径，供后台匹配使用
+let currentUploadZipPath = null;
+
 /**
- * 处理ZIP上传
+ * 处理ZIP上传（支持断点续传）
  */
 export async function handleZipUpload(e) {
     e.preventDefault();
     
-    const file = document.getElementById('zipFileInput').files[0];
+    const fileInput = document.getElementById('zipFileInput');
+    const file = fileInput.files[0];
     if (!file) {
         showNotification('请选择ZIP文件', 'error');
         return;
     }
     
-    const formData = new FormData();
-    formData.append('file', file);
+    // 获取DOM元素
+    const uploadProgressSection = document.getElementById('uploadProgressSection');
+    const uploadProgressBar = document.getElementById('uploadProgressBar');
+    const uploadProgressText = document.getElementById('uploadProgressText');
+    const uploadProgressPercent = document.getElementById('uploadProgressPercent');
+    const startMatchSection = document.getElementById('startMatchSection');
+    const uploadSubmitBtn = document.getElementById('uploadSubmitBtn');
+    const startBackgroundMatchBtn = document.getElementById('startBackgroundMatchBtn');
     
-    showLoading(true);
+    // 显示进度条区域，隐藏提交按钮
+    uploadProgressSection.style.display = 'block';
+    uploadSubmitBtn.style.display = 'none';
+    startMatchSection.style.display = 'none';
+    
     try {
-        const response = await fetch('/api/documents/upload-zip', {
+        // 生成分片ID
+        const fileId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        const filename = file.name;
+        
+        // 检查已上传的分片
+        const checkResponse = await fetch(
+            `/api/documents/zip-check-chunk?filename=${encodeURIComponent(filename)}&fileId=${fileId}`
+        );
+        const checkResult = await checkResponse.json();
+        const uploadedChunks = checkResult.uploaded_chunks || [];
+        
+        // 计算分片数量
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        
+        // 更新进度：开始上传
+        uploadProgressText.textContent = '正在上传...';
+        uploadProgressBar.style.width = '0%';
+        uploadProgressPercent.textContent = '0%';
+        
+        // 上传缺失的分片
+        for (let i = 0; i < totalChunks; i++) {
+            if (uploadedChunks.includes(i)) {
+                continue; // 跳过已上传的分片
+            }
+            
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            const formData = new FormData();
+            formData.append('chunk', chunk);
+            formData.append('filename', filename);
+            formData.append('chunkIndex', i);
+            formData.append('totalChunks', totalChunks);
+            formData.append('fileId', fileId);
+            
+            const uploadProgress = Math.round((i / totalChunks) * 80);
+            uploadProgressBar.style.width = uploadProgress + '%';
+            uploadProgressPercent.textContent = uploadProgress + '%';
+            uploadProgressText.textContent = `正在上传分片 ${i + 1}/${totalChunks}...`;
+            
+            await fetch('/api/documents/zip-chunk-upload', {
+                method: 'POST',
+                body: formData
+            });
+        }
+        
+        // 所有分片上传完成，合并文件
+        uploadProgressText.textContent = '正在合并文件...';
+        uploadProgressBar.style.width = '90%';
+        uploadProgressPercent.textContent = '90%';
+        
+        const mergeResponse = await fetch('/api/documents/zip-chunk-merge', {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename, fileId })
         });
         
-        const result = await response.json();
+        const mergeResult = await mergeResponse.json();
         
-        if (result.status === 'success') {
-            showNotification('ZIP文件上传成功', 'success');
-            closeModal(elements.zipUploadModal);
-            document.getElementById('zipUploadForm').reset();
-            // 重新加载ZIP包列表
-            await loadZipPackagesList();
-        } else {
-            showNotification('上传失败: ' + result.message, 'error');
+        if (mergeResult.status !== 'success') {
+            throw new Error(mergeResult.message || '文件合并失败');
         }
+        
+        // 保存文件路径供后台匹配使用
+        currentUploadZipPath = mergeResult.file_path;
+        
+        // 上传完成，显示匹配按钮
+        uploadProgressBar.style.width = '100%';
+        uploadProgressPercent.textContent = '100%';
+        uploadProgressText.textContent = '上传完成！';
+        startMatchSection.style.display = 'block';
+        
     } catch (error) {
         console.error('上传ZIP文件失败:', error);
         showNotification('上传失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
+        uploadProgressSection.style.display = 'none';
+        uploadSubmitBtn.style.display = 'inline-block';
     }
 }
+
+/**
+ * 处理后台匹配（从模态框触发）
+ */
+export async function handleBackgroundMatch() {
+    if (!currentUploadZipPath) {
+        showNotification('没有可匹配的文件', 'error');
+        return;
+    }
+    
+    // 关闭上传模态框
+    closeModal(elements.zipUploadModal);
+    
+    // 重置表单
+    document.getElementById('zipUploadForm').reset();
+    document.getElementById('uploadProgressSection').style.display = 'none';
+    document.getElementById('startMatchSection').style.display = 'none';
+    document.getElementById('uploadSubmitBtn').style.display = 'inline-block';
+    
+    // 创建底部进度显示
+    const progressId = 'zip-match-' + Date.now();
+    const progress = showOperationProgress(progressId, '正在启动匹配任务...');
+    
+    try {
+        // 启动匹配任务
+        const matchResponse = await fetch('/api/documents/zip-match-start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                zip_path: currentUploadZipPath,
+                project_id: appState.currentProjectId
+            })
+        });
+        
+        const matchResult = await matchResponse.json();
+        
+        if (matchResult.status !== 'success') {
+            throw new Error(matchResult.message || '启动匹配任务失败');
+        }
+        
+        const taskId = matchResult.task_id;
+        
+        // 轮询任务进度
+        await pollMatchTask(taskId, progress);
+        
+    } catch (error) {
+        console.error('匹配失败:', error);
+        showNotification('匹配失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 轮询匹配任务进度
+ */
+async function pollMatchTask(taskId, progress) {
+    return new Promise((resolve, reject) => {
+        const pollInterval = setInterval(async () => {
+            try {
+                const response = await fetch(
+                    `/api/documents/zip-match-status?task_id=${taskId}`
+                );
+                const result = await response.json();
+                
+                if (result.status !== 'success') {
+                    clearInterval(pollInterval);
+                    reject(new Error(result.message || '查询任务状态失败'));
+                    return;
+                }
+                
+                const taskStatus = result.task_status;
+                const taskProgress = result.progress;
+                const message = result.message;
+                
+                // 更新底部进度
+                progress.update(taskProgress, message);
+                
+                if (taskStatus === 'completed') {
+                    clearInterval(pollInterval);
+                    progress.update(100, '匹配完成！');
+                    
+                    // 显示结果
+                    const matchResult = result.result;
+                    if (matchResult) {
+                        showNotification(
+                            `匹配完成！共 ${matchResult.total_files} 个文件，匹配成功 ${matchResult.matched_count} 个`,
+                            matchResult.matched_count > 0 ? 'success' : 'warning'
+                        );
+                        
+                        // 刷新文档列表
+                        if (appState.currentCycle) {
+                            await renderCycleDocuments(appState.currentCycle);
+                        }
+                    }
+                    
+                    // 关闭进度显示
+                    setTimeout(() => {
+                        progress.close();
+                    }, 3000);
+                    
+                    resolve();
+                } else if (taskStatus === 'failed') {
+                    clearInterval(pollInterval);
+                    progress.close();
+                    reject(new Error(result.message || '匹配任务失败'));
+                }
+                
+            } catch (error) {
+                console.error('查询任务状态失败:', error);
+            }
+        }, 1000);
+    });
+}
+        
+
 
 /**
  * 处理导入匹配文件
@@ -322,47 +531,20 @@ export async function handleRejectPendingFiles() {
 }
 
 /**
- * 修复ZIP文件选择问题，确保选中的文件能够正确保存和显示
+ * 恢复ZIP文件列表中已选中的状态（搜索刷新后重新应用勾选）
+ * 注意：ES Module 中 export 函数不可重新赋值，此函数仅做 DOM 状态恢复
  */
 export function fixZipSelectionIssue() {
-    // 确保zipSelectedFiles数组正确保存所有选中的文件
-    const originalSearchZipFiles = searchZipFilesInPackage;
-    searchZipFilesInPackage = async function(keyword, packagePath) {
-        // 调用原始函数
-        await originalSearchZipFiles(keyword, packagePath);
-        
-        // 重新应用选中状态
-        setTimeout(() => {
-            const zipFileItems = document.querySelectorAll('.zip-file-item');
-            zipFileItems.forEach(item => {
-                const filePath = item.dataset.path;
-                if (appState.zipSelectedFiles.some(f => f.path === filePath)) {
-                    item.classList.add('selected');
-                    const checkbox = item.querySelector('.zip-file-checkbox');
-                    if (checkbox) checkbox.checked = true;
-                }
-            });
-        }, 100);
-    };
-    
-    // 修复确认选择按钮的状态更新
-    const originalHandleZipArchive = handleZipArchive;
-    handleZipArchive = async function() {
-        // 确保所有选中的文件都被正确处理
-        const selectedCheckboxes = document.querySelectorAll('.zip-file-checkbox:checked');
-        const selectedFiles = Array.from(selectedCheckboxes).map(cb => {
-            const item = cb.closest('.zip-file-item');
-            return {
-                path: item.dataset.path,
-                name: item.dataset.name
-            };
-        });
-        
-        appState.zipSelectedFiles = selectedFiles;
-        
-        // 调用原始函数
-        await originalHandleZipArchive();
-    };
+    // 重新应用已选中文件的 DOM 状态
+    const zipFileItems = document.querySelectorAll('.zip-file-item');
+    zipFileItems.forEach(item => {
+        const filePath = item.dataset.path;
+        if (appState.zipSelectedFiles.some(f => f.path === filePath)) {
+            item.classList.add('selected');
+            const checkbox = item.querySelector('.zip-file-checkbox');
+            if (checkbox) checkbox.checked = true;
+        }
+    });
 }
 
 

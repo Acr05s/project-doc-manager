@@ -5,30 +5,110 @@
 import { appState, elements } from './app-state.js';
 import { 
     handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, 
-    handleSaveProject, handlePackageProject, handleImportPackage, 
+    handleSaveProject, handleClearRequirements, updateClearRequirementsBtnState,
+    handlePackageProject, handleImportPackage, 
     selectProject, populateProjectManageSelects, handleAddCycle, 
     handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, 
     populateDocSelect, handleConfirmAcceptance, handleDownloadPackage, 
-    handleDeleteProject, resetImportPackageModal
+    handleDeleteProject, resetImportPackageModal, loadZipRecords, handleRematchFromZip, handleDeleteZipRecord
 } from './project.js';
 import { 
     handleUploadDocument, handleFileSelect, handleEditDocument, 
     handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments
 } from './document.js';
 import { 
-    handleZipArchive, handleZipUpload, handleImportMatchedFiles, 
+    handleZipArchive, handleZipUpload, handleBackgroundMatch, handleImportMatchedFiles, 
     handleConfirmPendingFiles, handleRejectPendingFiles, loadZipPackagesList, 
     searchZipFilesInPackage
 } from './zip.js';
 import { 
     handleGenerateReport, handleCheckCompliance, handleExportReport
 } from './report.js';
+import { 
+    openConfigVersionModal, closeConfigVersionModal, 
+    openSaveVersionModal, closeSaveVersionModal, handleSaveVersion
+} from './version.js';
+import {
+    openTreeEditor, closeTreeEditor,
+    expandAll, collapseAll,
+    saveTreeConfig, saveTreeAsTemplate, loadTemplateToTree,
+    closeAttributePanel, saveAttributes
+} from './tree-editor.js';
+import { handleSaveTemplate } from './requirement-editor.js';
 
 /**
  * 设置事件监听器
  */
 export function setupEventListeners() {
     console.log('设置事件监听器...');
+
+    // 文档需求下拉菜单
+    const docReqBtn = document.getElementById('documentRequirementsBtn');
+    const docReqDropdown = document.getElementById('documentRequirementsDropdown');
+    if (docReqBtn && docReqDropdown) {
+        docReqBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            docReqDropdown.classList.toggle('show');
+        });
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!docReqBtn.contains(e.target) && !docReqDropdown.contains(e.target)) {
+                docReqDropdown.classList.remove('show');
+            }
+        });
+    }
+
+    // 文档管理下拉菜单
+    const docManageBtn = document.getElementById('documentManagementBtn');
+    const docManageDropdown = document.getElementById('documentManagementDropdown');
+    if (docManageBtn && docManageDropdown) {
+        docManageBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            docManageDropdown.classList.toggle('show');
+        });
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!docManageBtn.contains(e.target) && !docManageDropdown.contains(e.target)) {
+                docManageDropdown.classList.remove('show');
+            }
+        });
+    }
+
+    // 数据备份导入下拉菜单
+    const dataBackupBtn = document.getElementById('dataBackupBtn');
+    const dataBackupDropdown = document.getElementById('dataBackupDropdown');
+    if (dataBackupBtn && dataBackupDropdown) {
+        dataBackupBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dataBackupDropdown.classList.toggle('show');
+        });
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!dataBackupBtn.contains(e.target) && !dataBackupDropdown.contains(e.target)) {
+                dataBackupDropdown.classList.remove('show');
+            }
+        });
+    }
+
+    // 验收项目文件下拉菜单
+    const acceptanceBtn = document.getElementById('acceptanceBtn');
+    const acceptanceDropdown = document.getElementById('acceptanceDropdown');
+    if (acceptanceBtn && acceptanceDropdown) {
+        acceptanceBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            acceptanceDropdown.classList.toggle('show');
+        });
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!acceptanceBtn.contains(e.target) && !acceptanceDropdown.contains(e.target)) {
+                acceptanceDropdown.classList.remove('show');
+            }
+        });
+    }
 
     // 新建项目 - 使用document.getElementById确保获取到元素
     const newProjectBtn = document.getElementById('newProjectBtn');
@@ -52,7 +132,12 @@ export function setupEventListeners() {
     const loadProjectBtn = document.getElementById('loadProjectBtn');
     const loadProjectModal = document.getElementById('loadProjectModal');
     if (loadProjectBtn && loadProjectModal) {
-        loadProjectBtn.addEventListener('click', () => {
+        loadProjectBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docReqDropdown = document.getElementById('documentRequirementsDropdown');
+            if (docReqDropdown) docReqDropdown.classList.remove('show');
             openModal(loadProjectModal);
         });
     }
@@ -81,7 +166,14 @@ export function setupEventListeners() {
     // 导出JSON
     const exportJsonBtn = document.getElementById('exportJsonBtn');
     if (exportJsonBtn) {
-        exportJsonBtn.addEventListener('click', handleExportJson);
+        exportJsonBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docReqDropdown = document.getElementById('documentRequirementsDropdown');
+            if (docReqDropdown) docReqDropdown.classList.remove('show');
+            handleExportJson();
+        });
     }
 
     // 保存项目状态
@@ -90,17 +182,219 @@ export function setupEventListeners() {
         saveProjectBtn.addEventListener('click', handleSaveProject);
     }
 
+    // 删除当前需求
+    const clearRequirementsBtn = document.getElementById('clearRequirementsBtn');
+    if (clearRequirementsBtn) {
+        clearRequirementsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docReqDropdown = document.getElementById('documentRequirementsDropdown');
+            if (docReqDropdown) docReqDropdown.classList.remove('show');
+            handleClearRequirements();
+        });
+    }
+
+    // 编辑文档需求
+    const editRequirementsBtn = document.getElementById('editRequirementsBtn');
+    if (editRequirementsBtn) {
+        editRequirementsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docReqDropdown = document.getElementById('documentRequirementsDropdown');
+            if (docReqDropdown) docReqDropdown.classList.remove('show');
+            openTreeEditor();
+        });
+    }
+
+    // 配置版本管理
+    const manageVersionsBtn = document.getElementById('manageVersionsBtn');
+    if (manageVersionsBtn) {
+        manageVersionsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docReqDropdown = document.getElementById('documentRequirementsDropdown');
+            if (docReqDropdown) docReqDropdown.classList.remove('show');
+            openConfigVersionModal();
+        });
+    }
+
+    // 保存新版本按钮
+    const saveNewVersionBtn = document.getElementById('saveNewVersionBtn');
+    if (saveNewVersionBtn) {
+        saveNewVersionBtn.addEventListener('click', () => {
+            openSaveVersionModal();
+        });
+    }
+
+    // 保存新版本表单提交
+    const saveVersionForm = document.getElementById('saveVersionForm');
+    if (saveVersionForm) {
+        saveVersionForm.addEventListener('submit', handleSaveVersion);
+    }
+
+    // 配置版本管理模态框关闭按钮
+    const configVersionModal = document.getElementById('configVersionModal');
+    if (configVersionModal) {
+        const closeBtn = configVersionModal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeConfigVersionModal);
+        }
+    }
+
+    // 保存新版本模态框关闭按钮
+    const saveVersionModal = document.getElementById('saveVersionModal');
+    if (saveVersionModal) {
+        const closeBtn = saveVersionModal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeSaveVersionModal);
+        }
+    }
+
+    // ========== 树形编辑器事件绑定 ==========
+    
+    // 树形编辑器模态框关闭按钮
+    const treeEditorModal = document.getElementById('treeEditorModal');
+    if (treeEditorModal) {
+        const closeBtn = treeEditorModal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeTreeEditor);
+        }
+    }
+    
+    // 工具栏按钮
+    const toolbarAddCycle = document.getElementById('toolbarAddCycle');
+    if (toolbarAddCycle) {
+        toolbarAddCycle.addEventListener('click', () => window.addTreeNode('cycle'));
+    }
+    
+    const toolbarAddDoc = document.getElementById('toolbarAddDoc');
+    if (toolbarAddDoc) {
+        toolbarAddDoc.addEventListener('click', () => window.addTreeNode('document'));
+    }
+    
+    const toolbarAddFolder = document.getElementById('toolbarAddFolder');
+    if (toolbarAddFolder) {
+        toolbarAddFolder.addEventListener('click', () => window.addTreeNode('folder'));
+    }
+    
+    const toolbarEdit = document.getElementById('toolbarEdit');
+    if (toolbarEdit) {
+        toolbarEdit.addEventListener('click', () => {
+            if (!window._treeSelectedNode) {
+                showNotification('请先在下方树中选择要编辑的节点', 'info');
+                return;
+            }
+            window.editTreeNode(window._treeSelectedNode);
+        });
+    }
+    
+    const toolbarAttr = document.getElementById('toolbarAttr');
+    if (toolbarAttr) {
+        toolbarAttr.addEventListener('click', () => {
+            if (!window._treeSelectedNode) {
+                showNotification('请先选择一个文档节点', 'info');
+                return;
+            }
+            window.openAttributePanel(window._treeSelectedNode);
+        });
+    }
+    
+    const toolbarDelete = document.getElementById('toolbarDelete');
+    if (toolbarDelete) {
+        toolbarDelete.addEventListener('click', () => {
+            if (!window._treeSelectedNode) {
+                showNotification('请先在下方树中选择要删除的节点', 'info');
+                return;
+            }
+            window.deleteTreeNode(window._treeSelectedNode);
+        });
+    }
+    
+    const toolbarExpandAll = document.getElementById('toolbarExpandAll');
+    if (toolbarExpandAll) {
+        toolbarExpandAll.addEventListener('click', expandAll);
+    }
+    
+    const toolbarCollapseAll = document.getElementById('toolbarCollapseAll');
+    if (toolbarCollapseAll) {
+        toolbarCollapseAll.addEventListener('click', collapseAll);
+    }
+    
+    const toolbarSave = document.getElementById('toolbarSave');
+    if (toolbarSave) {
+        toolbarSave.addEventListener('click', saveTreeConfig);
+    }
+    
+    const toolbarSaveAsTemplate = document.getElementById('toolbarSaveAsTemplate');
+    if (toolbarSaveAsTemplate) {
+        toolbarSaveAsTemplate.addEventListener('click', saveTreeAsTemplate);
+    }
+    
+    const toolbarLoadTemplate = document.getElementById('toolbarLoadTemplate');
+    if (toolbarLoadTemplate) {
+        toolbarLoadTemplate.addEventListener('click', loadTemplateToTree);
+    }
+    
+    // 保存模板模态框
+    const saveTemplateModal = document.getElementById('saveTemplateModal');
+    if (saveTemplateModal) {
+        const closeBtn = saveTemplateModal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                closeModal(saveTemplateModal);
+            });
+        }
+    }
+    
+    // 保存模板表单提交
+    const saveTemplateForm = document.getElementById('saveTemplateForm');
+    if (saveTemplateForm) {
+        saveTemplateForm.addEventListener('submit', handleSaveTemplate);
+    }
+
+    // 属性面板 - 保存按钮
+    const saveAttributesBtn = document.getElementById('saveAttributesBtn');
+    if (saveAttributesBtn) {
+        saveAttributesBtn.addEventListener('click', saveAttributes);
+    }
+    
+    // 模板库模态框
+    const templateLibraryModal = document.getElementById('templateLibraryModal');
+    if (templateLibraryModal) {
+        const closeBtn = templateLibraryModal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                closeModal(templateLibraryModal);
+            });
+        }
+    }
+
     // 打包项目
     const packageProjectBtn = document.getElementById('packageProjectBtn');
     if (packageProjectBtn) {
-        packageProjectBtn.addEventListener('click', handlePackageProject);
+        packageProjectBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const dataBackupDropdown = document.getElementById('dataBackupDropdown');
+            if (dataBackupDropdown) dataBackupDropdown.classList.remove('show');
+            handlePackageProject();
+        });
     }
 
     // 导入包按钮
     const importPackageBtn = document.getElementById('importPackageBtn');
     const importPackageModal = document.getElementById('importPackageModal');
     if (importPackageBtn && importPackageModal) {
-        importPackageBtn.addEventListener('click', () => {
+        importPackageBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const dataBackupDropdown = document.getElementById('dataBackupDropdown');
+            if (dataBackupDropdown) dataBackupDropdown.classList.remove('show');
             resetImportPackageModal();
             openModal(importPackageModal);
         });
@@ -172,33 +466,73 @@ export function setupEventListeners() {
             // ZIP 包删除按钮
             const deleteZipBtn = document.getElementById('deleteZipPackageBtn');
             if (deleteZipBtn) {
-                deleteZipBtn.addEventListener('click', () => {
+                deleteZipBtn.addEventListener('click', async () => {
                     if (appState.currentZipPackagePath) {
-                        showConfirmModal(
-                            '确认删除',
-                            '确定要删除这个ZIP包吗？此操作不可恢复。',
-                            async () => {
-                                try {
-                                    const response = await fetch('/api/documents/delete-zip-package', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ package_path: appState.currentZipPackagePath })
-                                    });
-                                    const result = await response.json();
-                                    
-                                    if (result.status === 'success') {
-                                        showNotification('ZIP包删除成功', 'success');
-                                        // 重新加载ZIP包列表
-                                        loadZipPackagesList();
-                                    } else {
-                                        showNotification('删除失败: ' + result.message, 'error');
-                                    }
-                                } catch (error) {
-                                    console.error('删除ZIP包失败:', error);
-                                    showNotification('删除失败: ' + error.message, 'error');
+                        try {
+                            // 首先检查是否有引用
+                            const response = await fetch('/api/documents/delete-zip-package', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ package_path: appState.currentZipPackagePath })
+                            });
+                            const result = await response.json();
+                            
+                            if (result.status === 'warning') {
+                                // 有引用记录，显示确认对话框
+                                const references = result.referenced_docs;
+                                const totalReferences = result.total_references;
+                                
+                                let message = `该ZIP包中有 ${totalReferences} 个文件被文档引用。\n\n`;
+                                message += '引用的文档：\n';
+                                references.slice(0, 5).forEach(doc => {
+                                    message += `- ${doc.doc_name} (${doc.cycle})\n`;
+                                });
+                                if (references.length > 5) {
+                                    message += `... 还有 ${references.length - 5} 个引用`;
                                 }
+                                message += '\n\n删除ZIP包的同时会删除这些引用记录，确定要继续吗？';
+                                
+                                showConfirmModal(
+                                    '确认删除',
+                                    message,
+                                    async () => {
+                                        try {
+                                            // 确认删除
+                                            const confirmResponse = await fetch('/api/documents/delete-zip-package', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ 
+                                                    package_path: appState.currentZipPackagePath,
+                                                    confirm_delete: true 
+                                                })
+                                            });
+                                            const confirmResult = await confirmResponse.json();
+                                            
+                                            if (confirmResult.status === 'success') {
+                                                showNotification(`ZIP包删除成功，同时删除了 ${confirmResult.deleted_references} 个引用记录`, 'success');
+                                                // 重新加载ZIP包列表
+                                                loadZipPackagesList();
+                                            } else {
+                                                showNotification('删除失败: ' + confirmResult.message, 'error');
+                                            }
+                                        } catch (error) {
+                                            console.error('删除ZIP包失败:', error);
+                                            showNotification('删除失败: ' + error.message, 'error');
+                                        }
+                                    }
+                                );
+                            } else if (result.status === 'success') {
+                                // 没有引用，直接删除
+                                showNotification('ZIP包删除成功', 'success');
+                                // 重新加载ZIP包列表
+                                loadZipPackagesList();
+                            } else {
+                                showNotification('删除失败: ' + result.message, 'error');
                             }
-                        );
+                        } catch (error) {
+                            console.error('删除ZIP包失败:', error);
+                            showNotification('删除失败: ' + error.message, 'error');
+                        }
                     } else {
                         showNotification('请先选择一个ZIP包', 'warning');
                     }
@@ -264,7 +598,10 @@ export function setupEventListeners() {
 
 
     // 导入包表单
-    document.getElementById('importPackageForm').addEventListener('submit', handleImportPackage);
+    const importPackageForm = document.getElementById('importPackageForm');
+    if (importPackageForm) {
+        importPackageForm.addEventListener('submit', handleImportPackage);
+    }
 
     // 项目管理
     const projectManageBtn = document.getElementById('projectManageBtn');
@@ -318,16 +655,33 @@ export function setupEventListeners() {
     const zipUploadBtn = document.getElementById('zipUploadBtn');
     const zipUploadModal = document.getElementById('zipUploadModal');
     if (zipUploadBtn && zipUploadModal) {
-        zipUploadBtn.addEventListener('click', () => {
+        zipUploadBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docManageDropdown = document.getElementById('documentManagementDropdown');
+            if (docManageDropdown) docManageDropdown.classList.remove('show');
             openModal(zipUploadModal);
         });
     }
 
     // ZIP上传表单提交
-    document.getElementById('zipUploadForm').addEventListener('submit', handleZipUpload);
+    const zipUploadForm = document.getElementById('zipUploadForm');
+    if (zipUploadForm) {
+        zipUploadForm.addEventListener('submit', handleZipUpload);
+    }
+
+    // 后台匹配按钮
+    const startBackgroundMatchBtn = document.getElementById('startBackgroundMatchBtn');
+    if (startBackgroundMatchBtn) {
+        startBackgroundMatchBtn.addEventListener('click', handleBackgroundMatch);
+    }
 
     // 导入匹配文件按钮
-    document.getElementById('importMatchedBtn').addEventListener('click', handleImportMatchedFiles);
+    const importMatchedBtn = document.getElementById('importMatchedBtn');
+    if (importMatchedBtn) {
+        importMatchedBtn.addEventListener('click', handleImportMatchedFiles);
+    }
 
     // 确认待确认文件按钮
     const confirmPendingBtn = document.getElementById('confirmPendingBtn');
@@ -344,31 +698,53 @@ export function setupEventListeners() {
     // 生成报告
     const generateReportBtn = document.getElementById('generateReportBtn');
     if (generateReportBtn) {
-        generateReportBtn.addEventListener('click', handleGenerateReport);
+        generateReportBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const acceptanceDropdown = document.getElementById('acceptanceDropdown');
+            if (acceptanceDropdown) acceptanceDropdown.classList.remove('show');
+            handleGenerateReport();
+        });
     }
 
-    // 检查异常
-    const checkComplianceBtn = document.getElementById('checkComplianceBtn');
-    if (checkComplianceBtn) {
-        checkComplianceBtn.addEventListener('click', handleCheckCompliance);
-    }
+
 
     // 确认验收
     const confirmAcceptanceBtn = document.getElementById('confirmAcceptanceBtn');
     if (confirmAcceptanceBtn) {
-        confirmAcceptanceBtn.addEventListener('click', handleConfirmAcceptance);
+        confirmAcceptanceBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const acceptanceDropdown = document.getElementById('acceptanceDropdown');
+            if (acceptanceDropdown) acceptanceDropdown.classList.remove('show');
+            handleConfirmAcceptance();
+        });
     }
 
     // 打包下载
     const downloadPackageBtn = document.getElementById('downloadPackageBtn');
     if (downloadPackageBtn) {
-        downloadPackageBtn.addEventListener('click', handleDownloadPackage);
+        downloadPackageBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const acceptanceDropdown = document.getElementById('acceptanceDropdown');
+            if (acceptanceDropdown) acceptanceDropdown.classList.remove('show');
+            handleDownloadPackage();
+        });
     }
 
     // 删除项目
     const deleteProjectBtn = document.getElementById('deleteProjectBtn');
     if (deleteProjectBtn) {
-        deleteProjectBtn.addEventListener('click', () => {
+        deleteProjectBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docManageDropdown = document.getElementById('documentManagementDropdown');
+            if (docManageDropdown) docManageDropdown.classList.remove('show');
             if (appState.currentProjectId) {
                 handleDeleteProject();
             } else {
@@ -574,8 +950,13 @@ export function initLogResize() {
 
 /**
  * 显示确认弹窗
+ * @param {string} title - 弹窗标题
+ * @param {string} message - 弹窗内容（支持HTML）
+ * @param {Function} onConfirm - 确认回调
+ * @param {Function} onCancel - 取消回调
+ * @param {Object} options - 额外选项 { allowHtml: boolean, okText: string, cancelText: string }
  */
-export function showConfirmModal(title, message, onConfirm) {
+export function showConfirmModal(title, message, onConfirm, onCancel, options = {}) {
     const modal = document.getElementById('confirmModal');
     const titleEl = document.getElementById('confirmTitle');
     const messageEl = document.getElementById('confirmMessage');
@@ -583,7 +964,20 @@ export function showConfirmModal(title, message, onConfirm) {
     const okBtn = document.getElementById('confirmOkBtn');
     
     titleEl.textContent = title;
-    messageEl.textContent = message;
+    
+    // 支持HTML内容或纯文本
+    if (options.allowHtml) {
+        messageEl.innerHTML = message;
+    } else {
+        messageEl.textContent = message;
+    }
+    
+    // 自定义按钮文字
+    if (options.okText) okBtn.textContent = options.okText;
+    else okBtn.textContent = '确定';
+    
+    if (options.cancelText) cancelBtn.textContent = options.cancelText;
+    else cancelBtn.textContent = '取消';
     
     // 清除之前的绑定，避免重复绑定
     const newCancelBtn = cancelBtn.cloneNode(true);
@@ -594,6 +988,7 @@ export function showConfirmModal(title, message, onConfirm) {
     // 取消按钮
     newCancelBtn.addEventListener('click', () => {
         closeConfirmModal();
+        if (onCancel) onCancel();
     });
     
     // 确认按钮
@@ -694,10 +1089,12 @@ export function closeModal(modal) {
  * 显示加载指示器
  */
 export function showLoading(show = true) {
-    if (show) {
-        elements.loadingIndicator.classList.add('show');
-    } else {
-        elements.loadingIndicator.classList.remove('show');
+    if (elements.loadingIndicator) {
+        if (show) {
+            elements.loadingIndicator.classList.add('show');
+        } else {
+            elements.loadingIndicator.classList.remove('show');
+        }
     }
 }
 
@@ -705,13 +1102,19 @@ export function showLoading(show = true) {
  * 显示通知
  */
 export function showNotification(message, type = 'info') {
-    elements.notification.textContent = message;
-    elements.notification.className = `notification show ${type}`;
+    if (elements.notification) {
+        elements.notification.textContent = message;
+        elements.notification.className = `notification show ${type}`;
 
-    // 3秒后自动隐藏
-    setTimeout(() => {
-        elements.notification.classList.remove('show');
-    }, 3000);
+        // 3秒后自动隐藏
+        setTimeout(() => {
+            if (elements.notification) {
+                elements.notification.classList.remove('show');
+            }
+        }, 3000);
+    } else {
+        console.log('Notification element not found:', message);
+    }
 }
 
 /**
@@ -719,6 +1122,10 @@ export function showNotification(message, type = 'info') {
  */
 export function showOperationProgress(id, title) {
     const container = document.getElementById('operationProgress');
+    if (!container) {
+        console.warn('operationProgress 容器未找到');
+        return null;
+    }
     const progressEl = document.createElement('div');
     progressEl.id = `progress-${id}`;
     progressEl.className = 'operation-progress-item';
@@ -738,6 +1145,11 @@ export function showOperationProgress(id, title) {
             const textEl = progressEl.querySelector('.progress-text');
             if (bar) bar.style.width = percent + '%';
             if (textEl) textEl.textContent = text;
+        },
+        close: function() {
+            if (progressEl.parentNode) {
+                progressEl.parentNode.removeChild(progressEl);
+            }
         },
         complete: function(text) {
             const textEl = progressEl.querySelector('.progress-text');
@@ -857,15 +1269,14 @@ export function updateSelectedDocumentsList() {
  * 显示项目按钮
  */
 export function showProjectButtons() {
-    const buttons = [
-        'loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn',
-        'importPackageBtn', 'projectManageBtn', 'zipUploadBtn', 'generateReportBtn',
-        'confirmAcceptanceBtn', 'downloadPackageBtn', 'checkComplianceBtn', 'deleteProjectBtn'
+    const menus = [
+        'documentRequirementsMenu', 'documentManagementMenu', 
+        'dataBackupMenu', 'acceptanceMenu'
     ];
     
-    buttons.forEach(btnId => {
-        const btn = document.getElementById(btnId);
-        if (btn) btn.style.display = 'inline-block';
+    menus.forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'inline-block';
     });
 }
 
@@ -873,14 +1284,13 @@ export function showProjectButtons() {
  * 隐藏项目按钮
  */
 export function hideProjectButtons() {
-    const buttons = [
-        'loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn',
-        'importPackageBtn', 'projectManageBtn', 'zipUploadBtn', 'generateReportBtn',
-        'confirmAcceptanceBtn', 'downloadPackageBtn', 'checkComplianceBtn', 'deleteProjectBtn'
+    const menus = [
+        'documentRequirementsMenu', 'documentManagementMenu', 
+        'dataBackupMenu', 'acceptanceMenu'
     ];
     
-    buttons.forEach(btnId => {
-        const btn = document.getElementById(btnId);
-        if (btn) btn.style.display = 'none';
+    menus.forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'none';
     });
 }

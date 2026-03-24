@@ -2,6 +2,8 @@
  * API模块 - 处理所有API请求
  */
 
+import { appState } from './app-state.js';
+
 /**
  * 加载项目列表
  */
@@ -11,7 +13,10 @@ export async function loadProjectsList() {
         const result = await response.json();
         
         // 检查响应格式，兼容不同的API返回格式
-        if (result.projects) {
+        if (Array.isArray(result)) {
+            // 直接返回数组的格式（如 Flask 直接返回 list）
+            return result;
+        } else if (result.projects) {
             // 直接返回projects数组的格式
             return result.projects;
         } else if (result.status === 'success' && result.data && result.data.projects) {
@@ -56,11 +61,13 @@ export async function saveProject(projectId, projectData) {
             body: JSON.stringify(projectData)
         });
         
-        if (!response.ok) {
-            throw new Error('保存项目配置失败');
+        const result = await response.json();
+        
+        if (!response.ok || result.status === 'error') {
+            throw new Error(result.message || '保存项目配置失败');
         }
         
-        return true;
+        return result;
     } catch (error) {
         console.error('保存项目失败:', error);
         throw error;
@@ -68,11 +75,14 @@ export async function saveProject(projectId, projectData) {
 }
 
 /**
- * 删除项目
+ * 删除项目（软删除）
  */
-export async function deleteProject(projectId) {
+export async function deleteProject(projectId, permanent = false) {
     try {
-        const response = await fetch(`/api/projects/${projectId}`, {
+        const url = permanent 
+            ? `/api/projects/${projectId}/permanent-delete`
+            : `/api/projects/${projectId}`;
+        const response = await fetch(url, {
             method: 'DELETE'
         });
         
@@ -90,11 +100,51 @@ export async function deleteProject(projectId) {
 }
 
 /**
+ * 获取已删除项目列表
+ */
+export async function getDeletedProjects() {
+    try {
+        const response = await fetch('/api/projects/deleted/list');
+        const result = await response.json();
+        
+        if (Array.isArray(result)) {
+            return result;
+        }
+        return [];
+    } catch (error) {
+        console.error('获取已删除项目失败:', error);
+        return [];
+    }
+}
+
+/**
+ * 恢复已删除的项目
+ */
+export async function restoreProject(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/restore`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            return true;
+        } else {
+            throw new Error(result.message || '恢复项目失败');
+        }
+    } catch (error) {
+        console.error('恢复项目失败:', error);
+        throw error;
+    }
+}
+
+/**
  * 加载周期文档
  */
 export async function getCycleDocuments(cycle) {
     try {
-        const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}`);
+        const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}&project_id=${encodeURIComponent(appState.currentProjectId || '')}`);
         const result = await response.json();
         return result.data || [];
     } catch (e) {
@@ -108,7 +158,7 @@ export async function getCycleDocuments(cycle) {
  */
 export async function calculateCycleProgress(cycle) {
     try {
-        const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}`);
+        const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}&project_id=${encodeURIComponent(appState.currentProjectId || '')}`);
         const result = await response.json();
         return result;
     } catch (e) {
@@ -285,16 +335,49 @@ export async function loadProjectConfig(file) {
     try {
         const formData = new FormData();
         formData.append('file', file);
-        
-        const response = await fetch('/api/project/load', {
+
+        const response = await fetch('/api/projects/load', {
             method: 'POST',
             body: formData
         });
-        
+
         const result = await response.json();
         return result;
     } catch (error) {
         console.error('加载项目配置失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 将文档需求配置应用到项目
+ */
+export async function applyRequirementsToProject(projectId, requirementsId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/apply-requirements`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requirements_id: requirementsId })
+        });
+
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('应用需求配置失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 获取所有文档需求配置列表
+ */
+export async function listRequirementsConfigs() {
+    try {
+        const response = await fetch('/api/projects/requirements/list');
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('获取需求配置列表失败:', error);
         throw error;
     }
 }
@@ -325,7 +408,7 @@ export async function importJson(file) {
  */
 export async function exportJson(projectId) {
     try {
-        const response = await fetch(`/api/project/export-requirements?project_id=${encodeURIComponent(projectId)}`);
+        const response = await fetch(`/api/projects/export-requirements?project_id=${encodeURIComponent(projectId)}`);
         return response;
     } catch (error) {
         console.error('导出JSON失败:', error);
@@ -338,7 +421,7 @@ export async function exportJson(projectId) {
  */
 export async function confirmAcceptance(projectId) {
     try {
-        const response = await fetch(`/api/projects/${projectId}/acceptance`, {
+        const response = await fetch(`/api/projects/${projectId}/confirm-acceptance`, {
             method: 'POST'
         });
         
@@ -355,10 +438,38 @@ export async function confirmAcceptance(projectId) {
  */
 export async function downloadPackage(projectId) {
     try {
-        const response = await fetch(`/api/projects/${projectId}/download`);
+        const response = await fetch(`/api/projects/${projectId}/download-package`);
         return response;
     } catch (error) {
         console.error('下载项目包失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 加载历史导入文档
+ */
+export async function loadImportedDocuments() {
+    try {
+        const response = await fetch('/api/documents/list-imported');
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('加载历史导入文档失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 搜索历史导入文档
+ */
+export async function searchImportedDocuments(keyword) {
+    try {
+        const response = await fetch(`/api/documents/search-imported?keyword=${encodeURIComponent(keyword)}`);
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('搜索历史导入文档失败:', error);
         throw error;
     }
 }

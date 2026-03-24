@@ -29,21 +29,28 @@ def create_project():
         data = request.get_json()
         name = data.get('name')
         description = data.get('description', '')
+        party_a = data.get('party_a', '')
+        party_b = data.get('party_b', '')
+        supervisor = data.get('supervisor', '')
+        manager = data.get('manager', '')
+        duration = data.get('duration', '')
         
         if not name:
             return jsonify({'status': 'error', 'message': '项目名称不能为空'}), 400
         
-        result = doc_manager.create_project(name, description)
+        result = doc_manager.create_project(name, description, 
+                                          party_a=party_a, party_b=party_b,
+                                          supervisor=supervisor, manager=manager,
+                                          duration=duration)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @project_bp.route('/<project_id>', methods=['GET'])
 def get_project(project_id):
-    """获取项目详情（兼容新旧版）"""
+    """获取项目详情"""
     try:
-        # 尝试使用兼容方法加载
-        result = doc_manager.load_project_with_fallback(project_id=project_id, project_name=project_id)
+        result = doc_manager.load_project(project_id)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -53,19 +60,133 @@ def update_project(project_id):
     """更新项目（兼容新旧版）"""
     try:
         data = request.get_json()
-        # 使用兼容保存方法
-        result = doc_manager.save_project_with_fallback(project_id=project_id, 
-                                                        project_name=data.get('name', project_id),
-                                                        project_config=data)
+        # 保存项目配置
+        result = doc_manager.save_project(data)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/load', methods=['POST'])
+def load_project_config():
+    """加载项目配置（Excel/JSON文件解析）并保存为独立的requirements文件"""
+    try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'status': 'error', 'message': '未获取到文件'}), 400
+
+        # 保存临时文件
+        from pathlib import Path
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+
+        # 使用 RequirementsLoader 解析文件
+        from app.utils.requirements_loader import RequirementsLoader
+        loader = RequirementsLoader(doc_manager.config)
+        config = loader.load(tmp_path)
+
+        # 删除临时文件
+        Path(tmp_path).unlink(missing_ok=True)
+
+        if not config or not config.get('cycles'):
+            return jsonify({'status': 'error', 'message': '文件解析失败或格式不正确'}), 400
+
+        # 保存为独立的requirements文件
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[DEBUG] 调用 save_requirements_config, doc_manager 类型: {type(doc_manager)}")
+        logger.info(f"[DEBUG] doc_manager 是否有 save_requirements_config: {hasattr(doc_manager, 'save_requirements_config')}")
+        
+        result = doc_manager.save_requirements_config(config, file.filename)
+        
+        # 调试日志
+        logger.info(f"[DEBUG] save_requirements_config 返回结果: {result}")
+        logger.info(f"[DEBUG] result 类型: {type(result)}")
+        if result:
+            logger.info(f"[DEBUG] result.keys(): {result.keys() if isinstance(result, dict) else 'N/A'}")
+            logger.info(f"[DEBUG] requirements_id: {result.get('requirements_id')}")
+            logger.info(f"[DEBUG] name: {result.get('name')}")
+
+        return jsonify({
+            'status': 'success',
+            'data': config,
+            'requirements_id': result.get('requirements_id') if result else None,
+            'requirements_name': result.get('name') if result else None
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/apply-requirements', methods=['POST'])
+def apply_requirements_to_project_route(project_id):
+    """将文档需求配置应用到项目"""
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        data = request.get_json()
+        requirements_id = data.get('requirements_id')
+        
+        logger.info(f"[DEBUG] /apply-requirements 被调用: project_id={project_id}, requirements_id={requirements_id}")
+
+        if not requirements_id:
+            return jsonify({'status': 'error', 'message': '未指定需求配置ID'}), 400
+
+        result = doc_manager.apply_requirements_to_project(project_id, requirements_id)
+        
+        logger.info(f"[DEBUG] apply_requirements_to_project 返回: {result}")
+        return jsonify(result)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"[DEBUG] /apply-requirements 异常: {e}")
+        import traceback
+        logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/requirements/list', methods=['GET'])
+def list_requirements_configs():
+    """获取所有文档需求配置列表"""
+    try:
+        result = doc_manager.list_requirements_configs()
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @project_bp.route('/<project_id>', methods=['DELETE'])
 def delete_project(project_id):
-    """删除项目"""
+    """删除项目（软删除）"""
     try:
-        result = doc_manager.delete_project(project_id)
+        permanent = request.args.get('permanent', 'false').lower() == 'true'
+        result = doc_manager.delete_project(project_id, permanent)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/deleted/list', methods=['GET'])
+def list_deleted_projects():
+    """获取已删除项目列表"""
+    try:
+        result = doc_manager.get_deleted_projects()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/restore', methods=['POST'])
+def restore_project(project_id):
+    """恢复已删除的项目"""
+    try:
+        result = doc_manager.restore_project(project_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/permanent-delete', methods=['DELETE'])
+def permanent_delete_project(project_id):
+    """永久删除项目"""
+    try:
+        result = doc_manager.delete_project(project_id, permanent=True)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -97,6 +218,33 @@ def confirm_cycle_documents(project_id):
 
         result = doc_manager.confirm_cycle_documents(project_id, cycle_name)
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/export-requirements', methods=['GET'])
+def export_requirements():
+    """导出需求清单JSON"""
+    try:
+        project_id = request.args.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
+        
+        # 获取项目配置
+        project_result = doc_manager.load_project(project_id)
+        if project_result['status'] != 'success':
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project_config = project_result['project']
+        
+        # 导出为JSON
+        json_content = doc_manager.export_requirements_to_json(project_config)
+        
+        from flask import Response
+        return Response(
+            json_content,
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename=requirements_{project_id}.json'}
+        )
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -552,6 +700,160 @@ def get_external_logs():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+# ========== 配置版本管理API ==========
+
+@project_bp.route('/<project_id>/versions', methods=['GET'])
+def list_config_versions(project_id):
+    """获取配置版本列表"""
+    try:
+        result = doc_manager.list_versions(project_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/versions', methods=['POST'])
+def save_config_version(project_id):
+    """保存当前配置为新版本"""
+    try:
+        data = request.get_json()
+        version_name = data.get('version_name', '')
+        description = data.get('description', '')
+        
+        if not version_name:
+            return jsonify({'status': 'error', 'message': '版本名称不能为空'}), 400
+        
+        result = doc_manager.save_version(project_id, version_name, description)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/versions/<version_filename>', methods=['GET'])
+def load_config_version(project_id, version_filename):
+    """加载指定版本配置（预览，不切换）"""
+    try:
+        result = doc_manager.load_version(project_id, version_filename)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/versions/<version_filename>/switch', methods=['POST'])
+def switch_config_version(project_id, version_filename):
+    """切换到指定版本"""
+    try:
+        result = doc_manager.switch_version(project_id, version_filename)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/versions/<version_filename>', methods=['DELETE'])
+def delete_config_version(project_id, version_filename):
+    """删除指定版本"""
+    try:
+        result = doc_manager.delete_version(project_id, version_filename)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/versions/<version_filename>/export', methods=['GET'])
+def export_config_version(project_id, version_filename):
+    """导出指定版本配置"""
+    try:
+        result = doc_manager.export_version(project_id, version_filename)
+        if result['status'] != 'success':
+            return jsonify(result), 400
+        
+        from flask import Response
+        return Response(
+            result['json_content'],
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename="{result["filename"]}"'}
+        )
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ========== 需求模板管理API ==========
+
+@project_bp.route('/templates', methods=['GET'])
+def list_templates():
+    """获取模板列表"""
+    try:
+        result = doc_manager.list_templates()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/templates', methods=['POST'])
+def save_template():
+    """保存需求模板"""
+    try:
+        data = request.get_json()
+        template_name = data.get('template_name', '')
+        template_data = data.get('template_data', {})
+        description = data.get('description', '')
+        
+        if not template_name:
+            return jsonify({'status': 'error', 'message': '模板名称不能为空'}), 400
+        
+        if not template_data:
+            return jsonify({'status': 'error', 'message': '模板数据不能为空'}), 400
+        
+        result = doc_manager.save_template(template_name, template_data, description)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/templates/<template_id>', methods=['GET'])
+def load_template(template_id):
+    """加载指定模板"""
+    try:
+        result = doc_manager.load_template(template_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/templates/<template_id>', methods=['DELETE'])
+def delete_template(template_id):
+    """删除指定模板"""
+    try:
+        result = doc_manager.delete_template(template_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/<project_id>/apply-template/<template_id>', methods=['POST'])
+def apply_template_to_project(project_id, template_id):
+    """将模板应用到项目"""
+    try:
+        # 加载模板
+        template_result = doc_manager.load_template(template_id)
+        if template_result['status'] != 'success':
+            return jsonify(template_result), 400
+        
+        template = template_result['template']
+        
+        # 加载项目配置
+        config = doc_manager.load(project_id)
+        if not config:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        # 应用模板数据
+        config['cycles'] = template.get('cycles', [])
+        config['documents'] = template.get('documents', {})
+        config['updated_time'] = datetime.now().isoformat()
+        
+        # 保存配置
+        doc_manager.save(project_id, config)
+        
+        return jsonify({
+            'status': 'success',
+            'message': '模板应用成功',
+            'config': config
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 # ========== 新版文档清单模式API ==========
 
 @project_bp.route('/new/create', methods=['POST'])
@@ -677,5 +979,87 @@ def delete_new_project(project_name):
             'status': 'success',
             'message': f'项目 "{project_name}" 已删除'
         })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ========== 自动保存草稿 API ==========
+
+@project_bp.route('/<project_id>/draft', methods=['POST'])
+def save_draft(project_id):
+    """自动保存编辑器草稿"""
+    try:
+        data = request.get_json()
+        draft_key = f'tree_draft_{project_id}'
+        
+        # 保存草稿到项目目录下的 .draft.json
+        config = doc_manager.load_project(project_id)
+        if config.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project = config['project']
+        project_folder = doc_manager.projects_base_folder / project_id
+        draft_path = project_folder / '.draft.json'
+        
+        draft_data = {
+            'tree_data': data.get('tree_data'),
+            'saved_time': datetime.now().isoformat(),
+            'version': 1
+        }
+        
+        with open(draft_path, 'w', encoding='utf-8') as f:
+            json.dump(draft_data, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({
+            'status': 'success',
+            'message': '草稿已保存',
+            'saved_time': draft_data['saved_time']
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/draft', methods=['GET'])
+def load_draft(project_id):
+    """加载编辑器草稿"""
+    try:
+        config = doc_manager.load_project(project_id)
+        if config.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project = config['project']
+        project_folder = doc_manager.projects_base_folder / project_id
+        draft_path = project_folder / '.draft.json'
+        
+        if not draft_path.exists():
+            return jsonify({'status': 'success', 'draft': None})
+        
+        with open(draft_path, 'r', encoding='utf-8') as f:
+            draft_data = json.load(f)
+        
+        return jsonify({
+            'status': 'success',
+            'draft': draft_data
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/draft', methods=['DELETE'])
+def clear_draft(project_id):
+    """删除编辑器草稿"""
+    try:
+        config = doc_manager.load_project(project_id)
+        if config.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project = config['project']
+        project_folder = doc_manager.projects_base_folder / project_id
+        draft_path = project_folder / '.draft.json'
+        
+        if draft_path.exists():
+            draft_path.unlink()
+        
+        return jsonify({'status': 'success', 'message': '草稿已删除'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

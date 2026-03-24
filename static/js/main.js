@@ -5,7 +5,19 @@
 import { initApp } from './modules/index.js';
 
 // 当DOM加载完成后初始化应用
-document.addEventListener('DOMContentLoaded', initApp);
+document.addEventListener('DOMContentLoaded', function() {
+    initApp();
+    
+    // 添加项目标题点击事件
+    const projectTitle = document.getElementById('projectTitle');
+    if (projectTitle) {
+        projectTitle.addEventListener('click', function() {
+            import('./modules/project.js').then(module => {
+                module.openProjectSelectModal();
+            });
+        });
+    }
+});
 
 // 全局函数，用于在HTML中调用模块化的函数
 window.previewDocument = function(docId) {
@@ -41,6 +53,12 @@ window.archiveDocument = function(cycle, docName) {
 window.unarchiveDocument = function(cycle, docName) {
     import('./modules/document.js').then(module => {
         module.unarchiveDocument(cycle, docName);
+    });
+};
+
+window.loadMaintainDocuments = function() {
+    import('./modules/document.js').then(module => {
+        module.loadMaintainDocuments();
     });
 };
 
@@ -99,5 +117,67 @@ window.closeConfirmModal = function() {
 window.closeInputModal = function() {
     import('./modules/ui.js').then(module => {
         module.closeInputModal();
+    });
+};
+
+// 项目选择模态框相关
+window.openProjectSelectModal = function() {
+    import('./modules/project.js').then(module => {
+        module.openProjectSelectModal();
+    });
+};
+
+window.closeProjectSelectModal = function() {
+    import('./modules/project.js').then(module => {
+        module.closeProjectSelectModal();
+    });
+};
+
+window.handleOpenProject = function(projectId) {
+    import('./modules/project.js').then(module => {
+        module.handleOpenProject(projectId);
+    });
+};
+
+window.handleSoftDeleteProject = function(projectId, projectName) {
+    import('./modules/project.js').then(module => {
+        module.handleSoftDeleteProject(projectId, projectName);
+    });
+};
+
+window.handleRestoreProject = function(projectId) {
+    import('./modules/project.js').then(module => {
+        module.handleRestoreProject(projectId);
+    });
+};
+
+window.handlePermanentDeleteProject = function(projectId, projectName) {
+    import('./modules/project.js').then(module => {
+        module.handlePermanentDeleteProject(projectId, projectName);
+    });
+};
+
+window.toggleDeletedProjects = function() {
+    import('./modules/project.js').then(module => {
+        module.toggleDeletedProjects();
+    });
+};
+
+window.openNewProjectModal = function() {
+    import('./modules/project.js').then(module => {
+        module.openNewProjectModal();
+    });
+};
+
+// 重新匹配文件管理相关
+window.handleRematchFromZip = function(zipId, filename, path) {
+    import('./modules/project.js').then(module => {
+        module.handleRematchFromZip(zipId, filename, path);
+    });
+};
+
+window.handleDeleteZipRecord = function(path, filename) {
+    import('./modules/project.js').then(module => {
+        module.handleDeleteZipRecord(path, filename);
     });
 };

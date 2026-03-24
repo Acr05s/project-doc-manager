@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -52,11 +52,6 @@ export async function selectProject(projectId) {
         appState.currentProjectId = projectId;
         appState.projectConfig = project;
         
-        // 更新下拉菜单选中状态
-        if (elements.projectSelect) {
-            elements.projectSelect.value = projectId;
-        }
-        
         // 更新URL参数
         const url = new URL(window.location);
         url.searchParams.set('project', projectId);
@@ -65,7 +60,19 @@ export async function selectProject(projectId) {
         // 渲染周期
         renderCycles();
         
+        // 更新顶部项目名显示
+        const nameEl = document.getElementById('currentProjectName');
+        if (nameEl) {
+            nameEl.textContent = project.name || '未命名项目';
+            nameEl.style.display = '';
+            nameEl.title = project.name || '';
+        }
+        
         showProjectButtons();
+        
+        // 更新删除需求按钮状态
+        updateClearRequirementsBtnState();
+        
         showNotification('已加载项目: ' + project.name, 'success');
     } catch (error) {
         console.error('选择项目失败:', error);
@@ -79,8 +86,13 @@ export async function selectProject(projectId) {
 export async function handleCreateProject(e) {
     e.preventDefault();
     
-    const projectName = document.getElementById('projectName').value;
-    const projectDescription = document.getElementById('projectDescription').value;
+    const projectName = document.getElementById('newProjectName').value;
+    const partyA = document.getElementById('newProjectPartyA').value;
+    const partyB = document.getElementById('newProjectPartyB').value;
+    const supervisor = document.getElementById('newProjectSupervisor').value;
+    const manager = document.getElementById('newProjectManager').value;
+    const duration = document.getElementById('newProjectDuration').value;
+    const projectDescription = document.getElementById('newProjectDesc').value;
     
     if (!projectName) {
         showNotification('请输入项目名称', 'error');
@@ -89,10 +101,18 @@ export async function handleCreateProject(e) {
     
     showLoading(true);
     try {
-        const response = await fetch('/api/projects', {
+        const response = await fetch('/api/projects/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: projectName, description: projectDescription })
+            body: JSON.stringify({ 
+                name: projectName, 
+                description: projectDescription,
+                party_a: partyA,
+                party_b: partyB,
+                supervisor: supervisor,
+                manager: manager,
+                duration: duration
+            })
         });
         
         const result = await response.json();
@@ -107,7 +127,7 @@ export async function handleCreateProject(e) {
             renderProjectsList(projects);
             
             // 自动选择新创建的项目
-            selectProject(result.project.id);
+            selectProject(result.project_id);
         } else {
             showNotification('创建失败: ' + result.message, 'error');
         }
@@ -131,12 +151,6 @@ export async function handleLoadProject(e) {
         return;
     }
 
-    // 检查是否选择了项目
-    if (!appState.currentProjectId) {
-        showNotification('请先选择项目或新建项目', 'error');
-        return;
-    }
-
     const progress = showOperationProgress('load-' + Date.now(), '正在导入文档需求...');
     progress.update(20, '正在上传文件...');
 
@@ -148,23 +162,61 @@ export async function handleLoadProject(e) {
 
         if (result.status === 'success') {
             progress.update(70, '正在保存配置...');
+
+            console.log('=== 导入流程调试 ===');
+            console.log('1. 后端返回的 result:', JSON.stringify(result, null, 2));
+            console.log('2. result.data 类型:', typeof result.data);
+            console.log('3. result.data:', result.data);
+            console.log('4. result.data?.cycles:', result.data?.cycles);
+            console.log('5. result.data?.cycles?.length:', result.data?.cycles?.length);
+            console.log('6. Array.isArray(result.data?.cycles):', Array.isArray(result.data?.cycles));
+
+            // 检查解析结果是否有效
+            if (!result.data) {
+                console.error('导入失败: result.data 为空');
+                progress.error('导入失败: 服务器返回数据为空');
+                showNotification('导入失败: 服务器返回数据异常', 'error');
+                return;
+            }
             
-            // 更新当前选中的项目
-            result.data.id = appState.currentProjectId;
-            result.data.name = appState.projectConfig ? appState.projectConfig.name : '未命名项目';
+            if (!result.data.cycles) {
+                console.error('导入失败: result.data.cycles 为空');
+                console.log('result.data 的所有键:', Object.keys(result.data));
+                progress.error('导入失败: Excel文件中没有找到周期数据');
+                showNotification('导入失败: Excel文件格式不正确，未找到周期数据', 'error');
+                return;
+            }
             
-            // 保存项目配置
-            await saveProject(appState.currentProjectId, result.data);
+            if (!Array.isArray(result.data.cycles)) {
+                console.error('导入失败: result.data.cycles 不是数组');
+                console.log('cycles 类型:', typeof result.data.cycles);
+                progress.error('导入失败: 周期数据格式异常');
+                showNotification('导入失败: 周期数据格式异常', 'error');
+                return;
+            }
             
-            appState.projectConfig = result.data;
-            renderCycles();
-            renderInitialContent();
+            if (result.data.cycles.length === 0) {
+                console.error('导入失败: result.data.cycles 为空数组');
+                progress.error('导入失败: Excel文件中没有找到有效的周期数据');
+                showNotification('导入失败: Excel文件中没有找到有效的周期数据', 'error');
+                return;
+            }
+
+            // 保存配置ID供后续使用
+            const requirementsId = result.requirements_id;
+            const requirementsName = result.requirements_name;
+
+            console.log('5. requirements_id:', requirementsId);
+            console.log('6. requirements_name:', requirementsName);
+
+            progress.complete('文档需求已保存');
             closeModal(elements.loadProjectModal);
             elements.loadProjectForm.reset();
-            
-            progress.complete('文档需求导入成功');
-            showNotification('文档结构更新成功！', 'success');
-            console.log('项目配置:', appState.projectConfig);
+
+            // 显示应用到项目的对话框
+            showApplyRequirementsDialog(requirementsId, requirementsName, result.data);
+
+            console.log('=== 导入流程完成 ===');
         } else {
             progress.error('导入失败: ' + result.message);
             showNotification('加载失败: ' + result.message, 'error');
@@ -173,6 +225,117 @@ export async function handleLoadProject(e) {
         console.error('加载项目错误:', error);
         progress.error('导入失败: ' + error.message);
         showNotification('加载项目出错: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 显示应用需求配置到项目的对话框
+ * 如果有当前项目，默认自动应用到当前项目
+ */
+function showApplyRequirementsDialog(requirementsId, requirementsName, configData) {
+    const cycleCount = configData.cycles?.length || 0;
+    const docCount = Object.values(configData.documents || {}).reduce(
+        (sum, docs) => sum + (docs.required_docs?.length || 0), 0
+    );
+
+    // 如果有当前项目，直接应用，不显示对话框
+    if (appState.currentProjectId) {
+        console.log('自动应用到当前项目:', appState.currentProjectId);
+        applyRequirementsToProjectWithNotification(appState.currentProjectId, requirementsId);
+        return;
+    }
+
+    // 没有当前项目，显示选择对话框
+    const content = `
+        <div style="padding: 20px;">
+            <h3 style="margin-bottom: 15px;">📋 文档需求配置已导入</h3>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <p><strong>配置名称：</strong>${requirementsName || '未命名配置'}</p>
+                <p><strong>周期数量：</strong>${cycleCount} 个</p>
+                <p><strong>文档数量：</strong>${docCount} 个</p>
+            </div>
+            <p style="margin-bottom: 15px;">请选择要应用到的项目：</p>
+            <select id="applyProjectSelect" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="">-- 选择项目 --</option>
+            </select>
+        </div>
+    `;
+
+    // 显示对话框 - 使用 allowHtml 选项
+    showConfirmModal(
+        '应用文档需求配置',
+        content,
+        async () => {
+            const select = document.getElementById('applyProjectSelect');
+            const projectId = select?.value;
+
+            if (!projectId) {
+                showNotification('请先选择项目', 'error');
+                return false; // 不关闭对话框
+            }
+
+            return await applyRequirementsToProjectWithNotification(projectId, requirementsId);
+        },
+        () => {
+            // 取消回调 - 用户可以选择不应用，配置已保存，可以以后应用
+            showNotification('配置已保存，可稍后从"文档需求"菜单应用', 'info');
+        },
+        { allowHtml: true, okText: '应用', cancelText: '暂不应用' }
+    );
+
+    // 加载项目列表到选择框
+    loadProjectsList().then(projects => {
+        const select = document.getElementById('applyProjectSelect');
+        if (select && projects) {
+            projects.forEach(project => {
+                const option = document.createElement('option');
+                option.value = project.id;
+                option.textContent = project.name;
+                select.appendChild(option);
+            });
+        }
+    });
+}
+
+/**
+ * 应用需求配置到项目并显示通知
+ * @param {string} projectId - 项目ID
+ * @param {string} requirementsId - 需求配置ID
+ * @returns {boolean} 是否成功
+ */
+async function applyRequirementsToProjectWithNotification(projectId, requirementsId) {
+    console.log('[DEBUG] applyRequirementsToProjectWithNotification 被调用:', { projectId, requirementsId });
+    showLoading(true);
+    try {
+        const result = await applyRequirementsToProject(projectId, requirementsId);
+        console.log('[DEBUG] applyRequirementsToProject 返回:', result);
+
+        if (result.status === 'success') {
+            showNotification('文档需求配置已应用到项目', 'success');
+
+            // 如果当前正在查看这个项目，刷新显示
+            if (appState.currentProjectId === projectId) {
+                console.log('[DEBUG] 刷新项目显示:', projectId);
+                const updatedProject = await loadProject(projectId);
+                console.log('[DEBUG] loadProject 返回:', updatedProject);
+                appState.projectConfig = updatedProject;
+                updateClearRequirementsBtnState();
+                renderCycles();
+                renderInitialContent();
+            }
+
+            return true; // 关闭对话框
+        } else {
+            console.error('[DEBUG] 应用失败:', result.message);
+            showNotification('应用失败: ' + result.message, 'error');
+            return false;
+        }
+    } catch (error) {
+        console.error('[DEBUG] 应用配置失败:', error);
+        showNotification('应用失败: ' + error.message, 'error');
+        return false;
     } finally {
         showLoading(false);
     }
@@ -214,39 +377,28 @@ export async function handleImportJson(e) {
 }
 
 /**
- * 处理导出JSON
+ * 处理导出JSON - 直接用前端数据，一瞬间完成
  */
-export async function handleExportJson() {
-    if (!appState.currentProjectId) {
-        showNotification('请先选择项目', 'error');
+export function handleExportJson() {
+    if (!appState.projectConfig) {
+        showNotification('没有可导出的项目数据', 'error');
         return;
     }
     
-    showLoading(true);
-    try {
-        const response = await exportJson(appState.currentProjectId);
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `project-${appState.currentProjectId}-${new Date().toISOString().split('T')[0]}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            showNotification('JSON导出成功', 'success');
-        } else {
-            showNotification('导出失败', 'error');
-        }
-    } catch (error) {
-        console.error('导出JSON失败:', error);
-        showNotification('导出失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
+    // 直接把前端的项目配置转成 JSON 下载，一瞬间完成
+    const jsonContent = JSON.stringify(appState.projectConfig, null, 2);
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const projectName = appState.projectConfig.name || appState.currentProjectId;
+    a.download = `需求清单_${projectName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showNotification('导出成功', 'success');
 }
 
 /**
@@ -267,6 +419,106 @@ export async function handleSaveProject() {
         showNotification('保存失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
+    }
+}
+
+/**
+ * 处理删除当前需求
+ */
+export async function handleClearRequirements() {
+    if (!appState.currentProjectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+    
+    // 检查是否有需求配置
+    if (!appState.projectConfig.cycles || appState.projectConfig.cycles.length === 0) {
+        showNotification('当前项目没有文档需求配置', 'error');
+        return;
+    }
+    
+    // 确认删除
+    showConfirmModal(
+        '确认删除',
+        '确定要删除当前项目的文档需求配置吗？此操作将清空所有周期和文档要求，但不会删除已上传的文档文件。',
+        async () => {
+            showLoading(true);
+            try {
+                // 清空需求配置，但保留项目基本信息
+                const clearedConfig = {
+                    id: appState.currentProjectId,
+                    name: appState.projectConfig.name,
+                    cycles: [],
+                    documents: {},
+                    updated_time: new Date().toISOString()
+                };
+                
+                // 保存清空后的配置
+                await saveProject(appState.currentProjectId, clearedConfig);
+                
+                // 更新前端状态
+                appState.projectConfig = clearedConfig;
+                appState.currentCycle = null; // 清空当前周期
+                
+                // 重新渲染
+                renderCycles();
+                renderInitialContent();
+                
+                // 清空文档列表显示（ID是 contentArea，不是 documentList）
+                const contentArea = document.getElementById('contentArea');
+                if (contentArea) {
+                    contentArea.innerHTML = '<div class="welcome-message"><h2>暂无文档需求</h2><p>请先导入文档需求配置</p></div>';
+                }
+                
+                // 更新删除按钮状态
+                updateClearRequirementsBtnState();
+                
+                showNotification('文档需求已清空', 'success');
+            } catch (error) {
+                console.error('清空需求失败:', error);
+                showNotification('操作失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+    );
+}
+
+/**
+ * 更新文档需求菜单按钮状态（删除、导出）
+ */
+export function updateClearRequirementsBtnState() {
+    const clearBtn = document.getElementById('clearRequirementsBtn');
+    const exportBtn = document.getElementById('exportJsonBtn');
+    
+    const hasCycles = appState.projectConfig && 
+                      appState.projectConfig.cycles && 
+                      appState.projectConfig.cycles.length > 0;
+    
+    // 更新删除按钮状态
+    if (clearBtn) {
+        if (hasCycles) {
+            clearBtn.classList.remove('disabled');
+            clearBtn.style.pointerEvents = 'auto';
+            clearBtn.style.opacity = '1';
+        } else {
+            clearBtn.classList.add('disabled');
+            clearBtn.style.pointerEvents = 'none';
+            clearBtn.style.opacity = '0.5';
+        }
+    }
+    
+    // 更新导出按钮状态
+    if (exportBtn) {
+        if (hasCycles) {
+            exportBtn.classList.remove('disabled');
+            exportBtn.style.pointerEvents = 'auto';
+            exportBtn.style.opacity = '1';
+        } else {
+            exportBtn.classList.add('disabled');
+            exportBtn.style.pointerEvents = 'none';
+            exportBtn.style.opacity = '0.5';
+        }
     }
 }
 
@@ -411,7 +663,7 @@ export async function handleDownloadPackage() {
 }
 
 /**
- * 处理删除项目
+ * 处理重新匹配文件管理
  */
 export async function handleDeleteProject() {
     if (!appState.currentProjectId) {
@@ -419,35 +671,216 @@ export async function handleDeleteProject() {
         return;
     }
     
+    // 打开重新匹配文件管理模态框
+    const modal = document.getElementById('rematchFileModal');
+    if (modal) {
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        await loadZipRecords();
+    }
+}
+
+/**
+ * 加载ZIP上传记录（实际是已解压的ZIP包目录）
+ */
+export async function loadZipRecords() {
+    const container = document.getElementById('zipRecordsList');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading">加载中...</div>';
+    
+    try {
+        // 调用API获取已解压的ZIP包列表
+        const response = await fetch('/api/documents/list-zip-packages', { method: 'GET' });
+        const result = await response.json();
+        
+        if (result.status !== 'success') {
+            throw new Error(result.message || '加载失败');
+        }
+        
+        const zipRecords = result.packages;
+        
+        if (!zipRecords || zipRecords.length === 0) {
+            container.innerHTML = '<div class="empty-tip">暂无ZIP上传记录</div>';
+            return;
+        }
+        
+        container.innerHTML = '';
+        
+        zipRecords.forEach((record, index) => {
+            // 从目录名中提取上传时间（如果目录名包含时间戳）
+            let uploadTime = '未知';
+            const timeMatch = record.name.match(/(\d{8}_\d{6})/);
+            if (timeMatch) {
+                const timeStr = timeMatch[1];
+                const date = timeStr.substring(0, 4) + '-' + timeStr.substring(4, 6) + '-' + timeStr.substring(6, 8);
+                const time = timeStr.substring(9, 11) + ':' + timeStr.substring(11, 13) + ':' + timeStr.substring(13, 15);
+                uploadTime = date + ' ' + time;
+            }
+            
+            // 对路径中的反斜杠进行转义，避免JavaScript语法错误
+            const escapedPath = record.path.replace(/\\/g, '\\\\');
+            const escapedName = record.name.replace(/'/g, "\\'");
+            
+            const item = document.createElement('div');
+            item.className = 'zip-record-item';
+            item.innerHTML = `
+                <div class="zip-record-info">
+                    <div class="zip-record-name">${record.name}</div>
+                    <div class="zip-record-meta">
+                        <span>上传时间: ${uploadTime}</span>
+                        <span>文件数量: ${record.file_count}</span>
+                        <span>状态: 已完成</span>
+                    </div>
+                </div>
+                <div class="zip-record-actions">
+                    <button class="btn btn-primary" onclick="handleRematchFromZip('${index}', '${escapedName}', '${escapedPath}')">重新匹配</button>
+                    <button class="btn btn-danger" onclick="handleDeleteZipRecord('${escapedPath}', '${escapedName}')">删除记录</button>
+                </div>
+            `;
+            container.appendChild(item);
+        });
+    } catch (error) {
+        console.error('加载ZIP记录失败:', error);
+        container.innerHTML = '<div class="empty-tip">加载失败</div>';
+    }
+}
+
+/**
+ * 处理从ZIP重新匹配
+ */
+export async function handleRematchFromZip(zipId, filename, path) {
+    showConfirmModal(
+        '确认重新匹配',
+        `确定要使用 "${filename}" 进行重新匹配吗？`,
+        async () => {
+            showLoading(true);
+            try {
+                // 调用API进行重新匹配
+                const response = await fetch('/api/documents/zip-match-start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        zip_path: path,
+                        project_id: appState.currentProjectId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status !== 'success') {
+                    throw new Error(result.message || '重新匹配失败');
+                }
+                
+                const taskId = result.task_id;
+                showNotification('重新匹配开始', 'success');
+                
+                // 关闭模态框
+                const modal = document.getElementById('rematchFileModal');
+                if (modal) {
+                    modal.classList.remove('show');
+                    document.body.style.overflow = 'auto';
+                }
+                
+                // 轮询任务进度
+                await pollMatchTask(taskId);
+            } catch (error) {
+                console.error('重新匹配失败:', error);
+                showNotification('重新匹配失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+    );
+}
+
+/**
+ * 轮询匹配任务进度
+ */
+async function pollMatchTask(taskId) {
+    return new Promise((resolve, reject) => {
+        const pollInterval = setInterval(async () => {
+            try {
+                const response = await fetch(
+                    `/api/documents/zip-match-status?task_id=${taskId}`
+                );
+                const result = await response.json();
+                
+                if (result.status !== 'success') {
+                    clearInterval(pollInterval);
+                    reject(new Error(result.message || '查询任务状态失败'));
+                    return;
+                }
+                
+                const taskStatus = result.task_status;
+                const taskProgress = result.progress;
+                const message = result.message;
+                
+                if (taskStatus === 'completed') {
+                    clearInterval(pollInterval);
+                    
+                    // 显示结果
+                    const matchResult = result.result;
+                    if (matchResult) {
+                        showNotification(
+                            `匹配完成！共 ${matchResult.total_files} 个文件，匹配成功 ${matchResult.matched_count} 个`,
+                            matchResult.matched_count > 0 ? 'success' : 'warning'
+                        );
+                        
+                        // 刷新文档列表
+                        if (appState.currentCycle) {
+                            import('./document.js').then(module => {
+                                module.renderCycleDocuments(appState.currentCycle);
+                            });
+                        }
+                    }
+                    
+                    resolve();
+                } else if (taskStatus === 'failed') {
+                    clearInterval(pollInterval);
+                    showNotification('匹配任务失败: ' + result.message, 'error');
+                    reject(new Error(result.message || '匹配任务失败'));
+                }
+                
+            } catch (error) {
+                console.error('查询任务状态失败:', error);
+            }
+        }, 1000);
+    });
+}
+
+/**
+ * 处理删除ZIP记录
+ */
+export async function handleDeleteZipRecord(path, filename) {
     showConfirmModal(
         '确认删除',
-        '确定要删除这个项目吗？此操作不可恢复。',
+        `确定要删除 "${filename}" 记录吗？此操作将同时删除对应文件。如果删除的文件有被文档匹配占用，将同时删除匹配结果。`,
         async () => {
+            showLoading(true);
             try {
-                await deleteProject(appState.currentProjectId);
+                // 调用API删除ZIP包
+                const response = await fetch('/api/documents/delete-zip-package', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ package_path: path })
+                });
                 
-                showNotification('项目已删除', 'success');
+                const result = await response.json();
                 
-                // 清除状态
-                appState.currentProjectId = null;
-                appState.projectConfig = null;
-                appState.currentCycle = null;
-                const projectSelectEl = document.getElementById('projectSelect');
-                if (projectSelectEl) projectSelectEl.value = '';
-                const cycleNavListEl = document.getElementById('cycleNavList');
-                if (cycleNavListEl) cycleNavListEl.innerHTML = '';
-                hideProjectButtons();
-                // 清除URL参数
-                const url = new URL(window.location);
-                url.searchParams.delete('project');
-                window.history.replaceState({}, '', url);
+                if (result.status !== 'success') {
+                    throw new Error(result.message || '删除失败');
+                }
                 
-                // 刷新项目列表
-                const projects = await loadProjectsList();
-                renderProjectsList(projects);
+                showNotification('记录删除成功', 'success');
+                
+                // 重新加载记录
+                await loadZipRecords();
             } catch (error) {
-                console.error('删除项目失败:', error);
-                showNotification('删除项目失败: ' + error.message, 'error');
+                console.error('删除记录失败:', error);
+                showNotification('删除记录失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
             }
         }
     );
@@ -847,15 +1280,14 @@ export function resetImportPackageModal() {
  * 显示项目按钮
  */
 export function showProjectButtons() {
-    const buttons = [
-        'loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn',
-        'importPackageBtn', 'projectManageBtn', 'zipUploadBtn', 'generateReportBtn',
-        'confirmAcceptanceBtn', 'downloadPackageBtn', 'checkComplianceBtn', 'deleteProjectBtn'
+    const menus = [
+        'documentRequirementsMenu', 'documentManagementMenu', 
+        'dataBackupMenu', 'acceptanceMenu'
     ];
     
-    buttons.forEach(btnId => {
-        const btn = document.getElementById(btnId);
-        if (btn) btn.style.display = 'inline-block';
+    menus.forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'inline-block';
     });
 }
 
@@ -863,16 +1295,284 @@ export function showProjectButtons() {
  * 隐藏项目按钮
  */
 export function hideProjectButtons() {
-    const buttons = [
-        'loadProjectBtn', 'exportJsonBtn', 'saveProjectBtn', 'packageProjectBtn',
-        'importPackageBtn', 'projectManageBtn', 'zipUploadBtn', 'generateReportBtn',
-        'confirmAcceptanceBtn', 'downloadPackageBtn', 'checkComplianceBtn', 'deleteProjectBtn'
+    const menus = [
+        'documentRequirementsMenu', 'documentManagementMenu', 
+        'dataBackupMenu', 'acceptanceMenu'
     ];
     
-    buttons.forEach(btnId => {
-        const btn = document.getElementById(btnId);
-        if (btn) btn.style.display = 'none';
+    menus.forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'none';
     });
+}
+
+/**
+ * 打开项目选择模态框
+ */
+export async function openProjectSelectModal() {
+    const modal = document.getElementById('projectSelectModal');
+    if (!modal) return;
+    
+    modal.style.display = 'block';
+    
+    // 加载项目列表
+    await loadProjectSelectList();
+    
+    // 加载已删除项目列表
+    await loadDeletedProjectsList();
+}
+
+/**
+ * 关闭项目选择模态框
+ */
+export function closeProjectSelectModal() {
+    const modal = document.getElementById('projectSelectModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * 加载项目选择列表
+ */
+async function loadProjectSelectList() {
+    const container = document.getElementById('projectListContainer');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading">加载中...</div>';
+    
+    try {
+        const projects = await loadProjectsList();
+        
+        if (!projects || projects.length === 0) {
+            container.innerHTML = '<div class="empty-tip">暂无项目，请创建新项目</div>';
+            return;
+        }
+        
+        container.innerHTML = '';
+        
+        projects.forEach(project => {
+            const item = document.createElement('div');
+            item.className = 'project-item';
+            item.innerHTML = `
+                <div class="project-info">
+                    <div class="project-name">${escapeHtml(project.name)}</div>
+                    <div class="project-meta">创建时间: ${formatDateTime(project.created_time)}</div>
+                </div>
+                <div class="project-actions-btns">
+                    <button class="btn btn-primary btn-sm" onclick="handleOpenProject('${project.id}')">打开</button>
+                    <button class="btn btn-danger btn-sm" onclick="handleSoftDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>
+                </div>
+            `;
+            container.appendChild(item);
+        });
+    } catch (error) {
+        console.error('加载项目列表失败:', error);
+        container.innerHTML = '<div class="empty-tip">加载失败</div>';
+    }
+}
+
+/**
+ * 加载已删除项目列表
+ */
+async function loadDeletedProjectsList() {
+    const container = document.getElementById('deletedProjectsContainer');
+    const countBadge = document.getElementById('deletedCount');
+    if (!container) return;
+    
+    try {
+        const deletedProjects = await getDeletedProjects();
+        
+        // 更新数量徽章
+        if (countBadge) {
+            countBadge.textContent = deletedProjects.length;
+        }
+        
+        if (!deletedProjects || deletedProjects.length === 0) {
+            container.innerHTML = '<div class="empty-tip">暂无已删除项目</div>';
+            return;
+        }
+        
+        container.innerHTML = '';
+        
+        deletedProjects.forEach(project => {
+            const item = document.createElement('div');
+            item.className = 'project-item deleted-project-item';
+            item.innerHTML = `
+                <div class="project-info">
+                    <div class="project-name">${escapeHtml(project.name)}</div>
+                    <div class="project-meta">删除时间: ${formatDateTime(project.deleted_time)}</div>
+                </div>
+                <div class="project-actions-btns">
+                    <button class="btn btn-success btn-sm" onclick="handleRestoreProject('${project.id}')">恢复</button>
+                    <button class="btn btn-danger btn-sm" onclick="handlePermanentDeleteProject('${project.id}', '${escapeHtml(project.name)}')">彻底删除</button>
+                </div>
+            `;
+            container.appendChild(item);
+        });
+    } catch (error) {
+        console.error('加载已删除项目失败:', error);
+        container.innerHTML = '<div class="empty-tip">加载失败</div>';
+    }
+}
+
+/**
+ * 处理打开项目
+ */
+export async function handleOpenProject(projectId) {
+    try {
+        const project = await loadProject(projectId);
+        
+        appState.currentProjectId = projectId;
+        appState.projectConfig = project;
+        
+        // 关闭模态框
+        closeProjectSelectModal();
+        
+        // 更新URL参数，刷新页面后自动加载该项目
+        const url = new URL(window.location);
+        url.searchParams.set('project', projectId);
+        window.history.replaceState({}, '', url);
+        
+        // 更新顶部项目名显示
+        const nameEl = document.getElementById('currentProjectName');
+        if (nameEl) {
+            nameEl.textContent = project.name || '未命名项目';
+            nameEl.style.display = '';
+            nameEl.title = project.name || '';
+        }
+        
+        // 显示项目按钮
+        showProjectButtons();
+        
+        // 更新删除需求按钮状态
+        updateClearRequirementsBtnState();
+        
+        // 渲染周期
+        renderCycles();
+        
+        // 更新下拉菜单
+        const projectSelect = document.getElementById('projectSelect');
+        if (projectSelect) {
+            projectSelect.value = projectId;
+        }
+        
+        showNotification('已加载项目: ' + project.name, 'success');
+    } catch (error) {
+        console.error('打开项目失败:', error);
+        showNotification('打开项目失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 处理软删除项目
+ */
+export async function handleSoftDeleteProject(projectId, projectName) {
+    showConfirmModal(
+        '确认删除',
+        `确定要删除项目"${projectName}"吗？删除后可从回收站恢复。`,
+        async () => {
+            try {
+                await deleteProject(projectId, false);
+                showNotification('项目已移至回收站', 'success');
+                
+                // 刷新列表
+                await loadProjectSelectList();
+                await loadDeletedProjectsList();
+            } catch (error) {
+                console.error('删除项目失败:', error);
+                showNotification('删除失败: ' + error.message, 'error');
+            }
+        }
+    );
+}
+
+/**
+ * 处理恢复项目
+ */
+export async function handleRestoreProject(projectId) {
+    try {
+        await restoreProject(projectId);
+        showNotification('项目已恢复', 'success');
+        
+        // 刷新列表
+        await loadProjectSelectList();
+        await loadDeletedProjectsList();
+    } catch (error) {
+        console.error('恢复项目失败:', error);
+        showNotification('恢复失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 处理永久删除项目
+ */
+export async function handlePermanentDeleteProject(projectId, projectName) {
+    showConfirmModal(
+        '确认永久删除',
+        `确定要永久删除项目"${projectName}"吗？此操作不可恢复！`,
+        async () => {
+            try {
+                await deleteProject(projectId, true);
+                showNotification('项目已永久删除', 'success');
+                
+                // 刷新列表
+                await loadDeletedProjectsList();
+            } catch (error) {
+                console.error('永久删除项目失败:', error);
+                showNotification('删除失败: ' + error.message, 'error');
+            }
+        }
+    );
+}
+
+/**
+ * 切换已删除项目显示
+ */
+export function toggleDeletedProjects() {
+    const container = document.getElementById('deletedProjectsContainer');
+    const arrow = document.getElementById('toggleArrow');
+    
+    if (container) {
+        if (container.style.display === 'none') {
+            container.style.display = 'block';
+            if (arrow) arrow.textContent = '▲';
+        } else {
+            container.style.display = 'none';
+            if (arrow) arrow.textContent = '▼';
+        }
+    }
+}
+
+/**
+ * 打开新建项目模态框
+ */
+export function openNewProjectModal() {
+    closeProjectSelectModal();
+    
+    const modal = document.getElementById('newProjectModal');
+    if (modal) {
+        modal.classList.add('show');
+    }
+}
+
+// 辅助函数：格式化日期时间
+function formatDateTime(dateStr) {
+    if (!dateStr) return '未知';
+    try {
+        const date = new Date(dateStr);
+        return date.toLocaleString('zh-CN');
+    } catch {
+        return dateStr;
+    }
+}
+
+// 辅助函数：转义HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 

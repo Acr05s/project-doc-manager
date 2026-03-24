@@ -42,9 +42,11 @@ def create_app(config: Optional[Dict] = None) -> Flask:
 
     
     # 创建文档管理器实例
+    # 注意：传入 base_dir（项目根目录），DocumentConfig 会在此基础上自动拼接
+    # uploads/ 和 projects/ 等子目录，不要传 upload_folder（否则路径会多嵌套一层）
     from app.utils.document_manager import DocumentManager
     doc_manager = DocumentManager({
-        'upload_folder': app.config['UPLOAD_FOLDER'],
+        'base_dir': BASE_DIR,
         **(config or {})
     })
     
@@ -85,7 +87,7 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     # 项目加载路由
     @app.route('/api/project/load', methods=['POST'])
     def load_project():
-        """加载项目配置（支持Excel和JSON自动识别）"""
+        """加载项目配置（支持Excel和JSON自动识别）并保存为需求配置"""
         try:
             from pathlib import Path
             import tempfile
@@ -106,9 +108,21 @@ def create_app(config: Optional[Dict] = None) -> Flask:
             # 清理临时文件
             shutil.rmtree(temp_dir, ignore_errors=True)
             
+            # 检查配置是否有效
+            if not project_config or not project_config.get('cycles'):
+                return jsonify({'status': 'error', 'message': '文件解析失败或格式不正确'}), 400
+            
+            # 保存为独立的requirements文件
+            result = doc_manager.save_requirements_config(project_config, file.filename)
+            
+            if result.get('status') != 'success':
+                return jsonify({'status': 'error', 'message': result.get('message', '保存配置失败')}), 500
+            
             return jsonify({
                 'status': 'success',
-                'data': project_config
+                'data': project_config,
+                'requirements_id': result.get('requirements_id'),
+                'requirements_name': result.get('name')
             })
         except Exception as e:
             logger.error(f"加载项目失败: {e}")
@@ -137,9 +151,15 @@ def create_app(config: Optional[Dict] = None) -> Flask:
             json_content = doc_manager.export_requirements_to_json(project_config)
             
             # 创建响应
+            from urllib.parse import quote
+            project_name = project_config.get('name', 'project')
+            filename = f"requirements_{project_name}.json"
+            # 对文件名进行URL编码，解决中文文件名问题
+            encoded_filename = quote(filename)
+            
             response = make_response(json_content)
-            response.headers['Content-Type'] = 'application/json'
-            response.headers['Content-Disposition'] = f'attachment; filename="requirements_{project_config.get("name", "project")}.json"'
+            response.headers['Content-Type'] = 'application/json; charset=utf-8'
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
             
             return response
         except Exception as e:
@@ -564,6 +584,14 @@ if __name__ == '__main__':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
-    # 测试/开发模式
-    app = create_app()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print("Starting application...")
+    try:
+        # 测试/开发模式
+        app = create_app()
+        print("Application created successfully")
+        print("Running on http://0.0.0.0:5000")
+        app.run(debug=True, host='0.0.0.0', port=5000)
+    except Exception as e:
+        print(f"Error starting application: {e}")
+        import traceback
+        traceback.print_exc()

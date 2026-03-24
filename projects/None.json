@@ -1,0 +1,21 @@
+{
+  "cycles": [
+    "准备",
+    "开工"
+  ],
+  "documents": {
+    "准备": {
+      "required_docs": [
+        "1."
+      ],
+      "uploaded_docs": []
+    },
+    "开工": {
+      "required_docs": [
+        "1。测试"
+      ],
+      "uploaded_docs": []
+    }
+  },
+  "updated_time": "2026-03-24T15:46:34.581336"
+}

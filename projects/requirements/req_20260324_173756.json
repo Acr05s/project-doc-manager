@@ -1,0 +1,14 @@
+{
+  "id": "req_20260324_173756",
+  "name": "测试文件",
+  "created_time": "2026-03-24T17:37:56.333061",
+  "cycles": [
+    "测试周期"
+  ],
+  "documents": {
+    "测试周期": {
+      "required_docs": [],
+      "uploaded_docs": []
+    }
+  }
+}

@@ -12,8 +12,4 @@ PyPDF2==3.0.1
 python-docx==0.8.11
 reportlab==4.0.4
 flasgger==0.9.7.1
-Flask-Celery==3.0.0
-celery==5.3.4
-redis==5.0.1
-Flask-SocketIO==5.3.4
-eventlet==0.33.3
+Flask-CORS==4.0.0

@@ -3,11 +3,23 @@
 from flask import Blueprint, request, jsonify, send_file, make_response
 import zipfile
 import io
+import os
+import hashlib
 from pathlib import Path
+from datetime import datetime
 from app.utils.document_manager import DocumentManager
+from app.utils.zip_matcher import create_matcher
 
 document_bp = Blueprint('document', __name__)
 doc_manager = None
+
+# 分片上传配置
+CHUNK_SIZE = 10 * 1024 * 1024  # 10MB per chunk
+UPLOAD_TEMP_FOLDER = Path('uploads/temp_chunks')
+UPLOAD_TEMP_FOLDER.mkdir(parents=True, exist_ok=True)
+
+# 匹配任务存储
+MATCH_TASKS = {}
 
 def init_doc_manager(manager):
     """初始化文档管理器"""
@@ -31,15 +43,23 @@ def upload_document():
         no_seal = request.form.get('no_seal', 'false').lower() == 'true'
         other_seal = request.form.get('other_seal', '')
         project_id = request.form.get('project_id', None)
+        project_name = request.form.get('project_name', None)
         
         if not all([file, cycle, doc_name]):
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
         result = doc_manager.upload_document(
             file, cycle, doc_name,
-            doc_date, sign_date, signer, no_signature,
-            has_seal, party_a_seal, party_b_seal, no_seal, other_seal,
-            project_id
+            doc_date=doc_date, 
+            sign_date=sign_date, 
+            signer=signer, 
+            no_signature=no_signature,
+            has_seal=has_seal, 
+            party_a_seal=party_a_seal, 
+            party_b_seal=party_b_seal, 
+            no_seal=no_seal, 
+            other_seal=other_seal,
+            project_name=project_name
         )
         
         return jsonify(result)
@@ -53,8 +73,36 @@ def list_documents():
     try:
         cycle = request.args.get('cycle')
         doc_name = request.args.get('doc_name')
+        project_id = request.args.get('project_id')
         
+        # 首先尝试从内存中获取文档
         docs = doc_manager.get_documents(cycle, doc_name)
+        
+        # 如果内存中没有文档，尝试从项目配置中加载
+        if not docs and project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result.get('status') == 'success':
+                project_config = project_result.get('project')
+                if project_config and 'documents' in project_config:
+                    documents = project_config['documents']
+                    # 遍历所有周期
+                    for doc_cycle, cycle_info in documents.items():
+                        # 过滤周期
+                        if cycle and doc_cycle != cycle:
+                            continue
+                        # 检查是否有已上传的文档
+                        if 'uploaded_docs' in cycle_info:
+                            for doc in cycle_info['uploaded_docs']:
+                                # 过滤文档名称
+                                if doc_name and doc.get('doc_name') != doc_name:
+                                    continue
+                                # 确保文档有 ID
+                                doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc.get('doc_name')}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
+                                # 添加到结果列表
+                                docs.append({
+                                    'id': doc_id,
+                                    **doc
+                                })
         
         return jsonify({
             'status': 'success',
@@ -73,6 +121,7 @@ def get_document(doc_id):
         import urllib.parse
         doc_id = urllib.parse.unquote(doc_id)
         
+        # 首先从 documents_db 中查找
         if doc_id in doc_manager.documents_db:
             metadata = doc_manager.documents_db[doc_id]
             return jsonify({
@@ -80,6 +129,36 @@ def get_document(doc_id):
                 'data': metadata
             })
         else:
+            # 尝试从项目配置中查找
+            if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                project_config = doc_manager.current_project
+                if 'documents' in project_config:
+                    for cycle, cycle_info in project_config['documents'].items():
+                        if 'uploaded_docs' in cycle_info:
+                            for doc in cycle_info['uploaded_docs']:
+                                if doc.get('doc_id') == doc_id:
+                                    # 将找到的文档信息添加到 documents_db
+                                    doc_manager.documents_db[doc_id] = doc
+                                    return jsonify({
+                                        'status': 'success',
+                                        'data': doc
+                                    })
+            
+            # 尝试从所有项目中查找
+            if hasattr(doc_manager, 'projects') and doc_manager.projects:
+                for project_id, project_data in doc_manager.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for doc in cycle_info['uploaded_docs']:
+                                    if doc.get('doc_id') == doc_id:
+                                        # 将找到的文档信息添加到 documents_db
+                                        doc_manager.documents_db[doc_id] = doc
+                                        return jsonify({
+                                            'status': 'success',
+                                            'data': doc
+                                        })
+            
             return jsonify({'status': 'error', 'message': '文档不存在'}), 404
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -179,7 +258,7 @@ def get_cycle_progress():
         total_required = len(required_docs)
         
         # 获取已上传的文档
-        all_docs = doc_manager.get_documents(cycle)
+        all_docs = doc_manager.get_documents(cycle, project_id=project_id)
         
         # 已上传文档数（每个文档类型只算1个）
         doc_names = set()
@@ -437,6 +516,226 @@ def replace_doc(doc_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# ========== ZIP 大文件断点续传上传 ==========
+
+@document_bp.route('/zip-chunk-upload', methods=['POST'])
+def upload_zip_chunk():
+    """分片上传ZIP文件（断点续传）"""
+    try:
+        chunk = request.files.get('chunk')
+        if not chunk:
+            return jsonify({'status': 'error', 'message': '未获取到文件分片'}), 400
+        
+        filename = request.form.get('filename')
+        chunk_index = int(request.form.get('chunkIndex', 0))
+        total_chunks = int(request.form.get('totalChunks', 1))
+        
+        if not filename:
+            return jsonify({'status': 'error', 'message': '文件名不能为空'}), 400
+        
+        # 创建临时目录
+        temp_dir = UPLOAD_TEMP_FOLDER / f"{filename}_{request.form.get('fileId', 'default')}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 保存分片
+        chunk_path = temp_dir / f"chunk_{chunk_index}"
+        chunk.save(str(chunk_path))
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'分片 {chunk_index + 1}/{total_chunks} 上传成功',
+            'chunkIndex': chunk_index,
+            'totalChunks': total_chunks
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/zip-chunk-merge', methods=['POST'])
+def merge_zip_chunks():
+    """合并ZIP分片"""
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        file_id = data.get('fileId', 'default')
+        
+        if not filename:
+            return jsonify({'status': 'error', 'message': '文件名不能为空'}), 400
+        
+        temp_dir = UPLOAD_TEMP_FOLDER / f"{filename}_{file_id}"
+        if not temp_dir.exists():
+            return jsonify({'status': 'error', 'message': '分片文件不存在'}), 400
+        
+        # 获取所有分片
+        chunks = sorted(temp_dir.glob('chunk_*'), key=lambda x: int(x.name.split('_')[1]))
+        
+        if not chunks:
+            return jsonify({'status': 'error', 'message': '没有找到分片文件'}), 400
+        
+        # 合并文件
+        from datetime import datetime
+        output_dir = UPLOAD_TEMP_FOLDER.parent / 'temp'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        merged_path = output_dir / f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+        
+        with open(merged_path, 'wb') as outfile:
+            for chunk in chunks:
+                with open(chunk, 'rb') as infile:
+                    outfile.write(infile.read())
+        
+        # 清理分片
+        import shutil
+        shutil.rmtree(temp_dir)
+        
+        return jsonify({
+            'status': 'success',
+            'message': '文件合并成功',
+            'file_path': str(merged_path)
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/zip-check-chunk', methods=['GET'])
+def check_zip_chunk():
+    """检查已上传的分片（断点续传）"""
+    try:
+        filename = request.args.get('filename')
+        file_id = request.args.get('fileId', 'default')
+        
+        if not filename:
+            return jsonify({'status': 'error', 'message': '文件名不能为空'}), 400
+        
+        temp_dir = UPLOAD_TEMP_FOLDER / f"{filename}_{file_id}"
+        
+        if not temp_dir.exists():
+            return jsonify({'status': 'success', 'uploaded_chunks': []})
+        
+        # 获取已上传的分片
+        uploaded = []
+        for chunk in temp_dir.glob('chunk_*'):
+            index = int(chunk.name.split('_')[1])
+            uploaded.append(index)
+        
+        return jsonify({
+            'status': 'success',
+            'uploaded_chunks': sorted(uploaded)
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ========== ZIP 自动匹配任务 ==========
+
+@document_bp.route('/zip-match-start', methods=['POST'])
+def start_zip_match():
+    """启动ZIP文件匹配任务"""
+    try:
+        data = request.get_json()
+        zip_path = data.get('zip_path')
+        project_id = data.get('project_id')
+        
+        if not zip_path:
+            return jsonify({'status': 'error', 'message': 'ZIP文件路径不能为空'}), 400
+        
+        # 获取项目配置
+        project_config = None
+        if project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result.get('status') == 'success':
+                project_config = project_result.get('project')
+        
+        if not project_config:
+            return jsonify({'status': 'error', 'message': '项目配置不存在'}), 400
+        
+        # 创建任务ID
+        task_id = f"match_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # 初始化任务状态
+        MATCH_TASKS[task_id] = {
+            'status': 'running',
+            'progress': 0,
+            'message': '正在初始化...',
+            'zip_path': zip_path,
+            'project_id': project_id,
+            'result': None,
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # 在后台线程执行匹配（简单实现，实际可用Celery）
+        import threading
+        
+        def run_match():
+            try:
+                # 创建匹配器
+                config = doc_manager.config if hasattr(doc_manager, 'config') else {}
+                matcher = create_matcher(config)
+                
+                # 进度回调
+                def progress_callback(progress, message):
+                    MATCH_TASKS[task_id]['progress'] = progress
+                    MATCH_TASKS[task_id]['message'] = message
+                
+                # 执行匹配
+                result = matcher.extract_and_match(
+                    zip_path, 
+                    project_config,
+                    progress_callback
+                )
+                
+                # 保存更新后的项目配置
+                if project_id and result.get('status') == 'success':
+                    doc_manager.save_project(project_config)
+                
+                MATCH_TASKS[task_id]['result'] = result
+                MATCH_TASKS[task_id]['status'] = 'completed' if result.get('status') == 'success' else 'failed'
+                MATCH_TASKS[task_id]['message'] = result.get('message', '匹配完成')
+                
+            except Exception as e:
+                MATCH_TASKS[task_id]['status'] = 'failed'
+                MATCH_TASKS[task_id]['message'] = str(e)
+                MATCH_TASKS[task_id]['result'] = {'status': 'error', 'message': str(e)}
+        
+        threading.Thread(target=run_match, daemon=True).start()
+        
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id,
+            'message': '匹配任务已启动'
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/zip-match-status', methods=['GET'])
+def get_zip_match_status():
+    """获取ZIP匹配任务状态"""
+    try:
+        task_id = request.args.get('task_id')
+        
+        if not task_id or task_id not in MATCH_TASKS:
+            return jsonify({'status': 'error', 'message': '任务不存在'}), 404
+        
+        task = MATCH_TASKS[task_id]
+        
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id,
+            'task_status': task['status'],
+            'progress': task['progress'],
+            'message': task['message'],
+            'result': task.get('result')
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @document_bp.route('/zip-upload', methods=['POST'])
 def upload_zip():
     """上传压缩包并自动匹配文档"""
@@ -490,7 +789,10 @@ def list_zip_packages():
     """列出所有已解压的ZIP包（temp_extract下的一级子目录）"""
     try:
         from pathlib import Path
-        temp_extract_dir = doc_manager.upload_folder / 'temp_extract'
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
+        temp_extract_dir = upload_folder / 'temp_extract'
         if not temp_extract_dir.exists():
             return jsonify({'status': 'success', 'packages': []})
 
@@ -521,9 +823,12 @@ def search_zip_files():
     """搜索已解压的ZIP包中的文件，支持文件名模糊搜索和指定ZIP包"""
     try:
         from pathlib import Path
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
         keyword = request.args.get('keyword', '').strip().lower()
         package_path = request.args.get('package_path', '').strip()  # 指定ZIP包路径
-        temp_extract_dir = doc_manager.upload_folder / 'temp_extract'
+        temp_extract_dir = upload_folder / 'temp_extract'
 
         if not temp_extract_dir.exists():
             return jsonify({'status': 'success', 'files': [], 'message': '暂无已上传的ZIP文件，请先批量导入ZIP'})
@@ -591,6 +896,9 @@ def delete_zip_package():
     try:
         from pathlib import Path
         import shutil
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
         data = request.get_json()
         if not data:
             return jsonify({'status': 'error', 'message': '没有收到数据'}), 400
@@ -599,8 +907,11 @@ def delete_zip_package():
         if not package_path:
             return jsonify({'status': 'error', 'message': '缺少package_path参数'}), 400
 
+        # 检查是否需要确认删除
+        confirm_delete = data.get('confirm_delete', False)
+
         package_dir = Path(package_path)
-        temp_extract_dir = doc_manager.upload_folder / 'temp_extract'
+        temp_extract_dir = upload_folder / 'temp_extract'
 
         # 安全检查：必须在 temp_extract_dir 下
         try:
@@ -611,10 +922,179 @@ def delete_zip_package():
         if not package_dir.exists():
             return jsonify({'status': 'error', 'message': 'ZIP包目录不存在'}), 404
 
-        # 删除ZIP包目录
+        # 检查是否有文档引用了该ZIP包中的文件
+        referenced_docs = []
+        for doc_id, doc in doc_manager.documents_db.items():
+            source_path = doc.get('source_path') or doc.get('original_path')
+            if source_path and package_path in source_path:
+                referenced_docs.append({
+                    'id': doc_id,
+                    'doc_name': doc.get('doc_name'),
+                    'cycle': doc.get('cycle'),
+                    'filename': doc.get('filename')
+                })
+
+        # 检查项目配置中的引用
+        if hasattr(doc_manager, 'projects') and doc_manager.projects:
+            for project_id, project_data in doc_manager.projects.projects_db.items():
+                if 'documents' in project_data:
+                    for cycle, cycle_info in project_data['documents'].items():
+                        if 'uploaded_docs' in cycle_info:
+                            for doc in cycle_info['uploaded_docs']:
+                                source_path = doc.get('source_path') or doc.get('original_path')
+                                if source_path and package_path in source_path:
+                                    referenced_docs.append({
+                                        'id': doc.get('doc_id'),
+                                        'doc_name': doc.get('doc_name'),
+                                        'cycle': cycle,
+                                        'filename': doc.get('filename'),
+                                        'project_id': project_id
+                                    })
+
+        # 如果有引用记录，且用户未确认删除，返回引用信息
+        if referenced_docs and not confirm_delete:
+            return jsonify({
+                'status': 'warning',
+                'message': '该ZIP包中有文件被文档引用',
+                'referenced_docs': referenced_docs,
+                'total_references': len(referenced_docs)
+            }), 200
+
+        # 用户确认删除，删除ZIP包目录
         shutil.rmtree(package_dir)
 
-        return jsonify({'status': 'success', 'message': 'ZIP包删除成功'})
+        # 删除相关的引用记录
+        if referenced_docs:
+            # 从内存中的documents_db删除引用
+            for doc in referenced_docs:
+                if doc['id'] in doc_manager.documents_db:
+                    del doc_manager.documents_db[doc['id']]
+
+            # 从项目配置中删除引用
+            if hasattr(doc_manager, 'projects') and doc_manager.projects:
+                for project_id, project_data in doc_manager.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                # 过滤掉引用了被删除ZIP包的文档
+                                cycle_info['uploaded_docs'] = [
+                                    doc for doc in cycle_info['uploaded_docs']
+                                    if not (doc.get('source_path') and package_path in doc.get('source_path'))
+                                ]
+                        # 保存更新后的项目配置
+                        doc_manager.projects.save(project_id, project_data)
+
+        return jsonify({
+            'status': 'success', 
+            'message': 'ZIP包删除成功',
+            'deleted_references': len(referenced_docs)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@document_bp.route('/list-imported', methods=['GET'])
+def list_imported_documents():
+    """获取历史导入文档列表"""
+    try:
+        from pathlib import Path
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
+        temp_extract_dir = upload_folder / 'temp_extract'
+        
+        if not temp_extract_dir.exists():
+            return jsonify({'status': 'success', 'data': []})
+
+        # 支持的文档格式
+        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
+                        '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
+
+        results = []
+        for file_path in sorted(temp_extract_dir.rglob('*')):
+            if not file_path.is_file():
+                continue
+            if file_path.name.startswith('.'):
+                continue
+            if file_path.suffix.lower() not in ALLOWED_EXTS:
+                continue
+
+            try:
+                rel_path = file_path.relative_to(temp_extract_dir)
+            except ValueError:
+                rel_path = file_path.name
+
+            # 检查该文件是否已被归档（通过 original_filename 匹配）
+            is_archived = any(
+                meta.get('original_filename') == file_path.name or
+                meta.get('source_path') == str(file_path)
+                for meta in doc_manager.documents_db.values()
+            )
+
+            results.append({
+                'name': file_path.name,
+                'path': str(file_path),
+                'rel_path': str(rel_path),
+                'size': file_path.stat().st_size,
+                'ext': file_path.suffix.lower(),
+                'archived': is_archived
+            })
+
+        return jsonify({'status': 'success', 'data': results, 'total': len(results)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@document_bp.route('/search-imported', methods=['GET'])
+def search_imported_documents():
+    """搜索历史导入文档"""
+    try:
+        from pathlib import Path
+        from app.utils.base import get_config
+        config = get_config()
+        upload_folder = Path(config.get('upload_folder', 'uploads'))
+        keyword = request.args.get('keyword', '').strip().lower()
+        temp_extract_dir = upload_folder / 'temp_extract'
+
+        if not temp_extract_dir.exists():
+            return jsonify({'status': 'success', 'data': [], 'message': '暂无已上传的文档'})
+
+        # 支持的文档格式
+        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
+                        '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
+
+        results = []
+        for file_path in sorted(temp_extract_dir.rglob('*')):
+            if not file_path.is_file():
+                continue
+            if file_path.name.startswith('.'):
+                continue
+            if file_path.suffix.lower() not in ALLOWED_EXTS:
+                continue
+            # 关键词过滤（空关键词返回全部）
+            if keyword and keyword not in file_path.name.lower():
+                continue
+
+            try:
+                rel_path = file_path.relative_to(temp_extract_dir)
+            except ValueError:
+                rel_path = file_path.name
+
+            # 检查该文件是否已被归档（通过 original_filename 匹配）
+            is_archived = any(
+                meta.get('original_filename') == file_path.name or
+                meta.get('source_path') == str(file_path)
+                for meta in doc_manager.documents_db.values()
+            )
+
+            results.append({
+                'name': file_path.name,
+                'path': str(file_path),
+                'rel_path': str(rel_path),
+                'size': file_path.stat().st_size,
+                'ext': file_path.suffix.lower(),
+                'archived': is_archived
+            })
+
+        return jsonify({'status': 'success', 'data': results, 'total': len(results)})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -812,6 +1292,12 @@ def confirm_pending_files():
                                 project_config['documents'][cycle] = {'required_docs': [], 'uploaded_docs': []}
                             if 'uploaded_docs' not in project_config['documents'][cycle]:
                                 project_config['documents'][cycle]['uploaded_docs'] = []
+                            
+                            # 如果 cycles 数组中没有这个周期，自动添加进去
+                            if 'cycles' not in project_config:
+                                project_config['cycles'] = []
+                            if cycle not in project_config['cycles']:
+                                project_config['cycles'].append(cycle)
                             
                             doc_id = f"{cycle}_{doc_name}_{timestamp}"
                             project_config['documents'][cycle]['uploaded_docs'].append({

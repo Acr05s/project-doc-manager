@@ -1,0 +1,1384 @@
+/**
+ * 图形化树形编辑器模块
+ * 支持节点的增删改、层次结构调整、目录节点、文档附加属性
+ * 支持自动保存（防抖 + localStorage + 服务端草稿）
+ * 支持文件名模板、匹配关键词
+ */
+
+import { appState } from './app-state.js';
+import { showNotification, showLoading, openModal, closeModal, showConfirmModal } from './ui.js';
+import { renderCycles, renderInitialContent } from './cycle.js';
+
+let currentTreeData = null;
+let selectedNode = null;
+let autoSaveTimer = null;
+let hasUnsavedChanges = false;
+let lastSaveTime = null;
+
+// ==================== 默认附加属性模板 ====================
+
+const DEFAULT_DOC_ATTRIBUTES = {
+    party_a_sign: false,
+    party_b_sign: false,
+    party_a_seal: false,
+    party_b_seal: false,
+    need_doc_number: false,
+    need_doc_date: false,
+    need_sign_date: false
+};
+
+const ATTRIBUTE_LABELS = {
+    party_a_sign: '甲方签字',
+    party_b_sign: '乙方签字',
+    party_a_seal: '甲方盖章',
+    party_b_seal: '乙方盖章',
+    need_doc_number: '发文号',
+    need_doc_date: '文档日期',
+    need_sign_date: '签字日期'
+};
+
+// ==================== 自动保存 ====================
+
+const AUTOSAVE_INTERVAL = 30000;  // 30秒自动保存一次
+const AUTOSAVE_DEBOUNCE = 2000;   // 修改后2秒触发一次
+
+/**
+ * 标记数据已修改，启动防抖自动保存
+ */
+function markDirty() {
+    hasUnsavedChanges = true;
+    updateAutoSaveStatus('unsaved');
+    
+    // 防抖：2秒后自动保存到 localStorage
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+        saveDraftToLocal();
+    }, AUTOSAVE_DEBOUNCE);
+}
+
+/**
+ * 保存草稿到 localStorage（快速，离线安全）
+ */
+function saveDraftToLocal() {
+    if (!currentTreeData || !appState.currentProjectId) return;
+    
+    const key = `treeEditor_draft_${appState.currentProjectId}`;
+    const draft = {
+        treeData: currentTreeData,
+        savedTime: new Date().toISOString(),
+        selectedNode: selectedNode
+    };
+    
+    try {
+        localStorage.setItem(key, JSON.stringify(draft));
+        lastSaveTime = draft.savedTime;
+        updateAutoSaveStatus('saved', draft.savedTime);
+    } catch (e) {
+        console.warn('localStorage 保存失败:', e);
+    }
+    
+    // 同时异步保存到服务端
+    saveDraftToServer();
+}
+
+/**
+ * 异步保存草稿到服务端
+ */
+async function saveDraftToServer() {
+    if (!currentTreeData || !appState.currentProjectId) return;
+    
+    try {
+        const response = await fetch(`/api/projects/${appState.currentProjectId}/draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tree_data: currentTreeData })
+        });
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('服务端草稿已保存:', result.saved_time);
+        }
+    } catch (e) {
+        // 静默失败，localStorage 已经保存了
+        console.warn('服务端草稿保存失败:', e);
+    }
+}
+
+/**
+ * 从 localStorage 加载草稿
+ */
+function loadDraftFromLocal() {
+    if (!appState.currentProjectId) return null;
+    
+    const key = `treeEditor_draft_${appState.currentProjectId}`;
+    try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+            return JSON.parse(stored);
+        }
+    } catch (e) {
+        console.warn('localStorage 读取失败:', e);
+    }
+    return null;
+}
+
+/**
+ * 清除草稿
+ */
+function clearDrafts() {
+    if (!appState.currentProjectId) return;
+    
+    const key = `treeEditor_draft_${appState.currentProjectId}`;
+    localStorage.removeItem(key);
+    
+    // 异步清除服务端草稿
+    fetch(`/api/projects/${appState.currentProjectId}/draft`, { method: 'DELETE' })
+        .catch(() => {});
+    
+    hasUnsavedChanges = false;
+    lastSaveTime = null;
+}
+
+/**
+ * 启动定时自动保存
+ */
+function startAutoSave() {
+    stopAutoSave();
+    setInterval(() => {
+        if (hasUnsavedChanges && currentTreeData) {
+            saveDraftToLocal();
+        }
+    }, AUTOSAVE_INTERVAL);
+}
+
+function stopAutoSave() {
+    // 通过标记清除旧 interval（简单方案）
+}
+
+/**
+ * 更新自动保存状态 UI
+ */
+function updateAutoSaveStatus(state, time) {
+    const el = document.getElementById('autoSaveStatus');
+    if (!el) return;
+    
+    const timeStr = time ? new Date(time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+    
+    switch (state) {
+        case 'unsaved':
+            el.innerHTML = '<span class="autosave-dot unsaved"></span> 有未保存的修改';
+            el.className = 'autosave-status unsaved';
+            break;
+        case 'saving':
+            el.innerHTML = '<span class="autosave-dot saving"></span> 正在保存...';
+            el.className = 'autosave-status saving';
+            break;
+        case 'saved':
+            el.innerHTML = `<span class="autosave-dot saved"></span> 已自动保存 ${timeStr}`;
+            el.className = 'autosave-status saved';
+            break;
+        case 'draft-found':
+            el.innerHTML = '<span class="autosave-dot draft"></span> 检测到未完成的编辑草稿';
+            el.className = 'autosave-status draft';
+            break;
+    }
+}
+
+/**
+ * 检测是否有未恢复的草稿，如果有则询问是否恢复
+ */
+async function checkForDraft() {
+    if (!appState.currentProjectId) return false;
+    
+    // 先检查 localStorage
+    const localDraft = loadDraftFromLocal();
+    
+    // 再检查服务端
+    let serverDraft = null;
+    try {
+        const response = await fetch(`/api/projects/${appState.currentProjectId}/draft`);
+        const result = await response.json();
+        if (result.status === 'success' && result.draft) {
+            serverDraft = result.draft;
+        }
+    } catch (e) {
+        // 忽略
+    }
+    
+    // 取较新的草稿
+    let bestDraft = null;
+    let bestSource = null;
+    
+    if (localDraft && serverDraft) {
+        const localTime = new Date(localDraft.savedTime).getTime();
+        const serverTime = new Date(serverDraft.saved_time).getTime();
+        bestDraft = localTime > serverTime ? localDraft : serverDraft;
+        bestSource = localTime > serverTime ? 'localStorage' : '服务端';
+    } else if (localDraft) {
+        bestDraft = localDraft;
+        bestSource = 'localStorage';
+    } else if (serverDraft) {
+        bestDraft = serverDraft;
+        bestSource = '服务端';
+    }
+    
+    if (!bestDraft) return false;
+    
+    return new Promise((resolve) => {
+        const draftTime = bestDraft.savedTime || bestDraft.saved_time;
+        const timeStr = new Date(draftTime).toLocaleString('zh-CN');
+        
+        showConfirmModal(
+            '发现未保存的草稿',
+            `在 ${timeStr}（${bestSource}）发现未完成的编辑草稿。\n是否恢复上次的编辑？\n\n点击"取消"将丢弃草稿使用当前配置。`,
+            () => {
+                // 恢复草稿
+                if (bestDraft.treeData) {
+                    currentTreeData = bestDraft.treeData;
+                    if (bestDraft.selectedNode) {
+                        selectedNode = bestDraft.selectedNode;
+                    }
+                } else if (bestDraft.tree_data) {
+                    currentTreeData = bestDraft.tree_data;
+                }
+                renderTree();
+                if (selectedNode) selectNode(selectedNode);
+                updateToolbarState();
+                markDirty();
+                showNotification('草稿已恢复', 'success');
+                resolve(true);
+            },
+            () => {
+                // 丢弃草稿
+                clearDrafts();
+                resolve(false);
+            }
+        );
+    });
+}
+
+// ==================== 打开/关闭编辑器 ====================
+
+export async function openTreeEditor() {
+    if (!appState.currentProjectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('treeEditorModal');
+    if (!modal) {
+        console.error('找不到树形编辑器模态框');
+        return;
+    }
+
+    openModal(modal);
+    
+    // 初始化编辑器数据
+    const config = appState.projectConfig;
+    if (!config) {
+        showNotification('项目配置加载失败', 'error');
+        return;
+    }
+
+    currentTreeData = buildTreeData(config);
+    hasUnsavedChanges = false;
+    
+    // 检查是否有草稿
+    const hasDraft = await checkForDraft();
+    
+    if (!hasDraft) {
+        renderTree();
+        updateToolbarState();
+    }
+    
+    startAutoSave();
+}
+
+export function closeTreeEditor() {
+    const modal = document.getElementById('treeEditorModal');
+    if (modal) {
+        if (hasUnsavedChanges) {
+            // 关闭前先保存草稿
+            saveDraftToLocal();
+            showNotification('编辑内容已自动保存为草稿，下次打开可恢复', 'info');
+        }
+        closeModal(modal);
+    }
+    selectedNode = null;
+    hasUnsavedChanges = false;
+}
+
+// ==================== 初始化与数据构建 ====================
+
+/**
+ * 从项目配置构建树形数据
+ * 兼容旧格式（required_docs 为字符串数组）和新格式（对象数组）
+ */
+function buildTreeData(config) {
+    const tree = {
+        id: 'root',
+        name: '项目配置',
+        type: 'root',
+        expanded: true,
+        children: []
+    };
+
+    const cycles = config.cycles || [];
+    const documents = config.documents || {};
+
+    cycles.forEach((cycle, index) => {
+        const cycleNode = {
+            id: `cycle_${index}`,
+            name: cycle,
+            type: 'cycle',
+            expanded: true,
+            children: []
+        };
+
+        const cycleDocs = documents[cycle] || {};
+        const requiredDocs = cycleDocs.required_docs || [];
+
+        requiredDocs.forEach((doc, docIndex) => {
+            // 兼容旧格式（字符串）和新格式（对象）
+            const docData = typeof doc === 'object' && doc !== null ? doc : { name: doc };
+            const docId = `doc_${index}_${docIndex}`;
+
+            const docNode = {
+                id: docId,
+                name: docData.name || doc,
+                type: 'document',
+                expanded: true,
+                children: [],
+                attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docData.attributes || {}) },
+                doc_note: docData.doc_note || '',
+                // 新增：文件名模板和匹配关键词
+                filename_template: docData.filename_template || '',
+                match_keywords: docData.match_keywords || []
+            };
+
+            // 支持目录子节点
+            if (docData.children && Array.isArray(docData.children)) {
+                docData.children.forEach((child, childIdx) => {
+                    if (child.type === 'folder') {
+                        const folderNode = {
+                            id: `folder_${index}_${docIndex}_${childIdx}`,
+                            name: child.name || '新目录',
+                            type: 'folder',
+                            expanded: true,
+                            children: [],
+                            attributes: child.attributes || {},
+                            filename_template: child.filename_template || '',
+                            match_keywords: child.match_keywords || []
+                        };
+                        // 文件夹的子文件
+                        if (child.files && Array.isArray(child.files)) {
+                            child.files.forEach((file, fileIdx) => {
+                                const fileData = typeof file === 'object' ? file : { name: file };
+                                folderNode.children.push({
+                                    id: `file_${index}_${docIndex}_${childIdx}_${fileIdx}`,
+                                    name: fileData.name || file,
+                                    type: 'file',
+                                    children: [],
+                                    match_keywords: fileData.match_keywords || []
+                                });
+                            });
+                        }
+                        docNode.children.push(folderNode);
+                    }
+                });
+            }
+
+            cycleNode.children.push(docNode);
+        });
+
+        tree.children.push(cycleNode);
+    });
+
+    return tree;
+}
+
+// ==================== 渲染 ====================
+
+function renderTree() {
+    const container = document.getElementById('treeEditorContainer');
+    if (!container) return;
+
+    container.innerHTML = renderTreeNode(currentTreeData, 0);
+    bindTreeEvents();
+}
+
+function renderTreeNode(node, level) {
+    const indent = level * 24;
+    const hasChildren = node.children && node.children.length > 0;
+    const icon = getNodeIcon(node.type);
+    const expandIcon = hasChildren ?
+        (node.expanded ? '▼' : '▶') :
+        '<span style="width:14px;display:inline-block;"></span>';
+
+    // 属性标签
+    const attrTags = getAttributeTags(node);
+    // 关键词标签
+    const keywordTags = getKeywordTags(node);
+    // 文件名模板标签
+    const templateTag = getTemplateTag(node);
+
+    let html = `
+        <div class="tree-node" 
+             data-id="${node.id}" 
+             data-type="${node.type}"
+             style="padding-left:${indent}px;"
+             draggable="true">
+            <div class="tree-node-content">
+                <span class="tree-expand-icon">${expandIcon}</span>
+                <span class="tree-icon">${icon}</span>
+                <span class="tree-name" contenteditable="false">${escapeHtml(node.name)}</span>
+                ${attrTags ? `<span class="tree-attr-tags">${attrTags}</span>` : ''}
+                ${keywordTags ? `<span class="tree-keyword-tags">${keywordTags}</span>` : ''}
+                ${templateTag ? `<span class="tree-template-tag">${templateTag}</span>` : ''}
+                <div class="tree-node-actions">
+                    ${getNodeActions(node)}
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (hasChildren && node.expanded) {
+        node.children.forEach(child => {
+            html += renderTreeNode(child, level + 1);
+        });
+    }
+
+    return html;
+}
+
+/**
+ * HTML 转义，防止 XSS
+ */
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/**
+ * 生成属性标签 HTML（签字/盖章等）
+ */
+function getAttributeTags(node) {
+    if (node.type !== 'document') return '';
+
+    const attrs = node.attributes || {};
+    const tags = [];
+    const icons = {
+        party_a_sign: '✍️',
+        party_b_sign: '✍️',
+        party_a_seal: '🔵',
+        party_b_seal: '🟢',
+        need_doc_number: '📄',
+        need_doc_date: '📅',
+        need_sign_date: '✅'
+    };
+    const shortLabels = {
+        party_a_sign: '甲方签字',
+        party_b_sign: '乙方签字',
+        party_a_seal: '甲方盖章',
+        party_b_seal: '乙方盖章',
+        need_doc_number: '发文号',
+        need_doc_date: '文档日期',
+        need_sign_date: '签字日期'
+    };
+
+    for (const [key, val] of Object.entries(attrs)) {
+        if (val && icons[key]) {
+            tags.push(`<span class="attr-tag" title="${shortLabels[key]}">${icons[key]}</span>`);
+        }
+    }
+    return tags.join('');
+}
+
+/**
+ * 生成关键词标签 HTML
+ */
+function getKeywordTags(node) {
+    if (!node.match_keywords || node.match_keywords.length === 0) return '';
+    
+    return node.match_keywords.slice(0, 3).map(kw => 
+        `<span class="keyword-tag" title="匹配关键词: ${escapeHtml(kw)}">🔖${escapeHtml(kw)}</span>`
+    ).join('');
+}
+
+/**
+ * 生成文件名模板标签
+ */
+function getTemplateTag(node) {
+    if (!node.filename_template) return '';
+    return `<span class="template-tag" title="文件名模板: ${escapeHtml(node.filename_template)}">📝</span>`;
+}
+
+function getNodeIcon(type) {
+    const icons = {
+        'root': '📁',
+        'cycle': '📂',
+        'folder': '📁',
+        'document': '📄',
+        'file': '📃'
+    };
+    return icons[type] || '📄';
+}
+
+function getNodeActions(node) {
+    let actions = '';
+
+    if (node.type === 'root') {
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('cycle')" title="添加周期">➕ 周期</button>`;
+    } else if (node.type === 'cycle') {
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('document')" title="添加文档">➕ 文档</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加目录">➕ 目录</button>`;
+    } else if (node.type === 'document') {
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加子目录">➕ 目录</button>`;
+    } else if (node.type === 'folder') {
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('file')" title="添加文件">➕ 文件</button>`;
+    }
+
+    if (node.type !== 'root') {
+        if (node.type === 'document') {
+            actions += `<button class="tree-action-btn" onclick="openAttributePanel('${node.id}')" title="设置属性">⚙️</button>`;
+        }
+        // 文件名模板和关键词：文档、目录、文件都可以设置
+        if (['document', 'folder', 'file'].includes(node.type)) {
+            actions += `<button class="tree-action-btn" onclick="openMatchSettings('${node.id}')" title="匹配设置">🏷️</button>`;
+        }
+        actions += `<button class="tree-action-btn" onclick="editTreeNode('${node.id}')" title="编辑名称">✏️</button>`;
+        actions += `<button class="tree-action-btn delete" onclick="deleteTreeNode('${node.id}')" title="删除">🗑️</button>`;
+    }
+
+    return actions;
+}
+
+// ==================== 事件绑定 ====================
+
+function bindTreeEvents() {
+    const container = document.getElementById('treeEditorContainer');
+    if (!container) return;
+
+    container.querySelectorAll('.tree-expand-icon').forEach(icon => {
+        icon.style.cursor = 'pointer';
+        icon.addEventListener('click', (e) => {
+            const nodeEl = e.target.closest('.tree-node');
+            toggleNode(nodeEl.dataset.id);
+        });
+    });
+
+    container.querySelectorAll('.tree-node').forEach(nodeEl => {
+        nodeEl.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('tree-action-btn')) {
+                selectNode(nodeEl.dataset.id);
+            }
+        });
+    });
+
+    container.querySelectorAll('.tree-name').forEach(nameEl => {
+        nameEl.addEventListener('dblclick', (e) => {
+            const nodeEl = e.target.closest('.tree-node');
+            if (nodeEl.dataset.type !== 'root') {
+                startEditNodeName(nodeEl.dataset.id);
+            }
+        });
+    });
+
+    setupDragAndDrop();
+
+    // 属性面板 checkbox 实时联动预览
+    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+        const checkbox = document.getElementById(`attr_${key}`);
+        if (checkbox && !checkbox._bound) {
+            checkbox._bound = true;
+            checkbox.addEventListener('change', () => {
+                const panel = document.getElementById('attributePanel');
+                const editingId = panel && panel.dataset && panel.dataset.editingNodeId;
+                if (editingId) updateAttributePreview(editingId);
+            });
+        }
+    }
+}
+
+// ==================== 节点操作 ====================
+
+function toggleNode(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (node && node.children && node.children.length > 0) {
+        node.expanded = !node.expanded;
+        renderTree();
+        if (selectedNode) selectNode(selectedNode);
+    }
+}
+
+function selectNode(nodeId) {
+    document.querySelectorAll('.tree-node.selected').forEach(el => {
+        el.classList.remove('selected');
+    });
+
+    const nodeEl = document.querySelector(`.tree-node[data-id="${nodeId}"]`);
+    if (nodeEl) {
+        nodeEl.classList.add('selected');
+        selectedNode = nodeId;
+        window._treeSelectedNode = nodeId;
+        updateToolbarState();
+    }
+}
+
+function startEditNodeName(nodeId) {
+    const nodeEl = document.querySelector(`.tree-node[data-id="${nodeId}"]`);
+    if (!nodeEl) return;
+
+    const nameEl = nodeEl.querySelector('.tree-name');
+    if (!nameEl) return;
+
+    nameEl.contentEditable = 'true';
+    nameEl.focus();
+
+    const range = document.createRange();
+    range.selectNodeContents(nameEl);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const originalName = findNode(currentTreeData, nodeId).name;
+
+    nameEl.addEventListener('blur', () => {
+        finishEditNodeName(nodeId, nameEl.textContent.trim(), originalName);
+    }, { once: true });
+
+    nameEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
+        if (e.key === 'Escape') {
+            nameEl.textContent = originalName;
+            nameEl.blur();
+        }
+    });
+}
+
+function finishEditNodeName(nodeId, newName, originalName) {
+    if (!newName) {
+        showNotification('名称不能为空', 'error');
+        renderTree();
+        if (selectedNode) selectNode(selectedNode);
+        return;
+    }
+
+    const node = findNode(currentTreeData, nodeId);
+    if (node) {
+        node.name = newName;
+        renderTree();
+        if (selectedNode) selectNode(selectedNode);
+        
+        if (newName !== originalName) {
+            markDirty();
+            showNotification('名称已更新', 'success');
+        }
+    }
+}
+
+// ==================== 添加/编辑/删除 ====================
+
+window.addTreeNode = function(type) {
+    // 确定父节点
+    let parentId = 'root';
+    if (type === 'document' || type === 'folder' || type === 'file') {
+        if (selectedNode) parentId = selectedNode;
+    }
+
+    const parent = findNode(currentTreeData, parentId);
+    if (!parent) {
+        showNotification('请先选择父节点', 'error');
+        return;
+    }
+
+    // 类型兼容性检查
+    if (type === 'cycle' && parent.type !== 'root') {
+        showNotification('周期只能添加到根节点下', 'error');
+        return;
+    }
+    if (type === 'document' && parent.type !== 'cycle') {
+        showNotification('文档只能添加到周期下', 'error');
+        return;
+    }
+    if (type === 'folder' && parent.type !== 'cycle' && parent.type !== 'document') {
+        showNotification('目录只能添加到周期或文档下', 'error');
+        return;
+    }
+    if (type === 'file' && parent.type !== 'folder') {
+        showNotification('文件只能添加到目录下', 'error');
+        return;
+    }
+
+    const now = new Date();
+    const ts = now.getFullYear().toString() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') + '_' +
+        String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0') +
+        String(now.getSeconds()).padStart(2, '0');
+
+    const defaultNames = {
+        cycle: '新周期',
+        document: '新文档',
+        folder: '新目录',
+        file: `文件_${ts}`
+    };
+
+    const newNode = {
+        id: `${type}_${Date.now()}`,
+        name: defaultNames[type] || '新节点',
+        type: type,
+        expanded: true,
+        children: []
+    };
+
+    // 文档节点带默认属性
+    if (type === 'document') {
+        newNode.attributes = { ...DEFAULT_DOC_ATTRIBUTES };
+        newNode.doc_note = '';
+        newNode.filename_template = '';
+        newNode.match_keywords = [];
+    }
+
+    // 目录和文件节点也支持匹配关键词
+    if (type === 'folder' || type === 'file') {
+        newNode.filename_template = '';
+        newNode.match_keywords = [];
+    }
+
+    if (!parent.children) parent.children = [];
+    parent.children.push(newNode);
+    parent.expanded = true;
+
+    renderTree();
+
+    setTimeout(() => {
+        selectNode(newNode.id);
+        startEditNodeName(newNode.id);
+        markDirty();
+    }, 100);
+};
+
+window.editTreeNode = function(nodeId) {
+    startEditNodeName(nodeId);
+};
+
+window.deleteTreeNode = function(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    const typeNames = { cycle: '周期', document: '文档', folder: '目录', file: '文件' };
+    const typeName = typeNames[node.type] || '节点';
+    const hasChildren = node.children && node.children.length > 0;
+
+    let message = `确定要删除${typeName}"${node.name}"吗？`;
+    if (hasChildren) {
+        message += `\n该${typeName}下还有 ${node.children.length} 个子项，将一并删除。`;
+    }
+
+    showConfirmModal('确认删除', message, () => {
+        deleteNode(currentTreeData, nodeId);
+        renderTree();
+        showNotification('删除成功', 'success');
+        selectedNode = null;
+        updateToolbarState();
+        markDirty();
+    });
+};
+
+// ==================== 属性面板（附加要求） ====================
+
+/**
+ * 打开属性编辑面板（签字/盖章等附加要求）
+ */
+window.openAttributePanel = function(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node || node.type !== 'document') return;
+
+    const panel = document.getElementById('attributePanel');
+    if (!panel) return;
+
+    // 填充属性值
+    const attrs = node.attributes || {};
+    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+        const checkbox = document.getElementById(`attr_${key}`);
+        if (checkbox) checkbox.checked = !!attrs[key];
+    }
+
+    // 备注
+    const noteEl = document.getElementById('attrDocNote');
+    if (noteEl) noteEl.value = node.doc_note || '';
+
+    // 显示面板
+    panel.style.display = 'block';
+    panel.dataset.editingNodeId = nodeId;
+
+    // 更新属性标签预览
+    updateAttributePreview(nodeId);
+};
+
+/**
+ * 关闭属性面板
+ */
+export function closeAttributePanel() {
+    const panel = document.getElementById('attributePanel');
+    if (panel) {
+        panel.style.display = 'none';
+        panel.dataset.editingNodeId = '';
+    }
+}
+
+/**
+ * 保存属性（附加要求）
+ */
+export function saveAttributes() {
+    const panel = document.getElementById('attributePanel');
+    if (!panel) return;
+
+    const nodeId = panel.dataset.editingNodeId;
+    if (!nodeId) return;
+
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    // 收集属性
+    const attrs = {};
+    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+        const checkbox = document.getElementById(`attr_${key}`);
+        if (checkbox) attrs[key] = checkbox.checked;
+    }
+    node.attributes = attrs;
+
+    // 备注
+    const noteEl = document.getElementById('attrDocNote');
+    if (noteEl) node.doc_note = noteEl.value.trim();
+
+    // 重新渲染树
+    renderTree();
+    if (selectedNode) selectNode(selectedNode);
+    showNotification('附加要求已保存', 'success');
+    markDirty();
+}
+
+/**
+ * 更新属性标签预览
+ */
+function updateAttributePreview(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    const previewEl = document.getElementById('attrPreview');
+    if (!previewEl) return;
+
+    const attrs = node.attributes || {};
+    const activeAttrs = Object.entries(attrs)
+        .filter(([k, v]) => v)
+        .map(([k]) => ATTRIBUTE_LABELS[k]);
+
+    if (activeAttrs.length === 0) {
+        previewEl.textContent = '未设置附加要求';
+        previewEl.className = 'attr-preview empty';
+    } else {
+        previewEl.textContent = activeAttrs.join('、');
+        previewEl.className = 'attr-preview';
+    }
+}
+
+// ==================== 匹配设置面板（文件名模板 + 关键词） ====================
+
+/**
+ * 打开匹配设置面板
+ */
+window.openMatchSettings = function(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    const typeNames = { document: '文档', folder: '目录', file: '文件' };
+    const title = document.getElementById('matchSettingsTitle');
+    if (title) title.textContent = `${typeNames[node.type] || '节点'}匹配设置 - ${node.name}`;
+
+    // 填充文件名模板
+    const templateEl = document.getElementById('matchFilenameTemplate');
+    if (templateEl) templateEl.value = node.filename_template || '';
+
+    // 填充关键词
+    const keywordsEl = document.getElementById('matchKeywords');
+    if (keywordsEl) {
+        keywordsEl.value = (node.match_keywords || []).join('、');
+    }
+
+    // 显示模板变量提示
+    updateTemplateHint(node.type);
+
+    // 记录当前编辑的节点
+    const panel = document.getElementById('matchSettingsPanel');
+    if (panel) {
+        panel.style.display = 'block';
+        panel.dataset.editingNodeId = nodeId;
+    }
+};
+
+/**
+ * 更新模板变量提示
+ */
+function updateTemplateHint(nodeType) {
+    const hintEl = document.getElementById('matchTemplateHint');
+    if (!hintEl) return;
+
+    if (nodeType === 'file') {
+        hintEl.textContent = '可用变量：无（文件名由系统生成时间戳）';
+    } else {
+        hintEl.textContent = '可用变量：{日期} {序号} {周期} {文档名}';
+    }
+}
+
+/**
+ * 关闭匹配设置面板
+ */
+window.closeMatchSettings = function() {
+    const panel = document.getElementById('matchSettingsPanel');
+    if (panel) {
+        panel.style.display = 'none';
+        panel.dataset.editingNodeId = '';
+    }
+};
+
+/**
+ * 保存匹配设置
+ */
+window.saveMatchSettings = function() {
+    const panel = document.getElementById('matchSettingsPanel');
+    if (!panel) return;
+
+    const nodeId = panel.dataset.editingNodeId;
+    if (!nodeId) return;
+
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    // 文件名模板
+    const templateEl = document.getElementById('matchFilenameTemplate');
+    if (templateEl) {
+        node.filename_template = templateEl.value.trim();
+    }
+
+    // 关键词
+    const keywordsEl = document.getElementById('matchKeywords');
+    if (keywordsEl) {
+        const kwStr = keywordsEl.value.trim();
+        if (kwStr) {
+            // 支持中文顿号、英文逗号、分号、空格分隔
+            node.match_keywords = kwStr.split(/[、,;\s]+/).filter(k => k.trim());
+        } else {
+            node.match_keywords = [];
+        }
+    }
+
+    // 关闭面板
+    panel.style.display = 'none';
+
+    // 重新渲染
+    renderTree();
+    if (selectedNode) selectNode(selectedNode);
+    showNotification('匹配设置已保存', 'success');
+    markDirty();
+};
+
+/**
+ * 添加预设关键词按钮
+ */
+window.addPresetKeyword = function(keyword) {
+    const keywordsEl = document.getElementById('matchKeywords');
+    if (!keywordsEl) return;
+
+    const existing = keywordsEl.value.trim();
+    if (existing) {
+        keywordsEl.value = existing + '、' + keyword;
+    } else {
+        keywordsEl.value = keyword;
+    }
+};
+
+// ==================== 树操作工具函数 ====================
+
+function findNode(tree, nodeId) {
+    if (tree.id === nodeId) return tree;
+    if (tree.children) {
+        for (const child of tree.children) {
+            const found = findNode(child, nodeId);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+function deleteNode(tree, nodeId) {
+    if (tree.children) {
+        const index = tree.children.findIndex(child => child.id === nodeId);
+        if (index !== -1) {
+            tree.children.splice(index, 1);
+            return true;
+        }
+        for (const child of tree.children) {
+            if (deleteNode(child, nodeId)) return true;
+        }
+    }
+    return false;
+}
+
+// ==================== 拖拽 ====================
+
+function setupDragAndDrop() {
+    const nodes = document.querySelectorAll('.tree-node');
+    nodes.forEach(node => {
+        node.addEventListener('dragstart', handleDragStart);
+        node.addEventListener('dragover', handleDragOver);
+        node.addEventListener('drop', handleDrop);
+        node.addEventListener('dragend', handleDragEnd);
+    });
+}
+
+let draggedNode = null;
+
+function handleDragStart(e) {
+    draggedNode = e.target.closest('.tree-node');
+    if (!draggedNode) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', draggedNode.dataset.id);
+    setTimeout(() => { draggedNode.style.opacity = '0.5'; }, 0);
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const targetNode = e.target.closest('.tree-node');
+    if (targetNode && targetNode !== draggedNode) {
+        targetNode.classList.add('drag-over');
+    }
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    const targetNode = e.target.closest('.tree-node');
+    if (!targetNode || !draggedNode || targetNode === draggedNode) return;
+
+    const draggedId = draggedNode.dataset.id;
+    const targetId = targetNode.dataset.id;
+    const draggedData = findNode(currentTreeData, draggedId);
+    const targetData = findNode(currentTreeData, targetId);
+    if (!draggedData || !targetData) return;
+
+    if (isDescendant(draggedData, targetId)) {
+        showNotification('不能移动到自己的子节点下', 'error');
+        return;
+    }
+
+    // 类型兼容检查
+    const rules = {
+        cycle: ['root'],
+        document: ['cycle'],
+        folder: ['cycle', 'document'],
+        file: ['folder']
+    };
+    const allowed = rules[draggedData.type];
+    if (allowed && !allowed.includes(targetData.type)) {
+        const typeNames = { cycle: '周期', document: '文档', folder: '目录', file: '文件' };
+        const targetNames = { root: '根节点', cycle: '周期', document: '文档', folder: '目录', file: '文件' };
+        showNotification(`${typeNames[draggedData.type]}只能移动到${allowed.map(t => targetNames[t]).join('或')}下`, 'error');
+        return;
+    }
+
+    moveNode(draggedId, targetId);
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+function handleDragEnd() {
+    if (draggedNode) draggedNode.style.opacity = '1';
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    draggedNode = null;
+}
+
+function moveNode(nodeId, targetId) {
+    const node = findNode(currentTreeData, nodeId);
+    const target = findNode(currentTreeData, targetId);
+    if (!node || !target) return;
+
+    deleteNode(currentTreeData, nodeId);
+    if (!target.children) target.children = [];
+    target.children.push(node);
+    target.expanded = true;
+
+    renderTree();
+    markDirty();
+    showNotification('移动成功', 'success');
+}
+
+function isDescendant(node, targetId) {
+    if (!node.children) return false;
+    for (const child of node.children) {
+        if (child.id === targetId) return true;
+        if (isDescendant(child, targetId)) return true;
+    }
+    return false;
+}
+
+// ==================== 工具栏 ====================
+
+function updateToolbarState() {
+    const addDocBtn = document.getElementById('toolbarAddDoc');
+    const addFolderBtn = document.getElementById('toolbarAddFolder');
+    const editBtn = document.getElementById('toolbarEdit');
+    const deleteBtn = document.getElementById('toolbarDelete');
+    const attrBtn = document.getElementById('toolbarAttr');
+
+    if (!selectedNode) {
+        if (addDocBtn) addDocBtn.disabled = true;
+        if (addFolderBtn) addFolderBtn.disabled = true;
+        if (editBtn) editBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = true;
+        if (attrBtn) attrBtn.disabled = true;
+        hideAttributePanelIfNoSelection();
+        return;
+    }
+
+    const node = findNode(currentTreeData, selectedNode);
+    if (!node) return;
+
+    // 添加文档：只有选中周期时可用
+    if (addDocBtn) addDocBtn.disabled = (node.type !== 'cycle');
+    // 添加目录：选中周期或文档时可用
+    if (addFolderBtn) addFolderBtn.disabled = (node.type !== 'cycle' && node.type !== 'document');
+    // 编辑：非根节点可用
+    if (editBtn) editBtn.disabled = (node.type === 'root');
+    // 删除：非根节点可用
+    if (deleteBtn) deleteBtn.disabled = (node.type === 'root');
+    // 属性：只有文档可用
+    if (attrBtn) attrBtn.disabled = (node.type !== 'document');
+
+    // 属性面板：选中文档时自动显示
+    if (node.type === 'document') {
+        window.openAttributePanel(selectedNode);
+    } else {
+        hideAttributePanelIfNoSelection();
+    }
+}
+
+/**
+ * 隐藏属性面板（非文档选中时）
+ */
+function hideAttributePanelIfNoSelection() {
+    const panel = document.getElementById('attributePanel');
+    if (panel) panel.style.display = 'none';
+}
+
+export function expandAll() {
+    setAllExpanded(currentTreeData, true);
+    renderTree();
+    if (selectedNode) selectNode(selectedNode);
+}
+
+export function collapseAll() {
+    setAllExpanded(currentTreeData, false);
+    renderTree();
+    if (selectedNode) selectNode(selectedNode);
+}
+
+function setAllExpanded(node, expanded) {
+    node.expanded = expanded;
+    if (node.children) {
+        node.children.forEach(child => setAllExpanded(child, expanded));
+    }
+}
+
+// ==================== 数据转换 ====================
+
+/**
+ * 将树形数据转换回配置格式
+ * 新格式：required_docs 为对象数组
+ */
+function treeToConfig() {
+    const config = {
+        cycles: [],
+        documents: {}
+    };
+
+    if (!currentTreeData.children) return config;
+
+    currentTreeData.children.forEach(cycleNode => {
+        if (cycleNode.type === 'cycle') {
+            config.cycles.push(cycleNode.name);
+
+            const requiredDocs = [];
+
+            if (cycleNode.children) {
+                cycleNode.children.forEach(child => {
+                    if (child.type === 'document') {
+                        const docObj = {
+                            name: child.name,
+                            attributes: child.attributes || {},
+                            doc_note: child.doc_note || '',
+                            filename_template: child.filename_template || '',
+                            match_keywords: child.match_keywords || []
+                        };
+                        // 目录子节点
+                        if (child.children && child.children.length > 0) {
+                            docObj.children = child.children
+                                .filter(c => c.type === 'folder')
+                                .map(folder => ({
+                                    type: 'folder',
+                                    name: folder.name,
+                                    attributes: folder.attributes || {},
+                                    filename_template: folder.filename_template || '',
+                                    match_keywords: folder.match_keywords || [],
+                                    files: (folder.children || [])
+                                        .filter(f => f.type === 'file')
+                                        .map(f => ({
+                                            name: f.name,
+                                            match_keywords: f.match_keywords || []
+                                        }))
+                                }));
+                        }
+                        requiredDocs.push(docObj);
+                    } else if (child.type === 'folder') {
+                        // 周期下的顶级目录
+                        requiredDocs.push({
+                            type: 'folder',
+                            name: child.name,
+                            filename_template: child.filename_template || '',
+                            match_keywords: child.match_keywords || [],
+                            files: (child.children || []).map(f => ({
+                                name: typeof f === 'object' ? f.name : f,
+                                match_keywords: f.match_keywords || []
+                            }))
+                        });
+                    }
+                });
+            }
+
+            config.documents[cycleNode.name] = {
+                required_docs: requiredDocs,
+                uploaded_docs: []
+            };
+        }
+    });
+
+    return config;
+}
+
+// ==================== 保存 ====================
+
+export async function saveTreeConfig() {
+    const newConfig = treeToConfig();
+
+    showConfirmModal(
+        '确认保存',
+        '保存将覆盖当前配置，确定要继续吗？\n（未保存的草稿将被自动清除）',
+        async () => {
+            showLoading(true);
+            updateAutoSaveStatus('saving');
+            try {
+                const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newConfig)
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showNotification('配置保存成功', 'success');
+                    appState.projectConfig = newConfig;
+                    hasUnsavedChanges = false;
+                    clearDrafts();
+                    updateAutoSaveStatus('saved', new Date().toISOString());
+                    closeTreeEditor();
+                    renderCycles(newConfig.cycles || []);
+                    renderInitialContent();
+                } else {
+                    showNotification('保存失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                console.error('保存配置失败:', error);
+                showNotification('保存失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+    );
+}
+
+// ==================== 模板功能 ====================
+
+export async function saveTreeAsTemplate() {
+    const modal = document.getElementById('saveTemplateModal');
+    if (modal) openModal(modal);
+}
+
+export async function loadTemplateToTree() {
+    const modal = document.getElementById('templateLibraryModal');
+    if (!modal) return;
+    openModal(modal);
+    await loadTemplateList();
+}
+
+async function loadTemplateList() {
+    const container = document.getElementById('templateListContainer');
+    if (!container) return;
+
+    container.innerHTML = '<div class="loading">加载中...</div>';
+
+    try {
+        const response = await fetch('/api/projects/templates');
+        const result = await response.json();
+
+        if (result.status !== 'success') throw new Error(result.message || '加载失败');
+
+        const templates = result.templates || [];
+        if (templates.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>暂无模板</p></div>';
+            return;
+        }
+
+        container.innerHTML = templates.map(t => `
+            <div class="template-item" data-id="${t.id}">
+                <div class="template-info">
+                    <h4>${escapeHtml(t.name)}</h4>
+                    <p class="template-meta">周期: ${t.cycle_count} | 文档: ${t.document_count}</p>
+                </div>
+                <div class="template-actions">
+                    <button class="btn btn-sm btn-primary" onclick="loadTemplateToTreeEditor('${t.id}')">加载</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('加载模板列表失败:', error);
+        container.innerHTML = `<div class="error-state">加载失败: ${error.message}</div>`;
+    }
+}
+
+window.loadTemplateToTreeEditor = async function(templateId) {
+    showLoading(true);
+    try {
+        const response = await fetch(`/api/projects/templates/${templateId}`);
+        const result = await response.json();
+        if (result.status !== 'success') throw new Error(result.message || '加载失败');
+
+        const template = result.template;
+        const tempConfig = {
+            cycles: template.cycles || [],
+            documents: template.documents || {}
+        };
+
+        currentTreeData = buildTreeData(tempConfig);
+        renderTree();
+        closeModal(document.getElementById('templateLibraryModal'));
+        showNotification('模板加载成功，请保存配置', 'success');
+        markDirty();
+    } catch (error) {
+        console.error('加载模板失败:', error);
+        showNotification('加载失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+};
