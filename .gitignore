@@ -46,6 +46,7 @@ Thumbs.db
 
 # 工作区数据
 ../.workbuddy/
+.workbuddy/
 
 # 项目根目录文件
 ../plugin_development_guide.md
