@@ -50,3 +50,6 @@ Thumbs.db
 # 项目根目录文件
 ../plugin_development_guide.md
 ../需求清单.xlsx
+
+# 项目数据
+projects/
