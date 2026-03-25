@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -691,14 +691,13 @@ export async function loadZipRecords() {
     
     try {
         // 调用API获取已解压的ZIP包列表
-        const response = await fetch('/api/documents/list-zip-packages', { method: 'GET' });
-        const result = await response.json();
+        const result = await apiLoadZipRecords(appState.currentProjectId);
         
         if (result.status !== 'success') {
             throw new Error(result.message || '加载失败');
         }
         
-        const zipRecords = result.packages;
+        const zipRecords = result.records;
         
         if (!zipRecords || zipRecords.length === 0) {
             container.innerHTML = '<div class="empty-tip">暂无ZIP上传记录</div>';
@@ -707,16 +706,9 @@ export async function loadZipRecords() {
         
         container.innerHTML = '';
         
-        zipRecords.forEach((record, index) => {
-            // 从目录名中提取上传时间（如果目录名包含时间戳）
-            let uploadTime = '未知';
-            const timeMatch = record.name.match(/(\d{8}_\d{6})/);
-            if (timeMatch) {
-                const timeStr = timeMatch[1];
-                const date = timeStr.substring(0, 4) + '-' + timeStr.substring(4, 6) + '-' + timeStr.substring(6, 8);
-                const time = timeStr.substring(9, 11) + ':' + timeStr.substring(11, 13) + ':' + timeStr.substring(13, 15);
-                uploadTime = date + ' ' + time;
-            }
+        zipRecords.forEach((record) => {
+            // 格式化上传时间
+            const uploadTime = new Date(record.upload_time).toLocaleString('zh-CN');
             
             // 对路径中的反斜杠进行转义，避免JavaScript语法错误
             const escapedPath = record.path.replace(/\\/g, '\\\\');
@@ -730,12 +722,12 @@ export async function loadZipRecords() {
                     <div class="zip-record-meta">
                         <span>上传时间: ${uploadTime}</span>
                         <span>文件数量: ${record.file_count}</span>
-                        <span>状态: 已完成</span>
+                        <span>状态: ${record.status}</span>
                     </div>
                 </div>
                 <div class="zip-record-actions">
-                    <button class="btn btn-primary" onclick="handleRematchFromZip('${index}', '${escapedName}', '${escapedPath}')">重新匹配</button>
-                    <button class="btn btn-danger" onclick="handleDeleteZipRecord('${escapedPath}', '${escapedName}')">删除记录</button>
+                    <button class="btn btn-primary" onclick="handleRematchFromZip('${record.id}', '${escapedName}', '${escapedPath}')">重新匹配</button>
+                    <button class="btn btn-danger" onclick="handleDeleteZipRecord('${record.id}', '${escapedName}')">删除记录</button>
                 </div>
             `;
             container.appendChild(item);
@@ -827,8 +819,24 @@ async function pollMatchTask(taskId) {
                             matchResult.matched_count > 0 ? 'success' : 'warning'
                         );
                         
-                        // 刷新文档列表
-                        if (appState.currentCycle) {
+                        // 重新加载项目配置
+                        if (appState.currentProjectId) {
+                            import('./api.js').then(module => {
+                                module.loadProject(appState.currentProjectId).then(updatedProject => {
+                                    if (updatedProject) {
+                                        appState.projectConfig = updatedProject;
+                                    }
+                                    
+                                    // 刷新文档列表
+                                    if (appState.currentCycle) {
+                                        import('./document.js').then(docModule => {
+                                            docModule.renderCycleDocuments(appState.currentCycle);
+                                        });
+                                    }
+                                });
+                            });
+                        } else if (appState.currentCycle) {
+                            // 刷新文档列表
                             import('./document.js').then(module => {
                                 module.renderCycleDocuments(appState.currentCycle);
                             });
@@ -852,7 +860,7 @@ async function pollMatchTask(taskId) {
 /**
  * 处理删除ZIP记录
  */
-export async function handleDeleteZipRecord(path, filename) {
+export async function handleDeleteZipRecord(zipId, filename) {
     showConfirmModal(
         '确认删除',
         `确定要删除 "${filename}" 记录吗？此操作将同时删除对应文件。如果删除的文件有被文档匹配占用，将同时删除匹配结果。`,
@@ -860,13 +868,7 @@ export async function handleDeleteZipRecord(path, filename) {
             showLoading(true);
             try {
                 // 调用API删除ZIP包
-                const response = await fetch('/api/documents/delete-zip-package', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ package_path: path })
-                });
-                
-                const result = await response.json();
+                const result = await apiDeleteZipRecord(zipId, appState.currentProjectId);
                 
                 if (result.status !== 'success') {
                     throw new Error(result.message || '删除失败');

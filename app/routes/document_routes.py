@@ -7,8 +7,10 @@ import os
 import hashlib
 from pathlib import Path
 from datetime import datetime
+from typing import Dict
 from app.utils.document_manager import DocumentManager
 from app.utils.zip_matcher import create_matcher
+from app.utils.json_file_manager import json_file_manager
 from src.services.preview_service import PreviewService
 
 document_bp = Blueprint('document', __name__)
@@ -732,6 +734,113 @@ def batch_delete_documents():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@document_bp.route('/smart-recognize', methods=['POST'])
+def smart_recognize():
+    """智能识别文档属性（签章、盖章等）"""
+    try:
+        file = request.files.get('file')
+        party_a = request.form.get('party_a', '')
+        party_b = request.form.get('party_b', '')
+        requirement = request.form.get('requirement', '')
+        
+        if not file:
+            return jsonify({'status': 'error', 'message': '未选择文件'}), 400
+        
+        # 保存临时文件
+        import tempfile
+        import os
+        from pathlib import Path
+        
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir) / file.filename
+        file.save(str(temp_path))
+        
+        try:
+            # 解析需要识别的属性
+            attributes_to_recognize = parse_recognition_requirements(requirement)
+            
+            # 调用智能识别服务，传入动态配置
+            result = doc_manager.smart_recognize_document(
+                str(temp_path), 
+                party_a, 
+                party_b,
+                attributes_to_recognize
+            )
+            return jsonify(result)
+        finally:
+            # 清理临时文件
+            if temp_path.exists():
+                temp_path.unlink()
+            if Path(temp_dir).exists():
+                Path(temp_dir).rmdir()
+                
+    except Exception as e:
+        import traceback
+        logger.error(f"智能识别失败: {e}\n{traceback.format_exc()}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def parse_recognition_requirements(requirement: str) -> Dict:
+    """解析需要识别的属性要求
+    
+    Args:
+        requirement: 要求文本
+        
+    Returns:
+        Dict: 需要识别的属性配置
+    """
+    attributes = {
+        'doc_date': False,
+        'sign_date': False,
+        'signer': False,
+        'has_seal': False,
+        'party_a_seal': False,
+        'party_b_seal': False,
+        'no_seal': False,
+        'no_signature': False,
+        'other_seal': False,
+        'doc_number': False
+    }
+    
+    if not requirement or requirement == '无特殊要求' or requirement == '甲方提供':
+        return attributes
+    
+    req_lower = requirement.lower()
+    
+    # 日期识别
+    if '文档日期' in requirement or '日期' in requirement:
+        attributes['doc_date'] = True
+    
+    if '签字日期' in requirement or '签署日期' in requirement:
+        attributes['sign_date'] = True
+    
+    # 签字人识别
+    if '签字' in requirement or '签名' in requirement:
+        attributes['signer'] = True
+        attributes['no_signature'] = True
+    
+    # 盖章识别
+    if '甲方盖章' in requirement or '甲方章' in requirement:
+        attributes['party_a_seal'] = True
+        attributes['has_seal'] = True
+    
+    if '乙方盖章' in requirement or '乙方章' in requirement:
+        attributes['party_b_seal'] = True
+        attributes['has_seal'] = True
+    
+    if '盖章' in requirement:
+        attributes['has_seal'] = True
+        attributes['no_seal'] = True
+    
+    # 发文号识别
+    if '发文号' in requirement or '文号' in requirement:
+        attributes['doc_number'] = True
+    
+    # 其他盖章标注
+    if '其它' in requirement or '其他' in requirement or '标注' in requirement:
+        attributes['other_seal'] = True
+    
+    return attributes
+
 @document_bp.route('/categories', methods=['GET'])
 def get_categories():
     """获取分类列表"""
@@ -1004,6 +1113,88 @@ def select_files():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@document_bp.route('/zip-records', methods=['GET'])
+def get_zip_records():
+    """获取ZIP上传记录"""
+    try:
+        project_id = request.args.get('project_id')
+        
+        if not project_id:
+            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
+        
+        # 获取项目文件路径
+        project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+        
+        # 使用JSON文件管理器获取ZIP上传记录
+        records = json_file_manager.get_zip_upload_records(project_file)
+        
+        return jsonify({
+            'status': 'success',
+            'records': records
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/zip-records', methods=['POST'])
+def add_zip_record():
+    """添加ZIP上传记录"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        zip_info = data.get('zip_info')
+        
+        if not project_id or not zip_info:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        # 获取项目文件路径
+        project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+        
+        # 确保ZIP信息包含必要字段
+        if 'id' not in zip_info:
+            import uuid
+            zip_info['id'] = str(uuid.uuid4())
+        
+        if 'upload_time' not in zip_info:
+            zip_info['upload_time'] = datetime.now().isoformat()
+        
+        # 使用JSON文件管理器添加ZIP上传记录
+        success = json_file_manager.add_zip_upload_record(project_file, zip_info)
+        
+        if success:
+            return jsonify({'status': 'success', 'message': 'ZIP上传记录添加成功'})
+        else:
+            return jsonify({'status': 'error', 'message': 'ZIP上传记录添加失败'}), 500
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@document_bp.route('/zip-records/<zip_id>', methods=['DELETE'])
+def delete_zip_record(zip_id):
+    """删除ZIP上传记录"""
+    try:
+        project_id = request.args.get('project_id')
+        
+        if not project_id:
+            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
+        
+        # 获取项目文件路径
+        project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+        
+        # 使用JSON文件管理器删除ZIP上传记录
+        success = json_file_manager.delete_zip_upload_record(project_file, zip_id)
+        
+        if success:
+            return jsonify({'status': 'success', 'message': 'ZIP上传记录删除成功'})
+        else:
+            return jsonify({'status': 'error', 'message': 'ZIP上传记录删除失败'}), 500
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # ========== ZIP 大文件断点续传上传 ==========
 
 @document_bp.route('/zip-chunk-upload', methods=['POST'])
@@ -1234,6 +1425,7 @@ def upload_zip():
     try:
         from pathlib import Path
         from datetime import datetime
+        import uuid
         
         # 优先检查是否有已上传的文件路径（分片上传场景）
         uploaded_file_path = request.form.get('uploaded_file_path')
@@ -1242,6 +1434,7 @@ def upload_zip():
             # 使用已上传的文件
             temp_zip = Path(uploaded_file_path)
             file = None
+            original_filename = temp_zip.name
         else:
             # 普通上传
             file = request.files.get('file')
@@ -1253,6 +1446,7 @@ def upload_zip():
                 return jsonify({'status': 'error', 'message': '请上传ZIP格式的压缩包'}), 400
 
             # 保存临时ZIP文件
+            original_filename = file.filename
             temp_zip = doc_manager.upload_folder / 'temp' / f'{datetime.now().strftime("%Y%m%d%H%M%S")}_{file.filename}'
             temp_zip.parent.mkdir(parents=True, exist_ok=True)
             file.save(str(temp_zip))
@@ -1268,6 +1462,58 @@ def upload_zip():
 
         # 解压并匹配
         result = doc_manager.extract_zipfile(str(temp_zip), project_config or {})
+
+        # 如果解压成功，保存ZIP上传记录到项目JSON
+        if result.get('status') == 'success' and project_config:
+            project_id = project_config.get('id')
+            if project_id:
+                # 生成ZIP记录ID
+                zip_id = f"zip_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                
+                # 获取解压目录（相对于项目uploads目录的路径）
+                extracted_dir = result.get('extracted_dir', '')
+                project_name = project_config.get('name', '')
+                
+                # 计算相对路径
+                try:
+                    from .folder_manager import FolderManager
+                    from .base import DocumentConfig
+                    folder_manager = FolderManager(DocumentConfig())
+                    project_uploads_dir = folder_manager.get_documents_folder(project_name)
+                    
+                    # 将绝对路径转换为相对于项目uploads目录的路径
+                    extract_path = Path(extracted_dir)
+                    if extract_path.is_absolute():
+                        try:
+                            rel_path = extract_path.relative_to(project_uploads_dir)
+                            path_for_record = str(rel_path)
+                        except ValueError:
+                            # 如果无法相对化，使用原始路径
+                            path_for_record = str(extracted_dir)
+                    else:
+                        path_for_record = str(extracted_dir)
+                except Exception as e:
+                    logger.warning(f"计算相对路径失败: {e}")
+                    path_for_record = str(extracted_dir)
+                
+                # 构建ZIP上传记录
+                zip_record = {
+                    'id': zip_id,
+                    'name': original_filename,
+                    'path': path_for_record,
+                    'file_count': result.get('total_files', 0),
+                    'upload_time': datetime.now().isoformat(),
+                    'status': '已完成'
+                }
+                
+                # 保存到项目JSON文件
+                project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+                success = json_file_manager.add_zip_upload_record(project_file, zip_record)
+                
+                if success:
+                    logger.info(f"ZIP上传记录已保存到项目 {project_id}")
+                else:
+                    logger.error(f"保存ZIP上传记录失败: {project_file}")
 
         # 不删除临时ZIP，保留以便后续导入使用
 

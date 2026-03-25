@@ -32,9 +32,9 @@ window.openUploadModal = function(cycle, docName) {
     });
 };
 
-window.openEditModal = function(docId) {
+window.openEditModal = function(docId, cycle, docName) {
     import('./modules/document.js').then(module => {
-        module.openEditModal(docId);
+        module.openEditModal(docId, cycle, docName);
     });
 };
 
@@ -176,8 +176,8 @@ window.handleRematchFromZip = function(zipId, filename, path) {
     });
 };
 
-window.handleDeleteZipRecord = function(path, filename) {
+window.handleDeleteZipRecord = function(zipId, filename) {
     import('./modules/project.js').then(module => {
-        module.handleDeleteZipRecord(path, filename);
+        module.handleDeleteZipRecord(zipId, filename);
     });
 };

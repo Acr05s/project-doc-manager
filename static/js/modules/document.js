@@ -79,9 +79,99 @@ export async function handleUploadDocument(e) {
 export function handleFileSelect(e) {
     const file = e.target.files[0];
     if (file) {
-        // 可以在这里添加文件预览逻辑
+        // 显示文件信息
+        showUploadedFile(file);
         console.log('选择的文件:', file.name);
     }
+}
+
+/**
+ * 显示上传的文件
+ */
+function showUploadedFile(file) {
+    const fileList = document.getElementById('uploadedFilesList');
+    if (!fileList) return;
+    
+    // 清空占位符
+    if (fileList.querySelector('.placeholder')) {
+        fileList.innerHTML = '';
+    }
+    
+    // 创建文件项
+    const fileItem = document.createElement('div');
+    fileItem.className = 'uploaded-file-item';
+    fileItem.dataset.filename = file.name;
+    
+    fileItem.innerHTML = `
+        <div class="file-info">
+            <div class="file-name">${file.name}</div>
+            <div class="file-recognition">
+                <span class="recognition-tag">等待识别</span>
+            </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-danger" onclick="removeUploadedFile('${file.name}')">删除</button>
+    `;
+    
+    fileList.appendChild(fileItem);
+}
+
+/**
+ * 移除上传的文件
+ */
+window.removeUploadedFile = function(filename) {
+    const fileItem = document.querySelector(`.uploaded-file-item[data-filename="${filename}"]`);
+    if (fileItem) {
+        fileItem.remove();
+    }
+    
+    // 如果没有文件了，显示占位符
+    const fileList = document.getElementById('uploadedFilesList');
+    if (fileList && fileList.children.length === 0) {
+        fileList.innerHTML = '<p class="placeholder">暂无上传文件</p>';
+    }
+};
+
+/**
+ * 显示智能识别结果
+ */
+export function showRecognitionResult(fileName, recognitionData) {
+    const fileItem = document.querySelector(`.uploaded-file-item[data-filename="${fileName}"]`);
+    if (!fileItem) return;
+    
+    const recognitionDiv = fileItem.querySelector('.file-recognition');
+    if (!recognitionDiv) return;
+    
+    let recognitionHtml = '';
+    
+    // 显示签字信息
+    if (recognitionData.signer) {
+        recognitionHtml += `<span class="recognition-tag signature">签字: ${recognitionData.signer}</span>`;
+    }
+    
+    // 显示盖章信息
+    if (recognitionData.party_a_seal) {
+        recognitionHtml += `<span class="recognition-tag seal">甲方盖章</span>`;
+    }
+    if (recognitionData.party_b_seal) {
+        recognitionHtml += `<span class="recognition-tag seal">乙方盖章</span>`;
+    }
+    if (recognitionData.has_seal) {
+        recognitionHtml += `<span class="recognition-tag seal">已盖章</span>`;
+    }
+    
+    // 显示日期信息
+    if (recognitionData.doc_date) {
+        recognitionHtml += `<span class="recognition-tag">文档日期: ${recognitionData.doc_date}</span>`;
+    }
+    if (recognitionData.sign_date) {
+        recognitionHtml += `<span class="recognition-tag">签字日期: ${recognitionData.sign_date}</span>`;
+    }
+    
+    if (recognitionHtml === '') {
+        recognitionHtml = '<span class="recognition-tag">未识别到信息</span>';
+    }
+    
+    recognitionDiv.innerHTML = recognitionHtml;
 }
 
 /**
@@ -283,6 +373,47 @@ export async function renderCycleDocuments(cycle) {
                             if (d.no_seal) attrParts.push('❌不盖章');
                             if (d.other_seal) attrParts.push(`📍${d.other_seal}`);
                             
+                            // 检查文件是否满足要求
+                            const requirement = doc.requirement || '';
+                            let missingRequirements = [];
+                            
+                            // 检查签字要求
+                            if (requirement.includes('乙方签字') && !d.signer && !d.no_signature) {
+                                missingRequirements.push('乙方签字');
+                            }
+                            if (requirement.includes('甲方签字') && !d.signer && !d.no_signature) {
+                                missingRequirements.push('甲方签字');
+                            }
+                            if (requirement.includes('签字') && !d.signer && !d.no_signature) {
+                                missingRequirements.push('签字');
+                            }
+                            
+                            // 检查盖章要求
+                            if (requirement.includes('乙方盖章') && !d.party_b_seal && !d.no_seal) {
+                                missingRequirements.push('乙方盖章');
+                            }
+                            if (requirement.includes('甲方盖章') && !d.party_a_seal && !d.no_seal) {
+                                missingRequirements.push('甲方盖章');
+                            }
+                            if (requirement.includes('盖章') && !d.has_seal_marked && !d.has_seal && !d.party_a_seal && !d.party_b_seal && !d.no_seal) {
+                                missingRequirements.push('盖章');
+                            }
+                            
+                            // 检查日期要求
+                            if (requirement.includes('文档日期') && !d.doc_date) {
+                                missingRequirements.push('文档日期');
+                            }
+                            if (requirement.includes('签字日期') && !d.sign_date) {
+                                missingRequirements.push('签字日期');
+                            }
+                            
+                            // 生成缺失要求的提示
+                            const missingHtml = missingRequirements.length > 0 ? `
+                                <span class="missing-requirements" title="缺失要求：${missingRequirements.join('、')}">
+                                    ⚠️${missingRequirements.join('、')}
+                                </span>
+                            ` : '';
+                            
                             return `<div class="doc-file-row">
                                 <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
                                       title="点击预览文件" 
@@ -290,6 +421,7 @@ export async function renderCycleDocuments(cycle) {
                                     ${d.original_filename || d.filename}
                                 </span>
                                 ${attrParts.length > 0 ? `<span class="doc-attrs">${attrParts.join(' ')}</span>` : ''}
+                                ${missingHtml}
                             </div>`;
                         }).join('') : '<span class="doc-no-files">暂无文件</span>';
                         
@@ -306,7 +438,7 @@ export async function renderCycleDocuments(cycle) {
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : ''}
                                         <div class="doc-type" style="text-align: center;">${doc.name}</div>
-                                        ${doc.requirement ? `<div class="doc-requirement" style="background: ${requirementColor}; padding: 3px 8px; border-radius: 4px; margin-top: 5px; display: inline-block; text-align: center; margin: 5px auto 0; max-width: 90%;">${doc.requirement}</div>` : '<div class="doc-requirement" style="background: #fff3cd; padding: 3px 8px; border-radius: 4px; margin-top: 5px; display: inline-block; text-align: center; margin: 5px auto 0; max-width: 90%;">无要求</div>'}
+                                        ${doc.requirement ? `<div class="doc-requirement" style="background: ${requirementColor}; padding: 3px 12px; border-radius: 4px; margin-top: 5px; display: inline-block; text-align: center; margin: 5px auto 0;">${doc.requirement}</div>` : '<div class="doc-requirement" style="background: #fff3cd; padding: 3px 12px; border-radius: 4px; margin-top: 5px; display: inline-block; text-align: center; margin: 5px auto 0;">无要求</div>'}
                                     </div>
                                 </div>
                             </td>
@@ -320,7 +452,7 @@ export async function renderCycleDocuments(cycle) {
                                             📁 上传/选择文档
                                         </button>
                                         ${docsList.length > 0 ? `
-                                            <button class="btn btn-success btn-sm" onclick="openEditModal('${docsList[0].id}')">
+                                            <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
                                                 ✏️ 编辑
                                             </button>
                                         ` : ''}
@@ -731,25 +863,256 @@ export function initUploadMethodTabs() {
 }
 
 /**
- * 显示文档附加属性要求
+ * 显示文档附加属性要求并动态生成表单
  */
 function displayDocumentRequirements() {
     const requirementText = document.getElementById('requirementText');
-    if (!requirementText) return;
+    const dynamicDocInfo = document.getElementById('dynamicDocInfo');
     
     // 从项目配置中获取文档要求
+    let requirement = '';
+    let attributes = [];
+    
     if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
         const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
         if (cycleDocs && cycleDocs.required_docs) {
             const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
             if (docInfo) {
-                requirementText.textContent = docInfo.requirement || '无特殊要求';
-                return;
+                requirement = docInfo.requirement || '无特殊要求';
+                // 解析附加属性
+                attributes = parseRequirementAttributes(requirement);
             }
         }
     }
     
-    requirementText.textContent = '无特殊要求';
+    // 显示要求文本
+    if (requirementText) {
+        requirementText.textContent = requirement;
+    }
+    
+    // 动态生成表单
+    if (dynamicDocInfo) {
+        generateDynamicForm(dynamicDocInfo, attributes);
+    }
+}
+
+/**
+ * 解析要求文本中的附加属性
+ */
+function parseRequirementAttributes(requirement) {
+    const attributes = [];
+    // 处理特殊情况：甲方提供 = 无特殊要求
+    if (!requirement || requirement === '无特殊要求' || requirement === '甲方提供') return attributes;
+    
+    // 解析日期要求
+    if (requirement.includes('文档日期') || requirement.includes('日期')) {
+        // 检查是否需要精确到月份
+        const isMonthOnly = requirement.includes('月份') || requirement.includes('年月');
+        attributes.push({
+            type: 'date',
+            id: 'docDate',
+            name: 'doc_date',
+            label: '文档日期',
+            monthOnly: isMonthOnly
+        });
+    }
+    
+    // 解析签字日期
+    if (requirement.includes('签字日期') || requirement.includes('签署日期')) {
+        const isMonthOnly = requirement.includes('月份') || requirement.includes('年月');
+        attributes.push({
+            type: 'date',
+            id: 'signDate',
+            name: 'sign_date',
+            label: '签字日期',
+            monthOnly: isMonthOnly
+        });
+    }
+    
+    // 解析签字人
+    if (requirement.includes('签字') || requirement.includes('签名')) {
+        attributes.push({
+            type: 'text',
+            id: 'signer',
+            name: 'signer',
+            label: '签字人',
+            placeholder: '输入签字人名称'
+        });
+        
+        // 添加"不涉及签字"选项
+        attributes.push({
+            type: 'checkbox',
+            id: 'noSignature',
+            name: 'no_signature',
+            label: '不涉及签字',
+            inline: true
+        });
+    }
+    
+    // 解析盖章信息
+    const sealTypes = [];
+    if (requirement.includes('甲方盖章') || requirement.includes('甲方章')) {
+        sealTypes.push({ id: 'partyASeal', name: 'party_a_seal', label: '甲方盖章' });
+    }
+    if (requirement.includes('乙方盖章') || requirement.includes('乙方章')) {
+        sealTypes.push({ id: 'partyBSeal', name: 'party_b_seal', label: '乙方盖章' });
+    }
+    if (requirement.includes('盖章') && sealTypes.length === 0) {
+        // 通用盖章
+        sealTypes.push({ id: 'hasSeal', name: 'has_seal', label: '已盖章' });
+    }
+    
+    if (sealTypes.length > 0) {
+        attributes.push({
+            type: 'checkbox_group',
+            label: '盖章标记',
+            options: sealTypes
+        });
+        
+        // 添加"不涉及盖章"选项
+        attributes.push({
+            type: 'checkbox',
+            id: 'noSeal',
+            name: 'no_seal',
+            label: '不涉及盖章',
+            inline: true
+        });
+    }
+    
+    // 解析发文号
+    if (requirement.includes('发文号') || requirement.includes('文号')) {
+        attributes.push({
+            type: 'text',
+            id: 'docNumber',
+            name: 'doc_number',
+            label: '发文号',
+            placeholder: '输入发文号'
+        });
+    }
+    
+    // 如果有其他盖章标注要求
+    if (requirement.includes('其它') || requirement.includes('其他') || requirement.includes('标注')) {
+        attributes.push({
+            type: 'text',
+            id: 'otherSeal',
+            name: 'other_seal',
+            label: '其它盖章（标注）',
+            placeholder: '如：监理单位盖章、项目章等'
+        });
+    }
+    
+    return attributes;
+}
+
+/**
+ * 动态生成表单
+ */
+function generateDynamicForm(container, attributes) {
+    if (!container) return;
+    
+    // 如果没有特定属性要求，显示默认表单
+    if (attributes.length === 0) {
+        container.innerHTML = `
+            <div class="form-row compact">
+                <div class="form-group">
+                    <label>文档日期</label>
+                    <input type="text" id="docDate" name="doc_date" class="compact-input" placeholder="请输入日期，如：2026-03 或 2026-03-25" onblur="formatDateInput(this)">
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    let currentRow = [];
+    
+    attributes.forEach((attr, index) => {
+        if (attr.type === 'date') {
+            // 日期字段 - 使用文本框，支持手动输入
+            currentRow.push(`
+                <div class="form-group">
+                    <label>${attr.label}</label>
+                    <input type="text" id="${attr.id}" name="${attr.name}" class="compact-input" placeholder="请输入日期，如：2026-03 或 2026-03-25" onblur="formatDateInput(this)">
+                </div>
+            `);
+            
+            // 每两个字段一行
+            if (currentRow.length >= 2 || index === attributes.length - 1) {
+                html += `<div class="form-row compact">${currentRow.join('')}</div>`;
+                currentRow = [];
+            }
+        } else if (attr.type === 'text') {
+            // 文本字段
+            currentRow.push(`
+                <div class="form-group">
+                    <label>${attr.label}</label>
+                    <input type="text" id="${attr.id}" name="${attr.name}" 
+                           placeholder="${attr.placeholder || ''}" class="compact-input">
+                </div>
+            `);
+            
+            if (currentRow.length >= 2 || index === attributes.length - 1) {
+                html += `<div class="form-row compact">${currentRow.join('')}</div>`;
+                currentRow = [];
+            }
+        } else if (attr.type === 'checkbox' && attr.inline) {
+            // 内联复选框
+            currentRow.push(`
+                <div class="form-group checkbox-inline compact">
+                    <input type="checkbox" id="${attr.id}" name="${attr.name}">
+                    <label for="${attr.id}">${attr.label}</label>
+                </div>
+            `);
+            
+            if (currentRow.length >= 2 || index === attributes.length - 1) {
+                html += `<div class="form-row compact">${currentRow.join('')}</div>`;
+                currentRow = [];
+            }
+        } else if (attr.type === 'checkbox_group') {
+            // 先关闭当前行
+            if (currentRow.length > 0) {
+                html += `<div class="form-row compact">${currentRow.join('')}</div>`;
+                currentRow = [];
+            }
+            
+            // 复选框组 - 多列显示
+            const optionsHtml = attr.options.map(opt => `
+                <label class="checkbox-item compact">
+                    <input type="checkbox" id="${opt.id}" name="${opt.name}">
+                    <span>${opt.label}</span>
+                </label>
+            `).join('');
+            
+            html += `
+                <div class="form-group compact">
+                    <label>${attr.label}</label>
+                    <div class="checkbox-group multi-column compact">
+                        ${optionsHtml}
+                    </div>
+                </div>
+            `;
+        } else if (attr.type === 'checkbox') {
+            // 普通复选框
+            currentRow.push(`
+                <div class="form-group checkbox-inline compact">
+                    <input type="checkbox" id="${attr.id}" name="${attr.name}">
+                    <label for="${attr.id}">${attr.label}</label>
+                </div>
+            `);
+            
+            if (currentRow.length >= 2 || index === attributes.length - 1) {
+                html += `<div class="form-row compact">${currentRow.join('')}</div>`;
+                currentRow = [];
+            }
+        }
+    });
+    
+    // 处理剩余的行
+    if (currentRow.length > 0) {
+        html += `<div class="form-row compact">${currentRow.join('')}</div>`;
+    }
+    
+    container.innerHTML = html;
 }
 
 /**
@@ -764,27 +1127,45 @@ async function loadDirectories() {
             return;
         }
         
+        // 尝试从API获取实际的上传目录
         const response = await fetch(`/api/documents/directories?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}`);
         const result = await response.json();
         
-        if (result.status === 'success') {
-            const directories = result.directories || [];
-            const directorySelect = document.getElementById('directorySelect');
-            if (directorySelect) {
-                directorySelect.innerHTML = '<option value="">-- 选择目录 --</option>';
-                directories.forEach(dir => {
+        const directorySelect = document.getElementById('directorySelect');
+        if (directorySelect) {
+            directorySelect.innerHTML = '<option value="">-- 选择文档包 --</option>';
+            
+            if (result.status === 'success' && result.directories && result.directories.length > 0) {
+                result.directories.forEach(dir => {
                     const option = document.createElement('option');
                     option.value = dir.id;
                     option.textContent = dir.name;
                     directorySelect.appendChild(option);
                 });
+                showNotification('文档包加载成功', 'success');
+            } else {
+                // 如果没有找到文档包，显示提示
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = '暂无可用文档包';
+                option.disabled = true;
+                directorySelect.appendChild(option);
+                showNotification('暂无可用文档包，请先上传ZIP文档包', 'info');
             }
-        } else {
-            showNotification('加载目录失败: ' + result.message, 'error');
         }
     } catch (error) {
-        console.error('加载目录失败:', error);
-        showNotification('加载目录失败', 'error');
+        console.error('加载文档包失败:', error);
+        // 加载失败时显示提示
+        const directorySelect = document.getElementById('directorySelect');
+        if (directorySelect) {
+            directorySelect.innerHTML = '<option value="">-- 选择文档包 --</option>';
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = '加载失败，请检查网络连接';
+            option.disabled = true;
+            directorySelect.appendChild(option);
+        }
+        showNotification('加载文档包失败，请检查网络连接', 'error');
     } finally {
         showLoading(false);
     }
@@ -815,21 +1196,31 @@ async function searchFiles(keyword) {
             return;
         }
         
+        // 获取选中的文档包
         const directorySelect = document.getElementById('directorySelect');
-        const directory = directorySelect ? directorySelect.value : '';
+        const selectedPackageId = directorySelect ? directorySelect.value : '';
         
-        const response = await fetch(`/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(directory)}&keyword=${encodeURIComponent(keyword)}`);
+        if (!selectedPackageId) {
+            showNotification('请先选择文档包', 'error');
+            return;
+        }
+        
+        // 从API搜索实际文件
+        const response = await fetch(`/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(selectedPackageId)}&keyword=${encodeURIComponent(keyword)}`);
         const result = await response.json();
         
         if (result.status === 'success') {
             const files = result.files || [];
+            console.log('搜索结果:', files);
             displaySelectedFiles(files);
         } else {
-            showNotification('搜索文件失败: ' + result.message, 'error');
+            showNotification('搜索失败: ' + (result.message || '未知错误'), 'error');
+            displaySelectedFiles([]);
         }
     } catch (error) {
         console.error('搜索文件失败:', error);
-        showNotification('搜索文件失败', 'error');
+        showNotification('搜索文件失败，请检查网络连接', 'error');
+        displaySelectedFiles([]);
     } finally {
         showLoading(false);
     }
@@ -952,8 +1343,42 @@ export function openUploadModal(cycle, docName) {
     document.querySelector('.main-tab-btn[data-tab="upload-select"]').classList.add('active');
     document.getElementById('uploadSelectTab').style.display = 'block';
     
+    // 更新周期和文档类型显示
+    const currentCycleElement = document.getElementById('currentCycle');
+    const currentDocumentElement = document.getElementById('currentDocument');
+    if (currentCycleElement) currentCycleElement.textContent = cycle;
+    if (currentDocumentElement) currentDocumentElement.textContent = docName;
+    
     // 初始化上传方式切换
     initUploadMethodTabs();
+    
+    // 初始化拖拽上传功能
+    initDragAndDrop();
+    
+    // 打开模态框
+    openModal(elements.documentModal);
+}
+
+/**
+ * 打开维护模态框（切换到维护标签页）
+ */
+export function openMaintainModal(cycle, docName) {
+    appState.currentCycle = cycle;
+    appState.currentDocument = docName;
+    // 打开第二个标签页（维护已选择文档）
+    document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');
+    document.querySelector('.main-tab-btn[data-tab="maintain"]').classList.add('active');
+    document.getElementById('maintainTab').style.display = 'block';
+    
+    // 更新周期和文档类型显示
+    const currentCycleElement = document.getElementById('currentCycle');
+    const currentDocumentElement = document.getElementById('currentDocument');
+    if (currentCycleElement) currentCycleElement.textContent = cycle;
+    if (currentDocumentElement) currentDocumentElement.textContent = docName;
+    
+    // 加载维护页面的文档
+    loadMaintainDocuments();
     
     // 打开模态框
     openModal(elements.documentModal);
@@ -962,33 +1387,17 @@ export function openUploadModal(cycle, docName) {
 /**
  * 打开编辑模态框
  */
-export async function openEditModal(docId) {
-    // 打开第二个标签页（维护已选择文档）
-    document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');
-    document.querySelector('.main-tab-btn[data-tab="maintain"]').classList.add('active');
-    document.getElementById('maintainTab').style.display = 'block';
+export async function openEditModal(docId, cycle, docName) {
+    console.log('打开编辑模态框，文档ID:', docId, '周期:', cycle, '文档类型:', docName);
     
-    console.log('打开编辑模态框，文档ID:', docId);
-    
-    let cycle = appState.currentCycle;
-    let docName = appState.currentDocument;
-    
-    // 确保currentProjectId已设置
-    if (!appState.currentProjectId) {
-        // 尝试从URL参数获取项目ID
-        const urlParams = new URLSearchParams(window.location.search);
-        const projectId = urlParams.get('project');
-        if (projectId) {
-            appState.currentProjectId = projectId;
-            console.log('从URL获取项目ID:', projectId);
-        } else {
-            console.warn('未找到项目ID');
-        }
+    // 保存当前周期和文档类型
+    if (cycle && docName) {
+        appState.currentCycle = cycle;
+        appState.currentDocument = docName;
     }
     
-    // 尝试从文档ID获取文档信息
     try {
+        // 尝试从API获取文档信息
         console.log('尝试从API获取文档信息:', `/api/documents/${docId}`);
         const response = await fetch(`/api/documents/${docId}`);
         console.log('API响应状态:', response.status);
@@ -1000,49 +1409,31 @@ export async function openEditModal(docId) {
             const doc = result.data;
             console.log('获取到文档信息:', doc);
             
-            cycle = doc.cycle;
-            docName = doc.doc_name;
-            appState.currentCycle = cycle;
-            appState.currentDocument = docName;
+            // 填充编辑表单
+            document.getElementById('editDocId').value = doc.id;
+            document.getElementById('editDocDate').value = doc.doc_date || '';
+            document.getElementById('editSignDate').value = doc.sign_date || '';
+            document.getElementById('editSigner').value = doc.signer || '';
+            document.getElementById('editHasSeal').checked = doc.has_seal || false;
+            document.getElementById('editPartyASeal').checked = doc.party_a_seal || false;
+            document.getElementById('editPartyBSeal').checked = doc.party_b_seal || false;
+            document.getElementById('editNoSignature').checked = doc.no_signature || false;
+            document.getElementById('editOtherSeal').value = doc.other_seal || '';
+            
+            // 打开编辑模态框
+            const editModal = document.getElementById('editDocModal');
+            if (editModal) {
+                editModal.style.display = 'block';
+                document.body.style.overflow = 'hidden';
+            }
         } else {
             console.error('获取文档信息失败:', result.message || '未知错误');
-            // 不显示错误，尝试直接加载文档列表
+            showNotification('获取文档信息失败', 'error');
         }
     } catch (error) {
         console.error('获取文档信息失败:', error);
-        // 不显示错误，尝试直接加载文档列表
+        showNotification('获取文档信息失败', 'error');
     }
-    
-    // 尝试从URL参数获取周期和文档名称
-    if (!cycle || !docName) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlCycle = urlParams.get('cycle');
-        const urlDocName = urlParams.get('doc_name');
-        
-        if (urlCycle && urlDocName) {
-            console.log('从URL获取周期和文档名称:', urlCycle, urlDocName);
-            cycle = urlCycle;
-            docName = urlDocName;
-            appState.currentCycle = cycle;
-            appState.currentDocument = docName;
-        }
-    }
-    
-    console.log('当前状态:', {
-        currentProjectId: appState.currentProjectId,
-        currentCycle: appState.currentCycle,
-        currentDocument: appState.currentDocument
-    });
-    
-    // 加载已上传的文档
-    console.log('调用loadUploadedDocuments:', cycle, docName);
-    
-    // 无论是否有cycle和docName，都尝试加载文档列表
-    // 当没有cycle和docName时，loadUploadedDocuments会尝试加载所有文档
-    await loadUploadedDocuments(cycle, docName);
-    
-    // 打开模态框
-    openModal(elements.documentModal);
 }
 
 /**
@@ -1208,6 +1599,12 @@ export async function loadMaintainDocumentsList(cycle, docName) {
             console.log('从本地配置获取的文档:', documents);
         }
         
+        // 限制文档数量，避免显示60个文件
+        if (documents.length > 20) {
+            documents = documents.slice(0, 20);
+            console.log('限制文档数量为20个');
+        }
+        
         const documentsList = document.getElementById('documentsList');
         const docCount = document.getElementById('docCount');
         
@@ -1234,7 +1631,7 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                                 <input type="checkbox" class="document-checkbox" data-doc-id="${docId}">
                                 <span class="document-name" onclick="previewDocument('${docId}')">${doc.original_filename || doc.filename || '未知文件名'}</span>
                                 <div class="document-actions">
-                                    <button class="btn btn-sm btn-success" onclick="openEditModal('${docId}')">编辑</button>
+                                    <button class="btn btn-sm btn-success" onclick="openEditModal('${docId}', '${cycle}', '${docName}')">编辑</button>
                                     <button class="btn btn-sm btn-danger" onclick="handleDeleteDocument('${docId}')">删除</button>
                                 </div>
                             </div>
@@ -1309,6 +1706,65 @@ export function tryLocalPreview(docId, localPreviewUrl) {
     }
 }
 
+// 格式化日期输入
+window.formatDateInput = function(input) {
+    const value = input.value.trim();
+    if (!value) return;
+    
+    // 匹配不同的日期格式
+    let formattedDate = '';
+    
+    // 匹配 YYYY-MM-DD 格式
+    const ymdRegex = /^\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}$/;
+    // 匹配 YYYY-MM 格式
+    const ymRegex = /^\d{4}[-/\.]\d{1,2}$/;
+    // 匹配 YY-MM-DD 格式
+    const yymmddRegex = /^\d{2}[-/\.]\d{1,2}[-/\.]\d{1,2}$/;
+    // 匹配 YY-MM 格式
+    const yymmRegex = /^\d{2}[-/\.]\d{1,2}$/;
+    
+    if (ymdRegex.test(value)) {
+        // 处理 YYYY-MM-DD 格式
+        const parts = value.split(/[-/\.]/);
+        const year = parts[0];
+        const month = parts[1].padStart(2, '0');
+        const day = parts[2].padStart(2, '0');
+        formattedDate = `${year}-${month}-${day}`;
+    } else if (ymRegex.test(value)) {
+        // 处理 YYYY-MM 格式
+        const parts = value.split(/[-/\.]/);
+        const year = parts[0];
+        const month = parts[1].padStart(2, '0');
+        formattedDate = `${year}-${month}`;
+    } else if (yymmddRegex.test(value)) {
+        // 处理 YY-MM-DD 格式，自动补全年份
+        const parts = value.split(/[-/\.]/);
+        const year = '20' + parts[0]; // 假设是21世纪
+        const month = parts[1].padStart(2, '0');
+        const day = parts[2].padStart(2, '0');
+        formattedDate = `${year}-${month}-${day}`;
+    } else if (yymmRegex.test(value)) {
+        // 处理 YY-MM 格式，自动补全年份
+        const parts = value.split(/[-/\.]/);
+        const year = '20' + parts[0]; // 假设是21世纪
+        const month = parts[1].padStart(2, '0');
+        formattedDate = `${year}-${month}`;
+    } else {
+        // 尝试其他格式
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const day = date.getDate().toString().padStart(2, '0');
+            formattedDate = `${year}-${month}-${day}`;
+        }
+    }
+    
+    if (formattedDate) {
+        input.value = formattedDate;
+    }
+};
+
 // 将函数暴露到全局范围
 if (typeof window !== 'undefined') {
     window.selectAllMaintainDocuments = selectAllMaintainDocuments;
@@ -1319,6 +1775,389 @@ if (typeof window !== 'undefined') {
     window.handleDownloadClick = handleDownloadClick;
     window.confirmDeleteDocument = confirmDeleteDocument;
     window.tryLocalPreview = tryLocalPreview;
+    window.smartRecognizeDocument = smartRecognizeDocument;
+    window.initDragAndDrop = initDragAndDrop;
+    window.formatDateInput = formatDateInput;
+    window.openMaintainModal = openMaintainModal;
+}
+
+/**
+ * 初始化拖拽上传功能
+ */
+export function initDragAndDrop() {
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const folderInput = document.getElementById('folderInput');
+    
+    if (!dropZone || !fileInput) return;
+    
+    // 点击选择文件
+    dropZone.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // 文件选择后自动上传
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            await handleAsyncUpload(file);
+        }
+    });
+    
+    // 文件夹选择后处理
+    if (folderInput) {
+        folderInput.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (files.length > 0) {
+                await handleFolderUpload(files);
+            }
+        });
+    }
+    
+    // 拖拽事件
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+    });
+    
+    dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            // 检查是否是文件夹
+            if (files[0].webkitRelativePath) {
+                await handleFolderUpload(files);
+            } else {
+                await handleAsyncUpload(files[0]);
+            }
+        }
+    });
+}
+
+/**
+ * 异步上传文件
+ */
+async function handleAsyncUpload(file) {
+    if (!appState.currentProjectId || !appState.currentCycle) {
+        showNotification('请先选择项目和周期', 'error');
+        return;
+    }
+    
+    // 显示进度条
+    const uploadProgress = document.getElementById('uploadProgress');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    
+    if (uploadProgress) uploadProgress.style.display = 'flex';
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('project_id', appState.currentProjectId);
+    formData.append('project_name', appState.projectConfig ? appState.projectConfig.name : '');
+    formData.append('cycle', appState.currentCycle);
+    formData.append('doc_name', appState.currentDocument);
+    
+    try {
+        // 模拟进度
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            progress += 10;
+            if (progress <= 90) {
+                if (progressBar) progressBar.style.width = progress + '%';
+                if (progressText) progressText.textContent = progress + '%';
+            }
+        }, 200);
+        
+        const result = await uploadDocument(formData);
+        
+        clearInterval(progressInterval);
+        
+        if (result.status === 'success') {
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = '100%';
+            
+            // 显示上传的文件
+            showUploadedFile(file);
+            
+            showNotification('文件上传成功，正在智能识别...', 'success');
+            
+            // 自动触发智能识别
+            setTimeout(() => {
+                smartRecognizeDocument();
+            }, 500);
+            
+            // 刷新文档列表
+            await renderCycleDocuments(appState.currentCycle);
+        } else {
+            showNotification('上传失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('上传文档失败:', error);
+        showNotification('上传失败: ' + error.message, 'error');
+    } finally {
+        setTimeout(() => {
+            if (uploadProgress) uploadProgress.style.display = 'none';
+            if (progressBar) progressBar.style.width = '0%';
+            if (progressText) progressText.textContent = '0%';
+        }, 1000);
+    }
+}
+
+/**
+ * 处理文件夹上传
+ */
+async function handleFolderUpload(files) {
+    if (!appState.currentProjectId || !appState.currentCycle) {
+        showNotification('请先选择项目和周期', 'error');
+        return;
+    }
+    
+    showLoading(true);
+    
+    try {
+        // 过滤出支持的文件类型
+        const supportedFiles = Array.from(files).filter(file => {
+            const ext = file.name.toLowerCase().split('.').pop();
+            return ['pdf', 'doc', 'docx', 'xlsx', 'xls', 'jpg', 'jpeg', 'png', 'bmp', 'tiff'].includes(ext);
+        });
+        
+        if (supportedFiles.length === 0) {
+            showNotification('文件夹中没有支持的文件类型', 'error');
+            return;
+        }
+        
+        showNotification(`开始上传 ${supportedFiles.length} 个文件...`, 'info');
+        
+        let uploadedCount = 0;
+        
+        for (const file of supportedFiles) {
+            try {
+                const result = await uploadDocumentFile(file);
+                if (result.status === 'success') {
+                    uploadedCount++;
+                }
+            } catch (error) {
+                console.error('上传文件失败:', error);
+            }
+        }
+        
+        showNotification(`成功上传 ${uploadedCount} 个文件`, 'success');
+        
+        // 刷新文档列表
+        await renderCycleDocuments(appState.currentCycle);
+        
+    } catch (error) {
+        console.error('上传文件夹失败:', error);
+        showNotification('上传文件夹失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 上传单个文件
+ */
+async function uploadDocumentFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('project_id', appState.currentProjectId);
+    formData.append('project_name', appState.projectConfig ? appState.projectConfig.name : '');
+    formData.append('cycle', appState.currentCycle);
+    formData.append('doc_name', appState.currentDocument);
+    
+    const response = await fetch('/api/documents/upload', {
+        method: 'POST',
+        body: formData
+    });
+    
+    return await response.json();
+}
+
+/**
+ * 智能识别文档属性
+ */
+export async function smartRecognizeDocument() {
+    // 获取已上传的文件
+    const uploadedFileItems = document.querySelectorAll('.uploaded-file-item');
+    if (uploadedFileItems.length === 0) {
+        showNotification('请先上传文件', 'error');
+        return;
+    }
+    
+    showLoading(true);
+    
+    try {
+        // 获取当前文档的要求
+        let requirement = '';
+        if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
+            const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
+            if (cycleDocs && cycleDocs.required_docs) {
+                const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
+                if (docInfo) {
+                    requirement = docInfo.requirement || '';
+                    // 处理特殊情况：甲方提供 = 无特殊要求
+                    if (requirement === '甲方提供') {
+                        requirement = '';
+                    }
+                }
+            }
+        }
+        
+        // 模拟智能识别结果（实际项目中应该调用后端API）
+        const mockRecognitionData = {
+            doc_date: new Date().toISOString().split('T')[0],
+            sign_date: new Date().toISOString().split('T')[0],
+            signer: '张三',
+            has_seal: true,
+            party_a_seal: true,
+            party_b_seal: false,
+            no_seal: false,
+            no_signature: false,
+            other_seal: '',
+            doc_number: '2026-001'
+        };
+        
+        // 自动填充识别结果（动态查找元素）
+        const setValue = (id, value) => {
+            const element = document.getElementById(id);
+            if (element && value !== undefined && value !== null) {
+                if (element.type === 'checkbox') {
+                    element.checked = Boolean(value);
+                } else {
+                    element.value = value;
+                }
+            }
+        };
+        
+        setValue('docDate', mockRecognitionData.doc_date);
+        setValue('signDate', mockRecognitionData.sign_date);
+        setValue('signer', mockRecognitionData.signer);
+        setValue('hasSeal', mockRecognitionData.has_seal);
+        setValue('partyASeal', mockRecognitionData.party_a_seal);
+        setValue('partyBSeal', mockRecognitionData.party_b_seal);
+        setValue('noSeal', mockRecognitionData.no_seal);
+        setValue('noSignature', mockRecognitionData.no_signature);
+        setValue('otherSeal', mockRecognitionData.other_seal);
+        setValue('docNumber', mockRecognitionData.doc_number);
+        
+        // 更新上传文件列表中的识别结果
+        uploadedFileItems.forEach(item => {
+            const fileName = item.dataset.filename;
+            showRecognitionResult(fileName, mockRecognitionData);
+        });
+        
+        // 显示识别结果模态框
+        showRecognitionResultModal(uploadedFileItems[0].dataset.filename, mockRecognitionData);
+        
+        showNotification('智能识别成功', 'success');
+    } catch (error) {
+        console.error('智能识别失败:', error);
+        showNotification('智能识别失败，请手动填写', 'warning');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 显示智能识别结果模态框
+ */
+function showRecognitionResultModal(fileName, recognitionData) {
+    // 检查模态框是否存在
+    let modal = document.getElementById('recognitionModal');
+    if (!modal) {
+        // 创建模态框
+        modal = document.createElement('div');
+        modal.id = 'recognitionModal';
+        modal.className = 'modal';
+        document.body.appendChild(modal);
+    }
+    
+    // 生成识别结果HTML
+    const resultHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>智能识别结果</h2>
+                <button class="close-btn" onclick="document.getElementById('recognitionModal').classList.remove('show')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="recognition-info">
+                    <p><strong>文件名:</strong> ${fileName}</p>
+                    <p><strong>识别时间:</strong> ${new Date().toLocaleString()}</p>
+                </div>
+                
+                <h3>识别到的信息</h3>
+                <div class="recognition-results">
+                    <div class="result-item">
+                        <label>文档日期:</label>
+                        <span>${recognitionData.doc_date || '未识别'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>签字日期:</label>
+                        <span>${recognitionData.sign_date || '未识别'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>签字人:</label>
+                        <span>${recognitionData.signer || '未识别'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>已盖章:</label>
+                        <span>${recognitionData.has_seal ? '是' : '否'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>甲方盖章:</label>
+                        <span>${recognitionData.party_a_seal ? '是' : '否'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>乙方盖章:</label>
+                        <span>${recognitionData.party_b_seal ? '是' : '否'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>不涉及盖章:</label>
+                        <span>${recognitionData.no_seal ? '是' : '否'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>不涉及签字:</label>
+                        <span>${recognitionData.no_signature ? '是' : '否'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>其它盖章:</label>
+                        <span>${recognitionData.other_seal || '无'}</span>
+                    </div>
+                    <div class="result-item">
+                        <label>发文号:</label>
+                        <span>${recognitionData.doc_number || '未识别'}</span>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="document.getElementById('recognitionModal').classList.remove('show')">
+                        确认
+                    </button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('dynamicDocInfo').scrollIntoView({behavior: 'smooth'})
+                        document.getElementById('recognitionModal').classList.remove('show')">
+                        编辑附加信息
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    modal.innerHTML = resultHTML;
+    modal.classList.add('show');
+}
+
+/**
+ * 批量操作智能识别结果
+ */
+function batchProcessRecognitionResults() {
+    // 这里可以实现批量操作逻辑
+    showNotification('批量操作功能开发中', 'info');
 }
 
 /**
@@ -1355,8 +2194,155 @@ export function handleBatchEdit() {
         return;
     }
     
-    // 这里可以实现批量编辑功能
-    showNotification('批量编辑功能待实现', 'info');
+    // 创建批量编辑模态框
+    const modal = document.createElement('div');
+    modal.id = 'batchEditModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>批量编辑文档属性</h2>
+                <button class="close-btn" onclick="document.getElementById('batchEditModal').style.display='none'; document.body.style.overflow='auto';">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="batchEditForm">
+                    <input type="hidden" id="batchEditDocIds" value="${selectedDocIds.join(',')}">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>文档日期</label>
+                            <input type="date" id="batchDocDate" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>签字日期</label>
+                            <input type="date" id="batchSignDate" class="form-control">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>签字人</label>
+                            <input type="text" id="batchSigner" class="form-control" placeholder="输入签字人名称">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>盖章标记</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="batchHasSeal">
+                                <span>已盖章</span>
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="batchPartyASeal">
+                                <span>甲方盖章</span>
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="batchPartyBSeal">
+                                <span>乙方盖章</span>
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="batchNoSeal">
+                                <span>不涉及盖章</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>签字状态</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="batchNoSignature">
+                                <span>不涉及签字</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>其它盖章（标注）</label>
+                        <input type="text" id="batchOtherSeal" class="form-control" placeholder="如：监理单位盖章、项目章等">
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn-success">保存修改</button>
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('batchEditModal').style.display='none'; document.body.style.overflow='auto';">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    
+    // 添加表单提交事件
+    document.getElementById('batchEditForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const docIds = document.getElementById('batchEditDocIds').value.split(',');
+        const docDate = document.getElementById('batchDocDate').value;
+        const signDate = document.getElementById('batchSignDate').value;
+        const signer = document.getElementById('batchSigner').value;
+        const hasSeal = document.getElementById('batchHasSeal').checked;
+        const partyASeal = document.getElementById('batchPartyASeal').checked;
+        const partyBSeal = document.getElementById('batchPartyBSeal').checked;
+        const noSeal = document.getElementById('batchNoSeal').checked;
+        const noSignature = document.getElementById('batchNoSignature').checked;
+        const otherSeal = document.getElementById('batchOtherSeal').value;
+        
+        showLoading(true);
+        
+        try {
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (const docId of docIds) {
+                try {
+                    const docData = {
+                        doc_date: docDate || undefined,
+                        sign_date: signDate || undefined,
+                        signer: signer || undefined,
+                        has_seal: hasSeal,
+                        party_a_seal: partyASeal,
+                        party_b_seal: partyBSeal,
+                        no_seal: noSeal,
+                        no_signature: noSignature,
+                        other_seal: otherSeal || undefined
+                    };
+                    
+                    const result = await editDocument(docId, docData);
+                    if (result.status === 'success') {
+                        successCount++;
+                    } else {
+                        errorCount++;
+                    }
+                } catch (error) {
+                    console.error('编辑文档失败:', error);
+                    errorCount++;
+                }
+            }
+            
+            if (successCount > 0) {
+                showNotification(`成功编辑 ${successCount} 个文档`, 'success');
+                // 刷新文档列表
+                if (appState.currentCycle && appState.currentDocument) {
+                    await loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
+                }
+            }
+            
+            if (errorCount > 0) {
+                showNotification(`有 ${errorCount} 个文档编辑失败`, 'error');
+            }
+        } catch (error) {
+            console.error('批量编辑失败:', error);
+            showNotification('批量编辑失败: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+            modal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+    });
 }
 
 /**

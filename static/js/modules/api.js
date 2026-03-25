@@ -269,6 +269,54 @@ export async function deleteZipPackage(packagePath) {
 }
 
 /**
+ * 加载ZIP上传记录
+ */
+export async function loadZipRecords(projectId) {
+    try {
+        const response = await fetch(`/api/documents/zip-records?project_id=${projectId}`, { method: 'GET' });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('加载ZIP记录失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 添加ZIP上传记录
+ */
+export async function addZipRecord(record) {
+    try {
+        const response = await fetch('/api/documents/zip-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(record)
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('添加ZIP记录失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 删除ZIP上传记录
+ */
+export async function deleteZipRecord(zipId, projectId) {
+    try {
+        const response = await fetch(`/api/documents/zip-records/${zipId}?project_id=${projectId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('删除ZIP记录失败:', error);
+        throw error;
+    }
+}
+
+/**
  * 生成报告
  */
 export async function generateReport(projectId) {
