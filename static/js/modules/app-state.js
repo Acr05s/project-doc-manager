@@ -12,7 +12,12 @@ export let appState = {
     zipSelectedFile: null,       // 从ZIP中选择的单个文件（兼容旧代码）
     zipSelectedFiles: [],        // 从ZIP中选择的多个文件数组 [{path, name}]
     currentZipPackagePath: '',   // 当前选中的ZIP包路径
-    currentZipPackageName: ''    // 当前选中的ZIP包名称
+    currentZipPackageName: '',   // 当前选中的ZIP包名称
+    filterOptions: {             // 筛选选项
+        hideArchived: false,
+        hideCompleted: false
+    },
+    projectLoaded: false         // 项目是否已加载
 };
 
 // DOM元素缓存（延迟获取，避免在DOM加载前访问）

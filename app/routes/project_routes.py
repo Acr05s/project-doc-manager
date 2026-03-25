@@ -60,6 +60,19 @@ def update_project(project_id):
     """更新项目（兼容新旧版）"""
     try:
         data = request.get_json()
+        
+        # 加载原有项目配置，保留uploaded_docs信息
+        project_result = doc_manager.load_project(project_id)
+        if project_result.get('status') == 'success':
+            original_config = project_result.get('project')
+            if original_config and 'documents' in original_config:
+                # 保留原有文档信息
+                for cycle, cycle_info in original_config['documents'].items():
+                    if 'uploaded_docs' in cycle_info:
+                        if cycle not in data.get('documents', {}):
+                            data.setdefault('documents', {})[cycle] = {}
+                        data['documents'][cycle]['uploaded_docs'] = cycle_info['uploaded_docs']
+        
         # 保存项目配置
         result = doc_manager.save_project(data)
         return jsonify(result)

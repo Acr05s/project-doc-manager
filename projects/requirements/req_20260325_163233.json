@@ -1,0 +1,333 @@
+{
+  "id": "req_20260325_163233",
+  "name": "IPV6项目文档清单（系统集成类）",
+  "created_time": "2026-03-25T16:32:33.442219",
+  "cycles": [
+    "1 项目立项",
+    "2 项目准备",
+    "3项目开工",
+    "4 设备到货",
+    "5 安装调试",
+    "6 系统集成",
+    "7 试用/试运行",
+    "8 项目验收",
+    "9 项目运维"
+  ],
+  "documents": {
+    "1 项目立项": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "立项申请",
+          "requirement": "甲方提供",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "可行性研究报告",
+          "requirement": "甲方提供",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "立项批复",
+          "requirement": "甲方提供",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "2 项目准备": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "成立项目管理机构的文件",
+          "requirement": "甲方提供",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "招标文件",
+          "requirement": "盖章",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "中标公示",
+          "requirement": "盖章",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "合同",
+          "requirement": "盖章",
+          "status": "pending"
+        },
+        {
+          "index": 5,
+          "name": "章程",
+          "requirement": "乙方签字",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "3项目开工": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "技术方案",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "计划",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "会议纪要",
+          "requirement": "签字",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "设备到货清单",
+          "requirement": "乙方签字",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "4 设备到货": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "设备到货验收单",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "设备的检验报告",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "设备出厂证明、合格证、说明书、技术资料及随机软件",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "项目与设备软件验收单",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 5,
+          "name": "设备安装、调试、检修说明书",
+          "requirement": "",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "5 安装调试": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "设备维护手册、运行使用说明",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "机柜布置图",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "电气系统接线图",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "电气系统设备及材料清册",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 5,
+          "name": "甲方认为所需要的其他资料",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 6,
+          "name": "竣工图",
+          "requirement": "盖章",
+          "status": "pending"
+        },
+        {
+          "index": 7,
+          "name": "综合布线图",
+          "requirement": "盖章",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "6 系统集成": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "机房配线架接线表",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "电缆桥架及电缆敷设布置图",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "设备安装配置报告",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "设备IP地址设置表",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 5,
+          "name": "网络拓扑结构图",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 6,
+          "name": "VLAN划分及IP地址配置表",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 7,
+          "name": "试运行方案",
+          "requirement": "乙方签字",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "7 试用/试运行": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "试运行问题清单",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "试运行问题整改报告",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "试运行报告",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "培训计划",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 5,
+          "name": "系统备份、恢复步骤等应急预案",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "8 项目验收": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "初步验收申请书",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "初步验收方案",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 3,
+          "name": "初步验收报告",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 4,
+          "name": "初步验收整改报告",
+          "requirement": "乙方签字",
+          "status": "pending"
+        },
+        {
+          "index": 5,
+          "name": "竣工验收申请书",
+          "requirement": "乙方盖章",
+          "status": "pending"
+        },
+        {
+          "index": 6,
+          "name": "竣工验收方案",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 7,
+          "name": "竣工验收报告",
+          "requirement": "",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    },
+    "9 项目运维": {
+      "required_docs": [
+        {
+          "index": 1,
+          "name": "故障应急预案",
+          "requirement": "",
+          "status": "pending"
+        },
+        {
+          "index": 2,
+          "name": "运维方案",
+          "requirement": "",
+          "status": "pending"
+        }
+      ],
+      "uploaded_docs": []
+    }
+  }
+}

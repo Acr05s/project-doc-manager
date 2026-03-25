@@ -197,6 +197,8 @@ def get_document(doc_id):
                         if 'uploaded_docs' in cycle_info:
                             for doc in cycle_info['uploaded_docs']:
                                 if doc.get('doc_id') == doc_id:
+                                    # 确保文档有 id 字段
+                                    doc['id'] = doc.get('doc_id') or doc_id
                                     # 将找到的文档信息添加到 documents_db
                                     doc_manager.documents_db[doc_id] = doc
                                     return jsonify({
@@ -212,6 +214,8 @@ def get_document(doc_id):
                             if 'uploaded_docs' in cycle_info:
                                 for doc in cycle_info['uploaded_docs']:
                                     if doc.get('doc_id') == doc_id:
+                                        # 确保文档有 id 字段
+                                        doc['id'] = doc.get('doc_id') or doc_id
                                         # 将找到的文档信息添加到 documents_db
                                         doc_manager.documents_db[doc_id] = doc
                                         return jsonify({
@@ -219,19 +223,23 @@ def get_document(doc_id):
                                             'data': doc
                                         })
             
-            # 尝试从项目文件中查找
+            # 尝试从项目文件中查找（兼容新目录结构：子目录下的 project_config.json）
             import json
             from pathlib import Path
             projects_dir = doc_manager.config.projects_base_folder
-            for project_file in projects_dir.glob('*.json'):
+            # 先找子目录下的 project_config.json，再找根目录 *.json
+            project_files = list(projects_dir.glob('*/project_config.json')) + list(projects_dir.glob('*.json'))
+            for project_file in project_files:
                 try:
                     with open(project_file, 'r', encoding='utf-8') as f:
                         project_data = json.load(f)
                     if 'documents' in project_data:
                         for cycle, cycle_info in project_data['documents'].items():
-                            if 'uploaded_docs' in cycle_info:
+                            if isinstance(cycle_info, dict) and 'uploaded_docs' in cycle_info:
                                 for doc in cycle_info['uploaded_docs']:
                                     if doc.get('doc_id') == doc_id:
+                                        # 确保文档有 id 字段
+                                        doc['id'] = doc.get('doc_id') or doc_id
                                         # 将找到的文档信息添加到 documents_db
                                         doc_manager.documents_db[doc_id] = doc
                                         return jsonify({
@@ -931,32 +939,44 @@ def replace_doc(doc_id):
 
 @document_bp.route('/directories', methods=['GET'])
 def get_directories():
-    """获取可用目录列表"""
+    """获取项目的文档包目录列表（扫描 projects/{项目名}/uploads/ 下的子目录）"""
     try:
-        import os
         from pathlib import Path
         
         project_id = request.args.get('project_id')
         project_name = request.args.get('project_name')
         
-        if not project_id or not project_name:
+        if not project_id and not project_name:
             return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
         
-        # 获取项目的文档目录
-        docs_folder = doc_manager.get_documents_folder(project_name)
-        temp_folder = docs_folder / 'temp'
+        # 如果只有 project_id，先查项目名
+        if not project_name and project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                project_name = project_result.get('project', {}).get('name', '')
         
-        # 确保temp目录存在
-        temp_folder.mkdir(parents=True, exist_ok=True)
+        if not project_name:
+            return jsonify({'status': 'success', 'directories': []})
         
-        # 扫描temp目录下的子目录
+        # 扫描 projects/{项目名}/uploads/ 下的一级子目录
+        project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+        project_uploads_dir.mkdir(parents=True, exist_ok=True)
+        
+        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
+                        '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
+        
         directories = []
-        if temp_folder.exists():
-            for item in temp_folder.iterdir():
+        if project_uploads_dir.exists():
+            for item in sorted(project_uploads_dir.iterdir()):
                 if item.is_dir() and not item.name.startswith('.'):
+                    file_count = sum(
+                        1 for f in item.rglob('*')
+                        if f.is_file() and not f.name.startswith('.')
+                        and f.suffix.lower() in ALLOWED_EXTS
+                    )
                     directories.append({
-                        'id': str(item.relative_to(docs_folder)),
-                        'name': item.name
+                        'id': str(item),        # 完整绝对路径，供搜索时用
+                        'name': f"{item.name}（{file_count}个文件）"
                     })
         
         return jsonify({
@@ -971,58 +991,68 @@ def get_directories():
 def search_files():
     """搜索文件"""
     try:
-        import os
         from pathlib import Path
         from datetime import datetime
         
         project_id = request.args.get('project_id')
         project_name = request.args.get('project_name')
-        directory = request.args.get('directory')
+        directory = request.args.get('directory', '').strip()  # 可以是绝对路径或相对路径
         keyword = request.args.get('keyword', '').strip().lower()
         
-        if not project_id or not project_name:
+        if not project_id and not project_name:
             return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
         
-        # 获取项目的文档目录
-        docs_folder = doc_manager.get_documents_folder(project_name)
-        search_dir = docs_folder
+        # 如果只有 project_id，查项目名
+        if not project_name and project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                project_name = project_result.get('project', {}).get('name', '')
         
+        # 确定搜索目录
         if directory:
-            search_dir = docs_folder / directory
-            # 安全检查：确保目录在docs_folder下
-            try:
-                search_dir.relative_to(docs_folder)
-            except ValueError:
-                return jsonify({'status': 'error', 'message': '非法目录'}), 400
+            search_dir = Path(directory)
+            # 如果是绝对路径直接用，否则拼接项目目录
+            if not search_dir.is_absolute() and project_name:
+                docs_folder = doc_manager.get_documents_folder(project_name)
+                search_dir = docs_folder / directory
+        elif project_name:
+            # 默认搜索项目 uploads 目录
+            search_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+        else:
+            return jsonify({'status': 'error', 'message': '缺少搜索目录'}), 400
+        
+        if not search_dir.exists():
+            return jsonify({'status': 'success', 'files': [], 'total': 0})
         
         # 支持的文件类型
         allowed_exts = {'.pdf', '.doc', '.docx', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
         
         # 搜索文件
         files = []
-        if search_dir.exists():
-            for file_path in search_dir.rglob('*'):
-                if file_path.is_file() and file_path.suffix.lower() in allowed_exts:
-                    # 检查关键词
-                    if keyword and keyword not in file_path.name.lower():
-                        continue
-                    
-                    # 检查是否已被其他文档使用
-                    is_used = any(
-                        meta.get('file_path') == str(file_path) or 
-                        meta.get('original_filename') == file_path.name
-                        for meta in doc_manager.documents_db.values()
-                    )
-                    
-                    files.append({
-                        'id': str(file_path.relative_to(docs_folder)),
-                        'name': file_path.name,
-                        'path': str(file_path),
-                        'rel_path': str(file_path.relative_to(docs_folder)),
-                        'size': file_path.stat().st_size,
-                        'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                        'used': is_used
-                    })
+        for file_path in sorted(search_dir.rglob('*')):
+            if not file_path.is_file() or file_path.name.startswith('.'):
+                continue
+            if file_path.suffix.lower() not in allowed_exts:
+                continue
+            if keyword and keyword not in file_path.name.lower():
+                continue
+            
+            # 检查是否已被其他文档使用
+            is_used = any(
+                meta.get('file_path') == str(file_path) or 
+                meta.get('original_filename') == file_path.name
+                for meta in doc_manager.documents_db.values()
+            )
+            
+            files.append({
+                'id': str(file_path),
+                'name': file_path.name,
+                'path': str(file_path),
+                'rel_path': file_path.name,
+                'size': file_path.stat().st_size,
+                'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
+                'used': is_used
+            })
         
         return jsonify({
             'status': 'success',
@@ -1124,10 +1154,11 @@ def get_zip_records():
             return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
         
         # 加载项目配置以获取项目名称
-        project_config = doc_manager.load_project(project_id)
-        if not project_config:
+        project_result = doc_manager.load_project(project_id)
+        if not project_result or project_result.get('status') != 'success':
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
+        project_config = project_result.get('project', {})
         project_name = project_config.get('name', project_id)
         
         # 获取项目文件路径（新位置）
@@ -1158,10 +1189,11 @@ def add_zip_record():
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
         # 加载项目配置以获取项目名称
-        project_config = doc_manager.load_project(project_id)
-        if not project_config:
+        project_result = doc_manager.load_project(project_id)
+        if not project_result or project_result.get('status') != 'success':
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
+        project_config = project_result.get('project', {})
         project_name = project_config.get('name', project_id)
         
         # 获取项目文件路径（新位置）
@@ -1198,10 +1230,11 @@ def delete_zip_record(zip_id):
             return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
         
         # 加载项目配置以获取项目名称
-        project_config = doc_manager.load_project(project_id)
-        if not project_config:
+        project_result = doc_manager.load_project(project_id)
+        if not project_result or project_result.get('status') != 'success':
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
+        project_config = project_result.get('project', {})
         project_name = project_config.get('name', project_id)
         
         # 获取项目文件路径（新位置）
@@ -1499,24 +1532,19 @@ def upload_zip():
                 extracted_dir = result.get('extracted_dir', '')
                 project_name = project_config.get('name', '')
                 
-                # 计算相对路径
+                # 计算相对路径（直接取解压目录的文件夹名作为记录）
                 try:
-                    from .folder_manager import FolderManager
-                    from .base import DocumentConfig
-                    folder_manager = FolderManager(DocumentConfig())
-                    project_uploads_dir = folder_manager.get_documents_folder(project_name)
-                    
-                    # 将绝对路径转换为相对于项目uploads目录的路径
                     extract_path = Path(extracted_dir)
-                    if extract_path.is_absolute():
+                    # 使用 doc_manager 的 folders 获取项目文档目录
+                    project_uploads_dir = doc_manager.get_documents_folder(project_name)
+                    if project_uploads_dir and extract_path.is_absolute():
                         try:
                             rel_path = extract_path.relative_to(project_uploads_dir)
                             path_for_record = str(rel_path)
                         except ValueError:
-                            # 如果无法相对化，使用原始路径
-                            path_for_record = str(extracted_dir)
+                            path_for_record = extract_path.name  # 只用文件夹名
                     else:
-                        path_for_record = str(extracted_dir)
+                        path_for_record = extract_path.name if extract_path.name else str(extracted_dir)
                 except Exception as e:
                     logger.warning(f"计算相对路径失败: {e}")
                     path_for_record = str(extracted_dir)
@@ -1550,33 +1578,55 @@ def upload_zip():
 
 @document_bp.route('/list-zip-packages', methods=['GET'])
 def list_zip_packages():
-    """列出所有已解压的ZIP包（temp_extract下的一级子目录）"""
+    """列出项目已解压的ZIP包目录（从项目uploads目录读取）"""
     try:
         from pathlib import Path
-        from app.utils.base import get_config
-        config = get_config()
-        upload_folder = Path(config.get('upload_folder', 'uploads'))
-        temp_extract_dir = upload_folder / 'temp_extract'
-        if not temp_extract_dir.exists():
-            return jsonify({'status': 'success', 'packages': []})
-
+        project_id = request.args.get('project_id', '').strip()
+        
+        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
+                        '.png', '.jpg', '.jpeg', '.tiff', '.txt',
+                        '.ppt', '.pptx'}
+        
         packages = []
-        for item in sorted(temp_extract_dir.iterdir()):
-            if item.is_dir() and not item.name.startswith('.'):
-                # 统计文件数量
-                ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
-                                '.png', '.jpg', '.jpeg', '.tiff', '.txt',
-                                '.ppt', '.pptx'}
-                file_count = sum(
-                    1 for f in item.rglob('*')
-                    if f.is_file() and not f.name.startswith('.')
-                    and f.suffix.lower() in ALLOWED_EXTS
-                )
-                packages.append({
-                    'name': item.name,
-                    'path': str(item),
-                    'file_count': file_count
-                })
+        
+        if project_id:
+            # 按项目ID查找：在 projects/{项目名}/uploads/ 下找子目录
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                project_config = project_result.get('project', {})
+                project_name = project_config.get('name', '')
+                if project_name:
+                    project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+                    if project_uploads_dir.exists():
+                        for item in sorted(project_uploads_dir.iterdir()):
+                            if item.is_dir() and not item.name.startswith('.'):
+                                file_count = sum(
+                                    1 for f in item.rglob('*')
+                                    if f.is_file() and not f.name.startswith('.')
+                                    and f.suffix.lower() in ALLOWED_EXTS
+                                )
+                                packages.append({
+                                    'name': item.name,
+                                    'path': str(item),
+                                    'file_count': file_count
+                                })
+        else:
+            # 无项目ID时，回退到旧的 uploads/temp_extract 路径
+            upload_folder = doc_manager.upload_folder
+            temp_extract_dir = upload_folder / 'temp_extract'
+            if temp_extract_dir.exists():
+                for item in sorted(temp_extract_dir.iterdir()):
+                    if item.is_dir() and not item.name.startswith('.'):
+                        file_count = sum(
+                            1 for f in item.rglob('*')
+                            if f.is_file() and not f.name.startswith('.')
+                            and f.suffix.lower() in ALLOWED_EXTS
+                        )
+                        packages.append({
+                            'name': item.name,
+                            'path': str(item),
+                            'file_count': file_count
+                        })
 
         return jsonify({'status': 'success', 'packages': packages})
     except Exception as e:
@@ -1584,7 +1634,7 @@ def list_zip_packages():
 
 @document_bp.route('/zip-packages', methods=['GET'])
 def zip_packages():
-    """列出所有已解压的ZIP包（temp_extract下的一级子目录）"""
+    """列出所有已解压的ZIP包（兼容旧接口）"""
     return list_zip_packages()
 
 @document_bp.route('/search-zip-files', methods=['GET'])
@@ -1592,32 +1642,39 @@ def search_zip_files():
     """搜索已解压的ZIP包中的文件，支持文件名模糊搜索和指定ZIP包"""
     try:
         from pathlib import Path
-        from app.utils.base import get_config
-        config = get_config()
-        upload_folder = Path(config.get('upload_folder', 'uploads'))
         keyword = request.args.get('keyword', '').strip().lower()
         package_path = request.args.get('package_path', '').strip()  # 指定ZIP包路径
-        temp_extract_dir = upload_folder / 'temp_extract'
-
-        if not temp_extract_dir.exists():
-            return jsonify({'status': 'success', 'files': [], 'message': '暂无已上传的ZIP文件，请先批量导入ZIP'})
+        project_id = request.args.get('project_id', '').strip()
 
         # 支持的文档格式
         ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
                         '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
 
-        # 确定搜索根目录
+        # 确定搜索根目录：优先用 package_path，其次按 project_id 找项目uploads目录
         if package_path:
             search_root = Path(package_path)
-            # 安全检查：必须在 temp_extract_dir 下
-            try:
-                search_root.relative_to(temp_extract_dir)
-            except ValueError:
-                return jsonify({'status': 'error', 'message': '非法路径'}), 400
             if not search_root.exists():
                 return jsonify({'status': 'error', 'message': '指定的ZIP包目录不存在'}), 404
+            # 计算相对路径基准
+            rel_base = search_root.parent
+        elif project_id:
+            project_result = doc_manager.load_project(project_id)
+            if not project_result or project_result.get('status') != 'success':
+                return jsonify({'status': 'success', 'files': [], 'message': '项目不存在'})
+            project_config = project_result.get('project', {})
+            project_name = project_config.get('name', '')
+            project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+            if not project_uploads_dir.exists():
+                return jsonify({'status': 'success', 'files': [], 'message': '暂无已上传的ZIP文件，请先导入ZIP'})
+            search_root = project_uploads_dir
+            rel_base = project_uploads_dir
         else:
-            search_root = temp_extract_dir
+            # 回退旧路径
+            upload_folder = doc_manager.upload_folder
+            search_root = upload_folder / 'temp_extract'
+            rel_base = search_root
+            if not search_root.exists():
+                return jsonify({'status': 'success', 'files': [], 'message': '暂无已上传的ZIP文件，请先批量导入ZIP'})
 
         results = []
         for file_path in sorted(search_root.rglob('*')):
@@ -1632,7 +1689,7 @@ def search_zip_files():
                 continue
 
             try:
-                rel_path = file_path.relative_to(temp_extract_dir)
+                rel_path = file_path.relative_to(rel_base)
             except ValueError:
                 rel_path = file_path.name
 
@@ -1734,45 +1791,6 @@ def delete_zip_package():
             'status': 'success',
             'message': 'ZIP包删除成功'
         })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@document_bp.route('/directories', methods=['GET'])
-def list_directories():
-    """获取项目的文档包目录列表"""
-    try:
-        import os
-        from pathlib import Path
-        
-        project_id = request.args.get('project_id')
-        project_name = request.args.get('project_name')
-        
-        if not project_id or not project_name:
-            return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
-        
-        # 获取项目的文档目录
-        docs_folder = doc_manager.get_documents_folder(project_name)
-        temp_folder = docs_folder / 'temp'
-        
-        # 确保temp目录存在
-        temp_folder.mkdir(parents=True, exist_ok=True)
-        
-        # 扫描temp目录下的子目录
-        directories = []
-        if temp_folder.exists():
-            for item in temp_folder.iterdir():
-                if item.is_dir() and not item.name.startswith('.'):
-                    directories.append({
-                        'id': str(item.relative_to(docs_folder)),
-                        'name': item.name
-                    })
-        
-        return jsonify({
-            'status': 'success',
-            'directories': directories
-        })
-        
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

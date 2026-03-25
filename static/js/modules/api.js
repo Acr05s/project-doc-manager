@@ -224,9 +224,12 @@ export async function deleteDocument(docId) {
 /**
  * 加载ZIP包列表
  */
-export async function loadZipPackages() {
+export async function loadZipPackages(projectId) {
     try {
-        const response = await fetch('/api/documents/zip-packages');
+        const url = projectId 
+            ? `/api/documents/zip-packages?project_id=${encodeURIComponent(projectId)}`
+            : '/api/documents/zip-packages';
+        const response = await fetch(url);
         const result = await response.json();
         return result.packages || [];
     } catch (error) {
@@ -238,9 +241,11 @@ export async function loadZipPackages() {
 /**
  * 搜索ZIP文件
  */
-export async function searchZipFiles(keyword, packagePath) {
+export async function searchZipFiles(keyword, packagePath, projectId) {
     try {
-        const response = await fetch(`/api/documents/search-zip-files?keyword=${encodeURIComponent(keyword)}&package_path=${encodeURIComponent(packagePath)}`);
+        let url = `/api/documents/search-zip-files?keyword=${encodeURIComponent(keyword)}&package_path=${encodeURIComponent(packagePath || '')}`;
+        if (projectId) url += `&project_id=${encodeURIComponent(projectId)}`;
+        const response = await fetch(url);
         const result = await response.json();
         return result.files || [];
     } catch (error) {

@@ -759,10 +759,25 @@ class DocumentManager:
             else:
                 deleted = False
             
-            # 然后从项目配置文件中删除
+            # 然后从项目配置文件中删除（同时更新内存中的数据）
             if hasattr(self, 'projects') and self.projects:
-                # 遍历所有项目文件
+                # 首先更新内存中的projects_db数据
+                for project_id, project_data in self.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                # 过滤掉要删除的文档
+                                original_length = len(cycle_info['uploaded_docs'])
+                                cycle_info['uploaded_docs'] = [
+                                    doc for doc in cycle_info['uploaded_docs']
+                                    if doc.get('doc_id') != doc_id
+                                ]
+                                if len(cycle_info['uploaded_docs']) != original_length:
+                                    deleted = True
+                
+                # 然后遍历所有项目文件（包括子目录）
                 projects_dir = self.config.projects_base_folder
+                # 检查根目录下的JSON文件
                 for project_file in projects_dir.glob('*.json'):
                     try:
                         import json
@@ -785,6 +800,33 @@ class DocumentManager:
                                             json.dump(project_data, f, ensure_ascii=False, indent=2)
                     except Exception as e:
                         logger.warning(f"处理项目文件 {project_file} 时出错: {e}")
+                
+                # 检查子目录中的project_config.json文件
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_config_file = project_dir / 'project_config.json'
+                        if project_config_file.exists():
+                            try:
+                                import json
+                                with open(project_config_file, 'r', encoding='utf-8') as f:
+                                    project_data = json.load(f)
+                                
+                                if 'documents' in project_data:
+                                    for cycle, cycle_info in project_data['documents'].items():
+                                        if 'uploaded_docs' in cycle_info:
+                                            # 过滤掉要删除的文档
+                                            original_length = len(cycle_info['uploaded_docs'])
+                                            cycle_info['uploaded_docs'] = [
+                                                doc for doc in cycle_info['uploaded_docs']
+                                                if doc.get('doc_id') != doc_id
+                                            ]
+                                            if len(cycle_info['uploaded_docs']) != original_length:
+                                                deleted = True
+                                                # 保存更新后的项目配置
+                                                with open(project_config_file, 'w', encoding='utf-8') as f:
+                                                    json.dump(project_data, f, ensure_ascii=False, indent=2)
+                            except Exception as e:
+                                logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
             
             if deleted:
                 return {'status': 'success'}
@@ -805,8 +847,73 @@ class DocumentManager:
             Dict: 更新结果
         """
         try:
+            updated = False
+            
+            # 更新内存中的documents_db
             if doc_id in self.documents_db:
                 self.documents_db[doc_id].update(data)
+                updated = True
+            
+            # 更新项目配置文件中的数据
+            if hasattr(self, 'projects') and self.projects:
+                # 首先更新内存中的projects_db数据
+                for project_id, project_data in self.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for doc in cycle_info['uploaded_docs']:
+                                    if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
+                                        doc.update(data)
+                                        updated = True
+                                        # 保存更新后的项目配置
+                                        self.projects.save(project_id, project_data)
+                
+                # 然后遍历所有项目文件（包括子目录）
+                projects_dir = self.config.projects_base_folder
+                # 检查根目录下的JSON文件
+                for project_file in projects_dir.glob('*.json'):
+                    try:
+                        import json
+                        with open(project_file, 'r', encoding='utf-8') as f:
+                            project_data = json.load(f)
+                        
+                        if 'documents' in project_data:
+                            for cycle, cycle_info in project_data['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    for doc in cycle_info['uploaded_docs']:
+                                        if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
+                                            doc.update(data)
+                                            updated = True
+                                            # 保存更新后的项目配置
+                                            with open(project_file, 'w', encoding='utf-8') as f:
+                                                json.dump(project_data, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        logger.warning(f"处理项目文件 {project_file} 时出错: {e}")
+                
+                # 检查子目录中的project_config.json文件
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_config_file = project_dir / 'project_config.json'
+                        if project_config_file.exists():
+                            try:
+                                import json
+                                with open(project_config_file, 'r', encoding='utf-8') as f:
+                                    project_data = json.load(f)
+                                
+                                if 'documents' in project_data:
+                                    for cycle, cycle_info in project_data['documents'].items():
+                                        if 'uploaded_docs' in cycle_info:
+                                            for doc in cycle_info['uploaded_docs']:
+                                                if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
+                                                    doc.update(data)
+                                                    updated = True
+                                                    # 保存更新后的项目配置
+                                                    with open(project_config_file, 'w', encoding='utf-8') as f:
+                                                        json.dump(project_data, f, ensure_ascii=False, indent=2)
+                            except Exception as e:
+                                logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
+            
+            if updated:
                 return {'status': 'success'}
             else:
                 return {'status': 'error', 'message': '文档不存在'}
@@ -927,6 +1034,8 @@ class DocumentManager:
         """
         try:
             success_count = 0
+            
+            # 从内存中的documents_db更新
             for doc_id in doc_ids:
                 if doc_id in self.documents_db:
                     if action == 'mark_seal':
@@ -936,6 +1045,57 @@ class DocumentManager:
                     elif action == 'mark_no_signature':
                         self.documents_db[doc_id]['no_signature'] = True
                     success_count += 1
+            
+            # 从项目配置中更新
+            if hasattr(self, 'projects') and self.projects:
+                # 首先使用项目管理器保存（处理内存中的数据）
+                for project_id, project_data in self.projects.projects_db.items():
+                    if 'documents' in project_data:
+                        for cycle, cycle_info in project_data['documents'].items():
+                            if 'uploaded_docs' in cycle_info:
+                                for doc in cycle_info['uploaded_docs']:
+                                    doc_id = doc.get('doc_id')
+                                    if doc_id in doc_ids:
+                                        if action == 'mark_seal':
+                                            doc['has_seal_marked'] = True
+                                        elif action == 'mark_no_seal':
+                                            doc['no_seal'] = True
+                                        elif action == 'mark_no_signature':
+                                            doc['no_signature'] = True
+                        # 保存更新后的项目配置
+                        self.projects.save(project_id, project_data)
+                
+                # 然后直接检查文件系统中的项目配置文件（确保所有文件都被更新）
+                projects_dir = self.config.projects_base_folder
+                # 检查子目录中的project_config.json文件
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_config_file = project_dir / 'project_config.json'
+                        if project_config_file.exists():
+                            try:
+                                import json
+                                with open(project_config_file, 'r', encoding='utf-8') as f:
+                                    project_data = json.load(f)
+                                
+                                if 'documents' in project_data:
+                                    for cycle, cycle_info in project_data['documents'].items():
+                                        if 'uploaded_docs' in cycle_info:
+                                            for doc in cycle_info['uploaded_docs']:
+                                                doc_id = doc.get('doc_id')
+                                                if doc_id in doc_ids:
+                                                    if action == 'mark_seal':
+                                                        doc['has_seal_marked'] = True
+                                                    elif action == 'mark_no_seal':
+                                                        doc['no_seal'] = True
+                                                    elif action == 'mark_no_signature':
+                                                        doc['no_signature'] = True
+                                
+                                # 保存更新后的项目配置
+                                with open(project_config_file, 'w', encoding='utf-8') as f:
+                                    json.dump(project_data, f, ensure_ascii=False, indent=2)
+                            except Exception as e:
+                                logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
+            
             return {
                 'status': 'success',
                 'success_count': success_count,
@@ -965,6 +1125,7 @@ class DocumentManager:
             
             # 从项目配置中删除
             if hasattr(self, 'projects') and self.projects:
+                # 首先使用项目管理器保存（处理内存中的数据）
                 for project_id, project_data in self.projects.projects_db.items():
                     if 'documents' in project_data:
                         for cycle, cycle_info in project_data['documents'].items():
@@ -978,6 +1139,34 @@ class DocumentManager:
                                 if len(cycle_info['uploaded_docs']) != original_length:
                                     # 保存更新后的项目配置
                                     self.projects.save(project_id, project_data)
+                
+                # 然后直接检查文件系统中的项目配置文件（确保所有文件都被更新）
+                projects_dir = self.config.projects_base_folder
+                # 检查子目录中的project_config.json文件
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_config_file = project_dir / 'project_config.json'
+                        if project_config_file.exists():
+                            try:
+                                import json
+                                with open(project_config_file, 'r', encoding='utf-8') as f:
+                                    project_data = json.load(f)
+                                
+                                if 'documents' in project_data:
+                                    for cycle, cycle_info in project_data['documents'].items():
+                                        if 'uploaded_docs' in cycle_info:
+                                            # 过滤掉要删除的文档
+                                            original_length = len(cycle_info['uploaded_docs'])
+                                            cycle_info['uploaded_docs'] = [
+                                                doc for doc in cycle_info['uploaded_docs']
+                                                if doc.get('doc_id') not in doc_ids
+                                            ]
+                                            if len(cycle_info['uploaded_docs']) != original_length:
+                                                # 保存更新后的项目配置
+                                                with open(project_config_file, 'w', encoding='utf-8') as f:
+                                                    json.dump(project_data, f, ensure_ascii=False, indent=2)
+                            except Exception as e:
+                                logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
             
             return {
                 'status': 'success',

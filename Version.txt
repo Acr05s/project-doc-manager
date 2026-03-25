@@ -1,0 +1,36 @@
+0.0.1
+
+更新内容：
+
+1. 项目初始化和基础功能
+   - 实现文档管理系统的基本架构
+   - 支持文档收集、版本管理、签字盖章识别
+   - 实现缺失文档统计功能
+
+2. 模块化重构
+   - 创建app/routes/main_routes.py：主页、项目加载和导出需求清单路由
+   - 创建app/services/task_service.py：任务管理相关功能
+   - 创建app/routes/task_routes.py：任务管理API路由
+   - 创建app/utils/swagger_utils.py：Swagger API文档相关功能
+   - 创建app/routes/swagger_routes.py：Swagger相关路由
+   - 创建app/plugins/__init__.py：插件相关功能
+   - 重构main.py：从600+行精简到121行，使用模块化组件
+
+3. 功能优化
+   - 创建app/utils/json_file_manager.py：实现线程安全的JSON文件操作
+   - 优化项目配置存储，使用项目特定目录
+   - 实现固定表格表头功能
+   - 修复ZIP上传记录显示问题
+   - 优化文档类型归档状态同步
+
+4. 工具脚本
+   - 创建tools/generate_zip_records.py：手动生成ZIP上传记录
+   - 创建move_project_configs.py：迁移项目配置文件
+   - 添加多个测试脚本
+
+5. 前端优化
+   - 优化前端JavaScript代码
+   - 添加项目状态记录文件
+   - 实现动态模态框显示
+
+此版本为初始版本，提供了完整的文档管理功能和模块化架构。

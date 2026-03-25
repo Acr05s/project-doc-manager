@@ -4,48 +4,13 @@
 
 import { appState, elements } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, openModal } from './ui.js';
-import { generateReport, checkCompliance } from './api.js';
+import { generateReport } from './document.js';
 
 /**
  * 处理生成报告
  */
 export async function handleGenerateReport() {
-    if (!appState.currentProjectId) {
-        showNotification('请先选择项目', 'error');
-        return;
-    }
-    
-    const progress = showOperationProgress('report-' + Date.now(), '正在生成报告...');
-    progress.update(20, '正在收集项目信息...');
-    
-    showLoading(true);
-    try {
-        const result = await generateReport(appState.currentProjectId);
-        
-        if (result.status === 'success') {
-            progress.update(60, '正在生成报告内容...');
-            
-            // 显示报告
-            const reportModal = elements.reportModal;
-            const reportContent = elements.reportContent;
-            
-            if (reportContent) {
-                reportContent.innerHTML = result.report || '<p>报告生成成功</p>';
-            }
-            
-            openModal(reportModal);
-            progress.complete('报告生成成功');
-        } else {
-            progress.error('生成失败: ' + result.message);
-            showNotification('生成报告失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        console.error('生成报告失败:', error);
-        progress.error('生成失败: ' + error.message);
-        showNotification('生成报告失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
+    await generateReport();
 }
 
 /**

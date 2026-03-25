@@ -88,3 +88,19 @@ def export_requirements():
         return response
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@main_bp.route('/api/version', methods=['GET'])
+def get_version():
+    """获取版本信息"""
+    try:
+        import os
+        version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Version.txt')
+        
+        if os.path.exists(version_file):
+            with open(version_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+        else:
+            return '0.0.1\n\n版本文件不存在', 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    except Exception as e:
+        return f'0.0.1\n\n获取版本信息失败: {str(e)}', 200, {'Content-Type': 'text/plain; charset=utf-8'}

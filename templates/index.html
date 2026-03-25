@@ -6,8 +6,8 @@
     <title>项目文档管理中心</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032529">
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026032529"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032570">
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026032570"></script>
 </head>
 <body>
     <!-- 操作进度显示容器 -->
@@ -18,7 +18,7 @@
         <header class="header">
             <div class="header-left">
                 <!-- 标题可点击打开项目选择模态框 -->
-                <h1 class="clickable" id="projectTitle" style="cursor: pointer;" title="点击打开项目管理">📁 项目文档管理中心 <span id="appVersion" class="app-version-badge">v1.1</span></h1>
+                <h1 class="clickable" id="projectTitle" style="cursor: pointer;" title="点击打开项目管理">📁 项目文档管理中心 <span id="appVersion" class="app-version-badge" style="cursor: pointer;" title="点击查看版本信息">v0.0.1</span></h1>
                 <!-- 当前项目名称显示 -->
                 <div id="currentProjectName" class="current-project-name" style="display:none;"></div>
             </div>
@@ -47,6 +47,11 @@
                         <a href="#" class="dropdown-item" id="deleteProjectBtn">🔄 重新匹配文件管理</a>
                     </div>
                 </div>
+                
+                <!-- 生成报告按钮 -->
+                <button class="btn btn-success" id="generateReportBtn" style="display:none; margin-left: 10px;" onclick="console.log('生成报告按钮点击'); if (typeof generateReport === 'function') { generateReport(); } else { console.error('generateReport函数未定义'); }">
+                    📊 生成报告
+                </button>
                 
                 <!-- 数据备份导入下拉菜单 -->
                 <div id="dataBackupMenu" class="dropdown" style="display:none;">
@@ -135,14 +140,14 @@
                 <button type="button" class="main-tab-btn" data-tab="maintain" onclick="loadMaintainDocuments()">🛠️ 维护已选择文档</button>
             </div>
             
+            <!-- 周期和文档类型显示 -->
+            <div class="cycle-doc-info" style="text-align: center; margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                <h3 id="currentCycleDocInfo">正在处理：<span id="currentCycle"></span> - <span id="currentDocument"></span></h3>
+            </div>
+            
             <!-- 上传/选择标签页 -->
             <div id="uploadSelectTab" class="main-tab-content active" style="overflow-y: auto;">
                 <div class="upload-container">
-
-                    <!-- 周期和文档类型显示 -->
-                    <div class="cycle-doc-info" style="text-align: center; margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
-                        <h3 id="currentCycleDocInfo">正在处理：<span id="currentCycle"></span> - <span id="currentDocument"></span></h3>
-                    </div>
 
                     <!-- 上传方式选择 -->
                     <div class="upload-method">
@@ -164,7 +169,7 @@
                                     <div class="drop-zone-content">
                                         <div class="drop-icon">📁</div>
                                         <p class="drop-text">拖拽文件到此处，或 <span class="drop-link">点击选择文件</span></p>
-                                        <p class="file-format">支持文件格式：PDF、Word、Excel、图片等</p>
+                                        <p class="file-format">支持格式：PDF、Word、Excel、图片等</p>
                                     </div>
                                     <input type="file" id="fileInput" name="file" style="display: none;">
                                     <input type="file" id="folderInput" name="folder" style="display: none;" webkitdirectory directory multiple>
@@ -178,15 +183,11 @@
                                     <span class="progress-text" id="progressText">0%</span>
                                 </div>
 
-
-
                                 <!-- 文档附加属性要求 -->
-                                <div class="doc-requirement-info" id="docRequirementInfo" style="margin: 10px 0; padding: 8px; background: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px;">
+                                <div class="doc-requirement-info" id="docRequirementInfo">
                                     <h4>📋 附加属性要求</h4>
                                     <p id="requirementText">加载中...</p>
                                 </div>
-
-
                             </div>
 
                             <!-- 右侧：文档信息区域 -->
@@ -212,11 +213,11 @@
                                     </div>
                                 </div>
                             </div>
-                            
-                            <!-- 确认归档按钮 -->
-                            <div class="confirm-archive-section">
-                                <button type="submit" class="btn btn-success" id="uploadBtn">确认归档</button>
-                            </div>
+                        </div>
+
+                        <!-- 确认归档按钮（两栏下方） -->
+                        <div class="confirm-archive-section">
+                            <button type="submit" class="btn btn-success" id="uploadBtn">✅ 确认归档</button>
                         </div>
                     </div>
 
@@ -575,7 +576,7 @@
 
             <!-- 文档编辑弹窗 -->
     <div id="editDocModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 600px; width: 90%;">
             <span class="close">&times;</span>
             <h2>编辑文档信息</h2>
             
@@ -646,7 +647,7 @@
 
     <!-- 文档替换弹窗 -->
     <div id="replaceDocModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 600px; width: 90%;">
             <span class="close">&times;</span>
             <h2>替换文档</h2>
             
@@ -964,6 +965,18 @@
             
             <div id="templatePreviewContent" class="template-preview">
                 <!-- 预览内容将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 版本信息模态框 -->
+    <div id="versionModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; width: 90%;">
+            <span class="close">&times;</span>
+            <h2>版本信息</h2>
+            
+            <div id="versionContent" class="version-content">
+                <div class="loading">加载中...</div>
             </div>
         </div>
     </div>

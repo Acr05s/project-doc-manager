@@ -197,17 +197,22 @@ export async function loadCycleProgresses(cycles, docsData) {
         });
     });
 
-    // 只有在没有选中任何周期时才默认选中第一个
-    // 这样刷新进度时不会改变当前选中的周期
+    // 不自动选中任何周期，让用户手动选择
     const currentCycle = appState.currentCycle;
-    if (!currentCycle && cycles.length > 0) {
-        selectCycle(cycles[0]);
-    } else if (currentCycle) {
+    if (currentCycle) {
         // 确保当前选中周期仍然可见
         const currentItem = document.querySelector(`.cycle-nav-item[data-cycle="${currentCycle}"]`);
         if (currentItem) {
             currentItem.classList.add('active');
         }
+    } else {
+        // 显示欢迎信息
+        elements.contentArea.innerHTML = `
+            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                <h2>欢迎使用文档管理系统</h2>
+                <p>请从上方选择一个周期开始管理文档</p>
+            </div>
+        `;
     }
 }
 
@@ -215,24 +220,47 @@ export async function loadCycleProgresses(cycles, docsData) {
  * 选定一个周期
  */
 export function selectCycle(cycle) {
-    appState.currentCycle = cycle;
+    // 如果点击的是已选中的周期，则取消选择
+    if (appState.currentCycle === cycle) {
+        appState.currentCycle = null;
+        
+        // 更新顶部导航UI
+        const cycleNavItems = document.querySelectorAll('.cycle-nav-item');
+        if (cycleNavItems) {
+            cycleNavItems.forEach(item => {
+                if (item) {
+                    item.classList.remove('active');
+                }
+            });
+        }
+        
+        // 显示欢迎信息
+        elements.contentArea.innerHTML = `
+            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                <h2>欢迎使用文档管理系统</h2>
+                <p>请从上方选择一个周期开始管理文档</p>
+            </div>
+        `;
+    } else {
+        appState.currentCycle = cycle;
 
-    // 更新顶部导航UI
-    const cycleNavItems = document.querySelectorAll('.cycle-nav-item');
-    if (cycleNavItems) {
-        cycleNavItems.forEach(item => {
-            if (item) {
-                item.classList.remove('active');
-            }
-        });
-    }
-    const cycleItem = document.querySelector(`.cycle-nav-item[data-cycle="${cycle}"]`);
-    if (cycleItem) {
-        cycleItem.classList.add('active');
-    }
+        // 更新顶部导航UI
+        const cycleNavItems = document.querySelectorAll('.cycle-nav-item');
+        if (cycleNavItems) {
+            cycleNavItems.forEach(item => {
+                if (item) {
+                    item.classList.remove('active');
+                }
+            });
+        }
+        const cycleItem = document.querySelector(`.cycle-nav-item[data-cycle="${cycle}"]`);
+        if (cycleItem) {
+            cycleItem.classList.add('active');
+        }
 
-    // 渲染该周期的文档
-    renderCycleDocuments(cycle);
+        // 渲染该周期的文档
+        renderCycleDocuments(cycle);
+    }
 }
 
 /**
@@ -242,7 +270,13 @@ export function renderInitialContent() {
     if (!appState.projectConfig) return;
 
     const cycles = appState.projectConfig.cycles;
-    if (cycles && cycles.length > 0) {
-        selectCycle(cycles[0]);
+    // 始终显示欢迎信息，让用户手动选择周期
+    if (!appState.currentCycle) {
+        elements.contentArea.innerHTML = `
+            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                <h2>欢迎使用文档管理系统</h2>
+                <p>请从上方选择一个周期开始管理文档</p>
+            </div>
+        `;
     }
 }

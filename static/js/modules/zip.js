@@ -12,18 +12,26 @@ import { renderCycleDocuments } from './document.js';
  */
 export async function loadZipPackagesList() {
     try {
-        const packages = await loadZipPackages();
+        const packages = await loadZipPackages(appState.currentProjectId);
         
         const zipPackageSelect = document.getElementById('zipPackageSelect');
         if (zipPackageSelect) {
-            zipPackageSelect.innerHTML = '<option value="">-- 选择ZIP包 --</option>';
+            zipPackageSelect.innerHTML = '<option value="">-- 选择文档包 --</option>';
             
-            packages.forEach(pkg => {
+            if (packages.length === 0) {
                 const option = document.createElement('option');
-                option.value = pkg.path;
-                option.textContent = `${pkg.name}（${pkg.file_count}个文件）`;
+                option.value = '';
+                option.textContent = '暂无已上传的ZIP包';
+                option.disabled = true;
                 zipPackageSelect.appendChild(option);
-            });
+            } else {
+                packages.forEach(pkg => {
+                    const option = document.createElement('option');
+                    option.value = pkg.path;
+                    option.textContent = `${pkg.name}（${pkg.file_count}个文件）`;
+                    zipPackageSelect.appendChild(option);
+                });
+            }
         }
     } catch (error) {
         console.error('加载ZIP包列表失败:', error);
@@ -35,14 +43,10 @@ export async function loadZipPackagesList() {
  * 搜索ZIP文件
  */
 export async function searchZipFilesInPackage(keyword, packagePath) {
-    if (!packagePath) {
-        showNotification('请先选择ZIP包', 'error');
-        return;
-    }
-    
     showLoading(true);
     try {
-        const files = await searchZipFiles(keyword, packagePath);
+        // 有 packagePath 时用指定目录搜索，否则按项目ID搜索所有上传目录
+        const files = await searchZipFiles(keyword || '', packagePath || '', appState.currentProjectId);
         
         const zipFilesList = document.getElementById('zipFilesList');
         if (zipFilesList) {

@@ -4,9 +4,63 @@
 
 import { initApp } from './modules/index.js';
 
+// 加载版本信息
+function loadVersionInfo() {
+    fetch('/api/version')
+        .then(response => response.text())
+        .then(data => {
+            const lines = data.split('\n');
+            const version = lines[0].trim();
+            const appVersion = document.getElementById('appVersion');
+            if (appVersion) {
+                appVersion.textContent = `v${version}`;
+            }
+        })
+        .catch(error => {
+            console.error('加载版本信息失败:', error);
+        });
+}
+
+// 打开版本信息模态框
+function openVersionModal() {
+    fetch('/api/version')
+        .then(response => response.text())
+        .then(data => {
+            const versionContent = document.getElementById('versionContent');
+            if (versionContent) {
+                versionContent.innerHTML = `<pre style="white-space: pre-wrap; font-family: monospace; padding: 15px; background: #f8f9fa; border-radius: 4px;">${data}</pre>`;
+            }
+            
+            const modal = document.getElementById('versionModal');
+            if (modal) {
+                modal.classList.add('show');
+                document.body.style.overflow = 'hidden';
+            }
+        })
+        .catch(error => {
+            console.error('加载版本信息失败:', error);
+            const versionContent = document.getElementById('versionContent');
+            if (versionContent) {
+                versionContent.innerHTML = '<p style="color: red;">加载版本信息失败</p>';
+            }
+        });
+}
+
+// 关闭版本信息模态框
+function closeVersionModal() {
+    const modal = document.getElementById('versionModal');
+    if (modal) {
+        modal.classList.remove('show');
+        document.body.style.overflow = 'auto';
+    }
+}
+
 // 当DOM加载完成后初始化应用
 document.addEventListener('DOMContentLoaded', function() {
     initApp();
+    
+    // 加载版本信息
+    loadVersionInfo();
     
     // 添加项目标题点击事件
     const projectTitle = document.getElementById('projectTitle');
@@ -15,6 +69,31 @@ document.addEventListener('DOMContentLoaded', function() {
             import('./modules/project.js').then(module => {
                 module.openProjectSelectModal();
             });
+        });
+    }
+    
+    // 添加版本号点击事件
+    const appVersion = document.getElementById('appVersion');
+    if (appVersion) {
+        appVersion.addEventListener('click', function(e) {
+            e.stopPropagation(); // 阻止事件冒泡
+            openVersionModal();
+        });
+    }
+    
+    // 添加版本模态框关闭事件
+    const versionModal = document.getElementById('versionModal');
+    if (versionModal) {
+        const closeBtn = versionModal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeVersionModal);
+        }
+        
+        // 点击模态框外部关闭
+        versionModal.addEventListener('click', function(e) {
+            if (e.target === versionModal) {
+                closeVersionModal();
+            }
         });
     }
 });
@@ -104,6 +183,12 @@ window.refreshOperationLog = function() {
     import('./modules/ui.js').then(module => {
         module.refreshOperationLog();
     });
+};
+
+// 生成报告
+window.generateReport = function() {
+    // 直接调用全局的generateReport函数
+    generateReport();
 };
 
 // 关闭确认模态框

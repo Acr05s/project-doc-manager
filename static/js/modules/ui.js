@@ -12,6 +12,7 @@ import {
     populateDocSelect, handleConfirmAcceptance, handleDownloadPackage, 
     handleDeleteProject, resetImportPackageModal, loadZipRecords, handleRematchFromZip, handleDeleteZipRecord
 } from './project.js';
+
 import { 
     handleUploadDocument, handleFileSelect, handleEditDocument, 
     handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments
@@ -773,10 +774,10 @@ export function setupEventListeners() {
         });
     }
 
-    // 文档编辑表单提交
+    // 文档编辑表单提交：用 onsubmit 赋值绑定（不重复；generateDynamicEditForm 也用 onsubmit 覆盖）
     const editDocForm = document.getElementById('editDocForm');
     if (editDocForm) {
-        editDocForm.addEventListener('submit', handleEditDocument);
+        editDocForm.onsubmit = handleEditDocument;
     }
 
     // 文档替换表单提交
@@ -1321,6 +1322,10 @@ export function showProjectButtons() {
         const menu = document.getElementById(menuId);
         if (menu) menu.style.display = 'inline-block';
     });
+    
+    // 显示生成报告按钮
+    const generateReportBtn = document.getElementById('generateReportBtn');
+    if (generateReportBtn) generateReportBtn.style.display = 'inline-block';
 }
 
 /**
@@ -1336,4 +1341,8 @@ export function hideProjectButtons() {
         const menu = document.getElementById(menuId);
         if (menu) menu.style.display = 'none';
     });
+    
+    // 隐藏生成报告按钮
+    const generateReportBtn = document.getElementById('generateReportBtn');
+    if (generateReportBtn) generateReportBtn.style.display = 'none';
 }
