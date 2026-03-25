@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, closeModal } from './ui.js';
-import { loadZipPackages, searchZipFiles, deleteZipPackage } from './api.js';
+import { loadZipPackages, searchZipFiles, deleteZipPackage, loadProject } from './api.js';
 import { renderCycleDocuments } from './document.js';
 
 /**
@@ -391,6 +391,14 @@ async function pollMatchTask(taskId, progress) {
                             `匹配完成！共 ${matchResult.total_files} 个文件，匹配成功 ${matchResult.matched_count} 个`,
                             matchResult.matched_count > 0 ? 'success' : 'warning'
                         );
+                        
+                        // 重新加载项目配置
+                        if (appState.currentProjectId) {
+                            const updatedProject = await loadProject(appState.currentProjectId);
+                            if (updatedProject) {
+                                appState.projectConfig = updatedProject;
+                            }
+                        }
                         
                         // 刷新文档列表
                         if (appState.currentCycle) {

@@ -1148,6 +1148,434 @@ class DocumentManager:
             logger.error(f"解压ZIP文件失败: {e}")
             return {'status': 'error', 'message': str(e)}
 
+    def smart_recognize_document(self, file_path: str, party_a: str = '', party_b: str = '', 
+                                  attributes_to_recognize: Dict = None) -> Dict:
+        """智能识别文档属性（签章、盖章等）
+        
+        Args:
+            file_path: 文件路径
+            party_a: 甲方名称
+            party_b: 乙方名称
+            attributes_to_recognize: 需要识别的属性配置
+            
+        Returns:
+            Dict: 识别结果
+        """
+        try:
+            from pathlib import Path
+            
+            file_path_obj = Path(file_path)
+            file_ext = file_path_obj.suffix.lower()
+            
+            # 默认识别所有属性
+            if attributes_to_recognize is None:
+                attributes_to_recognize = {
+                    'doc_date': True,
+                    'sign_date': True,
+                    'signer': True,
+                    'has_seal': True,
+                    'party_a_seal': True,
+                    'party_b_seal': True,
+                    'no_seal': True,
+                    'no_signature': True,
+                    'other_seal': True,
+                    'doc_number': True
+                }
+            
+            result = {
+                'doc_date': '',
+                'sign_date': '',
+                'signer': '',
+                'has_seal': False,
+                'party_a_seal': False,
+                'party_b_seal': False,
+                'no_seal': False,
+                'no_signature': False,
+                'other_seal': '',
+                'doc_number': ''
+            }
+            
+            # 根据文件类型选择不同的识别方法
+            if file_ext == '.pdf':
+                result = self._recognize_pdf(file_path, party_a, party_b, attributes_to_recognize)
+            elif file_ext in ['.doc', '.docx']:
+                result = self._recognize_word(file_path, party_a, party_b, attributes_to_recognize)
+            elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
+                result = self._recognize_image(file_path, party_a, party_b, attributes_to_recognize)
+            else:
+                # 对于其他格式，尝试通用文本识别
+                result = self._recognize_text(file_path, party_a, party_b, attributes_to_recognize)
+            
+            return {
+                'status': 'success',
+                'data': result
+            }
+        except Exception as e:
+            logger.error(f"智能识别文档失败: {e}")
+            return {
+                'status': 'error',
+                'message': str(e),
+                'data': {
+                    'doc_date': '',
+                    'sign_date': '',
+                    'signer': '',
+                    'has_seal': False,
+                    'party_a_seal': False,
+                    'party_b_seal': False,
+                    'no_seal': False,
+                    'no_signature': False,
+                    'other_seal': '',
+                    'doc_number': ''
+                }
+            }
+    
+    def _recognize_pdf(self, file_path: str, party_a: str, party_b: str, 
+                       attributes_to_recognize: Dict = None) -> Dict:
+        """识别PDF文档"""
+        result = {
+            'doc_date': '',
+            'sign_date': '',
+            'signer': '',
+            'has_seal': False,
+            'party_a_seal': False,
+            'party_b_seal': False,
+            'no_seal': False,
+            'no_signature': False,
+            'other_seal': '',
+            'doc_number': ''
+        }
+        
+        # 默认全部识别
+        if attributes_to_recognize is None:
+            attributes_to_recognize = {k: True for k in result.keys()}
+        
+        try:
+            import PyPDF2
+            from datetime import datetime
+            import re
+            
+            with open(file_path, 'rb') as f:
+                pdf_reader = PyPDF2.PdfReader(f)
+                text = ''
+                
+                # 提取所有页面的文本
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + '\n'
+                
+                # 识别日期（多种格式）
+                if attributes_to_recognize.get('doc_date') or attributes_to_recognize.get('sign_date'):
+                    date_patterns = [
+                        r'(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[日]?',
+                        r'(\d{4})(\d{2})(\d{2})',
+                        r'(\d{2})[年/-](\d{1,2})[月/-](\d{1,2})[日]?'
+                    ]
+                    
+                    dates = []
+                    for pattern in date_patterns:
+                        matches = re.findall(pattern, text)
+                        for match in matches:
+                            if len(match) == 3:
+                                year, month, day = match
+                                if len(year) == 2:
+                                    year = '20' + year
+                                try:
+                                    date_str = f"{year}-{int(month):02d}-{int(day):02d}"
+                                    dates.append(date_str)
+                                except:
+                                    pass
+                    
+                    if dates and attributes_to_recognize.get('doc_date'):
+                        result['doc_date'] = dates[0]
+                    if len(dates) > 1 and attributes_to_recognize.get('sign_date'):
+                        result['sign_date'] = dates[1]
+                
+                # 识别签字人（常见关键词附近的人名）
+                if attributes_to_recognize.get('signer'):
+                    signer_patterns = [
+                        r'(?:签字|签名|签署)[：:]\s*([^\n]{1,20})',
+                        r'(?:负责人|经办人|审核人)[：:]\s*([^\n]{1,20})',
+                        r'(?:甲方代表|乙方代表)[：:]\s*([^\n]{1,20})'
+                    ]
+                    
+                    for pattern in signer_patterns:
+                        match = re.search(pattern, text)
+                        if match:
+                            signer = match.group(1).strip()
+                            # 过滤掉过长的匹配
+                            if len(signer) < 20 and not any(char in signer for char in ['【', '】', '[', ']']):
+                                result['signer'] = signer
+                                break
+                
+                # 识别盖章信息
+                if attributes_to_recognize.get('has_seal') or attributes_to_recognize.get('party_a_seal') or attributes_to_recognize.get('party_b_seal'):
+                    if party_a and party_a in text:
+                        result['has_seal'] = True
+                        if attributes_to_recognize.get('party_a_seal'):
+                            result['party_a_seal'] = True
+                
+                if party_b and party_b in text:
+                    result['has_seal'] = True
+                    result['party_b_seal'] = True
+                
+                # 检查是否有"章"、"印章"等关键词
+                seal_keywords = ['盖章', '印章', '公章', '专用章', '合同章']
+                for keyword in seal_keywords:
+                    if keyword in text:
+                        result['has_seal'] = True
+                        break
+                
+                # 检查是否涉及签字/盖章
+                if '不涉及签字' in text or '无需签字' in text:
+                    result['no_signature'] = True
+                
+                if '不涉及盖章' in text or '无需盖章' in text:
+                    result['no_seal'] = True
+                
+                # 识别其他盖章信息
+                other_seal_patterns = [
+                    r'(监理单位|项目章|部门章|财务章)[：:]\s*([^\n]{1,30})',
+                    r'(见证单位|检测单位|设计单位)[：:]\s*([^\n]{1,30})'
+                ]
+                
+                other_seals = []
+                for pattern in other_seal_patterns:
+                    matches = re.findall(pattern, text)
+                    for match in matches:
+                        other_seals.append(f"{match[0]}: {match[1].strip()}")
+                
+                if other_seals:
+                    result['other_seal'] = '; '.join(other_seals[:3])  # 最多3个
+                
+        except Exception as e:
+            logger.warning(f"PDF识别失败: {e}")
+        
+        return result
+    
+    def _recognize_word(self, file_path: str, party_a: str, party_b: str) -> Dict:
+        """识别Word文档"""
+        result = {
+            'doc_date': '',
+            'sign_date': '',
+            'signer': '',
+            'has_seal': False,
+            'party_a_seal': False,
+            'party_b_seal': False,
+            'no_seal': False,
+            'no_signature': False,
+            'other_seal': ''
+        }
+        
+        try:
+            from docx import Document
+            import re
+            from datetime import datetime
+            
+            doc = Document(file_path)
+            text = ''
+            
+            # 提取所有段落的文本
+            for para in doc.paragraphs:
+                text += para.text + '\n'
+            
+            # 提取表格中的文本
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text += cell.text + '\n'
+            
+            # 使用与PDF相同的识别逻辑
+            date_patterns = [
+                r'(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[日]?',
+                r'(\d{4})(\d{2})(\d{2})',
+                r'(\d{2})[年/-](\d{1,2})[月/-](\d{1,2})[日]?'
+            ]
+            
+            dates = []
+            for pattern in date_patterns:
+                matches = re.findall(pattern, text)
+                for match in matches:
+                    if len(match) == 3:
+                        year, month, day = match
+                        if len(year) == 2:
+                            year = '20' + year
+                        try:
+                            date_str = f"{year}-{int(month):02d}-{int(day):02d}"
+                            dates.append(date_str)
+                        except:
+                            pass
+            
+            if dates:
+                result['doc_date'] = dates[0]
+                if len(dates) > 1:
+                    result['sign_date'] = dates[1]
+            
+            # 识别签字人
+            signer_patterns = [
+                r'(?:签字|签名|签署)[：:]\s*([^\n]{1,20})',
+                r'(?:负责人|经办人|审核人)[：:]\s*([^\n]{1,20})',
+                r'(?:甲方代表|乙方代表)[：:]\s*([^\n]{1,20})'
+            ]
+            
+            for pattern in signer_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    signer = match.group(1).strip()
+                    if len(signer) < 20 and not any(char in signer for char in ['【', '】', '[', ']']):
+                        result['signer'] = signer
+                        break
+            
+            # 识别盖章信息
+            if party_a and party_a in text:
+                result['has_seal'] = True
+                result['party_a_seal'] = True
+            
+            if party_b and party_b in text:
+                result['has_seal'] = True
+                result['party_b_seal'] = True
+            
+            seal_keywords = ['盖章', '印章', '公章', '专用章', '合同章']
+            for keyword in seal_keywords:
+                if keyword in text:
+                    result['has_seal'] = True
+                    break
+            
+            if '不涉及签字' in text or '无需签字' in text:
+                result['no_signature'] = True
+            
+            if '不涉及盖章' in text or '无需盖章' in text:
+                result['no_seal'] = True
+            
+        except Exception as e:
+            logger.warning(f"Word识别失败: {e}")
+        
+        return result
+    
+    def _recognize_image(self, file_path: str, party_a: str, party_b: str) -> Dict:
+        """识别图片文档（使用OCR）"""
+        result = {
+            'doc_date': '',
+            'sign_date': '',
+            'signer': '',
+            'has_seal': False,
+            'party_a_seal': False,
+            'party_b_seal': False,
+            'no_seal': False,
+            'no_signature': False,
+            'other_seal': ''
+        }
+        
+        try:
+            # 尝试使用OCR（如果安装了相关库）
+            try:
+                from PIL import Image
+                import pytesseract
+                import re
+                
+                # 打开图片
+                image = Image.open(file_path)
+                
+                # 使用OCR提取文本
+                text = pytesseract.image_to_string(image, lang='chi_sim+eng')
+                
+                # 使用与PDF相同的识别逻辑
+                date_patterns = [
+                    r'(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[日]?',
+                    r'(\d{4})(\d{2})(\d{2})'
+                ]
+                
+                dates = []
+                for pattern in date_patterns:
+                    matches = re.findall(pattern, text)
+                    for match in matches:
+                        if len(match) == 3:
+                            year, month, day = match
+                            try:
+                                date_str = f"{year}-{int(month):02d}-{int(day):02d}"
+                                dates.append(date_str)
+                            except:
+                                pass
+                
+                if dates:
+                    result['doc_date'] = dates[0]
+                    if len(dates) > 1:
+                        result['sign_date'] = dates[1]
+                
+                # 识别盖章信息
+                if party_a and party_a in text:
+                    result['has_seal'] = True
+                    result['party_a_seal'] = True
+                
+                if party_b and party_b in text:
+                    result['has_seal'] = True
+                    result['party_b_seal'] = True
+                
+                seal_keywords = ['盖章', '印章', '公章', '专用章']
+                for keyword in seal_keywords:
+                    if keyword in text:
+                        result['has_seal'] = True
+                        break
+                
+            except ImportError:
+                logger.warning("OCR库未安装，跳过图片识别")
+                
+        except Exception as e:
+            logger.warning(f"图片识别失败: {e}")
+        
+        return result
+    
+    def _recognize_text(self, file_path: str, party_a: str, party_b: str) -> Dict:
+        """通用文本识别"""
+        result = {
+            'doc_date': '',
+            'sign_date': '',
+            'signer': '',
+            'has_seal': False,
+            'party_a_seal': False,
+            'party_b_seal': False,
+            'no_seal': False,
+            'no_signature': False,
+            'other_seal': ''
+        }
+        
+        try:
+            # 尝试读取文件内容
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+            
+            import re
+            
+            # 简单的日期识别
+            date_patterns = [
+                r'(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})'
+            ]
+            
+            dates = []
+            for pattern in date_patterns:
+                matches = re.findall(pattern, text)
+                for match in matches:
+                    if len(match) == 3:
+                        year, month, day = match
+                        try:
+                            date_str = f"{year}-{int(month):02d}-{int(day):02d}"
+                            dates.append(date_str)
+                        except:
+                            pass
+            
+            if dates:
+                result['doc_date'] = dates[0]
+            
+            # 检查盖章信息
+            if party_a and party_a in text:
+                result['party_a_seal'] = True
+            
+            if party_b and party_b in text:
+                result['party_b_seal'] = True
+                
+        except Exception as e:
+            logger.warning(f"文本识别失败: {e}")
+        
+        return result
+
 
 # 全局单例
 _manager_instance: Optional[DocumentManager] = None

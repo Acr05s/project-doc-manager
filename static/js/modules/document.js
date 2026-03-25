@@ -180,29 +180,31 @@ export function showRecognitionResult(fileName, recognitionData) {
 export async function handleEditDocument(e) {
     e.preventDefault();
     
-    const docId = e.target.dataset.docId;
+    const form = e.target;
+    const docId = document.getElementById('editDocId').value;
     if (!docId) {
         showNotification('文档ID不存在', 'error');
         return;
     }
     
-    const docDate = document.getElementById('editDocDate').value;
-    const signDate = document.getElementById('editSignDate').value;
-    const signer = document.getElementById('editSigner').value;
-    const hasSeal = document.getElementById('editHasSeal').checked;
-    const partyASeal = document.getElementById('editPartyASeal').checked;
-    const partyBSeal = document.getElementById('editPartyBSeal').checked;
-    const otherSeal = document.getElementById('editOtherSeal').value;
+    // 动态收集表单数据
+    const docData = {};
     
-    const docData = {
-        doc_date: docDate,
-        sign_date: signDate,
-        signer: signer,
-        has_seal: hasSeal,
-        party_a_seal: partyASeal,
-        party_b_seal: partyBSeal,
-        other_seal: otherSeal
-    };
+    // 收集文本和日期输入
+    form.querySelectorAll('input[type="text"], input[type="date"]').forEach(input => {
+        if (input.id.startsWith('edit')) {
+            const fieldName = input.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
+            docData[fieldName] = input.value;
+        }
+    });
+    
+    // 收集复选框
+    form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        if (checkbox.id.startsWith('edit')) {
+            const fieldName = checkbox.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
+            docData[fieldName] = checkbox.checked;
+        }
+    });
     
     showLoading(true);
     try {
@@ -210,7 +212,11 @@ export async function handleEditDocument(e) {
         
         if (result.status === 'success') {
             showNotification('文档编辑成功', 'success');
-            closeModal(elements.editDocModal);
+            const editModal = document.getElementById('editDocModal');
+            if (editModal) {
+                editModal.classList.remove('show');
+                document.body.style.overflow = 'auto';
+            }
             // 刷新文档列表
             await renderCycleDocuments(appState.currentCycle);
         } else {
@@ -340,11 +346,12 @@ export async function renderCycleDocuments(cycle) {
     allDocTypes.sort((a, b) => (a.index || 0) - (b.index || 0));
 
     // 新布局：左侧组织机构人员，中间文件名+附加属性，右侧确认按钮
-    const html = `
+        const html = `
         <h2 style="text-align: left;">📋 ${cycle} - 文档管理</h2>
         
         <!-- 新文档管理布局 -->
         <div class="new-documents-layout">
+            <div class="documents-table-container">
             <table class="documents-table">
                 <thead>
                     <tr>
@@ -471,6 +478,7 @@ export async function renderCycleDocuments(cycle) {
                     }).join('')}
                 </tbody>
             </table>
+            </div>
         </div>
     `;
     
@@ -1411,19 +1419,14 @@ export async function openEditModal(docId, cycle, docName) {
             
             // 填充编辑表单
             document.getElementById('editDocId').value = doc.id;
-            document.getElementById('editDocDate').value = doc.doc_date || '';
-            document.getElementById('editSignDate').value = doc.sign_date || '';
-            document.getElementById('editSigner').value = doc.signer || '';
-            document.getElementById('editHasSeal').checked = doc.has_seal || false;
-            document.getElementById('editPartyASeal').checked = doc.party_a_seal || false;
-            document.getElementById('editPartyBSeal').checked = doc.party_b_seal || false;
-            document.getElementById('editNoSignature').checked = doc.no_signature || false;
-            document.getElementById('editOtherSeal').value = doc.other_seal || '';
+            
+            // 动态生成编辑表单
+            generateDynamicEditForm(doc, cycle, docName);
             
             // 打开编辑模态框
             const editModal = document.getElementById('editDocModal');
             if (editModal) {
-                editModal.style.display = 'block';
+                editModal.classList.add('show');
                 document.body.style.overflow = 'hidden';
             }
         } else {
@@ -1434,6 +1437,187 @@ export async function openEditModal(docId, cycle, docName) {
         console.error('获取文档信息失败:', error);
         showNotification('获取文档信息失败', 'error');
     }
+}
+
+/**
+ * 动态生成编辑表单
+ */
+function generateDynamicEditForm(doc, cycle, docName) {
+    const formContainer = document.getElementById('editDocForm');
+    if (!formContainer) return;
+    
+    // 从项目配置中获取文档要求
+    let requirement = '';
+    let attributes = [];
+    
+    if (appState.projectConfig && cycle && docName) {
+        const cycleDocs = appState.projectConfig.documents[cycle];
+        if (cycleDocs && cycleDocs.required_docs) {
+            const docInfo = cycleDocs.required_docs.find(d => d.name === docName);
+            if (docInfo) {
+                requirement = docInfo.requirement || '无特殊要求';
+                // 解析附加属性
+                attributes = parseRequirementAttributes(requirement);
+            }
+        }
+    }
+    
+    // 生成表单HTML
+    let formHtml = `
+        <input type="hidden" id="editDocId" value="${doc.id}">
+    `;
+    
+    // 如果没有特定属性要求，显示默认表单
+    if (attributes.length === 0) {
+        formHtml += `
+            <div class="form-row">
+                <div class="form-group">
+                    <label>文档日期</label>
+                    <input type="date" id="editDocDate" value="${doc.doc_date || ''}">
+                </div>
+                <div class="form-group">
+                    <label>签字日期</label>
+                    <input type="date" id="editSignDate" value="${doc.sign_date || ''}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>签字人</label>
+                    <input type="text" id="editSigner" placeholder="输入签字人名称" value="${doc.signer || ''}">
+                </div>
+                <div class="form-group">
+                    <label>签字状态</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="editNoSignature" ${doc.no_signature ? 'checked' : ''}>
+                            <span>不涉及签字</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>盖章标记</label>
+                <div class="checkbox-group">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="editHasSeal" ${(doc.has_seal || doc.has_seal_marked) ? 'checked' : ''}>
+                        <span>已盖章</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="editPartyASeal" ${doc.party_a_seal ? 'checked' : ''}>
+                        <span>甲方盖章</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="editPartyBSeal" ${doc.party_b_seal ? 'checked' : ''}>
+                        <span>乙方盖章</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="editNoSeal" ${doc.no_seal ? 'checked' : ''}>
+                        <span>不涉及盖章</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>其它盖章（标注）</label>
+                <input type="text" id="editOtherSeal" placeholder="如：监理单位盖章、项目章等" value="${doc.other_seal || ''}">
+            </div>
+        `;
+    } else {
+        // 根据文档要求动态生成表单
+        let currentRow = [];
+        
+        attributes.forEach((attr, index) => {
+            if (attr.type === 'date') {
+                // 日期字段
+                currentRow.push(`
+                    <div class="form-group">
+                        <label>${attr.label}</label>
+                        <input type="date" id="edit${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" value="${doc[attr.name] || ''}">
+                    </div>
+                `);
+                
+                if (currentRow.length >= 2 || index === attributes.length - 1) {
+                    formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+                    currentRow = [];
+                }
+            } else if (attr.type === 'text') {
+                // 文本字段
+                currentRow.push(`
+                    <div class="form-group">
+                        <label>${attr.label}</label>
+                        <input type="text" id="edit${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" 
+                               placeholder="${attr.placeholder || ''}" value="${doc[attr.name] || ''}">
+                    </div>
+                `);
+                
+                if (currentRow.length >= 2 || index === attributes.length - 1) {
+                    formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+                    currentRow = [];
+                }
+            } else if (attr.type === 'checkbox' && attr.inline) {
+                // 内联复选框
+                currentRow.push(`
+                    <div class="form-group">
+                        <label>${attr.label}</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="edit${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" ${doc[attr.name] ? 'checked' : ''}>
+                                <span>${attr.label}</span>
+                            </label>
+                        </div>
+                    </div>
+                `);
+                
+                if (currentRow.length >= 2 || index === attributes.length - 1) {
+                    formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+                    currentRow = [];
+                }
+            } else if (attr.type === 'checkbox_group') {
+                // 复选框组
+                if (currentRow.length > 0) {
+                    formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+                    currentRow = [];
+                }
+                
+                const optionsHtml = attr.options.map(opt => `
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}" ${doc[opt.name] ? 'checked' : ''}>
+                        <span>${opt.label}</span>
+                    </label>
+                `).join('');
+                
+                formHtml += `
+                    <div class="form-group">
+                        <label>${attr.label}</label>
+                        <div class="checkbox-group">
+                            ${optionsHtml}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+        
+        // 处理剩余的行
+        if (currentRow.length > 0) {
+            formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+        }
+    }
+    
+    // 添加表单操作按钮
+    formHtml += `
+        <div class="form-actions">
+            <button type="submit" class="btn btn-success">保存修改</button>
+            <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+        </div>
+    `;
+    
+    // 更新表单内容
+    formContainer.innerHTML = formHtml;
+    
+    // 重新绑定表单提交事件
+    formContainer.addEventListener('submit', handleEditDocument);
 }
 
 /**
@@ -1459,8 +1643,16 @@ export async function archiveDocument(cycle, docName) {
         
         if (response.ok) {
             showNotification('文档归档成功', 'success');
-            // 刷新文档列表
+            // 刷新当前周期的文档列表
             await renderCycleDocuments(cycle);
+            // 刷新所有周期的文档列表，确保状态同步
+            if (appState.projectConfig && appState.projectConfig.documents) {
+                for (const c in appState.projectConfig.documents) {
+                    if (c !== cycle) {
+                        await renderCycleDocuments(c);
+                    }
+                }
+            }
         } else {
             showNotification('归档失败', 'error');
         }
@@ -1499,8 +1691,16 @@ export async function unarchiveDocument(cycle, docName) {
         
         if (response.ok) {
             showNotification('取消归档成功', 'success');
-            // 刷新文档列表
+            // 刷新当前周期的文档列表
             await renderCycleDocuments(cycle);
+            // 刷新所有周期的文档列表，确保状态同步
+            if (appState.projectConfig && appState.projectConfig.documents) {
+                for (const c in appState.projectConfig.documents) {
+                    if (c !== cycle) {
+                        await renderCycleDocuments(c);
+                    }
+                }
+            }
         } else {
             showNotification('取消归档失败', 'error');
         }

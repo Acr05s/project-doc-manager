@@ -799,11 +799,21 @@ export function setupEventListeners() {
         });
     });
 
-    // 点击模态框外部关闭
+    // 点击模态框外部关闭（需要确认，防止误关闭）
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
-                closeModal(modal);
+                // 检查模态框内是否有未保存的更改
+                const hasUnsavedChanges = checkUnsavedChanges(modal);
+                if (hasUnsavedChanges) {
+                    showConfirmModal(
+                        '确认关闭',
+                        '您有未保存的更改，确定要关闭吗？',
+                        () => closeModal(modal)
+                    );
+                } else {
+                    closeModal(modal);
+                }
             }
         });
     });
@@ -1083,6 +1093,39 @@ export function openModal(modal) {
 export function closeModal(modal) {
     modal.classList.remove('show');
     document.body.style.overflow = 'auto';
+}
+
+/**
+ * 检查模态框内是否有未保存的更改
+ */
+function checkUnsavedChanges(modal) {
+    if (!modal) return false;
+    
+    // 检查表单输入
+    const inputs = modal.querySelectorAll('input[type="text"], input[type="date"], textarea');
+    for (const input of inputs) {
+        if (input.value && input.value.trim() !== '') {
+            return true;
+        }
+    }
+    
+    // 检查复选框
+    const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
+    for (const checkbox of checkboxes) {
+        if (checkbox.checked) {
+            return true;
+        }
+    }
+    
+    // 检查文件选择
+    const fileInputs = modal.querySelectorAll('input[type="file"]');
+    for (const fileInput of fileInputs) {
+        if (fileInput.files && fileInput.files.length > 0) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 /**

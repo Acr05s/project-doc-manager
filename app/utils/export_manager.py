@@ -84,6 +84,12 @@ class ExportManager:
                                 continue
                             
                             file_path = Path(file_path_str)
+                            # 处理相对路径
+                            if not file_path.is_absolute():
+                                # 相对路径，相对于项目的uploads目录
+                                project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
+                                file_path = project_uploads_dir / file_path_str
+                            
                             if not file_path.exists():
                                 skipped_files.append({
                                     'cycle': cycle_name,

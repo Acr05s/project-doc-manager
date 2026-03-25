@@ -139,6 +139,10 @@
             <div id="uploadSelectTab" class="main-tab-content active" style="overflow-y: auto;">
                 <div class="upload-container">
 
+                    <!-- 周期和文档类型显示 -->
+                    <div class="cycle-doc-info" style="text-align: center; margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                        <h3 id="currentCycleDocInfo">正在处理：<span id="currentCycle"></span> - <span id="currentDocument"></span></h3>
+                    </div>
 
                     <!-- 上传方式选择 -->
                     <div class="upload-method">
@@ -151,97 +155,107 @@
 
                     <!-- 上传文档 -->
                     <div id="uploadUploadTab" class="method-tab-content active">
-                        <h3>选择文件 *</h3>
-                        <input type="file" id="fileInput" name="file" required>
-                        <p class="file-format">支持文件格式：PDF、Word、Excel、图片等</p>
+                        <!-- 水平布局容器 -->
+                        <div class="upload-horizontal-layout">
+                            <!-- 左侧：文件选择区域 -->
+                            <div class="file-selection-panel">
+                                <!-- 拖拽上传区域 -->
+                                <div id="dropZone" class="drop-zone small">
+                                    <div class="drop-zone-content">
+                                        <div class="drop-icon">📁</div>
+                                        <p class="drop-text">拖拽文件到此处，或 <span class="drop-link">点击选择文件</span></p>
+                                        <p class="file-format">支持文件格式：PDF、Word、Excel、图片等</p>
+                                    </div>
+                                    <input type="file" id="fileInput" name="file" style="display: none;">
+                                    <input type="file" id="folderInput" name="folder" style="display: none;" webkitdirectory directory multiple>
+                                </div>
+                                
+                                <!-- 上传进度 -->
+                                <div id="uploadProgress" class="upload-progress" style="display: none;">
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar" id="progressBar"></div>
+                                    </div>
+                                    <span class="progress-text" id="progressText">0%</span>
+                                </div>
 
-                        <!-- 文档附加属性要求 -->
-                        <div class="doc-requirement-info" id="docRequirementInfo" style="margin: 15px 0; padding: 10px; background: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px;">
-                            <h4>📋 附加属性要求</h4>
-                            <p id="requirementText">加载中...</p>
+
+
+                                <!-- 文档附加属性要求 -->
+                                <div class="doc-requirement-info" id="docRequirementInfo" style="margin: 10px 0; padding: 8px; background: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px;">
+                                    <h4>📋 附加属性要求</h4>
+                                    <p id="requirementText">加载中...</p>
+                                </div>
+
+
+                            </div>
+
+                            <!-- 右侧：文档信息区域 -->
+                            <div class="doc-info-panel">
+                                <h3>文档信息</h3>
+                                <div id="dynamicDocInfo">
+                                    <!-- 动态生成的表单内容将放在这里 -->
+                                </div>
+                                
+                                <!-- 智能识别按钮 -->
+                                <div class="smart-recognize-section">
+                                    <button type="button" class="btn btn-info" id="smartRecognizeBtn" onclick="smartRecognizeDocument()">
+                                        🤖 智能识别文档属性
+                                    </button>
+                                    <span class="recognize-hint">自动识别签章、盖章信息</span>
+                                </div>
+                                
+                                <!-- 上传文件列表 -->
+                                <div class="uploaded-files-section">
+                                    <h4>已上传文件</h4>
+                                    <div id="uploadedFilesList" class="uploaded-files-list">
+                                        <p class="placeholder">暂无上传文件</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 确认归档按钮 -->
+                            <div class="confirm-archive-section">
+                                <button type="submit" class="btn btn-success" id="uploadBtn">确认归档</button>
+                            </div>
                         </div>
-
-                        <!-- 文档信息 -->
-                        <h3>文档信息</h3>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>文档日期</label>
-                                <input type="date" id="docDate" name="doc_date">
-                            </div>
-                            <div class="form-group">
-                                <label>签字日期</label>
-                                <input type="date" id="signDate" name="sign_date">
-                            </div>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>签字人</label>
-                                <input type="text" id="signer" name="signer" placeholder="输入签字人名称">
-                            </div>
-                            <div class="form-group">
-                                <label>签字状态</label>
-                                <input type="checkbox" id="noSignature" name="no_signature">
-                                <label for="noSignature">不涉及签字</label>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label>盖章标记</label>
-                            <div class="checkbox-group">
-                                <label class="checkbox-item">
-                                    <input type="checkbox" id="hasSeal" name="has_seal">
-                                    <span>已盖章</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" id="partyASeal" name="party_a_seal">
-                                    <span>甲方盖章</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" id="partyBSeal" name="party_b_seal">
-                                    <span>乙方盖章</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" id="noSeal" name="no_seal">
-                                    <span>不涉及盖章</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>其它盖章（标注）</label>
-                                <input type="text" id="otherSeal" name="other_seal" placeholder="如：监理单位盖章、项目章等">
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn btn-success" id="uploadBtn">确认归档</button>
                     </div>
 
                     <!-- 选择文档 -->
                     <div id="selectUploadTab" class="method-tab-content" style="display:none;">
-                        <h3>选择目录</h3>
-                        <div class="directory-selector">
-                            <select id="directorySelect" class="form-control">
-                                <option value="">-- 选择目录 --</option>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-primary" id="loadDirectoriesBtn">加载目录</button>
+                        <!-- 简洁布局 -->
+                        <div style="display: flex; flex-direction: column; height: 400px;">
+                            <!-- 选择文档包 -->
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px;">选择ZIP包:</label>
+                                <div style="display: flex; gap: 10px;">
+                                    <select id="directorySelect" class="form-control" style="flex: 1;">
+                                        <option value="">-- 选择文档包 --</option>
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-primary" id="loadDirectoriesBtn">加载文档包</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 搜索文件 -->
+                            <div style="margin-bottom: 15px;">
+                                <div style="display: flex; gap: 10px;">
+                                    <input type="text" id="selectFileKeyword" placeholder="输入文件名关键词" oninput="autoSearchFiles()" class="form-control">
+                                    <button type="button" class="btn btn-sm btn-primary" id="searchFilesBtn">搜索</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 文件列表 -->
+                            <div style="flex: 1; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px;">
+                                <div id="selectedFilesList" class="zip-files-list">
+                                    <p class="placeholder">请选择文档包并搜索文件</p>
+                                </div>
+                            </div>
+                            
+                            <!-- 确认选择按钮 -->
+                            <div style="margin-top: 15px;">
+                                <div id="selectedInfo" style="margin-bottom: 10px; display:none;"></div>
+                                <button type="button" class="btn btn-success" id="selectArchiveBtn" disabled style="width: 100%;">✅ 确认选择</button>
+                            </div>
                         </div>
-
-                        <h3>搜索文件</h3>
-                        <div class="search-box">
-                            <input type="text" id="selectFileKeyword" placeholder="输入文件名关键词" oninput="autoSearchFiles()">
-                            <button type="button" class="btn btn-sm btn-primary" id="searchFilesBtn">搜索</button>
-                        </div>
-
-                        <h3>文件列表</h3>
-                        <div id="selectedFilesList" class="zip-files-list">
-                            <p class="placeholder">请选择目录并搜索文件</p>
-                        </div>
-
-                        <div id="selectedInfo" style="margin: 15px 0; display:none;"></div>
-                        <button type="button" class="btn btn-success" id="selectArchiveBtn" disabled>✅ 确认选择</button>
                     </div>
 
                     <!-- 上传指南 -->

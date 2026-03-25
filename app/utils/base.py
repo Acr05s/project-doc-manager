@@ -86,7 +86,7 @@ class DocumentConfig:
     @property
     def projects_base_folder(self) -> Path:
         """获取项目基础文件夹"""
-        # 项目基础文件夹位于平台根目录下的projects目录
+        # 项目基础文件夹位于项目根目录下的projects目录
         projects_folder = self._base_dir / 'projects'
         # 确保文件夹存在
         if not projects_folder.exists():

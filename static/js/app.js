@@ -91,6 +91,10 @@ async function initApp() {
     
     // 修复ZIP文件选择问题
     fixZipSelectionIssue();
+    
+    // 初始化拖拽上传功能
+    initDragAndDrop();
+    console.log('拖拽上传功能已初始化');
 
     // 检查URL参数是否有项目ID
     const urlParams = new URLSearchParams(window.location.search);
@@ -553,11 +557,21 @@ function setupEventListeners() {
         });
     });
 
-    // 点击模态框外部关闭
+    // 点击模态框外部关闭（需要确认，防止误关闭）
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
-                closeModal(modal);
+                // 检查模态框内是否有未保存的更改
+                const hasUnsavedChanges = checkUnsavedChanges(modal);
+                if (hasUnsavedChanges) {
+                    showConfirmModal(
+                        '确认关闭',
+                        '您有未保存的更改，确定要关闭吗？',
+                        () => closeModal(modal)
+                    );
+                } else {
+                    closeModal(modal);
+                }
             }
         });
     });
@@ -1321,6 +1335,26 @@ async function renderCycleDocuments(cycle) {
         if (!docsByName[key]) docsByName[key] = [];
         docsByName[key].push(doc);
     }
+    
+    // 获取所有已上传文档的类型名称
+    const uploadedDocTypes = new Set(uploadedDocs.map(doc => doc.doc_name));
+    
+    // 合并required_docs和已上传的文档类型
+    const allDocTypes = [...requiredDocs];
+    
+    // 添加已上传但不在required_docs中的文档类型
+    uploadedDocTypes.forEach(docType => {
+        if (!requiredDocs.some(reqDoc => reqDoc.name === docType)) {
+            allDocTypes.push({
+                name: docType,
+                requirement: '无要求',
+                index: 9999 // 放在最后
+            });
+        }
+    });
+    
+    // 重新排序
+    allDocTypes.sort((a, b) => (a.index || 0) - (b.index || 0));
 
     // 新布局：左侧组织机构人员，中间文件名+附加属性，右侧确认按钮
     const html = `
@@ -1337,7 +1371,7 @@ async function renderCycleDocuments(cycle) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${requiredDocs.map(doc => {
+                    ${allDocTypes.map(doc => {
                         const docsList = docsByName[doc.name] || [];
                         
                         // 检查是否已归档
@@ -3167,6 +3201,39 @@ function openModal(modal) {
 function closeModal(modal) {
     modal.classList.remove('show');
     document.body.style.overflow = 'auto';
+}
+
+/**
+ * 检查模态框内是否有未保存的更改
+ */
+function checkUnsavedChanges(modal) {
+    if (!modal) return false;
+    
+    // 检查表单输入
+    const inputs = modal.querySelectorAll('input[type="text"], input[type="date"], textarea');
+    for (const input of inputs) {
+        if (input.value && input.value.trim() !== '') {
+            return true;
+        }
+    }
+    
+    // 检查复选框
+    const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
+    for (const checkbox of checkboxes) {
+        if (checkbox.checked) {
+            return true;
+        }
+    }
+    
+    // 检查文件选择
+    const fileInputs = modal.querySelectorAll('input[type="file"]');
+    for (const fileInput of fileInputs) {
+        if (fileInput.files && fileInput.files.length > 0) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 /**

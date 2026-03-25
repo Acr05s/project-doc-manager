@@ -1,4 +1,7 @@
 {
+  "id": "req_20260324_213242",
+  "name": "核对结果",
+  "created_time": "2026-03-24T21:32:42.246997",
   "cycles": [
     "1、项目立项",
     "2、项目组织及管理",
@@ -602,16 +605,5 @@
       ],
       "uploaded_docs": []
     }
-  },
-  "id": "project_20260324141019",
-  "name": "智慧党建",
-  "updated_time": "2026-03-24T16:15:53.767741",
-  "requirements_id": "req_20260324_191546",
-  "requirements_name": "需求清单",
-  "_version_info": {
-    "version_name": "软件开发类项目",
-    "description": "适用纯软件，无硬件",
-    "created_time": "2026-03-24T19:27:31.454837",
-    "filename": "20260324_192731_软件开发类项目.json"
   }
 }

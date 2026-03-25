@@ -27,9 +27,14 @@ class ZipMatcher:
         self.upload_folder = Path(config.get('upload_folder', 'uploads'))
         self.temp_extract = self.upload_folder / 'temp_extract'
         self.temp_extract.mkdir(parents=True, exist_ok=True)
+        # 导入FolderManager以获取项目目录
+        from .folder_manager import FolderManager
+        from .base import DocumentConfig
+        self.folder_manager = FolderManager(DocumentConfig())
     
     def extract_and_match(self, zip_path: str, project_config: Dict = None, 
-                         progress_callback: callable = None) -> Dict[str, Any]:
+                         progress_callback: callable = None, project_name: str = None, 
+                         skip_archived: bool = False) -> Dict[str, Any]:
         """
         解压ZIP文件并自动匹配文档，或者直接处理已解压的目录
         
@@ -37,6 +42,8 @@ class ZipMatcher:
             zip_path: ZIP文件路径或已解压的目录路径
             project_config: 项目配置（包含周期和文档类型）
             progress_callback: 进度回调函数
+            project_name: 项目名称（用于确定解压和归档目录）
+            skip_archived: 是否跳过已归档的文档类型
             
         Returns:
             Dict: 解压和匹配结果
@@ -51,7 +58,13 @@ class ZipMatcher:
         # 检查是否是ZIP文件
         if zip_path.suffix.lower() == '.zip':
             # 创建解压目录
-            extract_dir = self.temp_extract / f"{zip_path.stem}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            if project_name:
+                # 使用项目的uploads目录作为解压目标
+                project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
+                extract_dir = project_uploads_dir / f"{zip_path.stem}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            else:
+                # 兼容旧版，使用通用的temp_extract目录
+                extract_dir = self.temp_extract / f"{zip_path.stem}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
             extract_dir.mkdir(parents=True, exist_ok=True)
         
         try:
@@ -65,6 +78,13 @@ class ZipMatcher:
                 
                 extracted_files = self._extract_zip(zip_path, extract_dir)
                 logger.info(f"ZIP解压完成，共 {len(extracted_files)} 个文件")
+                
+                # 解压完成后删除源ZIP文件
+                try:
+                    zip_path.unlink()
+                    logger.info(f"已删除源ZIP文件: {zip_path}")
+                except Exception as e:
+                    logger.warning(f"删除源ZIP文件失败: {e}")
             else:
                 # 直接处理目录
                 if progress_callback:
@@ -103,7 +123,7 @@ class ZipMatcher:
                     progress_callback(progress, f'正在匹配文档... ({i+1}/{len(all_files)})')
                 
                 # 尝试匹配文档类型
-                match_result = self._match_file(file_info, doc_requirements)
+                match_result = self._match_file(file_info, doc_requirements, skip_archived, project_config)
                 
                 if match_result['matched']:
                     matched_files.append({
@@ -123,7 +143,7 @@ class ZipMatcher:
             
             archived_files = []
             for mf in matched_files:
-                target_path = self._archive_file(mf, project_config)
+                target_path = self._archive_file(mf, project_config, project_name)
                 if target_path:
                     archived_files.append({
                         'source': mf['path'],
@@ -138,7 +158,7 @@ class ZipMatcher:
                 progress_callback(100, '匹配完成')
             
             # 生成用户要求的格式的匹配结果
-            matching_result = self._generate_matching_result(matched_files, archived_files)
+            matching_result = self._generate_matching_result(matched_files, archived_files, project_name)
             
             # 将匹配结果添加到项目配置
             if project_config:
@@ -215,7 +235,7 @@ class ZipMatcher:
         except Exception:
             return ''
     
-    def _match_file(self, file_info: Dict, doc_requirements: Dict) -> Dict[str, Any]:
+    def _match_file(self, file_info: Dict, doc_requirements: Dict, skip_archived: bool, project_config: Dict) -> Dict[str, Any]:
         """
         匹配文件到文档类型
         
@@ -243,6 +263,13 @@ class ZipMatcher:
                 doc_name = doc.get('name', '')
                 if not doc_name:
                     continue
+                
+                # 检查是否已归档，如果是且skip_archived为True，则跳过
+                if skip_archived and project_config:
+                    documents_archived = project_config.get('documents_archived', {})
+                    cycle_archived = documents_archived.get(cycle, {})
+                    if doc_name in cycle_archived:
+                        continue
                 
                 # 计算匹配度
                 confidence = self._calculate_match_confidence(name_clean, doc_name)
@@ -288,7 +315,7 @@ class ZipMatcher:
         
         return 0.0
     
-    def _generate_matching_result(self, matched_files: List[Dict], archived_files: List[Dict]) -> Dict:
+    def _generate_matching_result(self, matched_files: List[Dict], archived_files: List[Dict], project_name: str = None) -> Dict:
         """生成用户要求的格式的匹配结果"""
         result = {}
         
@@ -308,8 +335,20 @@ class ZipMatcher:
             target_dir_rel = f"{cycle}/{doc_name}"
             
             # 构建文档原始路径（相对路径）
-            source_path_rel = str(Path(source_path).relative_to(self.upload_folder))
-            source_path_rel = f"/uploads/{source_path_rel}"
+            if project_name:
+                # 从项目uploads目录开始计算相对路径
+                project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
+                if project_uploads_dir in Path(source_path).parents:
+                    source_path_rel = str(Path(source_path).relative_to(project_uploads_dir))
+                    source_path_rel = f"/projects/{project_name}/uploads/{source_path_rel}"
+                else:
+                    # 兼容情况
+                    source_path_rel = str(Path(source_path).relative_to(self.upload_folder))
+                    source_path_rel = f"/uploads/{source_path_rel}"
+            else:
+                # 兼容旧版
+                source_path_rel = str(Path(source_path).relative_to(self.upload_folder))
+                source_path_rel = f"/uploads/{source_path_rel}"
             
             # 创建文档信息
             doc_info = {
@@ -324,7 +363,7 @@ class ZipMatcher:
                 "文档日期": "",
                 "甲方签字日期": "",
                 "已方签字日期": "",
-                "是否归档": False
+                "是否归档": True
             }
             
             cycle_files[cycle].append(doc_info)
@@ -335,7 +374,7 @@ class ZipMatcher:
         
         return result
     
-    def _archive_file(self, file_info: Dict, project_config: Dict) -> Optional[Path]:
+    def _archive_file(self, file_info: Dict, project_config: Dict, project_name: str = None) -> Optional[Path]:
         """归档文件到项目目录"""
         if not project_config:
             return None
@@ -347,29 +386,22 @@ class ZipMatcher:
             if not cycle or not doc_name:
                 return None
             
-            # 构建目标路径（与document_routes.py保持一致）
-            target_dir = self.upload_folder / cycle.replace('/', '_') / doc_name.replace('/', '_')
-            target_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 目标文件路径
+            # 源文件路径
             source_path = Path(file_info['path'])
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            file_ext = source_path.suffix
-            new_filename = f"zip_{timestamp}{file_ext}"
-            target_path = target_dir / new_filename
-            
-            # 如果目标文件已存在，添加序号
-            if target_path.exists():
-                counter = 1
-                while target_path.exists():
-                    target_path = target_dir / f"zip_{timestamp}_{counter}{file_ext}"
-                    counter += 1
-            
-            # 复制文件
-            shutil.copy2(source_path, target_path)
             
             # 生成文档ID
             doc_id = f"{cycle}_{doc_name}_{timestamp}"
+            
+            # 计算相对路径（相对于项目的uploads目录）
+            relative_path = str(source_path)
+            if project_name:
+                project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
+                try:
+                    relative_path = str(source_path.relative_to(project_uploads_dir))
+                except ValueError:
+                    # 如果文件不在项目uploads目录中，使用绝对路径
+                    pass
             
             # 添加到项目配置的uploaded_docs字段
             if 'documents' not in project_config:
@@ -387,9 +419,10 @@ class ZipMatcher:
             
             project_config['documents'][cycle]['uploaded_docs'].append({
                 'doc_name': doc_name,
-                'filename': new_filename,
+                'filename': source_path.name,
                 'original_filename': source_path.name,
-                'file_path': str(target_path),
+                'file_path': relative_path,
+                'project_name': project_name,
                 'doc_date': '',
                 'sign_date': '',
                 'signer': '',
@@ -405,9 +438,10 @@ class ZipMatcher:
             doc_manager.documents_db[doc_id] = {
                 'cycle': cycle,
                 'doc_name': doc_name,
-                'filename': new_filename,
+                'filename': source_path.name,
                 'original_filename': source_path.name,
-                'file_path': str(target_path),
+                'file_path': relative_path,
+                'project_name': project_name,
                 'doc_date': '',
                 'sign_date': '',
                 'signer': '',
@@ -419,10 +453,10 @@ class ZipMatcher:
                 'other_seal': '',
                 'upload_time': datetime.now().isoformat(),
                 'source': 'zip',
-                'file_size': target_path.stat().st_size
+                'file_size': source_path.stat().st_size
             }
             
-            return target_path
+            return source_path
             
         except Exception as e:
             logger.error(f"归档文件失败: {e}")

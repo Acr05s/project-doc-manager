@@ -184,12 +184,15 @@ function openCycleDocumentEditor(cycle) {
     
     const container = document.getElementById('documentListEditor');
     if (container) {
-        container.innerHTML = docs.map((doc, index) => `
+        container.innerHTML = docs.map((doc, index) => {
+            // 兼容字符串格式和对象格式
+            const docName = typeof doc === 'object' ? doc.name : doc;
+            return `
             <div class="document-edit-item" data-index="${index}">
-                <input type="text" class="doc-name-input" value="${doc}" placeholder="文档名称">
+                <input type="text" class="doc-name-input" value="${docName}" placeholder="文档名称">
                 <button class="btn btn-sm btn-danger" onclick="removeDocument(${index})">删除</button>
             </div>
-        `).join('');
+        `}).join('');
     }
     
     openModal(modal);
@@ -239,14 +242,37 @@ export function saveCycleDocuments() {
     const container = document.getElementById('documentListEditor');
     if (!container) return;
     
-    // 收集文档列表
+    // 获取现有的文档数据（包含attributes等属性）
+    const config = appState.projectConfig;
+    const existingDocs = config.documents[cycle]?.required_docs || [];
+    
+    // 收集文档列表，同时保留原有属性
     const inputs = container.querySelectorAll('.doc-name-input');
     const docs = Array.from(inputs)
-        .map(input => input.value.trim())
+        .map((input, index) => {
+            const name = input.value.trim();
+            if (!name) return null;
+            
+            // 查找同名的现有文档，保留其属性
+            const existingDoc = existingDocs.find(d => {
+                const existingName = typeof d === 'object' ? d.name : d;
+                return existingName === name;
+            });
+            
+            if (existingDoc && typeof existingDoc === 'object') {
+                // 保留原有文档的所有属性，只更新名称
+                return {
+                    ...existingDoc,
+                    name: name
+                };
+            }
+            
+            // 新文档，只返回名称
+            return name;
+        })
         .filter(v => v);
     
     // 更新配置
-    const config = appState.projectConfig;
     if (!config.documents[cycle]) {
         config.documents[cycle] = { required_docs: [], uploaded_docs: [] };
     }

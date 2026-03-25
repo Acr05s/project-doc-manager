@@ -62,8 +62,8 @@ class DocumentUploader:
         try:
             # 生成文件路径
             if project_name:
-                # 使用项目的文件夹结构
-                base_folder = self.folder_manager.get_documents_folder(project_name) / cycle.replace('/', '_') / doc_name.replace('/', '_')
+                # 使用项目的文件夹结构，保存到 temp 目录
+                base_folder = self.folder_manager.get_documents_folder(project_name) / 'temp' / cycle.replace('/', '_') / doc_name.replace('/', '_')
             else:
                 # 兼容旧版，使用上传文件夹
                 base_folder = self.upload_folder / cycle.replace('/', '_') / doc_name.replace('/', '_')

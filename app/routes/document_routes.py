@@ -1123,11 +1123,19 @@ def get_zip_records():
         if not project_id:
             return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
         
-        # 获取项目文件路径
-        project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+        # 加载项目配置以获取项目名称
+        project_config = doc_manager.load_project(project_id)
+        if not project_config:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project_name = project_config.get('name', project_id)
+        
+        # 获取项目文件路径（新位置）
+        project_folder = doc_manager.config.projects_base_folder / project_name
+        project_file = project_folder / 'project_config.json'
         
         # 使用JSON文件管理器获取ZIP上传记录
-        records = json_file_manager.get_zip_upload_records(project_file)
+        records = json_file_manager.get_zip_upload_records(str(project_file))
         
         return jsonify({
             'status': 'success',
@@ -1149,8 +1157,16 @@ def add_zip_record():
         if not project_id or not zip_info:
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
-        # 获取项目文件路径
-        project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+        # 加载项目配置以获取项目名称
+        project_config = doc_manager.load_project(project_id)
+        if not project_config:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project_name = project_config.get('name', project_id)
+        
+        # 获取项目文件路径（新位置）
+        project_folder = doc_manager.config.projects_base_folder / project_name
+        project_file = project_folder / 'project_config.json'
         
         # 确保ZIP信息包含必要字段
         if 'id' not in zip_info:
@@ -1161,7 +1177,7 @@ def add_zip_record():
             zip_info['upload_time'] = datetime.now().isoformat()
         
         # 使用JSON文件管理器添加ZIP上传记录
-        success = json_file_manager.add_zip_upload_record(project_file, zip_info)
+        success = json_file_manager.add_zip_upload_record(str(project_file), zip_info)
         
         if success:
             return jsonify({'status': 'success', 'message': 'ZIP上传记录添加成功'})
@@ -1181,11 +1197,19 @@ def delete_zip_record(zip_id):
         if not project_id:
             return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
         
-        # 获取项目文件路径
-        project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
+        # 加载项目配置以获取项目名称
+        project_config = doc_manager.load_project(project_id)
+        if not project_config:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project_name = project_config.get('name', project_id)
+        
+        # 获取项目文件路径（新位置）
+        project_folder = doc_manager.config.projects_base_folder / project_name
+        project_file = project_folder / 'project_config.json'
         
         # 使用JSON文件管理器删除ZIP上传记录
-        success = json_file_manager.delete_zip_upload_record(project_file, zip_id)
+        success = json_file_manager.delete_zip_upload_record(str(project_file), zip_id)
         
         if success:
             return jsonify({'status': 'success', 'message': 'ZIP上传记录删除成功'})
@@ -1362,12 +1386,13 @@ def start_zip_match():
                 # 获取项目名称
                 project_name = project_config.get('name') if project_config else None
                 
-                # 执行匹配
+                # 执行匹配，跳过已归档的文档类型
                 result = matcher.extract_and_match(
                     zip_path, 
                     project_config,
                     progress_callback,
-                    project_name=project_name
+                    project_name=project_name,
+                    skip_archived=True
                 )
                 
                 # 保存更新后的项目配置
@@ -1506,9 +1531,10 @@ def upload_zip():
                     'status': '已完成'
                 }
                 
-                # 保存到项目JSON文件
-                project_file = os.path.join(doc_manager.config.projects_base_folder, f"{project_id}.json")
-                success = json_file_manager.add_zip_upload_record(project_file, zip_record)
+                # 保存到项目JSON文件（新位置）
+                project_folder = doc_manager.config.projects_base_folder / project_name
+                project_file = project_folder / 'project_config.json'
+                success = json_file_manager.add_zip_upload_record(str(project_file), zip_record)
                 
                 if success:
                     logger.info(f"ZIP上传记录已保存到项目 {project_id}")
@@ -1555,6 +1581,11 @@ def list_zip_packages():
         return jsonify({'status': 'success', 'packages': packages})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@document_bp.route('/zip-packages', methods=['GET'])
+def zip_packages():
+    """列出所有已解压的ZIP包（temp_extract下的一级子目录）"""
+    return list_zip_packages()
 
 @document_bp.route('/search-zip-files', methods=['GET'])
 def search_zip_files():
@@ -1709,29 +1740,39 @@ def delete_zip_package():
 
 @document_bp.route('/directories', methods=['GET'])
 def list_directories():
-    """获取文件目录列表"""
+    """获取项目的文档包目录列表"""
     try:
+        import os
         from pathlib import Path
-        from app.utils.base import get_config
-        config = get_config()
-        upload_folder = Path(config.get('upload_folder', 'uploads'))
         
-        # 定义目录列表
-        directories = [
-            {"id": "temp", "name": "临时上传目录", "path": str(upload_folder / "temp")},
-            {"id": "temp_extract", "name": "解压文件目录", "path": str(upload_folder / "temp_extract")},
-            {"id": "projects", "name": "项目文件目录", "path": str(upload_folder / "projects")}
-        ]
+        project_id = request.args.get('project_id')
+        project_name = request.args.get('project_name')
         
-        # 确保目录存在
-        for directory in directories:
-            dir_path = Path(directory["path"])
-            dir_path.mkdir(parents=True, exist_ok=True)
+        if not project_id or not project_name:
+            return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
+        
+        # 获取项目的文档目录
+        docs_folder = doc_manager.get_documents_folder(project_name)
+        temp_folder = docs_folder / 'temp'
+        
+        # 确保temp目录存在
+        temp_folder.mkdir(parents=True, exist_ok=True)
+        
+        # 扫描temp目录下的子目录
+        directories = []
+        if temp_folder.exists():
+            for item in temp_folder.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    directories.append({
+                        'id': str(item.relative_to(docs_folder)),
+                        'name': item.name
+                    })
         
         return jsonify({
-            "status": "success",
-            "data": directories
+            'status': 'success',
+            'directories': directories
         })
+        
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

@@ -45,6 +45,7 @@ export async function calculateCycleStatus(cycle) {
 
     let allFilesComplete = true;
     let allAttributesComplete = true;
+    let allArchived = true;
 
     for (const doc of requiredDocs) {
         const docsList = docsByName[doc.name] || [];
@@ -57,11 +58,14 @@ export async function calculateCycleStatus(cycle) {
         if (docsList.length === 0) {
             allFilesComplete = false;
             allAttributesComplete = false;
+            allArchived = false;
             break;
         }
 
-        // 如果文档已归档，则视为属性完整
+        // 检查是否已归档
         if (!isArchived) {
+            allArchived = false;
+            
             // 检查附加属性
             const requireSigner = requirement.includes('签名') || requirement.includes('签字');
             const requireSeal = requirement.includes('盖章') || requirement.includes('章');
@@ -79,6 +83,8 @@ export async function calculateCycleStatus(cycle) {
         return 'incomplete';
     } else if (!allAttributesComplete) {
         return 'partial';
+    } else if (allArchived) {
+        return 'archived';
     } else {
         return 'complete';
     }
@@ -139,7 +145,8 @@ export async function loadCycleProgresses(cycles, docsData) {
         
         // 渲染周期项
         html += `
-            <div class="cycle-nav-item status-${status} ${isActive ? 'active' : ''}" data-cycle="${cycle}" data-status="${status}" style="${isActive ? 'transform: scale(1.1); z-index: 10;' : ''}" >
+            <div class="cycle-nav-item status-${status} ${isActive ? 'active' : ''}" data-cycle="${cycle}" data-status="${status}" style="${isActive ? 'transform: scale(1.2); z-index: 10;' : ''}" >
+                ${status === 'archived' ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : ''}
                 <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
                 <span class="cycle-name" style="text-align:center;">${cycle}</span>
             </div>

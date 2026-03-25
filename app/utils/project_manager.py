@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 from .base import DocumentConfig, setup_logging
 from .folder_manager import FolderManager
 from .requirements_loader import RequirementsLoader
+from .json_file_manager import json_file_manager
 
 logger = setup_logging(__name__)
 
@@ -43,28 +44,26 @@ class ProjectManager:
         """加载项目索引（兼容新旧格式）"""
         try:
             index_file = self.config.projects_folder / 'projects_index.json'
-            if index_file.exists():
-                with open(index_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                    # 新格式：{"projects": {...}}
-                    if 'projects' in data:
-                        self.projects_db = data.get('projects', {})
-                    # 旧格式：直接用项目ID作为键
-                    else:
-                        # 过滤掉非项目键（如updated_time, deleted_projects）
-                        self.projects_db = {
-                            k: v for k, v in data.items() 
-                            if isinstance(v, dict) and 'id' in v and k != 'deleted_projects'
-                        }
-                    
-                    # 加载已删除项目
-                    if 'deleted_projects' in data:
-                        self.deleted_projects = data.get('deleted_projects', {})
-                    else:
-                        self.deleted_projects = {}
-                    
-                    logger.info(f"已加载 {len(self.projects_db)} 个项目, {len(self.deleted_projects)} 个已删除项目")
+            data = json_file_manager.read_json(str(index_file))
+            if data:
+                # 新格式：{"projects": {...}}
+                if 'projects' in data:
+                    self.projects_db = data.get('projects', {})
+                # 旧格式：直接用项目ID作为键
+                else:
+                    # 过滤掉非项目键（如updated_time, deleted_projects）
+                    self.projects_db = {
+                        k: v for k, v in data.items() 
+                        if isinstance(v, dict) and 'id' in v and k != 'deleted_projects'
+                    }
+                
+                # 加载已删除项目
+                if 'deleted_projects' in data:
+                    self.deleted_projects = data.get('deleted_projects', {})
+                else:
+                    self.deleted_projects = {}
+                
+                logger.info(f"已加载 {len(self.projects_db)} 个项目, {len(self.deleted_projects)} 个已删除项目")
         except Exception as e:
             logger.error(f"加载项目索引失败: {e}")
             self.projects_db = {}
@@ -74,7 +73,6 @@ class ProjectManager:
         """保存项目索引（保持旧格式兼容）"""
         try:
             index_file = self.config.projects_folder / 'projects_index.json'
-            index_file.parent.mkdir(parents=True, exist_ok=True)
             
             # 保持旧格式：直接用项目ID作为键
             data = {
@@ -86,8 +84,7 @@ class ProjectManager:
             # 添加已删除项目
             data['deleted_projects'] = self.deleted_projects
             
-            with open(index_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            json_file_manager.write_json(str(index_file), data)
                 
         except Exception as e:
             logger.error(f"保存项目索引失败: {e}")
@@ -172,9 +169,13 @@ class ProjectManager:
             project_id: 项目ID
             config: 项目配置
         """
-        config_file = self.config.projects_folder / f"{project_id}.json"
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        # 获取项目名称
+        project_name = config.get('name', project_id)
+        # 保存到项目目录中
+        project_folder = self.config.projects_folder / project_name
+        project_folder.mkdir(parents=True, exist_ok=True)
+        config_file = project_folder / 'project_config.json'
+        json_file_manager.write_json(str(config_file), config)
     
     def load(self, project_id: str) -> Optional[Dict[str, Any]]:
         """加载项目配置
@@ -188,30 +189,42 @@ class ProjectManager:
             Optional[Dict]: 项目配置，不存在返回None
         """
         try:
-            config_file = self.config.projects_folder / f"{project_id}.json"
+            # 首先尝试从项目索引中获取项目名称
+            project_info = self.projects_db.get(project_id)
+            project_name = project_info.get('name', project_id) if project_info else project_id
+            
+            # 从项目目录加载配置
+            project_folder = self.config.projects_folder / project_name
+            config_file = project_folder / 'project_config.json'
+            
+            # 如果项目目录不存在，尝试从旧位置加载（向后兼容）
             if not config_file.exists():
+                config_file = self.config.projects_folder / f"{project_id}.json"
+            
+            config = json_file_manager.read_json(str(config_file))
+            if not config:
                 logger.warning(f"项目配置不存在: {project_id}")
                 return None
             
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            # 获取项目名称
-            project_name = config.get('name', project_id)
-            
             # 尝试从项目目录加载 requirements.json
-            req_file = self.config.projects_folder / project_name / 'requirements.json'
+            req_file = project_folder / 'requirements.json'
             logger.info(f"[DEBUG] 尝试加载 requirements.json: {req_file}, 是否存在: {req_file.exists()}")
             if req_file.exists():
                 try:
-                    with open(req_file, 'r', encoding='utf-8') as f:
-                        req_config = json.load(f)
-                    # 合并需求配置
-                    config['cycles'] = req_config.get('cycles', [])
-                    config['documents'] = req_config.get('documents', {})
-                    config['requirements_id'] = req_config.get('requirements_id')
-                    config['requirements_name'] = req_config.get('name')
-                    logger.info(f"[DEBUG] 已从 requirements.json 加载配置: {project_name}, cycles={len(config['cycles'])}")
+                    req_config = json_file_manager.read_json(str(req_file))
+                    if req_config:
+                        # 合并需求配置
+                        config['cycles'] = req_config.get('cycles', [])
+                        # 只覆盖documents中的required_docs部分，保留matching_result和uploaded_docs
+                        req_documents = req_config.get('documents', {})
+                        for cycle, cycle_info in req_documents.items():
+                            if cycle not in config.get('documents', {}):
+                                config.setdefault('documents', {})[cycle] = {}
+                            # 只覆盖required_docs，保留matching_result和uploaded_docs
+                            config['documents'][cycle]['required_docs'] = cycle_info.get('required_docs', [])
+                        config['requirements_id'] = req_config.get('requirements_id')
+                        config['requirements_name'] = req_config.get('name')
+                        logger.info(f"[DEBUG] 已从 requirements.json 加载配置: {project_name}, cycles={len(config['cycles'])}")
                 except Exception as e:
                     logger.warning(f"[DEBUG] 加载 requirements.json 失败: {e}")
             else:
@@ -299,9 +312,14 @@ class ProjectManager:
                         self.folder_manager.delete_folder(project_folder, safe=False)
                 
                 # 删除配置文件
-                config_file = self.config.projects_folder / f"{project_id}.json"
+                config_file = self.config.projects_folder / project_name / 'project_config.json'
                 if config_file.exists():
                     config_file.unlink()
+                
+                # 向后兼容：删除旧位置的配置文件
+                old_config_file = self.config.projects_folder / f"{project_id}.json"
+                if old_config_file.exists():
+                    old_config_file.unlink()
                 
                 # 从已删除列表中移除
                 if project_id in self.deleted_projects:
@@ -575,8 +593,11 @@ class ProjectManager:
             if not config:
                 return {'status': 'error', 'message': '项目不存在'}
             
+            # 获取项目名称
+            project_name = config.get('name', project_id)
+            
             # 创建版本目录
-            versions_dir = self.config.projects_folder / project_id.replace('.json', '') / 'versions'
+            versions_dir = self.config.projects_folder / project_name / 'versions'
             versions_dir.mkdir(parents=True, exist_ok=True)
             
             # 生成版本文件名
@@ -621,7 +642,11 @@ class ProjectManager:
             Dict: 版本列表
         """
         try:
-            versions_dir = self.config.projects_folder / project_id.replace('.json', '') / 'versions'
+            # 加载当前配置获取项目名称
+            config = self.load(project_id)
+            project_name = config.get('name', project_id) if config else project_id
+            
+            versions_dir = self.config.projects_folder / project_name / 'versions'
             
             if not versions_dir.exists():
                 return {
@@ -682,7 +707,11 @@ class ProjectManager:
             Dict: 版本配置
         """
         try:
-            version_path = self.config.projects_folder / project_id.replace('.json', '') / 'versions' / version_filename
+            # 加载当前配置获取项目名称
+            config = self.load(project_id)
+            project_name = config.get('name', project_id) if config else project_id
+            
+            version_path = self.config.projects_folder / project_name / 'versions' / version_filename
             
             if not version_path.exists():
                 return {'status': 'error', 'message': '版本文件不存在'}
@@ -756,7 +785,11 @@ class ProjectManager:
             Dict: 删除结果
         """
         try:
-            version_path = self.config.projects_folder / project_id.replace('.json', '') / 'versions' / version_filename
+            # 加载当前配置获取项目名称
+            config = self.load(project_id)
+            project_name = config.get('name', project_id) if config else project_id
+            
+            version_path = self.config.projects_folder / project_name / 'versions' / version_filename
             
             if not version_path.exists():
                 return {'status': 'error', 'message': '版本文件不存在'}
@@ -791,7 +824,11 @@ class ProjectManager:
             version_info = None
             
             # 重新读取获取版本信息
-            version_path = self.config.projects_folder / project_id.replace('.json', '') / 'versions' / version_filename
+            # 加载当前配置获取项目名称
+            current_config = self.load(project_id)
+            project_name = current_config.get('name', project_id) if current_config else project_id
+            
+            version_path = self.config.projects_folder / project_name / 'versions' / version_filename
             with open(version_path, 'r', encoding='utf-8') as f:
                 full_config = json.load(f)
                 version_info = full_config.get('_version_info', {})

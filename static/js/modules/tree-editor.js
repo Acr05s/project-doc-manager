@@ -842,13 +842,14 @@ export function saveAttributes() {
     const node = findNode(currentTreeData, nodeId);
     if (!node) return;
 
-    // 收集属性
-    const attrs = {};
+    // 确保attributes对象存在
+    if (!node.attributes) node.attributes = {};
+    
+    // 只更新界面上有的属性，保留其他属性
     for (const key of Object.keys(ATTRIBUTE_LABELS)) {
         const checkbox = document.getElementById(`attr_${key}`);
-        if (checkbox) attrs[key] = checkbox.checked;
+        if (checkbox) node.attributes[key] = checkbox.checked;
     }
-    node.attributes = attrs;
 
     // 备注
     const noteEl = document.getElementById('attrDocNote');
@@ -1179,9 +1180,44 @@ export function expandAll() {
 }
 
 export function collapseAll() {
-    setAllExpanded(currentTreeData, false);
+    // 只折叠到项目周期级别，保持根节点展开
+    collapseToCycleLevel(currentTreeData);
     renderTree();
     if (selectedNode) selectNode(selectedNode);
+}
+
+/**
+ * 递归折叠到项目周期级别
+ * 根节点和周期节点保持展开，周期下的子节点折叠
+ */
+function collapseToCycleLevel(node) {
+    if (node.type === 'root') {
+        // 根节点保持展开
+        node.expanded = true;
+        if (node.children) {
+            node.children.forEach(child => collapseToCycleLevel(child));
+        }
+    } else if (node.type === 'cycle') {
+        // 周期节点保持展开，但其子节点折叠
+        node.expanded = true;
+        if (node.children) {
+            node.children.forEach(child => {
+                child.expanded = false;
+                // 递归折叠所有子节点
+                collapseAllChildren(child);
+            });
+        }
+    }
+}
+
+/**
+ * 递归折叠所有子节点
+ */
+function collapseAllChildren(node) {
+    node.expanded = false;
+    if (node.children) {
+        node.children.forEach(child => collapseAllChildren(child));
+    }
 }
 
 function setAllExpanded(node, expanded) {
@@ -1245,6 +1281,7 @@ function treeToConfig() {
                         requiredDocs.push({
                             type: 'folder',
                             name: child.name,
+                            attributes: child.attributes || {},
                             filename_template: child.filename_template || '',
                             match_keywords: child.match_keywords || [],
                             files: (child.children || []).map(f => ({

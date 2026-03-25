@@ -55,9 +55,9 @@ class RequirementsLoader:
             logger.info(f"加载Excel文件: {excel_file}")
             
             # 读取Excel，不使用header
-            df = pd.read_excel(excel_file)
+            df = pd.read_excel(excel_file, header=None)
             
-            logger.info(f"Excel文件读取成功，共 {len(df)} 行，列名: {df.columns.tolist()}")
+            logger.info(f"Excel文件读取成功，共 {len(df)} 行，{len(df.columns)} 列")
             
             # 提取项目周期和文档结构
             project_config = {
@@ -78,12 +78,11 @@ class RequirementsLoader:
                     
                     # 获取分类（第一列）
                     category = None
-                    for col_name in ['Unnamed: 0', 0, '分类', '周期', '项目周期']:
-                        if col_name in row:
-                            val = row.get(col_name)
-                            if pd.notna(val) and str(val).strip():
-                                category = val
-                                break
+                    # 尝试通过索引获取第一列
+                    if len(df.columns) > 0:
+                        val = row.iloc[0]
+                        if pd.notna(val) and str(val).strip():
+                            category = val
                     
                     # 如果分类有值且不是NaN，则是新的周期
                     if category is not None and str(category).strip():
@@ -99,41 +98,26 @@ class RequirementsLoader:
                     if not current_cycle:
                         continue
                     
-                    # 获取序号（第二列）
-                    doc_index = None
-                    for col_name in ['Unnamed: 1', 1, '序号']:
-                        if col_name in row:
-                            val = row.get(col_name)
-                            if pd.notna(val):
-                                doc_index = val
-                                break
-                    
                     # 获取文档名称（第三列）
                     doc_name = None
-                    for col_name in ['Unnamed: 2', 2, '文档名称', '文件名', '名称']:
-                        if col_name in row:
-                            val = row.get(col_name)
-                            if pd.notna(val) and str(val).strip():
-                                doc_name = str(val).strip()
-                                break
+                    if len(df.columns) > 2:
+                        val = row.iloc[2]
+                        if pd.notna(val) and str(val).strip():
+                            doc_name = str(val).strip()
                     
                     if doc_name:
                         # 获取文档要求/备注（第四列）
                         doc_requirement = ''
-                        for col_name in ['Unnamed: 3', 3, '备注', '要求', '文档要求']:
-                            if col_name in row:
-                                val = row.get(col_name)
-                                if pd.notna(val):
-                                    doc_requirement = str(val).strip()
-                                    break
+                        if len(df.columns) > 3:
+                            val = row.iloc[3]
+                            if pd.notna(val):
+                                doc_requirement = str(val).strip()
                         
                         # 智能标准化文档要求
                         doc_requirement = self._standardize_requirement(doc_requirement)
                         
                         project_config['documents'][current_cycle]['required_docs'].append({
-                            'index': int(doc_index) if (
-                                pd.notna(doc_index) and str(doc_index).strip() != ''
-                            ) else len(project_config['documents'][current_cycle]['required_docs']) + 1,
+                            'index': len(project_config['documents'][current_cycle]['required_docs']) + 1,
                             'name': doc_name,
                             'requirement': doc_requirement,
                             'status': 'pending'
