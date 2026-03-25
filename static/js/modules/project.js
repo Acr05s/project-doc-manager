@@ -76,7 +76,15 @@ export async function selectProject(projectId) {
         showNotification('已加载项目: ' + project.name, 'success');
     } catch (error) {
         console.error('选择项目失败:', error);
-        showNotification('加载项目失败', 'error');
+        showNotification('加载项目失败: ' + error.message, 'error');
+        
+        // 清除URL中的无效项目ID
+        const url = new URL(window.location);
+        url.searchParams.delete('project');
+        window.history.replaceState({}, '', url);
+        
+        // 显示项目选择模态框
+        openProjectSelectModal();
     }
 }
 

@@ -696,10 +696,10 @@ export function setupEventListeners() {
         rejectPendingBtn.addEventListener('click', handleRejectPendingFiles);
     }
 
-    // 生成报告
-    const generateReportBtn = document.getElementById('generateReportBtn');
-    if (generateReportBtn) {
-        generateReportBtn.addEventListener('click', (e) => {
+    // 生成报告（从下拉菜单）
+    const generateReportMenuItem = document.getElementById('generateReportMenuItem');
+    if (generateReportMenuItem) {
+        generateReportMenuItem.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
             // 关闭下拉菜单

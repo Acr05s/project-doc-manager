@@ -44,7 +44,18 @@ class ProjectManager:
         """加载项目索引（兼容新旧格式）"""
         try:
             index_file = self.config.projects_folder / 'projects_index.json'
+            logger.info(f"[DEBUG] 尝试加载项目索引文件: {index_file}")
+            logger.info(f"[DEBUG] 文件是否存在: {index_file.exists()}")
+            
+            if not index_file.exists():
+                logger.error(f"项目索引文件不存在: {index_file}")
+                self.projects_db = {}
+                self.deleted_projects = {}
+                return
+            
             data = json_file_manager.read_json(str(index_file))
+            logger.info(f"[DEBUG] 读取到的数据: {data}")
+            
             if data:
                 # 新格式：{"projects": {...}}
                 if 'projects' in data:
@@ -64,8 +75,15 @@ class ProjectManager:
                     self.deleted_projects = {}
                 
                 logger.info(f"已加载 {len(self.projects_db)} 个项目, {len(self.deleted_projects)} 个已删除项目")
+                logger.info(f"[DEBUG] 项目列表: {list(self.projects_db.keys())}")
+            else:
+                logger.error(f"项目索引文件为空或读取失败: {index_file}")
+                self.projects_db = {}
+                self.deleted_projects = {}
         except Exception as e:
             logger.error(f"加载项目索引失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             self.projects_db = {}
             self.deleted_projects = {}
     
@@ -189,19 +207,34 @@ class ProjectManager:
             Optional[Dict]: 项目配置，不存在返回None
         """
         try:
+            logger.info(f"[DEBUG] 开始加载项目: {project_id}")
+            
             # 首先尝试从项目索引中获取项目名称
             project_info = self.projects_db.get(project_id)
-            project_name = project_info.get('name', project_id) if project_info else project_id
+            logger.info(f"[DEBUG] 项目索引信息: {project_info}")
+            
+            if not project_info:
+                logger.error(f"[DEBUG] 项目索引中不存在: {project_id}")
+                return None
+            
+            project_name = project_info['name'] if project_info and 'name' in project_info else project_id
+            logger.info(f"[DEBUG] 项目名称: {project_name}")
             
             # 从项目目录加载配置
             project_folder = self.config.projects_folder / project_name
             config_file = project_folder / 'project_config.json'
+            logger.info(f"[DEBUG] 项目目录: {project_folder}, 是否存在: {project_folder.exists()}")
+            logger.info(f"[DEBUG] 配置文件路径: {config_file}, 是否存在: {config_file.exists()}")
             
             # 如果项目目录不存在，尝试从旧位置加载（向后兼容）
             if not config_file.exists():
+                logger.info(f"[DEBUG] 配置文件不存在，尝试旧位置")
                 config_file = self.config.projects_folder / f"{project_id}.json"
+                logger.info(f"[DEBUG] 旧位置配置文件: {config_file}, 是否存在: {config_file.exists()}")
             
             config = json_file_manager.read_json(str(config_file))
+            logger.info(f"[DEBUG] 读取配置结果: {config}")
+            
             if not config:
                 logger.warning(f"项目配置不存在: {project_id}")
                 return None
@@ -230,10 +263,13 @@ class ProjectManager:
             else:
                 logger.info(f"[DEBUG] requirements.json 不存在: {req_file}")
             
+            logger.info(f"[DEBUG] 项目加载成功: {project_id}")
             return config
             
         except Exception as e:
             logger.error(f"加载项目失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             return None
     
     def load_by_name(self, name: str) -> Optional[Dict[str, Any]]:

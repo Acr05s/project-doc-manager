@@ -364,12 +364,12 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
         <h2 style="text-align: left;">📋 ${cycle} - 文档管理</h2>
         
         <!-- 过滤选项 -->
-        <div style="margin-bottom: 15px; padding: 12px; background: #f8f9fa; border-radius: 6px; display: flex; gap: 20px; align-items: center;">
-            <label class="checkbox-inline">
+        <div class="filter-options" style="margin-bottom: 15px; padding: 10px 15px; background: #f8f9fa; border-radius: 6px; display: flex; flex-wrap: wrap; gap: 15px 25px; align-items: center;">
+            <label class="checkbox-inline" style="display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;">
                 <input type="checkbox" id="hideArchived" ${appState.filterOptions.hideArchived ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
                 <span>隐藏已归档</span>
             </label>
-            <label class="checkbox-inline">
+            <label class="checkbox-inline" style="display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;">
                 <input type="checkbox" id="hideCompleted" ${appState.filterOptions.hideCompleted ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
                 <span>隐藏文件完整</span>
             </label>
@@ -890,14 +890,14 @@ export function initUploadMethodTabs() {
         batchEditBtn.addEventListener('click', handleBatchEdit);
     }
     
-    const batchReplaceBtn = document.getElementById('batchReplaceBtn');
-    if (batchReplaceBtn) {
-        batchReplaceBtn.addEventListener('click', handleBatchReplace);
-    }
-    
     const batchDeleteBtn = document.getElementById('batchDeleteBtn');
     if (batchDeleteBtn) {
         batchDeleteBtn.addEventListener('click', handleBatchDelete);
+    }
+    
+    const batchMoveBtn = document.getElementById('batchMoveBtn');
+    if (batchMoveBtn) {
+        batchMoveBtn.addEventListener('click', handleBatchMove);
     }
 }
 
@@ -1490,104 +1490,118 @@ function generateDynamicEditForm(doc, cycle, docName) {
         }
     }
     
-    // 生成表单HTML
+    // 生成表单HTML - 使用表格布局，每行一对属性，确保水平对齐
     let formHtml = `
         <input type="hidden" id="editDocId" value="${doc.doc_id || doc.id}">
+        <table class="edit-form-table">
     `;
     
-    // 根据文档要求动态生成表单
-    let currentRow = [];
-    
-    attributes.forEach((attr, index) => {
-        if (attr.type === 'date') {
-            // 日期字段
-            currentRow.push(`
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <input type="date" id="edit${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" value="${doc[attr.name] || ''}">
-                </div>
-            `);
-            
-            if (currentRow.length >= 2 || index === attributes.length - 1) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-        } else if (attr.type === 'text') {
-            // 文本字段
-            currentRow.push(`
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <input type="text" id="edit${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" 
-                           placeholder="${attr.placeholder || ''}" value="${doc[attr.name] || ''}">
-                </div>
-            `);
-            
-            if (currentRow.length >= 2 || index === attributes.length - 1) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-        } else if (attr.type === 'checkbox' && attr.inline) {
-            // 内联复选框
-            currentRow.push(`
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <div class="checkbox-group">
+    // 两两配对，每行显示两个属性
+    for (let i = 0; i < attributes.length; i += 2) {
+        const attr1 = attributes[i];
+        const attr2 = attributes[i + 1];
+        
+        let rowHtml = '<tr>';
+        
+        // 第一个属性
+        if (attr1) {
+            if (attr1.type === 'date') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value="${doc[attr1.name] || ''}"></td>
+                `;
+            } else if (attr1.type === 'text') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value="${doc[attr1.name] || ''}"></td>
+                `;
+            } else if (attr1.type === 'checkbox' && attr1.inline) {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" ${doc[attr.name] ? 'checked' : ''}>
-                            <span>${attr.label}</span>
+                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${doc[attr1.name] ? 'checked' : ''}>
+                            <span>${attr1.label}</span>
                         </label>
-                    </div>
-                </div>
-            `);
-            
-            if (currentRow.length >= 2 || index === attributes.length - 1) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
+                    </td>
+                `;
+            } else if (attr1.type === 'checkbox_group') {
+                const optionsHtml = attr1.options.map(opt => `
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}" ${doc[opt.name] ? 'checked' : ''}>
+                        <span>${opt.label}</span>
+                    </label>
+                `).join('');
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell checkbox-group">${optionsHtml}</td>
+                `;
             }
-        } else if (attr.type === 'checkbox_group') {
-            // 复选框组
-            if (currentRow.length > 0) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-            
-            const optionsHtml = attr.options.map(opt => `
-                <label class="checkbox-item">
-                    <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}" ${doc[opt.name] ? 'checked' : ''}>
-                    <span>${opt.label}</span>
-                </label>
-            `).join('');
-            
-            formHtml += `
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <div class="checkbox-group">
-                        ${optionsHtml}
-                    </div>
-                </div>
-            `;
+        } else {
+            rowHtml += '<td colspan="2"></td>';
         }
-    });
-    
-    // 处理剩余的行
-    if (currentRow.length > 0) {
-        formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+        
+        // 第二个属性
+        if (attr2) {
+            if (attr2.type === 'date') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value="${doc[attr2.name] || ''}"></td>
+                `;
+            } else if (attr2.type === 'text') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value="${doc[attr2.name] || ''}"></td>
+                `;
+            } else if (attr2.type === 'checkbox' && attr2.inline) {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${doc[attr2.name] ? 'checked' : ''}>
+                            <span>${attr2.label}</span>
+                        </label>
+                    </td>
+                `;
+            } else if (attr2.type === 'checkbox_group') {
+                const optionsHtml = attr2.options.map(opt => `
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}" ${doc[opt.name] ? 'checked' : ''}>
+                        <span>${opt.label}</span>
+                    </label>
+                `).join('');
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell checkbox-group">${optionsHtml}</td>
+                `;
+            }
+        } else {
+            rowHtml += '<td colspan="2"></td>';
+        }
+        
+        rowHtml += '</tr>';
+        formHtml += rowHtml;
     }
     
-    // 默认添加备注字段
+    // 备注行
     formHtml += `
-        <div class="form-group">
-            <label>备注</label>
-            <textarea id="editRemark" placeholder="输入备注信息" rows="3">${doc.remark || ''}</textarea>
-        </div>
+        <tr>
+            <td class="label-cell"><label>备注</label></td>
+            <td class="input-cell" colspan="3">
+                <textarea id="editRemark" placeholder="输入备注信息" rows="3">${doc.remark || ''}</textarea>
+            </td>
+        </tr>
     `;
     
-    // 添加表单操作按钮
+    // 操作按钮行
     formHtml += `
-        <div class="form-actions">
-            <button type="submit" class="btn btn-success">保存修改</button>
-            <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
-        </div>
+        <tr>
+            <td colspan="4" class="action-cell">
+                <button type="submit" class="btn btn-success">保存修改</button>
+                <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+            </td>
+        </tr>
+    </table>
     `;
     
     // 更新表单内容
@@ -1811,6 +1825,22 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                 document.querySelectorAll('.document-checkbox').forEach(checkbox => {
                     checkbox.addEventListener('change', updateSelectedCount);
                 });
+                
+                // 重新绑定批量操作按钮事件
+                const batchEditBtn = document.getElementById('batchEditBtn');
+                if (batchEditBtn) {
+                    batchEditBtn.addEventListener('click', handleBatchEdit);
+                }
+                
+                const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+                if (batchDeleteBtn) {
+                    batchDeleteBtn.addEventListener('click', handleBatchDelete);
+                }
+                
+                const batchMoveBtn = document.getElementById('batchMoveBtn');
+                if (batchMoveBtn) {
+                    batchMoveBtn.addEventListener('click', handleBatchMove);
+                }
             }
         } else {
             console.error('documentsList元素不存在');
@@ -1976,29 +2006,44 @@ function showReportModal(reportData) {
                         
                         <div class="uploaded-docs" style="margin-top: 15px;">
                             <h5 style="margin-bottom: 10px;">已上传文档:</h5>
-                            ${cycle.uploadedDocs.length > 0 ? `
-                                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                                    <thead>
-                                        <tr style="background: #f8f9fa;">
-                                            <th style="padding: 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
-                                            <th style="padding: 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
-                                            <th style="padding: 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${cycle.uploadedDocs.map(doc => `
-                                            <tr>
-                                                <td style="padding: 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename}</td>
-                                                <td style="padding: 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
-                                                <td style="padding: 8px; border: 1px solid #dee2e6;">
-                                                    ${doc.no_signature ? '✓ 无签字' : (doc.signer ? '✓ 有签字' : '⚠ 无签字')}
-                                                    ${doc.no_seal ? ' | ✓ 无盖章' : (doc.has_seal_marked ? ' | ✓ 有盖章' : ' | ⚠ 无盖章')}
-                                                </td>
-                                            </tr>
-                                        `).join('')}
-                                    </tbody>
-                                </table>
-                            ` : `<p>无已上传文档</p>`}
+                            ${cycle.uploadedDocs.length > 0 ? (() => {
+                                // 按文档类型(doc_name)分组
+                                const docsByType = {};
+                                cycle.uploadedDocs.forEach(doc => {
+                                    const typeName = doc.doc_name || '未分类';
+                                    if (!docsByType[typeName]) docsByType[typeName] = [];
+                                    docsByType[typeName].push(doc);
+                                });
+                                // 生成按类型分组的表格HTML
+                                return Object.entries(docsByType).map(([typeName, docs]) => `
+                                    <div style="margin-bottom: 20px;">
+                                        <h6 style="margin: 10px 0 8px; color: #495057; font-size: 14px; font-weight: 600; background: #e9ecef; padding: 6px 10px; border-radius: 4px;">
+                                            📄 ${typeName} (${docs.length}个文件)
+                                        </h6>
+                                        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                            <thead>
+                                                <tr style="background: #f8f9fa;">
+                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
+                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
+                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${docs.map(doc => `
+                                                    <tr>
+                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename}</td>
+                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
+                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
+                                                            ${doc.no_signature ? '✓ 无签字' : (doc.signer ? '✓ 有签字' : '⚠ 无签字')}
+                                                            ${doc.no_seal ? ' | ✓ 无盖章' : (doc.has_seal_marked ? ' | ✓ 有盖章' : ' | ⚠ 无盖章')}
+                                                        </td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                `).join('');
+                            })() : `<p>无已上传文档</p>`}
                         </div>
                     </div>
                 `).join('')}
@@ -2576,16 +2621,16 @@ export function updateSelectedCount() {
     
     // 启用/禁用批量操作按钮
     const batchEditBtn = document.getElementById('batchEditBtn');
-    const batchReplaceBtn = document.getElementById('batchReplaceBtn');
     const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+    const batchMoveBtn = document.getElementById('batchMoveBtn');
     
     if (batchEditBtn) batchEditBtn.disabled = selectedCount === 0;
-    if (batchReplaceBtn) batchReplaceBtn.disabled = selectedCount === 0;
     if (batchDeleteBtn) batchDeleteBtn.disabled = selectedCount === 0;
+    if (batchMoveBtn) batchMoveBtn.disabled = selectedCount === 0;
 }
 
 /**
- * 处理批量编辑
+ * 处理批量编辑 - 复用编辑文档模态框
  */
 export function handleBatchEdit() {
     const selectedCheckboxes = document.querySelectorAll('.document-checkbox:checked');
@@ -2612,139 +2657,155 @@ export function handleBatchEdit() {
         }
     }
     
-    // 创建批量编辑模态框
-    const modal = document.createElement('div');
-    modal.id = 'batchEditModal';
-    modal.className = 'modal';
+    // 复用一个已有的编辑模态框（使用 editDocModal）
+    const modal = document.getElementById('editDocModal');
+    const formContainer = document.getElementById('editDocForm');
+    const titleEl = modal ? modal.querySelector('h2') : null;
     
-    // 生成表单HTML
-    let formHtml = `
-        <input type="hidden" id="batchEditDocIds" value="${selectedDocIds.join(',')}">
-    `;
-    
-    // 根据文档要求动态生成表单
-    let currentRow = [];
-    
-    attributes.forEach((attr, index) => {
-        if (attr.type === 'date') {
-            // 日期字段
-            currentRow.push(`
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <input type="date" id="batch${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" class="form-control">
-                </div>
-            `);
-            
-            if (currentRow.length >= 2 || index === attributes.length - 1) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-        } else if (attr.type === 'text') {
-            // 文本字段
-            currentRow.push(`
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <input type="text" id="batch${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}" 
-                           placeholder="${attr.placeholder || ''}" class="form-control">
-                </div>
-            `);
-            
-            if (currentRow.length >= 2 || index === attributes.length - 1) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-        } else if (attr.type === 'checkbox' && attr.inline) {
-            // 内联复选框
-            currentRow.push(`
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <div class="checkbox-group">
-                        <label class="checkbox-item">
-                            <input type="checkbox" id="batch${attr.id.charAt(0).toUpperCase() + attr.id.slice(1)}">
-                            <span>${attr.label}</span>
-                        </label>
-                    </div>
-                </div>
-            `);
-            
-            if (currentRow.length >= 2 || index === attributes.length - 1) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-        } else if (attr.type === 'checkbox_group') {
-            // 复选框组
-            if (currentRow.length > 0) {
-                formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
-                currentRow = [];
-            }
-            
-            const optionsHtml = attr.options.map(opt => `
-                <label class="checkbox-item">
-                    <input type="checkbox" id="batch${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}">
-                    <span>${opt.label}</span>
-                </label>
-            `).join('');
-            
-            formHtml += `
-                <div class="form-group">
-                    <label>${attr.label}</label>
-                    <div class="checkbox-group">
-                        ${optionsHtml}
-                    </div>
-                </div>
-            `;
-        }
-    });
-    
-    // 处理剩余的行
-    if (currentRow.length > 0) {
-        formHtml += `<div class="form-row">${currentRow.join('')}</div>`;
+    if (!modal || !formContainer) {
+        showNotification('无法打开编辑模态框', 'error');
+        return;
     }
     
-    // 默认添加备注字段
+    // 生成批量编辑表单HTML（表格布局）
+    let formHtml = `
+        <input type="hidden" id="editDocId" value="${selectedDocIds.join(',')}">
+        <input type="hidden" id="batchMode" value="true">
+        <table class="edit-form-table">
+    `;
+    
+    // 两两配对，每行显示两个属性
+    for (let i = 0; i < attributes.length; i += 2) {
+        const attr1 = attributes[i];
+        const attr2 = attributes[i + 1];
+        
+        let rowHtml = '<tr>';
+        
+        // 第一个属性
+        if (attr1) {
+            if (attr1.type === 'date') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value=""></td>
+                `;
+            } else if (attr1.type === 'text') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value=""></td>
+                `;
+            } else if (attr1.type === 'checkbox' && attr1.inline) {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}">
+                            <span>${attr1.label}</span>
+                        </label>
+                    </td>
+                `;
+            } else if (attr1.type === 'checkbox_group') {
+                const optionsHtml = attr1.options.map(opt => `
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}">
+                        <span>${opt.label}</span>
+                    </label>
+                `).join('');
+                rowHtml += `
+                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="input-cell checkbox-group">${optionsHtml}</td>
+                `;
+            }
+        } else {
+            rowHtml += '<td colspan="2"></td>';
+        }
+        
+        // 第二个属性
+        if (attr2) {
+            if (attr2.type === 'date') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value=""></td>
+                `;
+            } else if (attr2.type === 'text') {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value=""></td>
+                `;
+            } else if (attr2.type === 'checkbox' && attr2.inline) {
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}">
+                            <span>${attr2.label}</span>
+                        </label>
+                    </td>
+                `;
+            } else if (attr2.type === 'checkbox_group') {
+                const optionsHtml = attr2.options.map(opt => `
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}">
+                        <span>${opt.label}</span>
+                    </label>
+                `).join('');
+                rowHtml += `
+                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="input-cell checkbox-group">${optionsHtml}</td>
+                `;
+            }
+        } else {
+            rowHtml += '<td colspan="2"></td>';
+        }
+        
+        rowHtml += '</tr>';
+        formHtml += rowHtml;
+    }
+    
+    // 备注行
     formHtml += `
-        <div class="form-group">
-            <label>备注</label>
-            <textarea id="batchRemark" class="form-control" placeholder="输入备注信息" rows="3"></textarea>
+        <tr>
+            <td class="label-cell"><label>备注</label></td>
+            <td class="input-cell" colspan="3">
+                <textarea id="editRemark" placeholder="输入备注信息（将应用到所有选中文档）" rows="3"></textarea>
+            </td>
+        </tr>
+    `;
+    
+    // 操作按钮行
+    formHtml += `
+        <tr>
+            <td colspan="4" class="action-cell">
+                <button type="submit" class="btn btn-success">应用到所有选中文档</button>
+                <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+            </td>
+        </tr>
+    </table>
+    `;
+    
+    // 添加表单操作按钮（复用样式）
+    formHtml += `
+        <div class="form-actions">
+            <button type="submit" class="btn btn-success">批量保存修改 (${selectedDocIds.length}个)</button>
+            <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
         </div>
     `;
     
-    // 模态框完整HTML
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>批量编辑文档属性</h2>
-                <button class="close-btn" onclick="document.getElementById('batchEditModal').style.display='none'; document.body.style.overflow='auto';">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form id="batchEditForm">
-                    ${formHtml}
-                    <div class="modal-actions">
-                        <button type="submit" class="btn btn-success">保存修改</button>
-                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('batchEditModal').style.display='none'; document.body.style.overflow='auto';">取消</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    `;
+    // 更新表单内容
+    formContainer.innerHTML = formHtml;
     
-    document.body.appendChild(modal);
-    modal.style.display = 'block';
-    document.body.style.overflow = 'hidden';
-    
-    // 添加表单提交事件
-    document.getElementById('batchEditForm').addEventListener('submit', async (e) => {
+    // 用 onsubmit 赋值绑定提交事件
+    formContainer.onsubmit = async (e) => {
         e.preventDefault();
         
-        const docIds = document.getElementById('batchEditDocIds').value.split(',');
+        const docIds = document.getElementById('editDocId').value.split(',');
         
         // 动态收集表单数据
         const docData = {};
         
         // 收集文本、日期和文本域输入
-        document.querySelectorAll('#batchEditForm input[type="text"], #batchEditForm input[type="date"], #batchEditForm textarea').forEach(input => {
-            if (input.id.startsWith('batch')) {
-                const fieldName = input.id.replace('batch', '').replace(/([A-Z])/g, '_$1').toLowerCase();
+        document.querySelectorAll('#editDocForm input[type="text"], #editDocForm input[type="date"], #editDocForm textarea').forEach(input => {
+            if (input.id.startsWith('edit') && input.id !== 'editDocId') {
+                const fieldName = input.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
                 const value = input.value;
                 if (value) {
                     docData[fieldName] = value;
@@ -2753,9 +2814,9 @@ export function handleBatchEdit() {
         });
         
         // 收集复选框
-        document.querySelectorAll('#batchEditForm input[type="checkbox"]').forEach(checkbox => {
-            if (checkbox.id.startsWith('batch')) {
-                const fieldName = checkbox.id.replace('batch', '').replace(/([A-Z])/g, '_$1').toLowerCase();
+        document.querySelectorAll('#editDocForm input[type="checkbox"]').forEach(checkbox => {
+            if (checkbox.id.startsWith('edit')) {
+                const fieldName = checkbox.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
                 docData[fieldName] = checkbox.checked;
             }
         });
@@ -2780,26 +2841,35 @@ export function handleBatchEdit() {
                 }
             }
             
-            if (successCount > 0) {
-                showNotification(`成功编辑 ${successCount} 个文档`, 'success');
-                // 刷新文档列表
-                if (appState.currentCycle && appState.currentDocument) {
-                    await loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
-                }
+            showNotification(`成功编辑 ${successCount} 个文档${errorCount > 0 ? '，' + errorCount + '个失败' : ''}`, errorCount > 0 ? 'warning' : 'success');
+            
+            // 刷新文档列表
+            if (appState.currentCycle) {
+                await renderCycleDocuments(appState.currentCycle);
             }
             
-            if (errorCount > 0) {
-                showNotification(`有 ${errorCount} 个文档编辑失败`, 'error');
+            // 同时刷新维护页面的文档列表
+            if (appState.currentCycle && appState.currentDocument) {
+                await loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
             }
+            
         } catch (error) {
             console.error('批量编辑失败:', error);
             showNotification('批量编辑失败: ' + error.message, 'error');
         } finally {
             showLoading(false);
-            modal.style.display = 'none';
-            document.body.style.overflow = 'auto';
+            closeEditModal();
         }
-    });
+    };
+    
+    // 更新标题显示批量编辑
+    if (titleEl) {
+        titleEl.textContent = `批量编辑文档属性 (${selectedDocIds.length}个)`;
+    }
+    
+    // 打开模态框
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
 }
 
 /**
@@ -2866,6 +2936,96 @@ export async function handleBatchDelete() {
             } catch (error) {
                 console.error('批量删除失败:', error);
                 showNotification('批量删除失败: ' + error.message, 'error');
+            }
+        }
+    );
+}
+
+/**
+ * 处理批量移动到目录
+ */
+export function handleBatchMove() {
+    const selectedCheckboxes = document.querySelectorAll('.document-checkbox:checked');
+    const selectedDocIds = Array.from(selectedCheckboxes).map(cb => cb.dataset.docId);
+    
+    if (selectedDocIds.length === 0) {
+        showNotification('请先选择文档', 'error');
+        return;
+    }
+    
+    // 从项目配置中获取当前文档类型的目录结构
+    let directories = [];
+    if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
+        const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
+        if (cycleDocs && cycleDocs.required_docs) {
+            const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
+            if (docInfo && docInfo.directories) {
+                directories = docInfo.directories;
+            }
+        }
+    }
+    
+    // 显示目录选择模态框
+    showInputModal(
+        '移动到目录',
+        [
+            {
+                label: '选择目录',
+                key: 'directory',
+                value: '',
+                placeholder: '输入目录名称，如：合同文件/2026'
+            }
+        ],
+        async (result) => {
+            const directory = result.directory.trim();
+            if (!directory) {
+                showNotification('请输入目录名称', 'error');
+                return;
+            }
+            
+            showLoading(true);
+            try {
+                let successCount = 0;
+                let errorCount = 0;
+                
+                for (const docId of selectedDocIds) {
+                    try {
+                        const response = await fetch(`/api/documents/${docId}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ directory })
+                        });
+                        
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            successCount++;
+                        } else {
+                            errorCount++;
+                        }
+                    } catch (error) {
+                        console.error('移动文档失败:', error);
+                        errorCount++;
+                    }
+                }
+                
+                if (successCount > 0) {
+                    showNotification(`成功移动 ${successCount} 个文档到目录 "${directory}"`, 'success');
+                    // 刷新文档列表
+                    if (appState.currentCycle && appState.currentDocument) {
+                        await loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
+                    }
+                }
+                
+                if (errorCount > 0) {
+                    showNotification(`有 ${errorCount} 个文档移动失败`, 'error');
+                }
+            } catch (error) {
+                console.error('批量移动失败:', error);
+                showNotification('批量移动失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
             }
         }
     );

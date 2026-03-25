@@ -53,11 +53,27 @@ class JSONFileManager:
             if not os.path.exists(file_path):
                 return None
             
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, Exception):
-                return None
+            # 尝试多种编码读取
+            encodings = ['utf-8', 'gbk', 'utf-8-sig', 'latin-1']
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        # 尝试解析JSON
+                        return json.loads(content)
+                except UnicodeDecodeError:
+                    continue
+                except json.JSONDecodeError as e:
+                    # JSON解析错误，可能是文件格式问题
+                    print(f"JSON解析错误 ({encoding}): {e}")
+                    continue
+                except Exception as e:
+                    print(f"读取文件错误 ({encoding}): {e}")
+                    continue
+            
+            # 所有编码都失败，返回None
+            print(f"无法读取文件: {file_path}")
+            return None
     
     def write_json(self, file_path: str, data: Dict[str, Any]) -> bool:
         """写入JSON文件

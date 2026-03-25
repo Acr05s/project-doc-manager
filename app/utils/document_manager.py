@@ -874,8 +874,13 @@ class DocumentManager:
                 for project_file in projects_dir.glob('*.json'):
                     try:
                         import json
-                        with open(project_file, 'r', encoding='utf-8') as f:
-                            project_data = json.load(f)
+                        # 尝试使用UTF-8编码读取，如果失败则使用gbk
+                        try:
+                            with open(project_file, 'r', encoding='utf-8') as f:
+                                project_data = json.load(f)
+                        except UnicodeDecodeError:
+                            with open(project_file, 'r', encoding='gbk') as f:
+                                project_data = json.load(f)
                         
                         if 'documents' in project_data:
                             for cycle, cycle_info in project_data['documents'].items():
@@ -897,8 +902,13 @@ class DocumentManager:
                         if project_config_file.exists():
                             try:
                                 import json
-                                with open(project_config_file, 'r', encoding='utf-8') as f:
-                                    project_data = json.load(f)
+                                # 尝试使用UTF-8编码读取，如果失败则使用gbk
+                                try:
+                                    with open(project_config_file, 'r', encoding='utf-8') as f:
+                                        project_data = json.load(f)
+                                except UnicodeDecodeError:
+                                    with open(project_config_file, 'r', encoding='gbk') as f:
+                                        project_data = json.load(f)
                                 
                                 if 'documents' in project_data:
                                     for cycle, cycle_info in project_data['documents'].items():

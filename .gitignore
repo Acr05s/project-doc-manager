@@ -57,3 +57,6 @@ projects/
 
 # 临时文件
 commit_message.txt
+
+# 测试目录
+test/
