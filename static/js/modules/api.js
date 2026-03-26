@@ -36,13 +36,46 @@ export async function loadProjectsList() {
  */
 export async function loadProject(projectId) {
     try {
-        const response = await fetch(`/api/projects/${projectId}`);
+        // 首先尝试使用新版API路径
+        const response = await fetch(`/api/projects/new/${projectId}/load`);
         const result = await response.json();
         
-        if (result.status === 'success') {
-            return result.project;
+        // 如果返回了有效的项目数据，检查格式并转换
+        if (result && result.cycles) {
+            // 检查是否是文档清单格式
+            if (result.cycles && Array.isArray(result.cycles)) {
+                // 转换为标准项目配置格式
+                const convertedResult = {
+                    id: projectId,
+                    name: result.project_info?.name || projectId,
+                    cycles: result.cycles.map(cycle => cycle.name),
+                    documents: {}
+                };
+                
+                // 转换文档数据
+                result.cycles.forEach(cycle => {
+                    convertedResult.documents[cycle.name] = {
+                        required_docs: cycle.documents.map(doc => ({
+                            name: doc.name,
+                            requirement: doc.requirement || '',
+                            index: doc.index || 0
+                        }))
+                    };
+                });
+                
+                return convertedResult;
+            }
+            return result;
+        }
+        
+        // 如果新版API失败，尝试使用旧版API路径
+        const oldResponse = await fetch(`/api/projects/${projectId}`);
+        const oldResult = await oldResponse.json();
+        
+        if (oldResult.status === 'success') {
+            return oldResult.project;
         } else {
-            throw new Error(result.message || '加载项目失败');
+            throw new Error(oldResult.message || '加载项目失败');
         }
     } catch (error) {
         console.error('加载项目失败:', error);

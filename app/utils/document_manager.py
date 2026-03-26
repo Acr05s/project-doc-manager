@@ -104,6 +104,13 @@ except Exception as e:
     logger.warning(f"文档上传模块加载失败: {e}")
     _document_uploader_available = False
 
+try:
+    from .project_data_manager import ProjectDataManager
+    _project_data_manager_available = True
+except Exception as e:
+    logger.warning(f"项目数据管理模块加载失败: {e}")
+    _project_data_manager_available = False
+
 
 class DocumentManager:
     """项目文档管理器 - 主类
@@ -251,6 +258,16 @@ class DocumentManager:
                 self.uploader = None
         else:
             self.uploader = None
+        
+        # 项目数据管理
+        if _project_data_manager_available:
+            try:
+                self.data_manager = ProjectDataManager(self.config)
+            except Exception as e:
+                logger.error(f"初始化项目数据管理模块失败: {e}")
+                self.data_manager = None
+        else:
+            self.data_manager = None
     
     def get_status(self) -> Dict[str, Any]:
         """获取模块状态
@@ -531,8 +548,113 @@ class DocumentManager:
     def load_document_list(self, project_name: str) -> Optional[Dict]:
         """加载文档清单"""
         if self.doc_lists:
-            return self.doc_lists.load(project_name)
+            # 先尝试加载文档清单文件
+            doc_list = self.doc_lists.load(project_name)
+            if doc_list:
+                return doc_list
+        
+        # 如果文档清单文件不存在，尝试从项目数据管理器中加载数据
+        if self.data_manager:
+            config = self.data_manager.load_full_config(project_name)
+            if config:
+                # 转换为文档清单格式
+                doc_list = {
+                    'version': '2.0',
+                    'project_name': project_name,
+                    'created_time': config.get('created_time', self._get_timestamp()),
+                    'updated_time': config.get('updated_time', self._get_timestamp()),
+                    'project_info': {
+                        'name': config.get('name', project_name),
+                        'description': config.get('description', ''),
+                        'party_a': config.get('party_a', ''),
+                        'party_b': config.get('party_b', ''),
+                        'supervisor': config.get('supervisor', ''),
+                        'manager': config.get('manager', ''),
+                        'duration': config.get('duration', '')
+                    },
+                    'cycles': []
+                }
+                
+                # 添加周期和文档
+                cycles = config.get('cycles', [])
+                documents = config.get('documents', {})
+                
+                for cycle in cycles:
+                    cycle_entry = {
+                        'name': cycle,
+                        'description': '',
+                        'documents': []
+                    }
+                    
+                    # 添加该周期的文档
+                    cycle_docs = documents.get(cycle, {})
+                    required_docs = cycle_docs.get('required_docs', [])
+                    uploaded_docs = cycle_docs.get('uploaded_docs', [])
+                    
+                    # 创建文档映射
+                    doc_map = {}
+                    for req_doc in required_docs:
+                        doc_map[req_doc.get('name')] = req_doc
+                    
+                    # 添加文档
+                    for req_doc in required_docs:
+                        doc_name = req_doc.get('name')
+                        doc_entry = {
+                            'name': doc_name,
+                            'requirement': req_doc.get('requirement', ''),
+                            'files': [],
+                            'status': req_doc.get('status', 'pending')
+                        }
+                        
+                        # 添加上传的文件
+                        for uploaded_doc in uploaded_docs:
+                            if uploaded_doc.get('doc_name') == doc_name:
+                                file_info = {
+                                    'filename': uploaded_doc.get('filename'),
+                                    'original_filename': uploaded_doc.get('original_filename'),
+                                    'file_path': uploaded_doc.get('file_path'),
+                                    'upload_time': uploaded_doc.get('upload_time'),
+                                    'source': uploaded_doc.get('source'),
+                                    'file_size': uploaded_doc.get('file_size')
+                                }
+                                doc_entry['files'].append(file_info)
+                        
+                        # 更新状态
+                        if doc_entry['files']:
+                            doc_entry['status'] = 'completed' if len(doc_entry['files']) > 0 else 'pending'
+                        
+                        cycle_entry['documents'].append(doc_entry)
+                    
+                    # 添加未在required_docs中但已上传的文档
+                    for uploaded_doc in uploaded_docs:
+                        doc_name = uploaded_doc.get('doc_name')
+                        if doc_name and not any(d.get('name') == doc_name for d in cycle_entry['documents']):
+                            doc_entry = {
+                                'name': doc_name,
+                                'requirement': '',
+                                'files': [{
+                                    'filename': uploaded_doc.get('filename'),
+                                    'original_filename': uploaded_doc.get('original_filename'),
+                                    'file_path': uploaded_doc.get('file_path'),
+                                    'upload_time': uploaded_doc.get('upload_time'),
+                                    'source': uploaded_doc.get('source'),
+                                    'file_size': uploaded_doc.get('file_size')
+                                }],
+                                'status': 'completed'
+                            }
+                            cycle_entry['documents'].append(doc_entry)
+                    
+                    doc_list['cycles'].append(cycle_entry)
+                
+                logger.info(f"从项目数据管理器加载文档清单: {project_name}")
+                return doc_list
+        
         return None
+    
+    def _get_timestamp(self) -> str:
+        """获取当前时间戳"""
+        from datetime import datetime
+        return datetime.now().isoformat()
     
     def save_document_list(self, project_name: str, doc_list: Dict) -> Dict:
         """保存文档清单"""
@@ -714,7 +836,7 @@ class DocumentManager:
         """
         result = []
         
-        # 直接从项目配置中加载文档，确保只返回指定项目的文档
+        # 首先从项目配置中加载文档，确保数据最新
         if project_id:
             project_result = self.load_project(project_id)
             if project_result.get('status') == 'success':
@@ -739,6 +861,20 @@ class DocumentManager:
                                     'id': doc_id,
                                     **doc
                                 })
+        
+        # 如果项目配置中没有文档，再从内存中的documents_db获取
+        if not result:
+            for doc_id, doc in self.documents_db.items():
+                # 过滤周期
+                if cycle and doc.get('cycle') != cycle:
+                    continue
+                # 过滤文档名称
+                if doc_name and doc.get('doc_name') != doc_name:
+                    continue
+                # 确保文档有 ID
+                doc_copy = doc.copy()
+                doc_copy['id'] = doc_id
+                result.append(doc_copy)
         
         return result
     
@@ -828,6 +964,57 @@ class DocumentManager:
                             except Exception as e:
                                 logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
             
+            # 从ProjectDataManager中删除文档
+            if hasattr(self, 'data_manager') and self.data_manager:
+                # 遍历所有项目
+                projects_dir = self.config.projects_base_folder
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_name = project_dir.name
+                        # 加载项目配置
+                        config = self.data_manager.load_full_config(project_name)
+                        if config and 'documents' in config:
+                            # 遍历所有周期
+                            for cycle, cycle_info in config['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    # 过滤掉要删除的文档
+                                    original_length = len(cycle_info['uploaded_docs'])
+                                    cycle_info['uploaded_docs'] = [
+                                        doc for doc in cycle_info['uploaded_docs']
+                                        if doc.get('doc_id') != doc_id
+                                    ]
+                                    if len(cycle_info['uploaded_docs']) != original_length:
+                                        deleted = True
+                                        # 保存更新后的项目配置
+                                        self.data_manager.save_full_config(project_name, config)
+                                        # 从文档索引中移除文档
+                                        self.data_manager.remove_document_from_index(project_name, doc_id)
+            
+            # 检查并删除文档清单中的已归档文档
+            if hasattr(self, 'doc_lists') and self.doc_lists:
+                # 遍历所有项目
+                projects_dir = self.config.projects_base_folder
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_name = project_dir.name
+                        doc_list = self.doc_lists.load(project_name)
+                        if doc_list:
+                            # 遍历所有周期和文档
+                            if 'documents' in doc_list:
+                                for cycle_name, cycle_docs in doc_list['documents'].items():
+                                    for doc_info in cycle_docs:
+                                        if 'files' in doc_info:
+                                            # 过滤掉要删除的文件
+                                            original_length = len(doc_info['files'])
+                                            doc_info['files'] = [
+                                                file_info for file_info in doc_info['files']
+                                                if file_info.get('doc_id') != doc_id
+                                            ]
+                                            if len(doc_info['files']) != original_length:
+                                                deleted = True
+                                                # 保存更新后的文档清单
+                                                self.doc_lists.save(project_name, doc_list)
+            
             if deleted:
                 return {'status': 'success'}
             else:
@@ -849,9 +1036,24 @@ class DocumentManager:
         try:
             updated = False
             
+            # 确保has_seal和has_seal_marked字段同步
+            if 'has_seal' in data:
+                data['has_seal_marked'] = data['has_seal']
+            elif 'has_seal_marked' in data:
+                data['has_seal'] = data['has_seal_marked']
+            
+            # 确保盖章相关字段的一致性
+            if 'has_seal' in data and data['has_seal']:
+                data['no_seal'] = False
+            if 'no_seal' in data and data['no_seal']:
+                data['has_seal'] = False
+                data['has_seal_marked'] = False
+            
             # 更新内存中的documents_db
             if doc_id in self.documents_db:
-                self.documents_db[doc_id].update(data)
+                # 只更新指定的字段，不覆盖整个文档
+                for key, value in data.items():
+                    self.documents_db[doc_id][key] = value
                 updated = True
             
             # 更新项目配置文件中的数据
@@ -863,7 +1065,9 @@ class DocumentManager:
                             if 'uploaded_docs' in cycle_info:
                                 for doc in cycle_info['uploaded_docs']:
                                     if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
-                                        doc.update(data)
+                                        # 只更新指定的字段，保留其他属性
+                                        for key, value in data.items():
+                                            doc[key] = value
                                         updated = True
                                         # 保存更新后的项目配置
                                         self.projects.save(project_id, project_data)
@@ -887,7 +1091,9 @@ class DocumentManager:
                                 if 'uploaded_docs' in cycle_info:
                                     for doc in cycle_info['uploaded_docs']:
                                         if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
-                                            doc.update(data)
+                                            # 只更新指定的字段，保留其他属性
+                                            for key, value in data.items():
+                                                doc[key] = value
                                             updated = True
                                             # 保存更新后的项目配置
                                             with open(project_file, 'w', encoding='utf-8') as f:
@@ -915,13 +1121,45 @@ class DocumentManager:
                                         if 'uploaded_docs' in cycle_info:
                                             for doc in cycle_info['uploaded_docs']:
                                                 if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
-                                                    doc.update(data)
+                                                    # 只更新指定的字段，保留其他属性
+                                                    for key, value in data.items():
+                                                        doc[key] = value
                                                     updated = True
                                                     # 保存更新后的项目配置
                                                     with open(project_config_file, 'w', encoding='utf-8') as f:
                                                         json.dump(project_data, f, ensure_ascii=False, indent=2)
                             except Exception as e:
                                 logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
+            
+            # 从ProjectDataManager中更新文档
+            if hasattr(self, 'data_manager') and self.data_manager:
+                # 遍历所有项目
+                projects_dir = self.config.projects_base_folder
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_name = project_dir.name
+                        # 加载项目配置
+                        config = self.data_manager.load_full_config(project_name)
+                        if config and 'documents' in config:
+                            # 遍历所有周期
+                            for cycle, cycle_info in config['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    for doc in cycle_info['uploaded_docs']:
+                                        if doc.get('doc_id') == doc_id or doc.get('id') == doc_id:
+                                            # 只更新指定的字段，保留其他属性
+                                            for key, value in data.items():
+                                                doc[key] = value
+                                            updated = True
+                            # 保存更新后的项目配置
+                            self.data_manager.save_full_config(project_name, config)
+                            
+                            # 同时更新文档索引
+                            doc_index = self.data_manager.load_documents_index(project_name)
+                            if 'documents' in doc_index and doc_id in doc_index['documents']:
+                                # 只更新指定的字段，保留其他属性
+                                for key, value in data.items():
+                                    doc_index['documents'][doc_id][key] = value
+                                self.data_manager.save_documents_index(project_name, doc_index)
             
             if updated:
                 return {'status': 'success'}
@@ -1050,8 +1288,12 @@ class DocumentManager:
                 if doc_id in self.documents_db:
                     if action == 'mark_seal':
                         self.documents_db[doc_id]['has_seal_marked'] = True
+                        self.documents_db[doc_id]['has_seal'] = True
+                        self.documents_db[doc_id]['no_seal'] = False
                     elif action == 'mark_no_seal':
                         self.documents_db[doc_id]['no_seal'] = True
+                        self.documents_db[doc_id]['has_seal_marked'] = False
+                        self.documents_db[doc_id]['has_seal'] = False
                     elif action == 'mark_no_signature':
                         self.documents_db[doc_id]['no_signature'] = True
                     success_count += 1
@@ -1064,12 +1306,16 @@ class DocumentManager:
                         for cycle, cycle_info in project_data['documents'].items():
                             if 'uploaded_docs' in cycle_info:
                                 for doc in cycle_info['uploaded_docs']:
-                                    doc_id = doc.get('doc_id')
+                                    doc_id = doc.get('doc_id') or doc.get('id')
                                     if doc_id in doc_ids:
                                         if action == 'mark_seal':
                                             doc['has_seal_marked'] = True
+                                            doc['has_seal'] = True
+                                            doc['no_seal'] = False
                                         elif action == 'mark_no_seal':
                                             doc['no_seal'] = True
+                                            doc['has_seal_marked'] = False
+                                            doc['has_seal'] = False
                                         elif action == 'mark_no_signature':
                                             doc['no_signature'] = True
                         # 保存更新后的项目配置
@@ -1091,12 +1337,16 @@ class DocumentManager:
                                     for cycle, cycle_info in project_data['documents'].items():
                                         if 'uploaded_docs' in cycle_info:
                                             for doc in cycle_info['uploaded_docs']:
-                                                doc_id = doc.get('doc_id')
+                                                doc_id = doc.get('doc_id') or doc.get('id')
                                                 if doc_id in doc_ids:
                                                     if action == 'mark_seal':
                                                         doc['has_seal_marked'] = True
+                                                        doc['has_seal'] = True
+                                                        doc['no_seal'] = False
                                                     elif action == 'mark_no_seal':
                                                         doc['no_seal'] = True
+                                                        doc['has_seal_marked'] = False
+                                                        doc['has_seal'] = False
                                                     elif action == 'mark_no_signature':
                                                         doc['no_signature'] = True
                                 
@@ -1105,6 +1355,52 @@ class DocumentManager:
                                     json.dump(project_data, f, ensure_ascii=False, indent=2)
                             except Exception as e:
                                 logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
+            
+            # 从ProjectDataManager中更新文档
+            if hasattr(self, 'data_manager') and self.data_manager:
+                # 遍历所有项目
+                projects_dir = self.config.projects_base_folder
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_name = project_dir.name
+                        # 加载项目配置
+                        config = self.data_manager.load_full_config(project_name)
+                        if config and 'documents' in config:
+                            # 遍历所有周期
+                            for cycle, cycle_info in config['documents'].items():
+                                if 'uploaded_docs' in cycle_info:
+                                    for doc in cycle_info['uploaded_docs']:
+                                        doc_id = doc.get('doc_id') or doc.get('id')
+                                        if doc_id in doc_ids:
+                                            if action == 'mark_seal':
+                                                doc['has_seal_marked'] = True
+                                                doc['has_seal'] = True
+                                                doc['no_seal'] = False
+                                            elif action == 'mark_no_seal':
+                                                doc['no_seal'] = True
+                                                doc['has_seal_marked'] = False
+                                                doc['has_seal'] = False
+                                            elif action == 'mark_no_signature':
+                                                doc['no_signature'] = True
+                            # 保存更新后的项目配置
+                            self.data_manager.save_full_config(project_name, config)
+                            
+                            # 同时更新文档索引
+                            doc_index = self.data_manager.load_documents_index(project_name)
+                            if 'documents' in doc_index:
+                                for doc_id in doc_ids:
+                                    if doc_id in doc_index['documents']:
+                                        if action == 'mark_seal':
+                                            doc_index['documents'][doc_id]['has_seal_marked'] = True
+                                            doc_index['documents'][doc_id]['has_seal'] = True
+                                            doc_index['documents'][doc_id]['no_seal'] = False
+                                        elif action == 'mark_no_seal':
+                                            doc_index['documents'][doc_id]['no_seal'] = True
+                                            doc_index['documents'][doc_id]['has_seal_marked'] = False
+                                            doc_index['documents'][doc_id]['has_seal'] = False
+                                        elif action == 'mark_no_signature':
+                                            doc_index['documents'][doc_id]['no_signature'] = True
+                                self.data_manager.save_documents_index(project_name, doc_index)
             
             return {
                 'status': 'success',
@@ -1177,6 +1473,32 @@ class DocumentManager:
                                                     json.dump(project_data, f, ensure_ascii=False, indent=2)
                             except Exception as e:
                                 logger.warning(f"处理项目配置文件 {project_config_file} 时出错: {e}")
+                
+                # 从ProjectDataManager中删除文档
+                if hasattr(self, 'data_manager') and self.data_manager:
+                    # 遍历所有项目
+                    projects_dir = self.config.projects_base_folder
+                    for project_dir in projects_dir.iterdir():
+                        if project_dir.is_dir():
+                            project_name = project_dir.name
+                            # 加载项目配置
+                            config = self.data_manager.load_full_config(project_name)
+                            if config and 'documents' in config:
+                                # 遍历所有周期
+                                for cycle, cycle_info in config['documents'].items():
+                                    if 'uploaded_docs' in cycle_info:
+                                        # 过滤掉要删除的文档
+                                        original_length = len(cycle_info['uploaded_docs'])
+                                        cycle_info['uploaded_docs'] = [
+                                            doc for doc in cycle_info['uploaded_docs']
+                                            if doc.get('doc_id') not in doc_ids
+                                        ]
+                                        if len(cycle_info['uploaded_docs']) != original_length:
+                                            # 保存更新后的项目配置
+                                            self.data_manager.save_full_config(project_name, config)
+                                            # 从文档索引中移除文档
+                                            for doc_id in doc_ids:
+                                                self.data_manager.remove_document_from_index(project_name, doc_id)
             
             return {
                 'status': 'success',
@@ -1187,93 +1509,171 @@ class DocumentManager:
             logger.error(f"批量删除文档失败: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    def get_categories(self, cycle: str, doc_name: str) -> List[str]:
+    def get_categories(self, cycle: str, doc_name: str, project_id: str = None) -> List[str]:
         """获取分类列表
         
         Args:
             cycle: 周期名称
             doc_name: 文档名称
+            project_id: 项目ID（可选，如果未提供则使用 current_project）
             
         Returns:
             List[str]: 分类列表
         """
-        # 从项目配置中获取分类
-        if hasattr(self, 'current_project') and self.current_project:
-            project_config = self.current_project
-            if 'documents' in project_config:
-                if cycle in project_config['documents']:
-                    if 'categories' in project_config['documents'][cycle]:
-                        if doc_name in project_config['documents'][cycle]['categories']:
-                            return project_config['documents'][cycle]['categories'][doc_name]
-        return []
+        try:
+            # 首先尝试使用新的数据管理器
+            if hasattr(self, 'data_manager') and self.data_manager:
+                # 获取项目名称
+                project_name = None
+                if project_id and hasattr(self, 'projects') and self.projects:
+                    project_info = self.projects.get_by_id(project_id)
+                    if project_info:
+                        project_name = project_info.get('name')
+                elif hasattr(self, 'current_project') and self.current_project:
+                    project_name = self.current_project.get('name')
+                
+                if project_name:
+                    return self.data_manager.get_categories_for_doc(project_name, cycle, doc_name)
+            
+            # 回退到旧方法
+            project_config = None
+            if project_id and hasattr(self, 'projects') and self.projects:
+                project_config = self.projects.load(project_id)
+            elif hasattr(self, 'current_project') and self.current_project:
+                project_config = self.current_project
+            
+            if project_config:
+                if 'documents' in project_config:
+                    if cycle in project_config['documents']:
+                        if 'categories' in project_config['documents'][cycle]:
+                            if doc_name in project_config['documents'][cycle]['categories']:
+                                return project_config['documents'][cycle]['categories'][doc_name]
+            return []
+        except Exception as e:
+            logger.error(f"获取分类列表失败: {e}")
+            return []
     
-    def create_category(self, cycle: str, doc_name: str, category: str) -> Dict:
+    def create_category(self, cycle: str, doc_name: str, category: str, project_id: str = None) -> Dict:
         """创建分类
         
         Args:
             cycle: 周期名称
             doc_name: 文档名称
             category: 分类名称
+            project_id: 项目ID（可选，如果未提供则使用 current_project）
             
         Returns:
             Dict: 创建结果
         """
         try:
-            if hasattr(self, 'current_project') and self.current_project:
+            # 首先尝试使用新的数据管理器
+            if hasattr(self, 'data_manager') and self.data_manager:
+                # 获取项目名称
+                project_name = None
+                if project_id and hasattr(self, 'projects') and self.projects:
+                    project_info = self.projects.get_by_id(project_id)
+                    if project_info:
+                        project_name = project_info.get('name')
+                elif hasattr(self, 'current_project') and self.current_project:
+                    project_name = self.current_project.get('name')
+                
+                if project_name:
+                    success = self.data_manager.add_category_for_doc(project_name, cycle, doc_name, category)
+                    if success:
+                        return {'status': 'success'}
+            
+            # 回退到旧方法
+            project_config = None
+            if project_id and hasattr(self, 'projects') and self.projects:
+                project_config = self.projects.load(project_id)
+            elif hasattr(self, 'current_project') and self.current_project:
                 project_config = self.current_project
-                if 'documents' not in project_config:
-                    project_config['documents'] = {}
-                if cycle not in project_config['documents']:
-                    project_config['documents'][cycle] = {'categories': {}}
-                if 'categories' not in project_config['documents'][cycle]:
-                    project_config['documents'][cycle]['categories'] = {}
-                if doc_name not in project_config['documents'][cycle]['categories']:
-                    project_config['documents'][cycle]['categories'][doc_name] = []
-                
-                # 检查分类是否已存在
-                if category not in project_config['documents'][cycle]['categories'][doc_name]:
-                    project_config['documents'][cycle]['categories'][doc_name].append(category)
-                    # 保存项目配置
-                    if hasattr(self, 'projects') and self.projects:
-                        project_id = project_config.get('id')
-                        if project_id:
-                            self.projects.save(project_id, project_config)
-                
-                return {'status': 'success'}
-            return {'status': 'error', 'message': '项目未加载'}
+                project_id = project_config.get('id')
+            
+            if not project_config:
+                return {'status': 'error', 'message': '项目未加载'}
+            
+            if 'documents' not in project_config:
+                project_config['documents'] = {}
+            if cycle not in project_config['documents']:
+                project_config['documents'][cycle] = {'categories': {}}
+            if 'categories' not in project_config['documents'][cycle]:
+                project_config['documents'][cycle]['categories'] = {}
+            if doc_name not in project_config['documents'][cycle]['categories']:
+                project_config['documents'][cycle]['categories'][doc_name] = []
+            
+            # 检查分类是否已存在
+            if category not in project_config['documents'][cycle]['categories'][doc_name]:
+                project_config['documents'][cycle]['categories'][doc_name].append(category)
+                # 保存项目配置
+                if hasattr(self, 'projects') and self.projects and project_id:
+                    self.projects.save(project_id, project_config)
+                # 更新 current_project
+                if hasattr(self, 'current_project'):
+                    self.current_project = project_config
+            
+            return {'status': 'success'}
         except Exception as e:
+            logger.error(f"创建分类失败: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    def delete_category(self, cycle: str, doc_name: str, category: str) -> Dict:
+    def delete_category(self, cycle: str, doc_name: str, category: str, project_id: str = None) -> Dict:
         """删除分类
         
         Args:
             cycle: 周期名称
             doc_name: 文档名称
             category: 分类名称
+            project_id: 项目ID（可选，如果未提供则使用 current_project）
             
         Returns:
             Dict: 删除结果
         """
         try:
-            if hasattr(self, 'current_project') and self.current_project:
-                project_config = self.current_project
-                if 'documents' in project_config:
-                    if cycle in project_config['documents']:
-                        if 'categories' in project_config['documents'][cycle]:
-                            if doc_name in project_config['documents'][cycle]['categories']:
-                                categories = project_config['documents'][cycle]['categories'][doc_name]
-                                if category in categories:
-                                    categories.remove(category)
-                                    # 保存项目配置
-                                    if hasattr(self, 'projects') and self.projects:
-                                        project_id = project_config.get('id')
-                                        if project_id:
-                                            self.projects.save(project_id, project_config)
+            # 首先尝试使用新的数据管理器
+            if hasattr(self, 'data_manager') and self.data_manager:
+                # 获取项目名称
+                project_name = None
+                if project_id and hasattr(self, 'projects') and self.projects:
+                    project_info = self.projects.get_by_id(project_id)
+                    if project_info:
+                        project_name = project_info.get('name')
+                elif hasattr(self, 'current_project') and self.current_project:
+                    project_name = self.current_project.get('name')
                 
-                return {'status': 'success'}
-            return {'status': 'error', 'message': '项目未加载'}
+                if project_name:
+                    success = self.data_manager.remove_category_for_doc(project_name, cycle, doc_name, category)
+                    if success:
+                        return {'status': 'success'}
+            
+            # 回退到旧方法
+            project_config = None
+            if project_id and hasattr(self, 'projects') and self.projects:
+                project_config = self.projects.load(project_id)
+            elif hasattr(self, 'current_project') and self.current_project:
+                project_config = self.current_project
+                project_id = project_config.get('id')
+            
+            if not project_config:
+                return {'status': 'error', 'message': '项目未加载'}
+            
+            if 'documents' in project_config:
+                if cycle in project_config['documents']:
+                    if 'categories' in project_config['documents'][cycle]:
+                        if doc_name in project_config['documents'][cycle]['categories']:
+                            categories = project_config['documents'][cycle]['categories'][doc_name]
+                            if category in categories:
+                                categories.remove(category)
+                                # 保存项目配置
+                                if hasattr(self, 'projects') and self.projects and project_id:
+                                    self.projects.save(project_id, project_config)
+                                # 更新 current_project
+                                if hasattr(self, 'current_project'):
+                                    self.current_project = project_config
+            
+            return {'status': 'success'}
         except Exception as e:
+            logger.error(f"删除分类失败: {e}")
             return {'status': 'error', 'message': str(e)}
     
     def replace_document(self, doc_id: str, file, data: Dict) -> Dict:

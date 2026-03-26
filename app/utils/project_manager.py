@@ -13,6 +13,7 @@ from .base import DocumentConfig, setup_logging
 from .folder_manager import FolderManager
 from .requirements_loader import RequirementsLoader
 from .json_file_manager import json_file_manager
+from .project_data_manager import ProjectDataManager
 
 logger = setup_logging(__name__)
 
@@ -30,6 +31,7 @@ class ProjectManager:
         self.config = config
         self.folder_manager = folder_manager
         self.requirements_loader = RequirementsLoader(config)
+        self.data_manager = ProjectDataManager(config)
         
         # 项目索引（内存缓存）
         self.projects_db: Dict[str, Dict[str, Any]] = {}
@@ -153,8 +155,8 @@ class ProjectManager:
                 project_config['cycles'] = requirements.get('cycles', [])
                 project_config['documents'] = requirements.get('documents', {})
             
-            # 创建项目文件夹结构
-            self.folder_manager.create_project_structure(name)
+            # 创建项目文件夹结构（使用新的数据管理器）
+            self.data_manager.create_project_structure(name)
             
             # 保存项目配置
             self._save_project_config(project_id, project_config)
@@ -189,16 +191,11 @@ class ProjectManager:
         """
         # 获取项目名称
         project_name = config.get('name', project_id)
-        # 保存到项目目录中
-        project_folder = self.config.projects_folder / project_name
-        project_folder.mkdir(parents=True, exist_ok=True)
-        config_file = project_folder / 'project_config.json'
-        json_file_manager.write_json(str(config_file), config)
+        # 使用新的数据管理器保存配置
+        self.data_manager.save_full_config(project_name, config)
     
     def load(self, project_id: str) -> Optional[Dict[str, Any]]:
         """加载项目配置
-        
-        如果项目目录下有 requirements.json，则合并到配置中
         
         Args:
             project_id: 项目ID
@@ -220,48 +217,39 @@ class ProjectManager:
             project_name = project_info['name'] if project_info and 'name' in project_info else project_id
             logger.info(f"[DEBUG] 项目名称: {project_name}")
             
-            # 从项目目录加载配置
-            project_folder = self.config.projects_folder / project_name
-            config_file = project_folder / 'project_config.json'
-            logger.info(f"[DEBUG] 项目目录: {project_folder}, 是否存在: {project_folder.exists()}")
-            logger.info(f"[DEBUG] 配置文件路径: {config_file}, 是否存在: {config_file.exists()}")
-            
-            # 如果项目目录不存在，尝试从旧位置加载（向后兼容）
-            if not config_file.exists():
-                logger.info(f"[DEBUG] 配置文件不存在，尝试旧位置")
-                config_file = self.config.projects_folder / f"{project_id}.json"
-                logger.info(f"[DEBUG] 旧位置配置文件: {config_file}, 是否存在: {config_file.exists()}")
-            
-            config = json_file_manager.read_json(str(config_file))
-            logger.info(f"[DEBUG] 读取配置结果: {config}")
+            # 使用新的数据管理器加载完整配置
+            config = self.data_manager.load_full_config(project_name)
+            logger.info(f"[DEBUG] 从新数据管理器加载配置结果: {config is not None}")
             
             if not config:
-                logger.warning(f"项目配置不存在: {project_id}")
-                return None
-            
-            # 尝试从项目目录加载 requirements.json
-            req_file = project_folder / 'requirements.json'
-            logger.info(f"[DEBUG] 尝试加载 requirements.json: {req_file}, 是否存在: {req_file.exists()}")
-            if req_file.exists():
-                try:
-                    req_config = json_file_manager.read_json(str(req_file))
-                    if req_config:
-                        # 合并需求配置
-                        config['cycles'] = req_config.get('cycles', [])
-                        # 只覆盖documents中的required_docs部分，保留matching_result和uploaded_docs
-                        req_documents = req_config.get('documents', {})
-                        for cycle, cycle_info in req_documents.items():
-                            if cycle not in config.get('documents', {}):
-                                config.setdefault('documents', {})[cycle] = {}
-                            # 只覆盖required_docs，保留matching_result和uploaded_docs
-                            config['documents'][cycle]['required_docs'] = cycle_info.get('required_docs', [])
-                        config['requirements_id'] = req_config.get('requirements_id')
-                        config['requirements_name'] = req_config.get('name')
-                        logger.info(f"[DEBUG] 已从 requirements.json 加载配置: {project_name}, cycles={len(config['cycles'])}")
-                except Exception as e:
-                    logger.warning(f"[DEBUG] 加载 requirements.json 失败: {e}")
-            else:
-                logger.info(f"[DEBUG] requirements.json 不存在: {req_file}")
+                # 尝试从旧位置加载（向后兼容）
+                logger.info(f"[DEBUG] 新数据管理器加载失败，尝试旧位置")
+                
+                # 尝试两种旧格式：
+                # 1. 直接在项目目录下的 project_config.json
+                old_config_file = self.config.projects_folder / project_name / "project_config.json"
+                logger.info(f"[DEBUG] 旧位置配置文件 (格式1): {old_config_file}, 是否存在: {old_config_file.exists()}")
+                
+                # 2. 在 projects 目录下的 project_id.json
+                old_config_file2 = self.config.projects_folder / f"{project_id}.json"
+                logger.info(f"[DEBUG] 旧位置配置文件 (格式2): {old_config_file2}, 是否存在: {old_config_file2.exists()}")
+                
+                if old_config_file.exists():
+                    config = json_file_manager.read_json(str(old_config_file))
+                    logger.info(f"[DEBUG] 从旧位置 (格式1) 加载配置结果: {config}")
+                elif old_config_file2.exists():
+                    config = json_file_manager.read_json(str(old_config_file2))
+                    logger.info(f"[DEBUG] 从旧位置 (格式2) 加载配置结果: {config}")
+                
+                # 如果加载成功，迁移到新结构
+                if config:
+                    logger.info(f"[DEBUG] 从旧位置加载成功，开始迁移到新结构")
+                    self.data_manager.save_full_config(project_name, config)
+                    logger.info(f"[DEBUG] 迁移到新结构成功")
+                
+                if not config:
+                    logger.warning(f"项目配置不存在: {project_id}")
+                    return None
             
             logger.info(f"[DEBUG] 项目加载成功: {project_id}")
             return config
@@ -343,14 +331,8 @@ class ProjectManager:
                 # 永久删除：删除项目文件
                 project_name = project_info.get('name', '')
                 if project_name:
-                    project_folder = self.folder_manager.get_project_folder(project_name)
-                    if project_folder.exists():
-                        self.folder_manager.delete_folder(project_folder, safe=False)
-                
-                # 删除配置文件
-                config_file = self.config.projects_folder / project_name / 'project_config.json'
-                if config_file.exists():
-                    config_file.unlink()
+                    # 使用新的数据管理器删除项目
+                    self.data_manager.delete_project(project_name)
                 
                 # 向后兼容：删除旧位置的配置文件
                 old_config_file = self.config.projects_folder / f"{project_id}.json"

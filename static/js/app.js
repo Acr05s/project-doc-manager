@@ -158,6 +158,60 @@ async function initApp() {
     }
 
     console.log('应用初始化完成');
+    
+    // 添加刷新按钮
+    addRefreshButton();
+}
+
+/**
+ * 添加刷新按钮
+ */
+function addRefreshButton() {
+    const currentProjectName = document.getElementById('currentProjectName');
+    if (!currentProjectName) return;
+    
+    // 检查是否已经存在刷新按钮
+    if (document.getElementById('refreshBtn')) return;
+    
+    const refreshBtn = document.createElement('button');
+    refreshBtn.id = 'refreshBtn';
+    refreshBtn.className = 'btn btn-primary';
+    refreshBtn.innerHTML = '🔄 刷新数据';
+    refreshBtn.style.marginLeft = '10px';
+    refreshBtn.style.display = 'inline-block';
+    refreshBtn.onclick = async function() {
+        if (!appState.currentProjectId) {
+            showNotification('请先选择项目', 'warning');
+            return;
+        }
+        
+        showLoading(true);
+        try {
+            // 重新加载项目配置
+            const response = await fetch(`/api/projects/${appState.currentProjectId}`);
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                appState.projectConfig = result.project;
+                showNotification('数据刷新成功', 'success');
+                
+                // 重新渲染周期和文档
+                renderCycles();
+                if (appState.currentCycle) {
+                    renderCycleDocuments(appState.currentCycle);
+                }
+            } else {
+                showNotification('刷新失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('刷新数据失败:', error);
+            showNotification('刷新数据失败', 'error');
+        } finally {
+            showLoading(false);
+        }
+    };
+    
+    currentProjectName.parentNode.insertBefore(refreshBtn, currentProjectName.nextSibling);
 }
 
 /**
@@ -983,6 +1037,8 @@ function updateCurrentProjectName() {
         if (appState.projectConfig) {
             projectNameElement.textContent = `当前项目: ${appState.projectConfig.name}`;
             projectNameElement.style.display = 'block';
+            // 确保添加刷新按钮
+            addRefreshButton();
         } else {
             projectNameElement.textContent = '';
             projectNameElement.style.display = 'none';
@@ -2798,7 +2854,8 @@ async function batchDeleteDocuments() {
  */
 async function loadCategories(cycle, docName) {
     try {
-        const response = await fetch(`/api/documents/categories?cycle=${encodeURIComponent(cycle)}&doc_name=${encodeURIComponent(docName)}`);
+        const projectId = appState.currentProjectId;
+        const response = await fetch(`/api/documents/categories?cycle=${encodeURIComponent(cycle)}&doc_name=${encodeURIComponent(docName)}&project_id=${encodeURIComponent(projectId)}`);
         const result = await response.json();
         
         if (result.status === 'success') {
@@ -2872,7 +2929,8 @@ async function createCategory(cycle, docName) {
             body: JSON.stringify({
                 cycle: cycle,
                 doc_name: docName,
-                category: categoryName
+                category: categoryName,
+                project_id: appState.currentProjectId
             })
         });
         
@@ -2902,7 +2960,8 @@ async function deleteCategory(cycle, docName, category) {
                 body: JSON.stringify({
                     cycle: cycle,
                     doc_name: docName,
-                    category: category
+                    category: category,
+                    project_id: appState.currentProjectId
                 })
             });
             

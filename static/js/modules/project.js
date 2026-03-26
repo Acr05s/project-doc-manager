@@ -47,10 +47,16 @@ export function renderProjectsList(projects) {
  */
 export async function selectProject(projectId) {
     try {
+        console.log('开始加载项目:', projectId);
         const project = await loadProject(projectId);
+        console.log('项目数据加载成功:', project);
+        console.log('项目名称:', project.name);
+        console.log('周期数量:', project.cycles ? project.cycles.length : 0);
+        console.log('文档配置:', project.documents ? Object.keys(project.documents).length : 0);
         
         appState.currentProjectId = projectId;
         appState.projectConfig = project;
+        console.log('项目配置已设置到appState');
         
         // 更新URL参数
         const url = new URL(window.location);
@@ -58,6 +64,7 @@ export async function selectProject(projectId) {
         window.history.replaceState({}, '', url);
         
         // 渲染周期
+        console.log('开始渲染周期');
         renderCycles();
         
         // 更新顶部项目名显示

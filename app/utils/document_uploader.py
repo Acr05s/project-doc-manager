@@ -95,6 +95,21 @@ class DocumentUploader:
                 except Exception as e:
                     logger.warning(f"图像分析失败: {e}")
             
+            # 提取目录信息
+            directory = ''
+            if project_name:
+                # 获取项目上传目录
+                project_uploads_dir = self.folder_manager.get_documents_folder(project_name) / 'temp'
+                try:
+                    # 计算相对路径作为目录
+                    relative_path = file_path.relative_to(project_uploads_dir)
+                    if len(relative_path.parts) > 1:
+                        # 如果文件在子目录中，取第一个目录作为directory
+                        directory = relative_path.parts[0]
+                except ValueError:
+                    # 如果文件不在项目上传目录中，使用空目录
+                    pass
+            
             # 构建返回信息
             result = {
                 'status': 'success',
@@ -104,7 +119,8 @@ class DocumentUploader:
                 'cycle': cycle,
                 'doc_name': doc_name,
                 'size': file_path.stat().st_size,
-                'upload_time': datetime.now().isoformat()
+                'upload_time': datetime.now().isoformat(),
+                'directory': directory
             }
             
             # 添加文档元数据

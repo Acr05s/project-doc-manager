@@ -10,15 +10,26 @@ import { renderCycleDocuments } from './document.js';
  * 渲染项目周期列表
  */
 export function renderCycles() {
-    if (!elements.cycleNavList) return;
+    console.log('开始渲染周期');
+    console.log('elements.cycleNavList:', elements.cycleNavList);
+    console.log('appState.projectConfig:', appState.projectConfig);
+    console.log('周期数据:', appState.projectConfig ? appState.projectConfig.cycles : '无');
+    
+    if (!elements.cycleNavList) {
+        console.error('cycleNavList 元素不存在');
+        return;
+    }
     
     if (!appState.projectConfig || !appState.projectConfig.cycles || appState.projectConfig.cycles.length === 0) {
+        console.log('无可用周期');
         elements.cycleNavList.innerHTML = '<span class="placeholder">无可用周期</span>';
         return;
     }
 
     const cycles = appState.projectConfig.cycles;
     const docsData = appState.projectConfig.documents || {};
+    console.log('周期列表:', cycles);
+    console.log('文档数据:', docsData);
 
     // 异步加载每个周期的进度
     loadCycleProgresses(cycles, docsData);

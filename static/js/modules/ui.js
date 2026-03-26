@@ -1081,6 +1081,85 @@ export function closeInputModal() {
 }
 
 /**
+ * 显示目录选择模态框
+ * @param {string} title - 弹窗标题
+ * @param {Array} existingDirectories - 已存在的目录列表
+ * @param {Function} onConfirm - 确认回调，参数为选择的目录
+ */
+export function showDirectorySelectModal(title, existingDirectories, onConfirm) {
+    const modal = document.getElementById('directorySelectModal');
+    const titleEl = document.getElementById('directorySelectModalTitle');
+    const selectEl = document.getElementById('directorySelect');
+    const inputEl = document.getElementById('newDirectoryInput');
+    const okBtn = document.getElementById('directorySelectOkBtn');
+
+    titleEl.textContent = title;
+
+    // 渲染已存在的目录选项
+    selectEl.innerHTML = '<option value="">-- 选择已存在的目录 --</option>';
+    existingDirectories.forEach(dir => {
+        const option = document.createElement('option');
+        option.value = dir;
+        option.textContent = dir;
+        selectEl.appendChild(option);
+    });
+
+    // 清空输入框
+    inputEl.value = '';
+
+    // 重绑确认按钮（cloneNode 避免重复事件）
+    const newOkBtn = okBtn.cloneNode(true);
+    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+
+    const doConfirm = () => {
+        let directory = '';
+        
+        // 优先使用下拉框选择，如果下拉框为空则使用输入框
+        if (selectEl.value) {
+            directory = selectEl.value;
+        } else if (inputEl.value.trim()) {
+            directory = inputEl.value.trim();
+        }
+        
+        closeDirectorySelectModal();
+        if (onConfirm) onConfirm(directory);
+    };
+
+    newOkBtn.addEventListener('click', doConfirm);
+
+    // 监听下拉框变化，清空输入框
+    selectEl.addEventListener('change', () => {
+        if (selectEl.value) {
+            inputEl.value = '';
+        }
+    });
+
+    // 监听输入框变化，清空下拉框
+    inputEl.addEventListener('input', () => {
+        if (inputEl.value.trim()) {
+            selectEl.value = '';
+        }
+    });
+
+    // 回车确认
+    inputEl.addEventListener('keydown', function handler(e) {
+        if (e.key === 'Enter') {
+            inputEl.removeEventListener('keydown', handler);
+            doConfirm();
+        }
+    });
+
+    modal.classList.add('show');
+}
+
+/**
+ * 关闭目录选择模态框
+ */
+export function closeDirectorySelectModal() {
+    document.getElementById('directorySelectModal').classList.remove('show');
+}
+
+/**
  * 打开模态框
  */
 export function openModal(modal) {

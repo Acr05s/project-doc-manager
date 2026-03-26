@@ -312,6 +312,7 @@ export function closeTreeEditor() {
 /**
  * 从项目配置构建树形数据
  * 兼容旧格式（required_docs 为字符串数组）和新格式（对象数组）
+ * 同时从 categories 中读取目录数据
  */
 function buildTreeData(config) {
     const tree = {
@@ -336,6 +337,7 @@ function buildTreeData(config) {
 
         const cycleDocs = documents[cycle] || {};
         const requiredDocs = cycleDocs.required_docs || [];
+        const categories = cycleDocs.categories || {};
 
         requiredDocs.forEach((doc, docIndex) => {
             // 兼容旧格式（字符串）和新格式（对象）
@@ -355,7 +357,7 @@ function buildTreeData(config) {
                 match_keywords: docData.match_keywords || []
             };
 
-            // 支持目录子节点
+            // 支持目录子节点（从 children 中读取）
             if (docData.children && Array.isArray(docData.children)) {
                 docData.children.forEach((child, childIdx) => {
                     if (child.type === 'folder') {
@@ -386,6 +388,28 @@ function buildTreeData(config) {
                     }
                 });
             }
+
+            // 同时从 categories 中读取目录（与文档管理界面共享的目录
+            const docCategories = categories[docData.name || doc] || [];
+            docCategories.forEach((categoryName, catIdx) => {
+                // 检查是否已经存在同名目录，避免重复
+                const existingFolder = docNode.children.find(child => 
+                    child.type === 'folder' && child.name === categoryName
+                );
+                if (!existingFolder) {
+                    const folderNode = {
+                        id: `folder_cat_${index}_${docIndex}_${catIdx}`,
+                        name: categoryName,
+                        type: 'folder',
+                        expanded: true,
+                        children: [],
+                        attributes: {},
+                        filename_template: '',
+                        match_keywords: []
+                    };
+                    docNode.children.push(folderNode);
+                }
+            });
 
             cycleNode.children.push(docNode);
         });
@@ -1232,6 +1256,7 @@ function setAllExpanded(node, expanded) {
 /**
  * 将树形数据转换回配置格式
  * 新格式：required_docs 为对象数组
+ * 同时将目录数据保存到 categories 中，与文档管理界面共享
  */
 function treeToConfig() {
     const config = {
@@ -1246,6 +1271,7 @@ function treeToConfig() {
             config.cycles.push(cycleNode.name);
 
             const requiredDocs = [];
+            const categories = {};
 
             if (cycleNode.children) {
                 cycleNode.children.forEach(child => {
@@ -1257,24 +1283,36 @@ function treeToConfig() {
                             filename_template: child.filename_template || '',
                             match_keywords: child.match_keywords || []
                         };
-                        // 目录子节点
+                        
+                        // 收集该文档下的所有目录名称，保存到 categories
+                        const docCategories = [];
                         if (child.children && child.children.length > 0) {
                             docObj.children = child.children
                                 .filter(c => c.type === 'folder')
-                                .map(folder => ({
-                                    type: 'folder',
-                                    name: folder.name,
-                                    attributes: folder.attributes || {},
-                                    filename_template: folder.filename_template || '',
-                                    match_keywords: folder.match_keywords || [],
-                                    files: (folder.children || [])
-                                        .filter(f => f.type === 'file')
-                                        .map(f => ({
-                                            name: f.name,
-                                            match_keywords: f.match_keywords || []
-                                        }))
-                                }));
+                                .map(folder => {
+                                    // 收集目录名称
+                                    docCategories.push(folder.name);
+                                    return {
+                                        type: 'folder',
+                                        name: folder.name,
+                                        attributes: folder.attributes || {},
+                                        filename_template: folder.filename_template || '',
+                                        match_keywords: folder.match_keywords || [],
+                                        files: (folder.children || [])
+                                            .filter(f => f.type === 'file')
+                                            .map(f => ({
+                                                name: f.name,
+                                                match_keywords: f.match_keywords || []
+                                            }))
+                                    };
+                                });
                         }
+                        
+                        // 将目录名称保存到 categories 中
+                        if (docCategories.length > 0) {
+                            categories[child.name] = docCategories;
+                        }
+                        
                         requiredDocs.push(docObj);
                     } else if (child.type === 'folder') {
                         // 周期下的顶级目录
@@ -1295,7 +1333,8 @@ function treeToConfig() {
 
             config.documents[cycleNode.name] = {
                 required_docs: requiredDocs,
-                uploaded_docs: []
+                uploaded_docs: [],
+                categories: categories
             };
         }
     });
@@ -1307,6 +1346,30 @@ function treeToConfig() {
 
 export async function saveTreeConfig() {
     const newConfig = treeToConfig();
+    
+    // 合并现有配置，保留 uploaded_docs 等重要数据
+    const existingConfig = appState.projectConfig || {};
+    if (existingConfig.documents) {
+        for (const cycle in newConfig.documents) {
+            if (existingConfig.documents[cycle]) {
+                // 保留 uploaded_docs
+                newConfig.documents[cycle].uploaded_docs = existingConfig.documents[cycle].uploaded_docs || [];
+                // 保留其他可能存在的数据（如 cycle_confirmed 等）
+                for (const key in existingConfig.documents[cycle]) {
+                    if (!newConfig.documents[cycle].hasOwnProperty(key)) {
+                        newConfig.documents[cycle][key] = existingConfig.documents[cycle][key];
+                    }
+                }
+            }
+        }
+    }
+    
+    // 保留根级别的其他配置数据
+    for (const key in existingConfig) {
+        if (!newConfig.hasOwnProperty(key)) {
+            newConfig[key] = existingConfig[key];
+        }
+    }
 
     showConfirmModal(
         '确认保存',

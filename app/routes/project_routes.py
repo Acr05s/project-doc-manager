@@ -248,9 +248,18 @@ def export_requirements():
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
         project_config = project_result['project']
+        project_name = project_config.get('name', project_id)
         
-        # 导出为JSON
-        json_content = doc_manager.export_requirements_to_json(project_config)
+        # 直接读取 config 下的 requirements.json 文件
+        from pathlib import Path
+        requirements_path = doc_manager.config.get_project_config_folder(project_name) / 'requirements.json'
+        
+        if not requirements_path.exists():
+            return jsonify({'status': 'error', 'message': 'requirements.json 文件不存在'}), 404
+        
+        # 读取文件内容
+        with open(requirements_path, 'r', encoding='utf-8') as f:
+            json_content = f.read()
         
         from flask import Response
         return Response(

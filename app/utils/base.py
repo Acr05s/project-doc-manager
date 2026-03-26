@@ -94,6 +94,89 @@ class DocumentConfig:
             print(f"Created projects directory at: {projects_folder}")
         return projects_folder
     
+    def get_project_folder(self, project_name: str) -> Path:
+        """获取指定项目的文件夹
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: 项目文件夹路径
+        """
+        folder = self.projects_base_folder / project_name
+        return ensure_dir(folder)
+    
+    def get_project_info_path(self, project_name: str) -> Path:
+        """获取项目基本信息文件路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: project_info.json 文件路径
+        """
+        return self.get_project_folder(project_name) / 'project_info.json'
+    
+    def get_project_config_folder(self, project_name: str) -> Path:
+        """获取项目配置文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: config 文件夹路径
+        """
+        folder = self.get_project_folder(project_name) / 'config'
+        return ensure_dir(folder)
+    
+    def get_project_data_folder(self, project_name: str) -> Path:
+        """获取项目数据文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: data 文件夹路径
+        """
+        folder = self.get_project_folder(project_name) / 'data'
+        return ensure_dir(folder)
+    
+    def get_project_uploads_folder(self, project_name: str) -> Path:
+        """获取项目上传文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: uploads 文件夹路径
+        """
+        folder = self.get_project_folder(project_name) / 'uploads'
+        return ensure_dir(folder)
+    
+    def get_project_versions_folder(self, project_name: str) -> Path:
+        """获取项目版本历史文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: versions 文件夹路径
+        """
+        folder = self.get_project_folder(project_name) / 'versions'
+        return ensure_dir(folder)
+    
+    def get_project_logs_folder(self, project_name: str) -> Path:
+        """获取项目日志文件夹路径
+        
+        Args:
+            project_name: 项目名称
+            
+        Returns:
+            Path: logs 文件夹路径
+        """
+        folder = self.get_project_folder(project_name) / 'logs'
+        return ensure_dir(folder)
+    
     @property
     def upload_folder(self) -> Path:
         """获取上传文件夹"""

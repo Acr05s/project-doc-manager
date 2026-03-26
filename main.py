@@ -52,8 +52,8 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     
     # 初始化路由
     from app.routes.main_routes import main_bp, init_doc_manager as init_main_manager
-    from app.routes.project_routes import project_bp, init_doc_manager as init_project_manager
-    from app.routes.document_routes import document_bp, init_doc_manager as init_document_manager
+    from app.routes.projects import project_bp, init_doc_manager as init_project_manager
+    from app.routes.documents import document_bp, init_doc_manager as init_document_manager
     from app.routes.task_routes import task_bp
     from app.routes.swagger_routes import swagger_bp
     

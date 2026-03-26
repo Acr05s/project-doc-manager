@@ -143,7 +143,7 @@ class ZipMatcher:
             
             archived_files = []
             for mf in matched_files:
-                target_path = self._archive_file(mf, project_config, project_name)
+                target_path = self._archive_file(mf, project_config, project_name, str(extract_dir))
                 if target_path:
                     archived_files.append({
                         'source': mf['path'],
@@ -374,7 +374,7 @@ class ZipMatcher:
         
         return result
     
-    def _archive_file(self, file_info: Dict, project_config: Dict, project_name: str = None) -> Optional[Path]:
+    def _archive_file(self, file_info: Dict, project_config: Dict, project_name: str = None, zip_dir: str = None) -> Optional[Path]:
         """归档文件到项目目录"""
         if not project_config:
             return None
@@ -417,44 +417,58 @@ class ZipMatcher:
             elif 'uploaded_docs' not in project_config['documents'][cycle]:
                 project_config['documents'][cycle]['uploaded_docs'] = []
             
-            project_config['documents'][cycle]['uploaded_docs'].append({
-                'doc_name': doc_name,
-                'filename': source_path.name,
-                'original_filename': source_path.name,
-                'file_path': relative_path,
-                'project_name': project_name,
-                'doc_date': '',
-                'sign_date': '',
-                'signer': '',
-                'has_seal': False,
-                'upload_time': datetime.now().isoformat(),
-                'source': 'zip',
-                'doc_id': doc_id
-            })
+            # 检查是否已存在相同的文档，避免重复
+            existing_docs = project_config['documents'][cycle]['uploaded_docs']
+            duplicate = False
+            for existing_doc in existing_docs:
+                if existing_doc.get('filename') == source_path.name and existing_doc.get('file_path') == relative_path:
+                    duplicate = True
+                    break
             
-            # 添加到documents_db（内存缓存）
-            from app.utils.document_manager import get_manager
-            doc_manager = get_manager()
-            doc_manager.documents_db[doc_id] = {
-                'cycle': cycle,
-                'doc_name': doc_name,
-                'filename': source_path.name,
-                'original_filename': source_path.name,
-                'file_path': relative_path,
-                'project_name': project_name,
-                'doc_date': '',
-                'sign_date': '',
-                'signer': '',
-                'no_signature': False,
-                'has_seal_marked': False,
-                'party_a_seal': False,
-                'party_b_seal': False,
-                'no_seal': False,
-                'other_seal': '',
-                'upload_time': datetime.now().isoformat(),
-                'source': 'zip',
-                'file_size': source_path.stat().st_size
-            }
+            # 获取ZIP目录名称
+            zip_dir_name = Path(zip_dir).name if zip_dir else '未知目录'
+            
+            if not duplicate:
+                project_config['documents'][cycle]['uploaded_docs'].append({
+                    'doc_name': doc_name,
+                    'filename': source_path.name,
+                    'original_filename': source_path.name,
+                    'file_path': relative_path,
+                    'project_name': project_name,
+                    'doc_date': '',
+                    'sign_date': '',
+                    'signer': '',
+                    'has_seal': False,
+                    'upload_time': datetime.now().isoformat(),
+                    'source': f'ZIP导入: {zip_dir_name}',
+                    'doc_id': doc_id,
+                    'archived': True  # 设置归档状态
+                })
+                
+                # 添加到documents_db（内存缓存）
+                from app.utils.document_manager import get_manager
+                doc_manager = get_manager()
+                doc_manager.documents_db[doc_id] = {
+                    'cycle': cycle,
+                    'doc_name': doc_name,
+                    'filename': source_path.name,
+                    'original_filename': source_path.name,
+                    'file_path': relative_path,
+                    'project_name': project_name,
+                    'doc_date': '',
+                    'sign_date': '',
+                    'signer': '',
+                    'no_signature': False,
+                    'has_seal_marked': False,
+                    'party_a_seal': False,
+                    'party_b_seal': False,
+                    'no_seal': False,
+                    'other_seal': '',
+                    'upload_time': datetime.now().isoformat(),
+                    'source': f'ZIP导入: {zip_dir_name}',
+                    'file_size': source_path.stat().st_size,
+                    'archived': True  # 设置归档状态
+                }
             
             return source_path
             

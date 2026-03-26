@@ -128,6 +128,33 @@
         </div>
     </div>
 
+    <!-- 目录选择模态框 -->
+    <div id="directorySelectModal" class="modal">
+        <div class="modal-content modal-md">
+            <span class="close" onclick="closeDirectorySelectModal()">&times;</span>
+            <h2 id="directorySelectModalTitle">选择目录</h2>
+            <div class="directory-select-content">
+                <div class="form-group">
+                    <label class="form-label">选择已存在的目录</label>
+                    <select id="directorySelect" class="form-control">
+                        <option value="">-- 选择已存在的目录 --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">或输入新目录</label>
+                    <input type="text" id="newDirectoryInput" class="form-control" placeholder="输入目录名称，如：合同文件/2026">
+                </div>
+                <div class="form-hint" style="color: #6c757d; font-size: 12px; margin-top: 8px;">
+                    提示：可以从下拉框选择已存在的目录，或输入新目录名称
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeDirectorySelectModal()">取消</button>
+                <button id="directorySelectOkBtn" class="btn btn-primary">确定</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 文档详情弹窗 -->
     <div id="documentModal" class="modal">
         <div class="modal-content wide" style="max-width: 1400px; width: 98%; max-height: 95vh;">

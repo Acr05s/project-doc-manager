@@ -650,6 +650,9 @@ body {
     padding: 15px;
     margin-bottom: 10px;
     transition: all 0.2s ease;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
 }
 
 .document-item:hover {
@@ -675,7 +678,54 @@ body {
 .document-item .document-actions {
     display: flex;
     gap: 8px;
-    margin-top: 10px;
+    margin-top: 0;
+    flex-shrink: 0;
+}
+
+/* 文档信息区域 */
+.document-item .document-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.document-item .document-name {
+    font-size: 14px;
+    color: var(--text-color);
+    cursor: pointer;
+    word-break: break-all;
+}
+
+.document-item .document-name:hover {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
+/* 目录和ZIP信息 */
+.document-item .document-directory,
+.document-item .document-zip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.document-item .document-directory {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.document-item .document-zip {
+    background: #fff3cd;
+    color: #856404;
+}
+
+/* 文档复选框 */
+.document-item .document-checkbox {
+    margin-top: 2px;
+    flex-shrink: 0;
 }
 
 /* 文档表单 */
@@ -800,6 +850,11 @@ body {
 /* 确认弹窗要显示在最上层 */
 #confirmModal {
     z-index: 10001;
+}
+
+/* 目录选择模态框显示在最上层 */
+#directorySelectModal {
+    z-index: 10002;
 }
 
 .modal-content {
