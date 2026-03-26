@@ -11,7 +11,7 @@ from .update import batch_update_documents, update_doc, replace_doc
 from .recognize import smart_recognize
 from .category import get_categories, create_category, delete_category
 from .files import get_directories, search_files, select_files
-from .zip import get_zip_records, add_zip_record, start_zip_match, get_zip_match_status
+from .zip import get_zip_records, add_zip_record, delete_zip_record, start_zip_match, get_zip_match_status, check_zip_chunk
 from .utils import init_doc_manager
 
 # 创建蓝图
@@ -43,8 +43,10 @@ document_bp.route('/files/search', methods=['GET'])(search_files)
 document_bp.route('/files/select', methods=['POST'])(select_files)
 document_bp.route('/zip-records', methods=['GET'])(get_zip_records)
 document_bp.route('/zip-records', methods=['POST'])(add_zip_record)
+document_bp.route('/zip-records/<zip_id>', methods=['DELETE'])(delete_zip_record)
 document_bp.route('/zip-chunk-upload', methods=['POST'])(upload_zip_chunk)
 document_bp.route('/zip-chunk-merge', methods=['POST'])(merge_zip_chunks)
+document_bp.route('/zip-check-chunk', methods=['GET'])(check_zip_chunk)
 document_bp.route('/zip-match-start', methods=['POST'])(start_zip_match)
 document_bp.route('/zip-match-status', methods=['GET'])(get_zip_match_status)
 

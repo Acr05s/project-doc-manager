@@ -225,10 +225,16 @@ class JSONFileManager:
         
         def update_func(data):
             if isinstance(data, list):
-                data = [
-                    record for record in data
-                    if record.get('id') != zip_id
-                ]
+                # 同时支持按 id 或 name/path 删除（兼容旧格式记录）
+                filtered_data = []
+                for record in data:
+                    record_id = record.get('id', '')
+                    record_name = record.get('name', '')
+                    record_path = record.get('path', '') or record.get('zip_path', '')
+                    # 不匹配 id、name 或 path 的记录保留
+                    if record_id != zip_id and record_name != zip_id and record_path != zip_id:
+                        filtered_data.append(record)
+                data = filtered_data
             return data
         
         return self.update_json(zip_uploads_file, update_func)

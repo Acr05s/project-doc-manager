@@ -30,7 +30,11 @@ class ZipMatcher:
         # 导入FolderManager以获取项目目录
         from .folder_manager import FolderManager
         from .base import DocumentConfig
-        self.folder_manager = FolderManager(DocumentConfig())
+        # 使用传入的projects_base_folder或默认值
+        folder_config = DocumentConfig()
+        if 'projects_base_folder' in config:
+            folder_config._base_dir = Path(config['projects_base_folder']).parent
+        self.folder_manager = FolderManager(folder_config)
     
     def extract_and_match(self, zip_path: str, project_config: Dict = None, 
                          progress_callback: callable = None, project_name: str = None, 
@@ -78,13 +82,6 @@ class ZipMatcher:
                 
                 extracted_files = self._extract_zip(zip_path, extract_dir)
                 logger.info(f"ZIP解压完成，共 {len(extracted_files)} 个文件")
-                
-                # 解压完成后删除源ZIP文件
-                try:
-                    zip_path.unlink()
-                    logger.info(f"已删除源ZIP文件: {zip_path}")
-                except Exception as e:
-                    logger.warning(f"删除源ZIP文件失败: {e}")
             else:
                 # 直接处理目录
                 if progress_callback:
@@ -97,7 +94,9 @@ class ZipMatcher:
             if progress_callback:
                 progress_callback(30, '正在扫描文件...')
             
+            logger.info(f"开始扫描目录: {extract_dir}")
             all_files = self._scan_files(extract_dir)
+            logger.info(f"扫描完成，共 {len(all_files)} 个文件")
             
             current_step = 40
             
@@ -113,6 +112,7 @@ class ZipMatcher:
             if progress_callback:
                 progress_callback(50, '正在匹配文档...')
             
+            logger.info(f"开始匹配文件，共 {len(all_files)} 个")
             matched_files = []
             unmatched_files = []
             
@@ -123,7 +123,12 @@ class ZipMatcher:
                     progress_callback(progress, f'正在匹配文档... ({i+1}/{len(all_files)})')
                 
                 # 尝试匹配文档类型
-                match_result = self._match_file(file_info, doc_requirements, skip_archived, project_config)
+                try:
+                    match_result = self._match_file(file_info, doc_requirements, skip_archived, project_config)
+                except Exception as e:
+                    logger.warning(f"匹配文件失败 {file_info['name']}: {e}")
+                    unmatched_files.append(file_info)
+                    continue
                 
                 if match_result['matched']:
                     matched_files.append({
@@ -164,6 +169,8 @@ class ZipMatcher:
             if project_config:
                 project_config['matching_result'] = matching_result
             
+            logger.info(f"匹配完成，成功 {len(matched_files)} 个，失败 {len(unmatched_files)} 个")
+            
             return {
                 'status': 'success',
                 'message': f'匹配完成',
@@ -179,22 +186,55 @@ class ZipMatcher:
             
         except Exception as e:
             logger.error(f"解压匹配失败: {e}")
+            import traceback
+            traceback.print_exc()
             return {'status': 'error', 'message': str(e)}
     
     def _extract_zip(self, zip_path: Path, extract_dir: Path) -> List[str]:
-        """解压ZIP文件"""
+        """解压ZIP文件，处理中文编码"""
         extracted = []
         
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            for member in zf.namelist():
+            # 尝试检测编码并设置
+            for encoding in ['gbk', 'utf-8', 'cp936', 'gb2312']:
+                try:
+                    # 测试编码是否正确
+                    for info in zf.infolist():
+                        info.filename.encode(encoding)
+                    # 如果成功，使用这个编码
+                    zf.encoding = encoding
+                    break
+                except:
+                    continue
+            
+            for info in zf.infolist():
+                member = info.filename
+                
                 # 跳过目录和隐藏文件
                 if member.endswith('/') or '/' in member and member.split('/')[0].startswith('.'):
                     continue
                 if member.startswith('.'):
                     continue
-                    
+                
+                # 尝试解码文件名（处理乱码）
                 try:
-                    zf.extract(member, extract_dir)
+                    # 如果是 bytes，尝试解码
+                    if isinstance(member, bytes):
+                        for enc in ['gbk', 'utf-8', 'cp936']:
+                            try:
+                                member = member.decode(enc)
+                                break
+                            except:
+                                continue
+                    # 重新编码为UTF-8（确保文件名正确）
+                    member = member.encode('cp437').decode('gbk', errors='ignore')
+                except:
+                    pass
+                
+                try:
+                    # 更新文件名
+                    info.filename = member
+                    zf.extract(info, extract_dir)
                     extracted.append(member)
                 except Exception as e:
                     logger.warning(f"解压文件失败 {member}: {e}")

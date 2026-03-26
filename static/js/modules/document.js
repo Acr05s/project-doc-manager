@@ -187,22 +187,35 @@ export async function handleEditDocument(e) {
         return;
     }
     
+    // 字段名映射表：将表单ID映射到后端API字段名
+    const fieldNameMap = {
+        'editDocDate': 'doc_date',
+        'editSignDate': 'sign_date',
+        'editSigner': 'signer',
+        'editPartyASigner': 'party_a_signer',  // 甲方签字人
+        'editPartyBSigner': 'party_b_signer',  // 乙方签字人
+        'editNoSignature': 'no_signature',
+        'editHasSeal': 'has_seal_marked',  // 注意：后端使用 has_seal_marked
+        'editPartyASeal': 'party_a_seal',
+        'editPartyBSeal': 'party_b_seal',
+        'editNoSeal': 'no_seal',
+        'editOtherSeal': 'other_seal'
+    };
+    
     // 动态收集表单数据
     const docData = {};
     
     // 收集文本、日期和文本域输入
     form.querySelectorAll('input[type="text"], input[type="date"], textarea').forEach(input => {
-        if (input.id.startsWith('edit')) {
-            const fieldName = input.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
-            docData[fieldName] = input.value;
+        if (input.id.startsWith('edit') && fieldNameMap[input.id]) {
+            docData[fieldNameMap[input.id]] = input.value;
         }
     });
     
     // 收集复选框
     form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-        if (checkbox.id.startsWith('edit')) {
-            const fieldName = checkbox.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
-            docData[fieldName] = checkbox.checked;
+        if (checkbox.id.startsWith('edit') && fieldNameMap[checkbox.id]) {
+            docData[fieldNameMap[checkbox.id]] = checkbox.checked;
         }
     });
     
@@ -462,12 +475,17 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
                                         </span>
                                     ` : '';
                                     
-                                    return `<div class="doc-file-row" style="padding-left: 25px;">
+                                    // ZIP包来源信息
+                                    const zipSourceInfo = d.zip_name || d.zip_file ? 
+                                        `<span class="doc-zip-source" title="来源: ${d.zip_name || d.zip_file}" style="background: #e3f2fd; color: #1976d2; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px;">📦 ${d.zip_name || d.zip_file}</span>` : '';
+                                    
+                                    return `<div class="doc-file-row" style="padding-left: 25px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
                                         <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
                                               title="点击预览文件" 
                                               style="cursor: pointer; text-decoration: underline;">
                                             ${d.original_filename || d.filename}
                                         </span>
+                                        ${zipSourceInfo}
                                         ${attrParts.length > 0 ? `<span class="doc-attrs">${attrParts.join(' ')}</span>` : ''}
                                         ${missingHtml}
                                     </div>`;
@@ -995,7 +1013,41 @@ function parseRequirementAttributes(requirement) {
     }
     
     // 解析签字人
-    if (requirement.includes('签字') || requirement.includes('签名')) {
+    // 分别检查甲方签字、乙方签字和通用签字
+    const hasPartyASign = requirement.includes('甲方签字');
+    const hasPartyBSign = requirement.includes('乙方签字');
+    const hasGeneralSign = requirement.includes('签字') || requirement.includes('签名');
+    
+    if (hasPartyASign || hasPartyBSign) {
+        // 有明确的甲方或乙方签字要求
+        if (hasPartyASign) {
+            attributes.push({
+                type: 'text',
+                id: 'partyASigner',
+                name: 'party_a_signer',
+                label: '甲方签字人',
+                placeholder: '输入甲方签字人名称'
+            });
+        }
+        if (hasPartyBSign) {
+            attributes.push({
+                type: 'text',
+                id: 'partyBSigner',
+                name: 'party_b_signer',
+                label: '乙方签字人',
+                placeholder: '输入乙方签字人名称'
+            });
+        }
+        // 添加"不涉及签字"选项
+        attributes.push({
+            type: 'checkbox',
+            id: 'noSignature',
+            name: 'no_signature',
+            label: '不涉及签字',
+            inline: true
+        });
+    } else if (hasGeneralSign) {
+        // 只有通用的签字要求
         attributes.push({
             type: 'text',
             id: 'signer',
@@ -1638,10 +1690,104 @@ function generateDynamicEditForm(doc, cycle, docName) {
 }
 
 /**
+ * 检查文档是否满足附加要求
+ * @param {Object} doc - 已上传的文档对象
+ * @param {string} requirement - 文档要求字符串
+ * @returns {Array} - 缺失的要求列表
+ */
+function checkMissingRequirements(doc, requirement) {
+    const missingRequirements = [];
+    
+    if (!requirement) return missingRequirements;
+    
+    // 检查签字要求
+    if (requirement.includes('乙方签字') && !doc.signer && !doc.no_signature) {
+        missingRequirements.push('乙方签字');
+    }
+    if (requirement.includes('甲方签字') && !doc.signer && !doc.no_signature) {
+        missingRequirements.push('甲方签字');
+    }
+    if (requirement.includes('签字') && !doc.signer && !doc.no_signature) {
+        missingRequirements.push('签字');
+    }
+    
+    // 检查盖章要求
+    if (requirement.includes('乙方盖章') && !doc.party_b_seal && !doc.no_seal) {
+        missingRequirements.push('乙方盖章');
+    }
+    if (requirement.includes('甲方盖章') && !doc.party_a_seal && !doc.no_seal) {
+        missingRequirements.push('甲方盖章');
+    }
+    if (requirement.includes('盖章') && !doc.has_seal_marked && !doc.has_seal && !doc.party_a_seal && !doc.party_b_seal && !doc.no_seal) {
+        missingRequirements.push('盖章');
+    }
+    
+    // 检查日期要求
+    if (requirement.includes('文档日期') && !doc.doc_date) {
+        missingRequirements.push('文档日期');
+    }
+    if (requirement.includes('签字日期') && !doc.sign_date) {
+        missingRequirements.push('签字日期');
+    }
+    
+    return missingRequirements;
+}
+
+/**
  * 归档文档
  */
 export async function archiveDocument(cycle, docName) {
     try {
+        // 获取当前周期的文档配置
+        const docsInfo = appState.projectConfig.documents?.[cycle];
+        if (!docsInfo) {
+            showNotification('文档配置不存在', 'error');
+            return;
+        }
+        
+        // 查找当前文档类型的要求
+        const docConfig = (docsInfo.required_docs || []).find(d => 
+            (typeof d === 'object' ? d.name : d) === docName
+        );
+        const requirement = docConfig?.requirement || '';
+        
+        // 获取已上传的该类型文档列表
+        const uploadedDocs = await getCycleDocuments(cycle);
+        const docTypeFiles = uploadedDocs.filter(d => d.doc_name === docName);
+        
+        // 检查是否有文档不满足要求
+        const unmetDocs = [];
+        for (const doc of docTypeFiles) {
+            const missing = checkMissingRequirements(doc, requirement);
+            if (missing.length > 0) {
+                unmetDocs.push({
+                    filename: doc.original_filename || doc.filename,
+                    missing: missing
+                });
+            }
+        }
+        
+        // 如果有文档不满足要求，提示用户确认
+        if (unmetDocs.length > 0) {
+            const unmetList = unmetDocs.map(d => 
+                `• ${d.filename}：缺少 ${d.missing.join('、')}`
+            ).join('\n');
+            
+            const confirmed = await new Promise((resolve) => {
+                showConfirmModal(
+                    '确认归档',
+                    `以下文档未满足附加要求：<br><br>${unmetList.replace(/\n/g, '<br>')}<br><br>是否确认归档？`,
+                    () => resolve(true),
+                    () => resolve(false),
+                    { allowHtml: true }
+                );
+            });
+            
+            if (!confirmed) {
+                return; // 用户取消归档
+            }
+        }
+        
         // 标记文档为已归档
         if (!appState.projectConfig.documents_archived) {
             appState.projectConfig.documents_archived = {};

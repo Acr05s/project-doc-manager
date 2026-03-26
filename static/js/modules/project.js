@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -72,7 +72,32 @@ export async function selectProject(projectId) {
         if (nameEl) {
             nameEl.textContent = project.name || '未命名项目';
             nameEl.style.display = '';
-            nameEl.title = project.name || '';
+            nameEl.style.cursor = 'pointer';
+            nameEl.title = '点击刷新项目数据';
+            nameEl.onclick = async () => {
+                if (appState.currentProjectId) {
+                    showNotification('正在刷新项目数据...', 'info');
+                    try {
+                        const response = await fetch(`/api/projects/${appState.currentProjectId}`);
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            appState.projectConfig = result.project;
+                            // 重新渲染周期和文档
+                            renderCycles();
+                            if (appState.currentCycle) {
+                                const { renderCycleDocuments } = await import('./document.js');
+                                await renderCycleDocuments(appState.currentCycle);
+                            }
+                            showNotification('项目数据已刷新', 'success');
+                        } else {
+                            showNotification('刷新失败: ' + result.message, 'error');
+                        }
+                    } catch (error) {
+                        console.error('刷新项目数据失败:', error);
+                        showNotification('刷新失败', 'error');
+                    }
+                }
+            };
         }
         
         showProjectButtons();
@@ -538,7 +563,7 @@ export function updateClearRequirementsBtnState() {
 }
 
 /**
- * 处理打包项目
+ * 处理打包项目（异步任务方式）
  */
 export async function handlePackageProject() {
     if (!appState.currentProjectId) {
@@ -546,21 +571,157 @@ export async function handlePackageProject() {
         return;
     }
     
-    showLoading(true);
+    // 获取当前项目配置
+    const projectConfig = appState.projectConfig;
+    if (!projectConfig) {
+        showNotification('项目配置未加载', 'error');
+        return;
+    }
+    
+    // 显示进度模态框
+    const modal = document.getElementById('packageProgressModal');
+    const progressBar = document.getElementById('packageProgressBar');
+    const progressMessage = document.getElementById('packageProgressMessage');
+    const cancelBtn = document.getElementById('cancelPackageBtn');
+    const downloadBtn = document.getElementById('downloadPackageBtn');
+    const closeBtn = document.getElementById('closePackageModalBtn');
+    
+    if (modal) {
+        modal.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressMessage.textContent = '正在启动打包任务...';
+        cancelBtn.style.display = 'inline-block';
+        downloadBtn.style.display = 'none';
+        closeBtn.style.display = 'none';
+    }
+    
+    let taskId = null;
+    let pollInterval = null;
+    
     try {
-        const result = await packageProject(appState.currentProjectId);
+        // 启动打包任务
+        const result = await packageProject(appState.currentProjectId, projectConfig);
         
-        if (result.status === 'success') {
-            showNotification('项目打包成功', 'success');
-            // 可以在这里添加下载逻辑
-        } else {
-            showNotification('打包失败: ' + result.message, 'error');
+        if (result.status !== 'success') {
+            throw new Error(result.message || '启动打包任务失败');
         }
+        
+        taskId = result.task_id;
+        
+        // 轮询任务状态
+        pollInterval = setInterval(async () => {
+            try {
+                const statusResult = await getTaskStatus(taskId);
+                
+                if (statusResult.status !== 'success') {
+                    clearInterval(pollInterval);
+                    progressMessage.textContent = '获取任务状态失败: ' + statusResult.message;
+                    cancelBtn.style.display = 'none';
+                    closeBtn.style.display = 'inline-block';
+                    return;
+                }
+                
+                const task = statusResult.task;
+                
+                // 更新进度
+                if (task.progress !== undefined) {
+                    progressBar.style.width = task.progress + '%';
+                }
+                if (task.message) {
+                    progressMessage.textContent = task.message;
+                }
+                
+                // 任务完成
+                if (task.status === 'completed') {
+                    clearInterval(pollInterval);
+                    progressBar.style.width = '100%';
+                    progressMessage.textContent = '打包完成，正在下载...';
+                    cancelBtn.style.display = 'none';
+                    downloadBtn.style.display = 'inline-block';
+                    closeBtn.style.display = 'inline-block';
+                    
+                    // 自动触发下载
+                    const downloadUrl = getPackageDownloadUrl(appState.currentProjectId, taskId);
+                    console.log('[打包] 自动下载URL:', downloadUrl);
+                    
+                    // 使用 iframe 方式下载（避免弹窗拦截）
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = downloadUrl;
+                    document.body.appendChild(iframe);
+                    
+                    // 3秒后移除 iframe
+                    setTimeout(() => {
+                        if (iframe.parentNode) {
+                            iframe.parentNode.removeChild(iframe);
+                        }
+                    }, 3000);
+                    
+                    // 同时设置下载按钮（备用）
+                    downloadBtn.onclick = () => {
+                        window.location.href = downloadUrl;
+                    };
+                    
+                    showNotification('项目打包成功，正在下载...', 'success');
+                }
+                
+                // 任务失败
+                if (task.status === 'error') {
+                    clearInterval(pollInterval);
+                    progressMessage.textContent = '打包失败: ' + task.message;
+                    cancelBtn.style.display = 'none';
+                    closeBtn.style.display = 'inline-block';
+                    showNotification('打包失败: ' + task.message, 'error');
+                }
+                
+                // 任务取消
+                if (task.status === 'cancelled') {
+                    clearInterval(pollInterval);
+                    progressMessage.textContent = '任务已取消';
+                    cancelBtn.style.display = 'none';
+                    closeBtn.style.display = 'inline-block';
+                }
+                
+            } catch (error) {
+                clearInterval(pollInterval);
+                console.error('轮询任务状态失败:', error);
+                progressMessage.textContent = '获取进度失败: ' + error.message;
+                cancelBtn.style.display = 'none';
+                closeBtn.style.display = 'inline-block';
+            }
+        }, 500); // 每500ms轮询一次
+        
+        // 取消按钮事件
+        if (cancelBtn) {
+            cancelBtn.onclick = async () => {
+                if (taskId) {
+                    try {
+                        await cancelTask(taskId);
+                        progressMessage.textContent = '正在取消任务...';
+                    } catch (error) {
+                        console.error('取消任务失败:', error);
+                    }
+                }
+            };
+        }
+        
     } catch (error) {
+        if (pollInterval) clearInterval(pollInterval);
         console.error('打包项目失败:', error);
+        progressMessage.textContent = '打包失败: ' + error.message;
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        if (closeBtn) closeBtn.style.display = 'inline-block';
         showNotification('打包失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
+    }
+}
+
+/**
+ * 关闭打包进度模态框
+ */
+export function closePackageProgressModal() {
+    const modal = document.getElementById('packageProgressModal');
+    if (modal) {
+        modal.style.display = 'none';
     }
 }
 
@@ -570,9 +731,16 @@ export async function handlePackageProject() {
 export async function handleImportPackage(e) {
     e.preventDefault();
     
-    const file = document.getElementById('importPackageFile').files[0];
-    const conflictAction = document.querySelector('input[name="conflictAction"]:checked').value;
-    const customName = document.getElementById('importPackageName').value;
+    const fileInput = document.getElementById('importPackageFile');
+    if (!fileInput) {
+        showNotification('找不到文件输入框', 'error');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    const conflictActionRadio = document.querySelector('input[name="conflictAction"]:checked');
+    const conflictAction = conflictActionRadio ? conflictActionRadio.value : 'rename';
+    const customName = document.getElementById('importPackageName')?.value || '';
     
     if (!file) {
         showNotification('请选择文件', 'error');
@@ -624,7 +792,10 @@ export async function handleConfirmAcceptance() {
         async () => {
             showLoading(true);
             try {
-                const result = await confirmAcceptance(appState.currentProjectId);
+                const result = await confirmAcceptance(appState.currentProjectId, {
+                    accepted_by: '用户',
+                    accepted_time: new Date().toISOString()
+                });
                 
                 if (result.status === 'success') {
                     showNotification('验收确认成功', 'success');
@@ -725,10 +896,6 @@ export async function loadZipRecords() {
             // 格式化上传时间
             const uploadTime = new Date(record.upload_time).toLocaleString('zh-CN');
             
-            // 对路径中的反斜杠进行转义，避免JavaScript语法错误
-            const escapedPath = record.path.replace(/\\/g, '\\\\');
-            const escapedName = record.name.replace(/'/g, "\\'");
-            
             const item = document.createElement('div');
             item.className = 'zip-record-item';
             item.innerHTML = `
@@ -741,15 +908,28 @@ export async function loadZipRecords() {
                     </div>
                 </div>
                 <div class="zip-record-actions">
-                    <button class="btn btn-primary" onclick="handleRematchFromZip('${record.id}', '${escapedName}', '${escapedPath}')">重新匹配</button>
-                    <button class="btn btn-danger" onclick="handleDeleteZipRecord('${record.id}', '${escapedName}')">删除记录</button>
+                    <button class="btn btn-primary rematch-btn">重新匹配</button>
+                    <button class="btn btn-danger delete-btn">删除记录</button>
                 </div>
             `;
+            
+            // 直接绑定事件（避免内联 onclick 在 ES Module 中失效）
+            const rematchBtn = item.querySelector('.rematch-btn');
+            const deleteBtn = item.querySelector('.delete-btn');
+            
+            rematchBtn.addEventListener('click', () => {
+                handleRematchFromZip(record.id, record.name, record.path);
+            });
+            
+            deleteBtn.addEventListener('click', () => {
+                handleDeleteZipRecord(record.id, record.name);
+            });
+            
             container.appendChild(item);
         });
     } catch (error) {
         console.error('加载ZIP记录失败:', error);
-        container.innerHTML = '<div class="empty-tip">加载失败</div>';
+        container.innerHTML = `<div class="empty-tip">加载失败: ${error.message || '未知错误'}</div>`;
     }
 }
 

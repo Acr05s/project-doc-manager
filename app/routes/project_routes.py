@@ -381,6 +381,85 @@ def package_project(project_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@project_bp.route('/<project_id>/package-full', methods=['POST'])
+def package_full_project(project_id):
+    """完整打包项目目录（先保存再打包）"""
+    try:
+        import shutil
+        import tempfile
+        from flask import make_response
+        
+        # 1. 先获取项目配置并保存，确保数据已持久化
+        project = doc_manager.load_project(project_id)
+        if not project or project.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+        
+        project_config = project.get('project', {})
+        project_name = project_config.get('name', 'project')
+        
+        # 保存项目数据
+        save_result = doc_manager.save_project(project_config)
+        if save_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '保存项目数据失败: ' + save_result.get('message', '')}), 500
+        
+        # 2. 查找项目目录
+        project_dir = None
+        projects_base = doc_manager.config.projects_base_folder
+        
+        # 尝试多种方式查找项目目录
+        possible_paths = [
+            projects_base / project_id,
+            projects_base / project_name,
+            projects_base / f"{project_name}_{project_id}",
+        ]
+        
+        for path in possible_paths:
+            if path.exists() and path.is_dir():
+                project_dir = path
+                break
+        
+        # 如果没找到，使用项目ID作为目录名
+        if not project_dir:
+            project_dir = projects_base / project_id
+            if not project_dir.exists():
+                return jsonify({'status': 'error', 'message': '项目目录不存在'}), 404
+        
+        # 3. 创建临时ZIP文件
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip.close()
+        
+        # 4. 打包整个项目目录
+        shutil.make_archive(
+            temp_zip.name.replace('.zip', ''),
+            'zip',
+            root_dir=project_dir.parent,
+            base_dir=project_dir.name
+        )
+        
+        # 5. 读取ZIP文件并返回
+        with open(temp_zip.name, 'rb') as f:
+            zip_data = f.read()
+        
+        # 清理临时文件
+        import os
+        os.unlink(temp_zip.name)
+        
+        # 记录操作日志
+        doc_manager.log_operation('打包项目', f'完整打包项目"{project_name}"', project=project_id)
+        
+        # 返回ZIP文件
+        response = make_response(zip_data)
+        response.headers['Content-Type'] = 'application/zip'
+        safe_name = ''.join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip()
+        response.headers['Content-Disposition'] = f'attachment; filename="{safe_name}_full_backup.zip"'
+        
+        return response
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @project_bp.route('/package/import', methods=['POST'])
 def import_package():
     """从ZIP包导入项目"""
@@ -551,6 +630,147 @@ def import_package():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@project_bp.route('/package/import-full', methods=['POST'])
+def import_full_package():
+    """从完整项目目录ZIP导入项目"""
+    try:
+        from flask import request
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'status': 'error', 'message': '未选择文件'}), 400
+
+        import uuid
+        import shutil
+        from datetime import datetime
+        from pathlib import Path
+        import zipfile
+        import json
+
+        # 保存上传的ZIP到临时文件
+        temp_zip_path = doc_manager.upload_folder / 'temp' / f'{uuid.uuid4()}.zip'
+        temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
+        file.save(str(temp_zip_path))
+
+        # 解压ZIP到临时目录
+        extract_dir = doc_manager.upload_folder / 'temp' / f'import_full_{uuid.uuid4()}'
+        extract_dir.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(temp_zip_path, 'r') as zip_file:
+            zip_file.extractall(extract_dir)
+
+        # 查找解压后的项目目录（应该是解压目录下的一个子目录）
+        project_dirs = [d for d in extract_dir.iterdir() if d.is_dir()]
+        if not project_dirs:
+            # 可能是直接打包的项目目录内容，使用解压目录本身
+            project_dir = extract_dir
+        else:
+            project_dir = project_dirs[0]
+
+        # 查找项目配置文件
+        config_path = project_dir / 'project_config.json'
+        if not config_path.exists():
+            # 尝试在其他位置查找
+            config_files = list(project_dir.rglob('project_config.json'))
+            if config_files:
+                config_path = config_files[0]
+                project_dir = config_path.parent
+            else:
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                temp_zip_path.unlink(missing_ok=True)
+                return jsonify({'status': 'error', 'message': 'ZIP包中未找到项目配置文件'}), 400
+
+        # 读取项目配置
+        with open(config_path, 'r', encoding='utf-8') as f:
+            project_config = json.load(f)
+
+        # 获取冲突处理选项
+        conflict_action = request.form.get('conflict_action', 'rename')
+        custom_name = request.form.get('name', '').strip()
+
+        # 确定项目名称
+        original_name = project_config.get('name', '未命名项目')
+        final_name = custom_name or original_name
+
+        # 检查是否有同名项目
+        existing_projects = doc_manager.get_projects_list()
+        existing_project = None
+        for proj in existing_projects:
+            if proj.get('name') == final_name:
+                existing_project = proj
+                break
+
+        # 处理冲突
+        if existing_project and conflict_action == 'rename':
+            final_name = f"{original_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        elif existing_project and conflict_action == 'overwrite':
+            # 删除旧项目
+            doc_manager.delete_project(existing_project.get('id'))
+        elif existing_project and conflict_action == 'manual':
+            return jsonify({
+                'status': 'conflict',
+                'message': f'存在同名项目 "{final_name}"',
+                'existing_name': final_name,
+                'original_name': original_name
+            }), 200
+
+        # 生成新的项目ID
+        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # 更新项目配置
+        project_config['id'] = new_project_id
+        project_config['name'] = final_name
+        project_config['created_time'] = datetime.now().isoformat()
+        project_config['updated_time'] = datetime.now().isoformat()
+
+        # 创建项目目录
+        projects_base = doc_manager.config.projects_base_folder
+        new_project_dir = projects_base / new_project_id
+        new_project_dir.mkdir(parents=True, exist_ok=True)
+
+        # 复制所有文件到新项目目录
+        for item in project_dir.iterdir():
+            if item.is_file():
+                shutil.copy2(item, new_project_dir)
+            elif item.is_dir():
+                shutil.copytree(item, new_project_dir / item.name, dirs_exist_ok=True)
+
+        # 保存项目配置
+        doc_manager._save_project(new_project_id, project_config)
+
+        # 更新文档数据库中的文件路径
+        if 'documents' in project_config:
+            for cycle, cycle_info in project_config['documents'].items():
+                if 'uploaded_docs' in cycle_info:
+                    for doc in cycle_info['uploaded_docs']:
+                        if 'file_path' in doc:
+                            old_path = Path(doc['file_path'])
+                            # 更新路径指向新的项目目录
+                            new_path = new_project_dir / 'documents' / cycle / doc.get('doc_name', '') / old_path.name
+                            if new_path.exists():
+                                doc['file_path'] = str(new_path)
+
+        # 重新保存更新后的配置
+        doc_manager._save_project(new_project_id, project_config)
+
+        # 清理临时文件
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        temp_zip_path.unlink(missing_ok=True)
+
+        # 记录操作日志
+        doc_manager.log_operation('导入项目', f'导入完整项目"{final_name}"', project=new_project_id)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'项目"{final_name}"导入成功',
+            'project_id': new_project_id,
+            'project_name': final_name
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @project_bp.route('/<project_id>/confirm-acceptance', methods=['POST'])
 def confirm_cycle_acceptance(project_id):
     """确认周期验收"""
@@ -608,68 +828,387 @@ def confirm_cycle_acceptance(project_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@project_bp.route('/<project_id>/download-package', methods=['GET'])
-def download_project_package(project_id):
-    """打包下载项目所有文档（优先使用新版导出）"""
+
+@project_bp.route('/<project_id>/verify-acceptance', methods=['GET'])
+def verify_acceptance(project_id):
+    """验证项目是否满足验收条件"""
     try:
-        import io
-        import zipfile
-        from pathlib import Path
-        from flask import send_file, make_response
-        from datetime import datetime
-
-        project_name = project_id  # 新版使用project_id作为项目名称
-
-        # 优先尝试新版导出
-        result = doc_manager.export_documents_package(project_name)
-        if result['status'] == 'success':
-            # 使用新版导出结果
-            with open(result['package_path'], 'rb') as f:
-                file_data = f.read()
-            
-            response = make_response(file_data)
-            response.headers['Content-Type'] = 'application/zip'
-            response.headers['Content-Disposition'] = f'attachment; filename="{result["download_name"]}"'
-            return response
-
-        # 回退到旧版导出
         project_result = doc_manager.load_project(project_id)
         if project_result['status'] != 'success':
             return jsonify(project_result), 404
 
         project_config = project_result['project']
+        
+        # 验证结果
+        verification = {
+            'can_accept': True,
+            'issues': [],
+            'warnings': [],
+            'statistics': {
+                'total_cycles': 0,
+                'completed_cycles': 0,
+                'total_docs': 0,
+                'uploaded_docs': 0,
+                'archived_docs': 0
+            }
+        }
+        
+        # 检查所有周期
+        for cycle, doc_data in project_config.get('documents', {}).items():
+            verification['statistics']['total_cycles'] += 1
+            
+            # 检查周期是否有文档需求
+            required_docs = doc_data.get('required_docs', [])
+            uploaded_docs = doc_data.get('uploaded_docs', [])
+            archived = doc_data.get('archived', {})
+            
+            # 检查必需文档是否都有文件
+            for req_doc in required_docs:
+                doc_name = req_doc.get('name') if isinstance(req_doc, dict) else req_doc
+                requirement = req_doc.get('requirement', '') if isinstance(req_doc, dict) else ''
+                
+                verification['statistics']['total_docs'] += 1
+                
+                # 查找该文档类型的上传文件
+                type_files = [d for d in uploaded_docs if d.get('doc_name') == doc_name]
+                
+                if type_files:
+                    verification['statistics']['uploaded_docs'] += 1
+                    
+                    # 检查是否已归档
+                    if archived.get(doc_name):
+                        verification['statistics']['archived_docs'] += 1
+                    else:
+                        verification['warnings'].append({
+                            'type': 'not_archived',
+                            'cycle': cycle,
+                            'doc_name': doc_name,
+                            'message': f'周期"{cycle}"的"{doc_name}"未归档'
+                        })
+                    
+                    # 检查附加要求是否满足
+                    for doc_file in type_files:
+                        missing = []
+                        
+                        if requirement:
+                            # 检查签字
+                            if '甲方签字' in requirement and not doc_file.get('party_a_signer') and not doc_file.get('no_signature'):
+                                missing.append('甲方签字')
+                            if '乙方签字' in requirement and not doc_file.get('party_b_signer') and not doc_file.get('no_signature'):
+                                missing.append('乙方签字')
+                            if '签字' in requirement and not doc_file.get('signer') and not doc_file.get('no_signature') and '甲方签字' not in requirement and '乙方签字' not in requirement:
+                                missing.append('签字')
+                            
+                            # 检查盖章
+                            if '甲方盖章' in requirement and not doc_file.get('party_a_seal') and not doc_file.get('no_seal'):
+                                missing.append('甲方盖章')
+                            if '乙方盖章' in requirement and not doc_file.get('party_b_seal') and not doc_file.get('no_seal'):
+                                missing.append('乙方盖章')
+                            if '盖章' in requirement and not doc_file.get('has_seal_marked') and not doc_file.get('has_seal') and not doc_file.get('party_a_seal') and not doc_file.get('party_b_seal') and not doc_file.get('no_seal'):
+                                missing.append('盖章')
+                            
+                            # 检查日期
+                            if '文档日期' in requirement and not doc_file.get('doc_date'):
+                                missing.append('文档日期')
+                            if '签字日期' in requirement and not doc_file.get('sign_date'):
+                                missing.append('签字日期')
+                        
+                        if missing:
+                            verification['issues'].append({
+                                'type': 'missing_requirement',
+                                'cycle': cycle,
+                                'doc_name': doc_name,
+                                'filename': doc_file.get('filename'),
+                                'missing': missing,
+                                'message': f'周期"{cycle}"的"{doc_name}"缺少：{"、".join(missing)}'
+                            })
+                            verification['can_accept'] = False
+                else:
+                    # 必需文档没有上传文件
+                    verification['issues'].append({
+                        'type': 'missing_file',
+                        'cycle': cycle,
+                        'doc_name': doc_name,
+                        'message': f'周期"{cycle}"的"{doc_name}"缺少文件'
+                    })
+                    verification['can_accept'] = False
+            
+            # 检查周期是否完成（所有必需文档都有文件且已归档）
+            cycle_completed = True
+            for req_doc in required_docs:
+                doc_name = req_doc.get('name') if isinstance(req_doc, dict) else req_doc
+                type_files = [d for d in uploaded_docs if d.get('doc_name') == doc_name]
+                if not type_files or not archived.get(doc_name):
+                    cycle_completed = False
+                    break
+            
+            if cycle_completed:
+                verification['statistics']['completed_cycles'] += 1
+        
+        # 如果没有周期，也提示问题
+        if verification['statistics']['total_cycles'] == 0:
+            verification['issues'].append({
+                'type': 'no_cycles',
+                'message': '项目没有配置任何周期'
+            })
+            verification['can_accept'] = False
+        
+        return jsonify({
+            'status': 'success',
+            'verification': verification
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def generate_sequential_filename(original_name, seq_num):
+    """
+    生成顺序编号的文件名
+    规则：去掉源文件名第一个中文字符前的所有字符，加上序号
+    例："DT-DJ-2023-03-002-V1.0 中国大唐集团..." -> "001_中国大唐集团..."
+    """
+    import re
+    from pathlib import Path
+    
+    # 查找第一个中文字符位置
+    match = re.search(r'[\u4e00-\u9fff]', original_name)
+    if match:
+        chinese_start = match.start()
+        name_without_prefix = original_name[chinese_start:]
+    else:
+        # 如果没有中文字符，使用原文件名（去掉扩展名）
+        name_without_prefix = Path(original_name).stem
+    
+    # 清理文件名中的非法字符
+    name_without_prefix = re.sub(r'[<>:"/\\|?*]', '_', name_without_prefix)
+    
+    # 保留原扩展名
+    ext = Path(original_name).suffix
+    
+    return f"{seq_num:03d}_{name_without_prefix}{ext}"
+
+
+def convert_to_pdf(file_path, output_path):
+    """
+    将文件转换为PDF格式
+    支持：Word(doc/docx)、Excel(xls/xlsx)、PowerPoint(ppt/pptx)、图片等
+    """
+    try:
+        from pathlib import Path
+        import subprocess
+        import os
+        
+        file_path = Path(file_path)
+        output_path = Path(output_path)
+        ext = file_path.suffix.lower()
+        
+        # 如果已经是PDF，直接复制
+        if ext == '.pdf':
+            import shutil
+            shutil.copy2(file_path, output_path)
+            return True
+        
+        # 尝试使用LibreOffice转换
+        try:
+            cmd = [
+                'soffice',
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', str(output_path.parent),
+                str(file_path)
+            ]
+            subprocess.run(cmd, check=True, timeout=60)
+            
+            # LibreOffice生成的文件名可能与预期不同
+            generated_pdf = output_path.parent / (file_path.stem + '.pdf')
+            if generated_pdf.exists():
+                if generated_pdf != output_path:
+                    generated_pdf.rename(output_path)
+                return True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+        
+        # 如果是图片，使用PIL转换
+        if ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif']:
+            try:
+                from PIL import Image
+                img = Image.open(file_path)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img = img.convert('RGB')
+                img.save(output_path, 'PDF', resolution=100.0)
+                return True
+            except Exception:
+                pass
+        
+        # 转换失败，返回False
+        return False
+        
+    except Exception as e:
+        print(f"PDF转换失败: {e}")
+        return False
+
+
+@project_bp.route('/<project_id>/download-package', methods=['GET'])
+def download_project_package(project_id):
+    """打包下载项目所有文档（支持序号重生成和PDF转换）"""
+    try:
+        import io
+        import zipfile
+        from pathlib import Path
+        from flask import send_file, request
+        from datetime import datetime
+        import tempfile
+        import shutil
+
+        # 获取查询参数
+        renumber = request.args.get('renumber', 'false').lower() == 'true'
+        convert_pdf = request.args.get('convert_pdf', 'false').lower() == 'true'
+
+        # 加载项目
+        project_result = doc_manager.load_project(project_id)
+        if project_result['status'] != 'success':
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+
+        project_config = project_result.get('project', {})
+        if not project_config:
+            return jsonify({'status': 'error', 'message': '项目配置为空'}), 404
+            
         project_name = project_config.get('name', '项目文档')
 
-        # 创建内存 ZIP
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            added_count = 0
-
-            for cycle, doc_data in project_config.get('documents', {}).items():
+        # 创建临时目录用于处理文件
+        temp_dir = Path(tempfile.mkdtemp())
+        
+        try:
+            # 收集所有文件
+            files_to_package = []
+            file_counter = 1
+            
+            documents = project_config.get('documents', {})
+            if not documents:
+                # 如果没有文档数据，返回空包
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    zipf.writestr('说明.txt', f'项目"{project_name}"暂无文档数据。')
+                zip_buffer.seek(0)
+                zip_filename = f"{project_name}_文档包_{datetime.now().strftime('%Y%m%d')}.zip"
+                return send_file(
+                    zip_buffer,
+                    mimetype='application/zip',
+                    as_attachment=True,
+                    download_name=zip_filename
+                )
+            
+            for cycle, doc_data in documents.items():
+                if not isinstance(doc_data, dict):
+                    continue
                 uploaded_docs = doc_data.get('uploaded_docs', [])
+                if not uploaded_docs:
+                    continue
                 for doc_meta in uploaded_docs:
+                    if not isinstance(doc_meta, dict):
+                        continue
                     file_path = doc_meta.get('file_path')
-                    if file_path and Path(file_path).exists():
-                        # 目录结构: 项目名/周期/文档名/文件名
-                        archive_path = f"{project_name}/{cycle}/{doc_meta.get('doc_name', '未知')}/{doc_meta.get('filename', Path(file_path).name)}"
-                        zipf.write(file_path, archive_path)
+                    if not file_path:
+                        continue
+                    file_path_obj = Path(file_path)
+                    if not file_path_obj.exists():
+                        continue
+                    
+                    original_filename = doc_meta.get('filename') or file_path_obj.name
+                    
+                    # 生成新文件名
+                    if renumber:
+                        new_filename = generate_sequential_filename(original_filename, file_counter)
+                    else:
+                        new_filename = original_filename
+                    
+                    # 如果需要PDF转换且不是PDF文件
+                    final_filename = new_filename
+                    if convert_pdf and not new_filename.lower().endswith('.pdf'):
+                        pdf_filename = Path(new_filename).stem + '.pdf'
+                        final_filename = pdf_filename
+                    
+                    files_to_package.append({
+                        'source_path': str(file_path_obj),
+                        'original_name': original_filename,
+                        'new_name': new_filename,
+                        'final_name': final_filename,
+                        'cycle': cycle,
+                        'doc_name': doc_meta.get('doc_name', '未知'),
+                        'needs_conversion': convert_pdf and not original_filename.lower().endswith('.pdf'),
+                        'seq_num': file_counter
+                    })
+                    file_counter += 1
+            
+            # 创建 ZIP
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                added_count = 0
+                
+                for file_info in files_to_package:
+                    try:
+                        source_path = Path(file_info['source_path'])
+                        final_name = file_info['final_name']
+                        
+                        # 构建归档路径
+                        archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{final_name}"
+                        
+                        # 如果需要PDF转换
+                        if file_info['needs_conversion']:
+                            temp_pdf_path = temp_dir / final_name
+                            if convert_to_pdf(source_path, temp_pdf_path):
+                                zipf.write(temp_pdf_path, archive_path)
+                            else:
+                                # 转换失败，使用原文件
+                                zipf.write(source_path, archive_path.replace('.pdf', source_path.suffix))
+                        else:
+                            # 直接添加文件
+                            zipf.write(source_path, archive_path)
+                        
                         added_count += 1
+                    except Exception as e:
+                        print(f"添加文件失败 {file_info['original_name']}: {e}")
+                        continue
+                
+                # 如果没有文件，添加说明
+                if added_count == 0:
+                    zipf.writestr('说明.txt', f'项目"{project_name}"暂无归档文档。')
+                
+                # 添加文件清单
+                manifest = []
+                for f in files_to_package:
+                    manifest.append(f"{f['seq_num']:03d}. {f['original_name']} -> {f['final_name']}")
+                if manifest:
+                    zipf.writestr('文件清单.txt', '\n'.join(manifest))
 
-            # 如果没有文件，也添加一个说明文件
-            if added_count == 0:
-                zipf.writestr('说明.txt', f'项目"{project_name}"暂无归档文档。')
+            zip_buffer.seek(0)
+            
+            # 构建文件名
+            suffix_parts = []
+            if renumber:
+                suffix_parts.append('序号重编')
+            if convert_pdf:
+                suffix_parts.append('PDF版')
+            suffix = '_'.join(suffix_parts) if suffix_parts else '文档包'
+            zip_filename = f"{project_name}_{suffix}_{datetime.now().strftime('%Y%m%d')}.zip"
 
-        zip_buffer.seek(0)
-        zip_filename = f"{project_name}_{datetime.now().strftime('%Y%m%d')}.zip"
+            doc_manager.log_operation(
+                '打包下载', 
+                f'下载项目"{project_name}"（{added_count}个文件，重编号={renumber}，PDF转换={convert_pdf}）', 
+                project=project_id
+            )
 
-        doc_manager.log_operation('打包下载', f'下载项目"{project_name}"（{added_count}个文件）', project=project_id)
-
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=zip_filename
-        )
+            return send_file(
+                zip_buffer,
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name=zip_filename
+            )
+            
+        finally:
+            # 清理临时目录
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1085,3 +1624,64 @@ def clear_draft(project_id):
         return jsonify({'status': 'success', 'message': '草稿已删除'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/download/<task_id>', methods=['GET'])
+def download_package(project_id, task_id):
+    """下载打包完成的ZIP文件"""
+    import json
+    from pathlib import Path
+    import os
+    
+    try:
+        from flask import send_file, jsonify
+        
+        # 使用绝对路径
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        tasks_file = Path(base_dir) / 'uploads' / 'tasks' / 'package_tasks.json'
+        
+        print(f'[下载] 任务文件路径: {tasks_file}', flush=True)
+        print(f'[下载] 任务文件存在: {tasks_file.exists()}', flush=True)
+        
+        task = None
+        if tasks_file.exists():
+            with open(tasks_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                task = data.get(task_id)
+                print(f'[下载] 找到任务: {task is not None}', flush=True)
+        
+        if not task:
+            return jsonify({'status': 'error', 'message': '任务不存在或已过期'}), 404
+        
+        if task.get('status') != 'completed':
+            return jsonify({'status': 'error', 'message': '任务尚未完成'}), 400
+        
+        if task.get('type') != 'package':
+            return jsonify({'status': 'error', 'message': '任务类型不是打包'}), 400
+        
+        result = task.get('result', {})
+        package_path = result.get('package_path')
+        
+        print(f'[下载] 包文件路径: {package_path}', flush=True)
+        print(f'[下载] 包文件存在: {Path(package_path).exists() if package_path else False}', flush=True)
+        
+        if not package_path:
+            return jsonify({'status': 'error', 'message': '打包路径为空'}), 404
+        
+        if not Path(package_path).exists():
+            return jsonify({'status': 'error', 'message': f'打包文件不存在: {package_path}'}), 404
+        
+        # 返回文件
+        filename = result.get('package_filename', 'project_package.zip')
+        print(f'[下载] 开始返回文件: {filename}', flush=True)
+        return send_file(
+            package_path,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/zip'
+        )
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': f'下载失败: {str(e)}'}), 500

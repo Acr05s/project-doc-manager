@@ -115,6 +115,23 @@
         </div>
     </div>
 
+    <!-- 打包进度模态框 -->
+    <div id="packageProgressModal" class="modal">
+        <div class="modal-content modal-sm" style="max-width: 400px;">
+            <span class="close" onclick="closePackageProgressModal()">&times;</span>
+            <h2>正在打包项目...</h2>
+            <div class="progress-bar" style="width: 100%; height: 24px; background: #e9ecef; border-radius: 12px; overflow: hidden; margin: 20px 0;">
+                <div id="packageProgressBar" style="height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); width: 0%; transition: width 0.3s ease; border-radius: 12px;"></div>
+            </div>
+            <p id="packageProgressMessage" style="text-align: center; color: #666; margin: 10px 0;">准备中...</p>
+            <div class="modal-actions" style="justify-content: center; margin-top: 20px;">
+                <button id="cancelPackageBtn" class="btn btn-secondary">取消</button>
+                <a id="downloadPackageBtn" class="btn btn-primary" style="display:none; text-decoration: none;">下载</a>
+                <button id="closePackageModalBtn" class="btn btn-secondary" style="display:none" onclick="closePackageProgressModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 通用输入框模态框 -->
     <div id="inputModal" class="modal">
         <div class="modal-content modal-sm">

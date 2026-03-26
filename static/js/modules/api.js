@@ -311,12 +311,34 @@ export async function deleteZipPackage(packagePath) {
  */
 export async function loadZipRecords(projectId) {
     try {
-        const response = await fetch(`/api/documents/zip-records?project_id=${projectId}`, { method: 'GET' });
+        const response = await fetch(`/api/documents/zip-records?project_id=${projectId}`, { 
+            method: 'GET'
+        });
+        
+        // 检查响应状态
+        if (!response.ok) {
+            if (response.status === 404) {
+                return { status: 'success', records: [] }; // 文件不存在，返回空数组
+            }
+            throw new Error(`服务器错误: ${response.status}`);
+        }
+        
+        // 检查内容类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('服务器返回了非 JSON 响应');
+        }
+        
         const result = await response.json();
         return result;
     } catch (error) {
         console.error('加载ZIP记录失败:', error);
-        throw error;
+        // 返回错误状态而不是抛出，让调用方更容易处理
+        return { 
+            status: 'error', 
+            message: error.message || '加载失败',
+            records: []
+        };
     }
 }
 
@@ -383,11 +405,82 @@ export async function checkCompliance(projectId) {
 }
 
 /**
- * 打包项目
+ * 打包项目（异步任务方式）
  */
-export async function packageProject(projectId) {
+export async function packageProject(projectId, projectConfig) {
     try {
-        const response = await fetch(`/api/projects/${projectId}/package`);
+        const response = await fetch('/api/tasks/package', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                project_id: projectId, 
+                project_config: projectConfig 
+            })
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('启动打包任务失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 获取任务状态
+ */
+export async function getTaskStatus(taskId) {
+    try {
+        const response = await fetch(`/api/tasks/${taskId}`);
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('获取任务状态失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 获取打包下载链接
+ */
+export function getPackageDownloadUrl(projectId, taskId) {
+    return `/api/projects/${projectId}/download/${taskId}`;
+}
+
+/**
+ * 取消任务
+ */
+export async function cancelTask(taskId) {
+    try {
+        const response = await fetch(`/api/tasks/${taskId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('取消任务失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 完整打包项目（包含整个项目目录）
+ */
+export async function packageFullProject(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/package-full`, {
+            method: 'POST'
+        });
+        
+        if (response.ok && response.headers.get('content-type')?.includes('application/zip')) {
+            // 直接返回ZIP文件数据
+            const blob = await response.blob();
+            return {
+                status: 'success',
+                blob: blob,
+                filename: response.headers.get('content-disposition')?.match(/filename="(.+)"/)?.[1] || 'project_backup.zip'
+            };
+        }
+        
         const result = await response.json();
         return result;
     } catch (error) {
@@ -410,6 +503,24 @@ export async function importPackage(formData) {
         return result;
     } catch (error) {
         console.error('导入包失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 导入完整项目包
+ */
+export async function importFullPackage(formData) {
+    try {
+        const response = await fetch('/api/projects/package/import-full', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('导入完整项目包失败:', error);
         throw error;
     }
 }
@@ -505,10 +616,14 @@ export async function exportJson(projectId) {
 /**
  * 确认验收
  */
-export async function confirmAcceptance(projectId) {
+export async function confirmAcceptance(projectId, data = {}) {
     try {
         const response = await fetch(`/api/projects/${projectId}/confirm-acceptance`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
         });
         
         const result = await response.json();
@@ -522,9 +637,14 @@ export async function confirmAcceptance(projectId) {
 /**
  * 下载项目包
  */
-export async function downloadPackage(projectId) {
+export async function downloadPackage(projectId, options = {}) {
     try {
-        const response = await fetch(`/api/projects/${projectId}/download-package`);
+        const params = new URLSearchParams();
+        if (options.renumber) params.append('renumber', 'true');
+        if (options.convertPdf) params.append('convert_pdf', 'true');
+        
+        const url = `/api/projects/${projectId}/download-package?${params.toString()}`;
+        const response = await fetch(url);
         return response;
     } catch (error) {
         console.error('下载项目包失败:', error);

@@ -1220,38 +1220,6 @@ def add_zip_record():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@document_bp.route('/zip-records/<zip_id>', methods=['DELETE'])
-def delete_zip_record(zip_id):
-    """删除ZIP上传记录"""
-    try:
-        project_id = request.args.get('project_id')
-        
-        if not project_id:
-            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
-        
-        # 加载项目配置以获取项目名称
-        project_result = doc_manager.load_project(project_id)
-        if not project_result or project_result.get('status') != 'success':
-            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
-        
-        project_config = project_result.get('project', {})
-        project_name = project_config.get('name', project_id)
-        
-        # 获取项目文件路径（新位置）
-        project_folder = doc_manager.config.projects_base_folder / project_name
-        project_file = project_folder / 'project_config.json'
-        
-        # 使用JSON文件管理器删除ZIP上传记录
-        success = json_file_manager.delete_zip_upload_record(str(project_file), zip_id)
-        
-        if success:
-            return jsonify({'status': 'success', 'message': 'ZIP上传记录删除成功'})
-        else:
-            return jsonify({'status': 'error', 'message': 'ZIP上传记录删除失败'}), 500
-        
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
 # ========== ZIP 大文件断点续传上传 ==========
 
 @document_bp.route('/zip-chunk-upload', methods=['POST'])

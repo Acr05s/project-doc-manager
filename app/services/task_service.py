@@ -3,6 +3,8 @@
 import uuid
 import threading
 import time
+import json
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -13,6 +15,39 @@ class TaskService:
         """初始化任务服务"""
         self.tasks_store: Dict[str, Dict[str, Any]] = {}
         self.doc_manager = None
+        self._tasks_file = Path('uploads/tasks/package_tasks.json')
+        self._tasks_file.parent.mkdir(parents=True, exist_ok=True)
+        self._load_tasks()
+    
+    def _load_tasks(self):
+        """从文件加载任务"""
+        print(f'[TaskService] 尝试从文件加载任务: {self._tasks_file}', flush=True)
+        if self._tasks_file.exists():
+            try:
+                with open(self._tasks_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    print(f'[TaskService] 从文件加载了 {len(data)} 个任务', flush=True)
+                    # 合并到现有任务存储（不覆盖已有任务）
+                    for task_id, task in data.items():
+                        if task_id not in self.tasks_store:
+                            # 只加载已完成的任务
+                            if task.get('status') == 'completed':
+                                self.tasks_store[task_id] = task
+                            elif task.get('status') in ['running', 'pending']:
+                                task['status'] = 'failed'
+                                task['message'] = '服务重启，任务中断'
+                                self.tasks_store[task_id] = task
+            except Exception as e:
+                print(f'[TaskService] 加载任务失败: {e}', flush=True)
+    
+    def _save_tasks(self):
+        """保存任务到文件"""
+        try:
+            with open(self._tasks_file, 'w', encoding='utf-8') as f:
+                json.dump(self.tasks_store, f, ensure_ascii=False, indent=2)
+            print(f'[TaskService] 任务已保存到文件: {self._tasks_file}', flush=True)
+        except Exception as e:
+            print(f'[TaskService] 保存任务失败: {e}', flush=True)
     
     def set_doc_manager(self, manager):
         """设置文档管理器"""
@@ -20,7 +55,29 @@ class TaskService:
     
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务状态"""
-        return self.tasks_store.get(task_id)
+        # 先检查内存
+        task = self.tasks_store.get(task_id)
+        if task:
+            print(f'[TaskService] 从内存找到任务: {task_id}', flush=True)
+            return task
+        
+        # 如果内存中没有，直接从文件读取
+        print(f'[TaskService] 内存中没有任务，从文件读取: {task_id}', flush=True)
+        if self._tasks_file.exists():
+            try:
+                with open(self._tasks_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    task = data.get(task_id)
+                    if task:
+                        print(f'[TaskService] 从文件找到任务: {task_id}', flush=True)
+                        # 添加到内存缓存
+                        self.tasks_store[task_id] = task
+                        return task
+            except Exception as e:
+                print(f'[TaskService] 读取文件失败: {e}', flush=True)
+        
+        print(f'[TaskService] 任务未找到: {task_id}', flush=True)
+        return None
     
     def list_tasks(self) -> list:
         """列出所有任务"""
@@ -36,6 +93,11 @@ class TaskService:
     
     def start_package_task(self, project_id: str, project_config: Dict[str, Any]) -> Dict[str, Any]:
         """启动打包项目任务"""
+        import json
+        import zipfile
+        from pathlib import Path
+        import os
+        
         # 创建任务
         task_id = str(uuid.uuid4())
         self.tasks_store[task_id] = {
@@ -48,24 +110,122 @@ class TaskService:
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat()
         }
+        self._save_tasks()  # 立即保存任务
         
         # 启动后台线程执行任务
         def package_task():
-            for i in range(1, 11):
+            try:
+                if not self.doc_manager:
+                    raise Exception('文档管理器未初始化')
+                
+                # 获取项目数据
+                project = self.doc_manager.load_project(project_id)
+                if not project or project.get('status') != 'success':
+                    raise Exception('项目不存在')
+                
+                project_data = project.get('project', {})
+                project_name = project_data.get('name', 'project')
+                
+                # 更新进度：查找项目目录
+                self.tasks_store[task_id]['progress'] = 10
+                self.tasks_store[task_id]['message'] = '正在查找项目目录...'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                
+                # 查找项目目录
+                projects_base = Path(self.doc_manager.config.projects_base_folder)
+                project_dir = None
+                
+                # 尝试多种方式查找项目目录
+                possible_paths = [
+                    projects_base / project_name,
+                    projects_base / project_id,
+                    projects_base / f"{project_name}_{project_id}"
+                ]
+                
+                for path in possible_paths:
+                    if path.exists() and path.is_dir():
+                        project_dir = path
+                        break
+                
+                if not project_dir:
+                    raise Exception('项目目录不存在')
+                
+                # 创建临时目录存放打包文件
+                temp_dir = projects_base / 'temp' / 'packages'
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                safe_name = ''.join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                package_filename = f"{safe_name}_{task_id[:8]}.zip"
+                package_path = temp_dir / package_filename
+                
+                # 统计文件数量
+                total_files = 0
+                for root, dirs, files in os.walk(project_dir):
+                    total_files += len(files)
+                
+                # 更新进度：开始创建ZIP
+                self.tasks_store[task_id]['progress'] = 20
+                self.tasks_store[task_id]['message'] = f'正在打包项目目录... 共 {total_files} 个文件'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                
+                # 创建ZIP文件
+                with zipfile.ZipFile(package_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    # 递归添加项目目录的所有内容
+                    processed_files = 0
+                    for root, dirs, files in os.walk(project_dir):
+                        if self.tasks_store[task_id]['status'] == 'cancelled':
+                            break
+                        
+                        for file in files:
+                            if self.tasks_store[task_id]['status'] == 'cancelled':
+                                break
+                            
+                            file_path = Path(root) / file
+                            # 计算相对路径作为归档路径
+                            rel_path = file_path.relative_to(project_dir.parent)
+                            arcname = str(rel_path)
+                            
+                            try:
+                                zip_file.write(file_path, arcname)
+                                processed_files += 1
+                            except Exception:
+                                pass
+                            
+                            # 更新进度（20% - 90%）
+                            if total_files > 0:
+                                progress = 20 + int(70 * processed_files / total_files)
+                                self.tasks_store[task_id]['progress'] = min(progress, 90)
+                                self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files})'
+                                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                            
+                            # 每10个文件保存一次进度
+                            if processed_files % 10 == 0:
+                                self._save_tasks()
+                
                 if self.tasks_store[task_id]['status'] == 'cancelled':
-                    break
-                self.tasks_store[task_id]['progress'] = i * 10
-                self.tasks_store[task_id]['message'] = f'正在打包项目... {i * 10}%'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
-                time.sleep(0.5)
-            
-            if self.tasks_store[task_id]['status'] != 'cancelled' and self.doc_manager:
-                # 实际打包操作
-                package_path = self.doc_manager.package_project(project_id, project_config)
+                    # 删除未完成的包
+                    if package_path.exists():
+                        package_path.unlink()
+                    return
+                
+                # 完成任务
                 self.tasks_store[task_id]['status'] = 'completed'
-                self.tasks_store[task_id]['message'] = '项目打包完成'
-                self.tasks_store[task_id]['result'] = {'package_path': package_path}
+                self.tasks_store[task_id]['progress'] = 100
+                self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
+                self.tasks_store[task_id]['result'] = {
+                    'package_path': str(package_path),
+                    'package_filename': package_filename,
+                    'total_files': total_files,
+                    'processed_files': processed_files
+                }
                 self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()  # 保存到文件
+                
+            except Exception as e:
+                self.tasks_store[task_id]['status'] = 'error'
+                self.tasks_store[task_id]['message'] = f'打包失败: {str(e)}'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()  # 保存到文件
         
         threading.Thread(target=package_task).start()
         

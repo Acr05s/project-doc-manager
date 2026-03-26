@@ -236,7 +236,18 @@ export async function handleZipUpload(e) {
         const checkResponse = await fetch(
             `/api/documents/zip-check-chunk?filename=${encodeURIComponent(filename)}&fileId=${fileId}`
         );
+        
+        if (!checkResponse.ok) {
+            const errorText = await checkResponse.text();
+            throw new Error(`检查分片失败: ${checkResponse.status} - ${errorText}`);
+        }
+        
         const checkResult = await checkResponse.json();
+        
+        if (checkResult.status !== 'success') {
+            throw new Error(`检查分片失败: ${checkResult.message || '未知错误'}`);
+        }
+        
         const uploadedChunks = checkResult.uploaded_chunks || [];
         
         // 计算分片数量
@@ -269,10 +280,20 @@ export async function handleZipUpload(e) {
             uploadProgressPercent.textContent = uploadProgress + '%';
             uploadProgressText.textContent = `正在上传分片 ${i + 1}/${totalChunks}...`;
             
-            await fetch('/api/documents/zip-chunk-upload', {
+            const chunkResponse = await fetch('/api/documents/zip-chunk-upload', {
                 method: 'POST',
                 body: formData
             });
+            
+            if (!chunkResponse.ok) {
+                const errorText = await chunkResponse.text();
+                throw new Error(`分片 ${i + 1} 上传失败: ${chunkResponse.status} - ${errorText}`);
+            }
+            
+            const chunkResult = await chunkResponse.json();
+            if (chunkResult.status !== 'success') {
+                throw new Error(`分片 ${i + 1} 上传失败: ${chunkResult.message || '未知错误'}`);
+            }
         }
         
         // 所有分片上传完成，合并文件
@@ -285,6 +306,11 @@ export async function handleZipUpload(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename, fileId })
         });
+        
+        if (!mergeResponse.ok) {
+            const errorText = await mergeResponse.text();
+            throw new Error(`文件合并失败: ${mergeResponse.status} - ${errorText}`);
+        }
         
         const mergeResult = await mergeResponse.json();
         
@@ -385,35 +411,51 @@ async function pollMatchTask(taskId, progress) {
                 progress.update(taskProgress, message);
                 
                 if (taskStatus === 'completed') {
+                    console.log('[ZIP匹配] 任务完成，开始处理结果');
                     clearInterval(pollInterval);
                     progress.update(100, '匹配完成！');
                     
                     // 显示结果
-                    const matchResult = result.result;
-                    if (matchResult) {
-                        showNotification(
-                            `匹配完成！共 ${matchResult.total_files} 个文件，匹配成功 ${matchResult.matched_count} 个`,
-                            matchResult.matched_count > 0 ? 'success' : 'warning'
-                        );
-                        
-                        // 重新加载项目配置
-                        if (appState.currentProjectId) {
+                    console.log('[ZIP匹配] result:', result);
+                    const matchResult = result.result || {};
+                    const totalFiles = matchResult.total_files || 0;
+                    const matchedCount = matchResult.matched_count || 0;
+                    
+                    console.log('[ZIP匹配] 显示通知:', totalFiles, matchedCount);
+                    showNotification(
+                        `匹配完成！共 ${totalFiles} 个文件，匹配成功 ${matchedCount} 个`,
+                        matchedCount > 0 ? 'success' : 'warning'
+                    );
+                    
+                    // 重新加载项目配置
+                    if (appState.currentProjectId) {
+                        try {
                             const updatedProject = await loadProject(appState.currentProjectId);
                             if (updatedProject) {
                                 appState.projectConfig = updatedProject;
                             }
+                        } catch (e) {
+                            console.error('重新加载项目配置失败:', e);
                         }
-                        
-                        // 刷新文档列表
-                        if (appState.currentCycle) {
+                    }
+                    
+                    // 刷新文档列表
+                    if (appState.currentCycle) {
+                        try {
                             await renderCycleDocuments(appState.currentCycle);
+                        } catch (e) {
+                            console.error('刷新文档列表失败:', e);
                         }
                     }
                     
                     // 关闭进度显示
                     setTimeout(() => {
-                        progress.close();
-                    }, 3000);
+                        try {
+                            progress.close();
+                        } catch (e) {
+                            console.error('关闭进度显示失败:', e);
+                        }
+                    }, 2000);
                     
                     resolve();
                 } else if (taskStatus === 'failed') {

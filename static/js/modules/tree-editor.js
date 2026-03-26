@@ -1254,6 +1254,23 @@ function setAllExpanded(node, expanded) {
 // ==================== 数据转换 ====================
 
 /**
+ * 将 attributes 对象转换为 requirement 字符串
+ */
+function attributesToRequirement(attributes) {
+    const requirements = [];
+    
+    if (attributes.party_a_sign) requirements.push('甲方签字');
+    if (attributes.party_b_sign) requirements.push('乙方签字');
+    if (attributes.party_a_seal) requirements.push('甲方盖章');
+    if (attributes.party_b_seal) requirements.push('乙方盖章');
+    if (attributes.need_doc_number) requirements.push('发文号');
+    if (attributes.need_doc_date) requirements.push('文档日期');
+    if (attributes.need_sign_date) requirements.push('签字日期');
+    
+    return requirements.join('、') || '';
+}
+
+/**
  * 将树形数据转换回配置格式
  * 新格式：required_docs 为对象数组
  * 同时将目录数据保存到 categories 中，与文档管理界面共享
@@ -1283,6 +1300,9 @@ function treeToConfig() {
                             filename_template: child.filename_template || '',
                             match_keywords: child.match_keywords || []
                         };
+                        
+                        // 将 attributes 转换为 requirement 字符串，供主页显示
+                        docObj.requirement = attributesToRequirement(child.attributes || {});
                         
                         // 收集该文档下的所有目录名称，保存到 categories
                         const docCategories = [];

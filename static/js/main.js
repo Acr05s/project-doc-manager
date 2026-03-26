@@ -218,6 +218,13 @@ window.closeProjectSelectModal = function() {
     });
 };
 
+// 关闭打包进度模态框
+window.closePackageProgressModal = function() {
+    import('./modules/project.js').then(module => {
+        module.closePackageProgressModal();
+    });
+};
+
 window.handleOpenProject = function(projectId) {
     import('./modules/project.js').then(module => {
         module.handleOpenProject(projectId);

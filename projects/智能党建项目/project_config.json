@@ -326,7 +326,10 @@
           "doc_id": "3、项目准备_项目中标通知书_20260325_191207_0",
           "_remark": "",
           "_has_seal": true,
-          "_no_seal": false
+          "_no_seal": false,
+          "_party_a_seal": true,
+          "party_a_seal": true,
+          "no_seal": false
         },
         {
           "cycle": "3、项目准备",
@@ -342,7 +345,10 @@
           "_remark": "",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐南京发电厂"
+          "directory": "大唐南京发电厂",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -357,7 +363,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192017_1",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐大丰风电开发有限公司"
+          "directory": "大唐大丰风电开发有限公司",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -372,7 +381,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192017_2",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐江苏徐塘"
+          "directory": "大唐江苏徐塘",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -387,7 +399,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192017_3",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐泰州热电有限责任公司"
+          "directory": "大唐泰州热电有限责任公司",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -402,7 +417,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192017_4",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐苏州热电"
+          "directory": "大唐苏州热电",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -417,7 +435,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192142_0",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐南京发电厂"
+          "directory": "大唐南京发电厂",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -432,7 +453,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192142_1",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐大丰风电开发有限公司"
+          "directory": "大唐大丰风电开发有限公司",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -447,7 +471,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192142_2",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐江苏徐塘"
+          "directory": "大唐江苏徐塘",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -462,7 +489,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192142_3",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐泰州热电有限责任公司"
+          "directory": "大唐泰州热电有限责任公司",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         },
         {
           "cycle": "3、项目准备",
@@ -477,7 +507,10 @@
           "doc_id": "3、项目准备_项目合同（含技术协议）_20260325_192142_4",
           "_has_seal": true,
           "_no_seal": false,
-          "directory": "大唐苏州热电"
+          "directory": "大唐苏州热电",
+          "_no_signature": false,
+          "_party_a_seal": true,
+          "_party_b_seal": true
         }
       ]
     },
@@ -1348,7 +1381,8 @@
           "upload_time": "2026-03-25T19:45:41.273543",
           "source": "select",
           "file_size": 103935,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_0"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_0",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1360,7 +1394,8 @@
           "upload_time": "2026-03-25T19:45:41.281662",
           "source": "select",
           "file_size": 20519,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_1"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_1",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1372,7 +1407,8 @@
           "upload_time": "2026-03-25T19:45:41.291748",
           "source": "select",
           "file_size": 67344,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_2"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_2",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1384,7 +1420,8 @@
           "upload_time": "2026-03-25T19:45:41.301415",
           "source": "select",
           "file_size": 120471,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_3"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_3",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1396,7 +1433,8 @@
           "upload_time": "2026-03-25T19:45:41.309779",
           "source": "select",
           "file_size": 60706,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_4"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_4",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1408,7 +1446,8 @@
           "upload_time": "2026-03-25T19:45:41.317453",
           "source": "select",
           "file_size": 25566,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_5"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_5",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1420,7 +1459,8 @@
           "upload_time": "2026-03-25T19:45:41.326256",
           "source": "select",
           "file_size": 38778,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_6"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_6",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1432,7 +1472,8 @@
           "upload_time": "2026-03-25T19:45:41.336250",
           "source": "select",
           "file_size": 260096,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_7"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_7",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1444,7 +1485,8 @@
           "upload_time": "2026-03-25T19:45:41.345081",
           "source": "select",
           "file_size": 60416,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_8"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_8",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1456,7 +1498,8 @@
           "upload_time": "2026-03-25T19:45:41.353449",
           "source": "select",
           "file_size": 56074,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_9"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_9",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1468,7 +1511,8 @@
           "upload_time": "2026-03-25T19:45:41.363260",
           "source": "select",
           "file_size": 15450,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_10"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_10",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1480,7 +1524,8 @@
           "upload_time": "2026-03-25T19:45:41.372735",
           "source": "select",
           "file_size": 61440,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_11"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_11",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1492,7 +1537,8 @@
           "upload_time": "2026-03-25T19:45:41.381137",
           "source": "select",
           "file_size": 956928,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_12"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_12",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1504,7 +1550,8 @@
           "upload_time": "2026-03-25T19:45:41.389468",
           "source": "select",
           "file_size": 14657,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_13"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_13",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1516,7 +1563,8 @@
           "upload_time": "2026-03-25T19:45:41.397010",
           "source": "select",
           "file_size": 22706,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_14"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_14",
+          "directory": "测试用例"
         },
         {
           "cycle": "7、系统开发测试",
@@ -1528,7 +1576,8 @@
           "upload_time": "2026-03-25T19:45:41.412117",
           "source": "select",
           "file_size": 22269,
-          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_15"
+          "doc_id": "7、系统开发测试_项目用户测试用例_20260325_194541_15",
+          "directory": "测试用例"
         }
       ]
     },

@@ -119,7 +119,8 @@ def upload_chunk():
         project_id = request.form.get('project_id')
         project_name = request.form.get('project_name')
         
-        if not all([file, chunk_index, total_chunks, file_name, cycle, doc_name]):
+        # 检查必要参数（注意：chunk_index 可能为 0，不能用 all()）
+        if file is None or chunk_index is None or total_chunks is None or not file_name or not cycle or not doc_name:
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
         # 生成临时文件路径
@@ -285,7 +286,8 @@ def upload_zip_chunk():
         file_name = request.form.get('filename')
         file_id = request.form.get('fileId')
         
-        if not all([file, chunk_index, total_chunks, file_name, file_id]):
+        # 检查必要参数（注意：chunk_index 可能为 0，不能用 all()）
+        if file is None or chunk_index is None or total_chunks is None or not file_name or not file_id:
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
         # 生成临时文件路径
