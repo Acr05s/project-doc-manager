@@ -129,7 +129,7 @@ def upload_chunk():
         chunk_path = temp_dir / f"chunk_{chunk_index}"
         
         # 保存分片
-        file.save(chunk_path)
+        file.save(str(chunk_path))
         
         return jsonify({
             'status': 'success',
@@ -168,21 +168,37 @@ def merge_chunks():
         if not temp_dir.exists():
             return jsonify({'status': 'error', 'message': '分片不存在'}), 400
         
-        # 合并分片
-        import io
-        merged_file = io.BytesIO()
-        for i in range(total_chunks):
-            chunk_path = temp_dir / f"chunk_{i}"
-            if not chunk_path.exists():
-                return jsonify({'status': 'error', 'message': f'分片 {i} 不存在'}), 400
-            with open(chunk_path, 'rb') as f:
-                merged_file.write(f.read())
-        
-        merged_file.seek(0)
+        # 合并分片 - 使用临时文件避免内存占用
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tmp') as temp_file:
+            temp_file_path = temp_file.name
+            
+        try:
+            with open(temp_file_path, 'wb') as merged_file:
+                for i in range(total_chunks):
+                    chunk_path = temp_dir / f"chunk_{i}"
+                    if not chunk_path.exists():
+                        return jsonify({'status': 'error', 'message': f'分片 {i} 不存在'}), 400
+                    with open(chunk_path, 'rb') as f:
+                        # 分块读取以减少内存使用
+                        while True:
+                            chunk_data = f.read(8192)  # 8KB chunks
+                            if not chunk_data:
+                                break
+                            merged_file.write(chunk_data)
+            
+            # 重新打开临时文件进行读取
+            with open(temp_file_path, 'rb') as f:
+                merged_file_content = f.read()
         
         # 上传合并后的文件
         from werkzeug.datastructures import FileStorage
-        file = FileStorage(merged_file, filename=file_name)
+        import io
+        file = FileStorage(io.BytesIO(merged_file_content), filename=file_name)
+        
+        # 清理临时文件
+        import os
+        os.unlink(temp_file_path)
         
         result = doc_manager.upload_document(
             file, cycle, doc_name,
@@ -296,7 +312,7 @@ def upload_zip_chunk():
         chunk_path = temp_dir / f"chunk_{chunk_index}"
         
         # 保存分片
-        file.save(chunk_path)
+        file.save(str(chunk_path))
         
         return jsonify({
             'status': 'success',
@@ -322,29 +338,39 @@ def merge_zip_chunks():
         if not temp_dir.exists():
             return jsonify({'status': 'error', 'message': '分片不存在'}), 400
         
-        # 合并分片
-        import io
-        merged_file = io.BytesIO()
-        
-        # 找出所有分片文件并按索引排序
-        chunk_files = []
-        for chunk_file in temp_dir.iterdir():
-            if chunk_file.name.startswith('chunk_'):
-                try:
-                    chunk_index = int(chunk_file.name.split('_')[1])
-                    chunk_files.append((chunk_index, chunk_file))
-                except:
-                    pass
-        
-        # 按索引排序
-        chunk_files.sort(key=lambda x: x[0])
-        
-        # 合并所有分片
-        for chunk_index, chunk_file in chunk_files:
-            with open(chunk_file, 'rb') as f:
-                merged_file.write(f.read())
-        
-        merged_file.seek(0)
+        # 合并分片 - 使用临时文件避免内存占用
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tmp') as temp_file:
+            temp_file_path = temp_file.name
+            
+        try:
+            with open(temp_file_path, 'wb') as merged_file:
+                # 找出所有分片文件并按索引排序
+                chunk_files = []
+                for chunk_file in temp_dir.iterdir():
+                    if chunk_file.name.startswith('chunk_'):
+                        try:
+                            chunk_index = int(chunk_file.name.split('_')[1])
+                            chunk_files.append((chunk_index, chunk_file))
+                        except:
+                            pass
+                
+                # 按索引排序
+                chunk_files.sort(key=lambda x: x[0])
+                
+                # 合并所有分片
+                for chunk_index, chunk_file in chunk_files:
+                    with open(chunk_file, 'rb') as f:
+                        # 分块读取以减少内存使用
+                        while True:
+                            chunk_data = f.read(8192)  # 8KB chunks
+                            if not chunk_data:
+                                break
+                            merged_file.write(chunk_data)
+            
+            # 读取合并后的内容
+            with open(temp_file_path, 'rb') as f:
+                merged_content = f.read()
         
         # 保存合并后的ZIP文件
         import uuid
@@ -353,9 +379,13 @@ def merge_zip_chunks():
         zip_file_path = zip_save_dir / f"{file_id}_{file_name}"
         
         with open(zip_file_path, 'wb') as f:
-            f.write(merged_file.getvalue())
+            f.write(merged_content)
         
         # 清理临时文件
+        import os
+        os.unlink(temp_file_path)
+        
+        # 清理分片临时目录
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
         

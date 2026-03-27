@@ -43,10 +43,20 @@ class ImageAnalyzer:
             tuple: (是否有签字, 置信度)
         """
         try:
+            # 读取图像并限制大小以减少内存使用
             image = cv2.imread(image_path)
             if image is None:
                 logger.warning(f"无法读取图像: {image_path}")
                 return False, 0.0
+            
+            # 调整图像大小，限制最大维度为1000像素
+            max_dim = 1000
+            h, w = image.shape[:2]
+            if max(h, w) > max_dim:
+                scale = max_dim / max(h, w)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
             
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
@@ -140,13 +150,23 @@ class ImageAnalyzer:
             tuple: (是否有盖章, 置信度)
         """
         try:
+            # 读取图像并限制大小以减少内存使用
             image = cv2.imread(image_path)
             if image is None:
                 logger.warning(f"无法读取图像: {image_path}")
                 return False, 0.0
             
-            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            # 调整图像大小，限制最大维度为1000像素
+            max_dim = 1000
             h, w = image.shape[:2]
+            if max(h, w) > max_dim:
+                scale = max_dim / max(h, w)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                h, w = image.shape[:2]
+            
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
             total_pixels = h * w
             
             # 1. 多范围颜色检测
@@ -302,9 +322,18 @@ class ImageAnalyzer:
         Returns:
             list: 分析结果列表
         """
+        import gc
         results = []
-        for path in image_paths:
-            result = self.analyze_document(path)
-            result['path'] = path
-            results.append(result)
+        batch_size = 5  # 分批处理，每批5个图像
+        
+        for i in range(0, len(image_paths), batch_size):
+            batch = image_paths[i:i+batch_size]
+            for path in batch:
+                result = self.analyze_document(path)
+                result['path'] = path
+                results.append(result)
+            
+            # 每批处理后释放内存
+            gc.collect()
+        
         return results
