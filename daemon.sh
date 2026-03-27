@@ -189,6 +189,31 @@ main() {
             # 拉取远程代码
             log "从远程仓库拉取代码..."
             cd "$APP_DIR"
+            
+            # 检查是否是Git仓库
+            if [ ! -d ".git" ]; then
+                log "当前目录不是Git仓库，初始化仓库..."
+                git init
+                
+                # 检查是否提供了远程仓库URL
+                if [ -n "$2" ]; then
+                    log "添加远程仓库: $2"
+                    git remote add origin "$2"
+                else
+                    log "错误: 不是Git仓库且未提供远程仓库URL"
+                    log "请使用: $0 update <远程仓库URL>"
+                    return 1
+                fi
+            else
+                # 检查是否提供了新的远程仓库URL
+                if [ -n "$2" ]; then
+                    log "更新远程仓库URL: $2"
+                    git remote set-url origin "$2"
+                fi
+            fi
+            
+            # 拉取代码
+            log "拉取远程代码..."
             git pull origin main
             
             if [ $? -eq 0 ]; then
@@ -214,7 +239,7 @@ main() {
             echo "  restart  - 重启服务"
             echo "  monitor  - 监控服务（后台运行）"
             echo "  status   - 检查服务状态"
-            echo "  update   - 从远程仓库更新代码"
+            echo "  update   - 从远程仓库更新代码 [远程仓库URL]"
             exit 1
             ;;
     esac
