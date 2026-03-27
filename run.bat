@@ -45,7 +45,7 @@ if %errorlevel% neq 0 (
 echo 虚拟环境激活成功
 
 echo 安装依赖包...
-pip install -r requirements.txt
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 if %errorlevel% neq 0 (
     echo 错误: 安装依赖失败
     echo 请检查网络连接或requirements.txt文件

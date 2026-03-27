@@ -754,19 +754,9 @@ function getPreviewContent(docId, fileExt) {
         return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onload="handleIframeLoad(this)" onerror="handlePreviewError(this)"></iframe>`;
     }
     
-    // Office文档预览（使用本地预览方案，避免网络问题）
+    // Office文档预览（转换为PDF后预览）
     if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(fileExt)) {
-        const localPreviewUrl = `/api/documents/preview-local/${docId}`;
-        return `
-            <div class="preview-office">
-                <div class="file-icon">📄</div>
-                <p>Office文档预览</p>
-                <div class="preview-options">
-                    <a href="${viewUrl}" class="btn btn-primary" target="_blank" onclick="handleDownloadClick(event, this)">下载文件</a>
-                    <button class="btn btn-secondary" onclick="tryLocalPreview('${docId}', '${localPreviewUrl}')">本地预览</button>
-                </div>
-            </div>
-        `;
+        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onload="handleIframeLoad(this)" onerror="handlePreviewError(this)"></iframe>`;
     }
     
     // 其他文件类型，提供下载链接
