@@ -177,13 +177,44 @@ main() {
                 log "服务未运行"
             fi
             ;;
+        update)
+            log "================================================================================"
+            log "$APP_NAME - 更新代码"
+            log "================================================================================"
+            
+            # 停止服务
+            log "停止服务..."
+            stop_service
+            
+            # 拉取远程代码
+            log "从远程仓库拉取代码..."
+            cd "$APP_DIR"
+            git pull origin main
+            
+            if [ $? -eq 0 ]; then
+                log "代码更新成功"
+                
+                # 安装新依赖
+                log "检查并安装依赖..."
+                source "$APP_DIR/venv/bin/activate"
+                pip install -r "$APP_DIR/requirements.txt"
+                
+                # 重新启动服务
+                log "重新启动服务..."
+                start_service
+                log "更新完成"
+            else
+                log "错误: 代码更新失败"
+            fi
+            ;;
         *)
-            echo "用法: $0 {start|stop|restart|monitor|status}"
+            echo "用法: $0 {start|stop|restart|monitor|status|update}"
             echo "  start    - 启动服务"
             echo "  stop     - 停止服务"
             echo "  restart  - 重启服务"
             echo "  monitor  - 监控服务（后台运行）"
             echo "  status   - 检查服务状态"
+            echo "  update   - 从远程仓库更新代码"
             exit 1
             ;;
     esac
