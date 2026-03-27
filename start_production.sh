@@ -84,7 +84,6 @@ if [ "$WSGI_SERVER" == "gunicorn" ]; then
         --max-requests-jitter 30 \
         --limit-request-line 4094 \
         --limit-request-fields 100 \
-        --limit-request-field-size 8190 \
         --access-logfile $LOG_DIR/access.log \
         --error-logfile $LOG_DIR/error.log \
         --capture-output \
