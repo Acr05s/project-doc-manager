@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZIP上传测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>ZIP上传测试</h1>
+    
+    <form id="zipUploadForm">
+        <div class="form-group">
+            <label for="zipFile">选择ZIP文件：</label>
+            <input type="file" id="zipFile" name="zipFile" accept=".zip">
+        </div>
+        <div class="form-group">
+            <button type="button" id="uploadBtn">上传</button>
+        </div>
+    </form>
+    
+    <div id="result"></div>
+    
+    <script>
+        document.getElementById('uploadBtn').addEventListener('click', async function() {
+            const fileInput = document.getElementById('zipFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('请选择ZIP文件');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '正在上传...';
+            
+            try {
+                // 测试zip-check-chunk
+                const fileId = 'test_' + Date.now();
+                const checkResponse = await fetch(`/api/documents/zip-check-chunk?filename=${encodeURIComponent(file.name)}&fileId=${fileId}`);
+                const checkResult = await checkResponse.json();
+                
+                resultDiv.innerHTML += '<br>检查分片: ' + JSON.stringify(checkResult);
+                
+                // 测试zip-chunk-upload
+                const formData = new FormData();
+                formData.append('chunk', file);
+                formData.append('chunkIndex', 0);
+                formData.append('totalChunks', 1);
+                formData.append('filename', file.name);
+                formData.append('fileId', fileId);
+                
+                const uploadResponse = await fetch('/api/documents/zip-chunk-upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const uploadResult = await uploadResponse.json();
+                resultDiv.innerHTML += '<br>上传分片: ' + JSON.stringify(uploadResult);
+                
+                // 测试zip-chunk-merge
+                const mergeResponse = await fetch('/api/documents/zip-chunk-merge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: file.name, fileId: fileId })
+                });
+                
+                const mergeResult = await mergeResponse.json();
+                resultDiv.innerHTML += '<br>合并分片: ' + JSON.stringify(mergeResult);
+                
+            } catch (error) {
+                resultDiv.innerHTML += '<br>错误: ' + error.message;
+            }
+        });
+    </script>
+</body>
+</html>
