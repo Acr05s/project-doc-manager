@@ -4,6 +4,7 @@ from flask import request, jsonify, send_file
 from pathlib import Path
 from .utils import get_doc_manager
 from src.services.preview_service import PreviewService
+from src.services.pdf_conversion_service import PDFConversionService
 
 
 def preview_document(doc_id):
@@ -208,6 +209,20 @@ def view_document(doc_id):
         
         file_ext = file_path_obj.suffix.lower()
         file_path = str(file_path_obj)
+        
+        # 检查是否为Office文档，如果是则转换为PDF
+        office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        if file_ext in office_extensions:
+            try:
+                # 转换为PDF
+                pdf_service = PDFConversionService()
+                pdf_path = pdf_service.convert_to_pdf(file_path)
+                
+                # 返回PDF文件
+                return send_file(pdf_path, mimetype='application/pdf', as_attachment=False, download_name=f"{file_path_obj.stem}.pdf")
+            except Exception as e:
+                # 转换失败，返回原始文件
+                print(f"PDF转换失败: {e}")
         
         mime_types = {
             '.pdf': 'application/pdf',
