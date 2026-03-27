@@ -1549,6 +1549,13 @@ def list_zip_packages():
     """列出项目已解压的ZIP包目录（从项目uploads目录读取）"""
     try:
         from pathlib import Path
+        
+        # 确保 doc_manager 已初始化
+        global doc_manager
+        if doc_manager is None:
+            from app.routes.documents.utils import get_doc_manager
+            doc_manager = get_doc_manager()
+        
         project_id = request.args.get('project_id', '').strip()
         
         ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
@@ -1560,13 +1567,17 @@ def list_zip_packages():
         if project_id:
             # 按项目ID查找：在 projects/{项目名}/uploads/ 下找子目录
             project_result = doc_manager.load_project(project_id)
+            print(f"[list_zip_packages] 项目ID: {project_id}, 加载结果: {project_result}")
             if project_result and project_result.get('status') == 'success':
                 project_config = project_result.get('project', {})
                 project_name = project_config.get('name', '')
+                print(f"[list_zip_packages] 项目名称: {project_name}")
                 if project_name:
                     project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+                    print(f"[list_zip_packages] 查找目录: {project_uploads_dir}, 是否存在: {project_uploads_dir.exists()}")
                     if project_uploads_dir.exists():
                         for item in sorted(project_uploads_dir.iterdir()):
+                            print(f"[list_zip_packages] 找到项目: {item.name}, 是目录: {item.is_dir()}")
                             if item.is_dir() and not item.name.startswith('.'):
                                 file_count = sum(
                                     1 for f in item.rglob('*')
@@ -1578,6 +1589,9 @@ def list_zip_packages():
                                     'path': str(item),
                                     'file_count': file_count
                                 })
+                                print(f"[list_zip_packages] 添加包: {item.name}, 文件数: {file_count}")
+                    else:
+                        print(f"[list_zip_packages] 目录不存在: {project_uploads_dir}")
         else:
             # 无项目ID时，回退到旧的 uploads/temp_extract 路径
             upload_folder = doc_manager.upload_folder

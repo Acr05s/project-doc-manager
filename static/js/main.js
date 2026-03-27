@@ -65,10 +65,55 @@ document.addEventListener('DOMContentLoaded', function() {
     // 添加项目标题点击事件
     const projectTitle = document.getElementById('projectTitle');
     if (projectTitle) {
-        projectTitle.addEventListener('click', function() {
-            import('./modules/project.js').then(module => {
-                module.openProjectSelectModal();
-            });
+        projectTitle.addEventListener('click', async function() {
+            // 检查是否有当前打开的项目
+            const appState = (await import('./modules/app-state.js')).appState;
+            const { showNotification, showLoading } = await import('./modules/ui.js');
+            const { saveProject } = await import('./modules/api.js');
+            const { renderInitialContent } = await import('./modules/cycle.js');
+            
+            if (appState.currentProjectId && appState.projectConfig) {
+                // 保存当前项目
+                showLoading(true);
+                try {
+                    await saveProject(appState.currentProjectId, appState.projectConfig);
+                    
+                    // 重置应用状态
+                    appState.currentProjectId = null;
+                    appState.projectConfig = null;
+                    
+                    // 隐藏项目相关按钮
+                    const hideProjectButtons = (await import('./modules/project.js')).hideProjectButtons;
+                    hideProjectButtons();
+                    
+                    // 清空当前项目名称显示
+                    const nameEl = document.getElementById('currentProjectName');
+                    if (nameEl) {
+                        nameEl.textContent = '';
+                        nameEl.style.display = 'none';
+                    }
+                    
+                    // 重置项目选择下拉框
+                    const projectSelect = document.getElementById('projectSelect');
+                    if (projectSelect) {
+                        projectSelect.value = '';
+                    }
+                    
+                    // 清空页面内容，显示初始状态
+                    renderInitialContent();
+                    
+                    showNotification('当前项目已保存并关闭', 'success');
+                } catch (error) {
+                    console.error('保存项目失败:', error);
+                    showNotification('保存项目失败: ' + error.message, 'error');
+                } finally {
+                    showLoading(false);
+                }
+            }
+            
+            // 打开项目选择模态框
+            const module = await import('./modules/project.js');
+            module.openProjectSelectModal();
         });
     }
     

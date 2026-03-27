@@ -435,13 +435,21 @@ class ZipMatcher:
             
             # 计算相对路径（相对于项目的uploads目录）
             relative_path = str(source_path)
+            directory = ''
             if project_name:
                 project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
                 try:
+                    # 计算相对路径
                     relative_path = str(source_path.relative_to(project_uploads_dir))
+                    # 提取目录信息，与document_uploader.py保持一致
+                    rel_path_parts = Path(relative_path).parts
+                    if len(rel_path_parts) > 1:
+                        # 如果文件在子目录中，取第一个目录作为directory
+                        directory = rel_path_parts[0]
                 except ValueError:
-                    # 如果文件不在项目uploads目录中，使用绝对路径
-                    pass
+                    # 如果文件不在项目uploads目录中，使用空相对路径
+                    relative_path = ''
+                    directory = ''
             
             # 添加到项目配置的uploaded_docs字段
             if 'documents' not in project_config:

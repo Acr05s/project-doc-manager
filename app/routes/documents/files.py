@@ -7,7 +7,7 @@ from .utils import get_doc_manager
 
 
 def get_directories():
-    """获取项目的文档包目录列表（扫描 projects/{项目名}/uploads/ 下的子目录）"""
+    """获取项目的文档包目录列表（只从 zip_uploads.json 读取，使用相对路径）"""
     try:
         doc_manager = get_doc_manager()
         project_id = request.args.get('project_id')
@@ -25,26 +25,57 @@ def get_directories():
         if not project_name:
             return jsonify({'status': 'success', 'directories': []})
         
-        # 扫描 projects/{项目名}/uploads/ 下的一级子目录
+        # 项目上传目录
         project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
-        project_uploads_dir.mkdir(parents=True, exist_ok=True)
-        
-        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
-                        '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
         
         directories = []
-        if project_uploads_dir.exists():
-            for item in sorted(project_uploads_dir.iterdir()):
-                if item.is_dir() and not item.name.startswith('.'):
-                    file_count = sum(
-                        1 for f in item.rglob('*')
-                        if f.is_file() and not f.name.startswith('.')
-                        and f.suffix.lower() in ALLOWED_EXTS
-                    )
-                    directories.append({
-                        'id': str(item),        # 完整绝对路径，供搜索时用
-                        'name': f"{item.name}（{file_count}个文件）"
-                    })
+        
+        # 只从 zip_uploads.json 读取记录
+        zip_uploads_file = doc_manager.config.projects_base_folder / project_name / 'zip_uploads.json'
+        if zip_uploads_file.exists():
+            import json
+            try:
+                with open(zip_uploads_file, 'r', encoding='utf-8') as f:
+                    zip_uploads = json.load(f)
+                
+                # 获取 uploads 目录下所有子目录
+                existing_dirs = {}
+                if project_uploads_dir.exists():
+                    for item in project_uploads_dir.iterdir():
+                        if item.is_dir() and not item.name.startswith('.'):
+                            existing_dirs[item.name] = item
+                
+                for zip_info in zip_uploads:
+                    zip_name = zip_info.get('name', '')
+                    file_count = zip_info.get('file_count', 0)
+                    
+                    if zip_name:
+                        # 查找以 zip_name 开头的目录（因为目录名可能包含时间戳后缀）
+                        matched_dir = None
+                        for dir_name, dir_path in existing_dirs.items():
+                            if dir_name.startswith(zip_name):
+                                matched_dir = (dir_name, dir_path)
+                                break
+                        
+                        if matched_dir:
+                            dir_name, dir_path = matched_dir
+                            # 使用相对路径（相对于项目目录）
+                            # 使用完整相对路径（从 projects 开始），便于预览等功能
+                            rel_path = f"projects/{project_name}/uploads/{dir_name}"
+                            # 显示名称使用完整目录名（包含时间戳，便于区分）
+                            # 从 dir_name 中提取文件名部分（去掉前缀）
+                            if '_' in dir_name:
+                                display_name = dir_name.split('_', 1)[1]
+                            else:
+                                display_name = dir_name
+                            directories.append({
+                                'id': rel_path,  # 完整相对路径
+                                'name': f"{display_name}（{file_count}个文件）"
+                            })
+            except Exception as e:
+                import traceback
+                print(f"[get_directories] 读取 zip_uploads.json 失败: {e}")
+                traceback.print_exc()
         
         return jsonify({
             'status': 'success',
@@ -73,51 +104,110 @@ def search_files():
             if project_result and project_result.get('status') == 'success':
                 project_name = project_result.get('project', {}).get('name', '')
         
-        # 确定搜索目录
+        # 确定搜索目录或ZIP文件
+        search_dir = None
+        zip_file = None
+        
         if directory:
-            search_dir = Path(directory)
-            # 如果是绝对路径直接用，否则拼接项目目录
-            if not search_dir.is_absolute() and project_name:
-                docs_folder = doc_manager.get_documents_folder(project_name)
-                search_dir = docs_folder / directory
+            # 处理完整相对路径（如 projects/{项目名}/uploads/xxx）
+            if directory.startswith('projects/') and project_name:
+                # 从 projects_base_folder 拼接完整路径
+                directory_path = doc_manager.config.projects_base_folder.parent / directory
+            elif directory.startswith('uploads/') and project_name:
+                # 兼容旧格式
+                directory_path = doc_manager.config.projects_base_folder / project_name / directory
+            else:
+                directory_path = Path(directory)
+            
+            if directory_path.exists():
+                if directory_path.is_dir():
+                    # 是目录
+                    search_dir = directory_path
+                elif directory_path.is_file() and directory_path.suffix.lower() == '.zip':
+                    # 是ZIP文件
+                    zip_file = directory_path
         elif project_name:
             # 默认搜索项目 uploads 目录
             search_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
         else:
             return jsonify({'status': 'error', 'message': '缺少搜索目录'}), 400
         
-        if not search_dir.exists():
-            return jsonify({'status': 'success', 'files': [], 'total': 0})
-        
         # 支持的文件类型
         allowed_exts = {'.pdf', '.doc', '.docx', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
         
         # 搜索文件
         files = []
-        for file_path in sorted(search_dir.rglob('*')):
-            if not file_path.is_file() or file_path.name.startswith('.'):
-                continue
-            if file_path.suffix.lower() not in allowed_exts:
-                continue
-            if keyword and keyword not in file_path.name.lower():
-                continue
-            
-            # 检查是否已被其他文档使用
-            is_used = any(
-                meta.get('file_path') == str(file_path) or 
-                meta.get('original_filename') == file_path.name
-                for meta in doc_manager.documents_db.values()
-            )
-            
-            files.append({
-                'id': str(file_path),
-                'name': file_path.name,
-                'path': str(file_path),
-                'rel_path': file_path.name,
-                'size': file_path.stat().st_size,
-                'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                'used': is_used
-            })
+        
+        if search_dir and search_dir.exists():
+            # 搜索目录
+            for file_path in sorted(search_dir.rglob('*')):
+                if not file_path.is_file() or file_path.name.startswith('.'):
+                    continue
+                if file_path.suffix.lower() not in allowed_exts:
+                    continue
+                if keyword and keyword not in file_path.name.lower():
+                    continue
+                
+                # 检查是否已被其他文档使用
+                is_used = any(
+                    meta.get('file_path') == str(file_path) or 
+                    meta.get('original_filename') == file_path.name
+                    for meta in doc_manager.documents_db.values()
+                )
+                
+                # 计算相对路径
+                rel_path = file_path.name
+                if project_name:
+                    project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+                    try:
+                        rel_path = str(file_path.relative_to(project_uploads_dir))
+                    except ValueError:
+                        pass
+                
+                # 使用完整相对路径作为 id（从 projects 开始）
+                full_rel_path = f"projects/{project_name}/uploads/{rel_path}"
+                files.append({
+                    'id': full_rel_path,
+                    'name': file_path.name,
+                    'path': full_rel_path,
+                    'rel_path': rel_path,
+                    'size': file_path.stat().st_size,
+                    'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
+                    'used': is_used
+                })
+        elif zip_file and zip_file.exists():
+            # 搜索ZIP文件
+            import zipfile
+            try:
+                with zipfile.ZipFile(zip_file, 'r') as zf:
+                    for info in zf.infolist():
+                        if info.filename.endswith('/'):
+                            continue
+                        file_path = Path(info.filename)
+                        if file_path.suffix.lower() not in allowed_exts:
+                            continue
+                        if keyword and keyword not in file_path.name.lower():
+                            continue
+                        
+                        # 检查是否已被其他文档使用
+                        is_used = any(
+                            meta.get('file_path') == info.filename or 
+                            meta.get('original_filename') == file_path.name
+                            for meta in doc_manager.documents_db.values()
+                        )
+                        
+                        files.append({
+                            'id': info.filename,
+                            'name': file_path.name,
+                            'path': info.filename,
+                            'rel_path': info.filename,
+                            'size': info.file_size,
+                            'modified': datetime.fromtimestamp(info.date_time[0:6]).isoformat(),
+                            'used': is_used
+                        })
+            except Exception:
+                # 如果ZIP文件损坏，返回空列表
+                pass
         
         return jsonify({
             'status': 'success',
@@ -160,27 +250,43 @@ def select_files():
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             doc_id = f"{cycle}_{doc_name}_{timestamp}_{len(results)}"
             
-            # 提取目录信息
-            directory = ''
+            # 提取目录信息 - 手动选择的文件使用根目录 '/'，不显示具体子目录
+            directory = '/'
+            relative_path = str(file_path)
             if project_name:
                 # 获取项目上传目录
                 project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
                 try:
-                    # 计算相对路径作为目录
-                    relative_path = file_path.relative_to(project_uploads_dir)
-                    if len(relative_path.parts) > 1:
-                        # 如果文件在子目录中，取第一个目录作为directory
-                        directory = relative_path.parts[0]
+                    # 计算相对路径
+                    relative_path = str(file_path.relative_to(project_uploads_dir))
                 except ValueError:
-                    # 如果文件不在项目上传目录中，使用空目录
+                    # 如果文件不在项目上传目录中，使用原路径
                     pass
+            
+            # 将路径转换为完整相对路径（从 projects 开始）
+            try:
+                # 尝试计算相对于 projects_base_folder 父目录的路径
+                projects_base = doc_manager.config.projects_base_folder.parent
+                file_path_relative = str(file_path.relative_to(projects_base))
+            except ValueError:
+                # 如果无法相对化，使用相对于 uploads 的路径
+                try:
+                    project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+                    rel_to_uploads = str(file_path.relative_to(project_uploads_dir))
+                    file_path_relative = f"projects/{project_name}/uploads/{rel_to_uploads}"
+                except ValueError:
+                    # 最后使用绝对路径
+                    file_path_relative = str(file_path)
+            
+            # 获取原始文件名（优先使用前端传来的文件名）
+            original_name = file_info.get('name') or file_path.name
             
             doc_metadata = {
                 'cycle': cycle,
                 'doc_name': doc_name,
-                'filename': file_path.name,
-                'original_filename': file_path.name,
-                'file_path': str(file_path),
+                'filename': original_name,
+                'original_filename': original_name,
+                'file_path': file_path_relative,
                 'project_name': project_name,
                 'upload_time': datetime.now().isoformat(),
                 'source': 'select',

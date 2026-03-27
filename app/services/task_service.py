@@ -358,5 +358,291 @@ class TaskService:
             'message': '异常检查任务已启动'
         }
 
+    def start_download_package_task(self, project_id: str, project_config: Dict[str, Any]) -> Dict[str, Any]:
+        """启动下载打包任务（按周期/文档类型组织）"""
+        import zipfile
+        from pathlib import Path
+        
+        task_id = str(uuid.uuid4())
+        self.tasks_store[task_id] = {
+            'id': task_id,
+            'type': 'download_package',
+            'name': '打包下载',
+            'status': 'running',
+            'progress': 0,
+            'message': '开始打包...',
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        self._save_tasks()
+        
+        def download_package_task():
+            try:
+                import os
+                import re
+                
+                # 获取项目数据
+                documents = project_config.get('documents', {})
+                # 获取周期的正确顺序（cycles 列表定义了顺序）
+                cycles_order = project_config.get('cycles', [])
+                
+                # 统计文件总数
+                total_files = sum(
+                    len(doc_data.get('uploaded_docs', []))
+                    for doc_data in documents.values()
+                    if isinstance(doc_data, dict)
+                )
+                
+                if total_files == 0:
+                    raise Exception('没有可打包的文件')
+                
+                # 创建临时目录和ZIP文件
+                temp_dir = Path('uploads/temp/packages')
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                project_name = project_config.get('name', '项目文档')
+                safe_name = ''.join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                package_filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d')}_{task_id[:8]}.zip"
+                package_path = temp_dir / package_filename
+                
+                # 辅助函数：清理文件名（去掉前面的非中文字符，添加X.Y.Z序号）
+                def clean_filename(filename, index_prefix):
+                    """
+                    清理文件名并添加X.Y.Z序号前缀
+                    index_prefix: 如 "1.1", "1.2.1" 等
+                    """
+                    import re
+                    # 分离文件名和扩展名
+                    name_part, ext_part = os.path.splitext(filename)
+                    # 找到第一个中文字符的位置
+                    match = re.search(r'[\u4e00-\u9fff]', name_part)
+                    if match:
+                        chinese_start = match.start()
+                        clean_name = name_part[chinese_start:]
+                    else:
+                        clean_name = name_part
+                    # 返回：X.Y.Z 清理后的文件名.扩展名
+                    return f"{index_prefix} {clean_name}{ext_part}"
+                
+                # 辅助函数：清理名称（去掉非中文前缀）
+                def clean_name_prefix(name):
+                    """去掉名称前面的非中文字符"""
+                    match = re.search(r'[\u4e00-\u9fff]', name)
+                    if match:
+                        return name[match.start():]
+                    return name
+                
+                # 预处理：统计每个文档类型的文件数量
+                doc_file_counts = {}  # {cycle: {doc_name: count}}
+                # 按照 cycles 列表的顺序遍历
+                for cycle in cycles_order:
+                    doc_data = documents.get(cycle)
+                    if not isinstance(doc_data, dict):
+                        continue
+                    doc_file_counts[cycle] = {}
+                    uploaded_docs = doc_data.get('uploaded_docs', [])
+                    for doc_meta in uploaded_docs:
+                        if not isinstance(doc_meta, dict):
+                            continue
+                        doc_name = doc_meta.get('doc_name', '未知')
+                        if doc_name not in doc_file_counts[cycle]:
+                            doc_file_counts[cycle][doc_name] = 0
+                        doc_file_counts[cycle][doc_name] += 1
+                
+                # 预处理：为周期分配序号，标记单文件类型
+                cycle_order = {}
+                single_file_docs = {}  # 记录单文件文档类型 {cycle: {doc_name: True}}
+                
+                # 按照 cycles 列表的顺序分配序号
+                for cycle_idx, cycle in enumerate(cycles_order, 1):
+                    doc_data = documents.get(cycle)
+                    if not isinstance(doc_data, dict):
+                        continue
+                    cycle_order[cycle] = cycle_idx
+                    
+                    single_file_docs[cycle] = {}
+                    
+                    # 标记单文件文档类型
+                    for doc_name, count in doc_file_counts.get(cycle, {}).items():
+                        single_file_docs[cycle][doc_name] = (count == 1)
+                
+                # 创建ZIP文件
+                processed_files = 0
+                with zipfile.ZipFile(package_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # 按照 cycles 列表的顺序处理周期
+                    for cycle in cycles_order:
+                        doc_data = documents.get(cycle)
+                        if not isinstance(doc_data, dict):
+                            continue
+                        
+                        cycle_idx = cycle_order.get(cycle)
+                        if not cycle_idx:
+                            continue
+                        
+                        # 获取需求文档列表（定义了页面上文档类型的顺序）
+                        required_docs = doc_data.get('required_docs', [])
+                        uploaded_docs = doc_data.get('uploaded_docs', [])
+                        
+                        # 构建文档名称到文件列表的映射
+                        doc_files_map = {}
+                        for doc_meta in uploaded_docs:
+                            if not isinstance(doc_meta, dict):
+                                continue
+                            doc_name = doc_meta.get('doc_name', '未知')
+                            if doc_name not in doc_files_map:
+                                doc_files_map[doc_name] = []
+                            doc_files_map[doc_name].append(doc_meta)
+                        
+                        # 按照 required_docs 的顺序处理文档类型
+                        doc_type_seq = 0
+                        for req_doc in required_docs:
+                            doc_name = req_doc.get('name', '未知')
+                            
+                            # 如果该文档类型没有上传的文件，跳过
+                            if doc_name not in doc_files_map:
+                                continue
+                            
+                            # 文档类型序号递增（1.1, 1.2, 1.3...）
+                            doc_type_seq += 1
+                            
+                            # 判断是否为单文件类型
+                            is_single_file = single_file_docs.get(cycle, {}).get(doc_name, False)
+                            
+                            # 先按子目录对文件分组（无子目录的用 '' 作为键）
+                            files_by_directory = {}
+                            for doc_meta in doc_files_map[doc_name]:
+                                directory = doc_meta.get('directory', '')
+                                # 规范化目录值：'/' 和 '' 都视为无子目录
+                                if directory == '/':
+                                    directory = ''
+                                if directory not in files_by_directory:
+                                    files_by_directory[directory] = []
+                                files_by_directory[directory].append(doc_meta)
+                            
+                            # 处理该文档类型的所有文件（按子目录分组）
+                            dir_seq = 0
+                            file_seq = 0  # 文件序号在文档类型级别累加
+                            for directory, dir_files in files_by_directory.items():
+                                # 规范化后，'' 表示无子目录，其他值表示有子目录
+                                has_subdir = bool(directory)
+                                
+                                if has_subdir:
+                                    # 有子目录：子目录有自己的序号
+                                    dir_seq += 1
+                                    for doc_meta in dir_files:
+                                        file_path = doc_meta.get('file_path')
+                                        if not file_path:
+                                            continue
+                                        
+                                        # 解析文件路径
+                                        file_path_obj = Path(file_path)
+                                        if not file_path_obj.is_absolute():
+                                            if file_path.startswith('projects/'):
+                                                base_dir = self.doc_manager.config.projects_base_folder.parent
+                                                file_path_obj = base_dir / file_path
+                                            else:
+                                                project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
+                                                file_path_obj = project_uploads_dir / file_path
+                                        
+                                        if not file_path_obj.exists():
+                                            continue
+                                        
+                                        # 优先使用原始文件名，其次是filename字段，最后是磁盘文件名
+                                        filename = doc_meta.get('original_filename') or doc_meta.get('filename') or file_path_obj.name
+                                        
+                                        # 文件在子目录内的序号（有子目录时：3.3.1.1, 3.3.1.2...）
+                                        file_seq += 1
+                                        file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{dir_seq}.{file_seq}"
+                                        
+                                        # 构建路径：3.周期/3.3 文档类型/3.3.1 子目录/3.3.1.1 文件名
+                                        clean_cycle = clean_name_prefix(cycle)
+                                        clean_dir = clean_name_prefix(directory)
+                                        archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}/{cycle_idx}.{doc_type_seq}.{dir_seq} {clean_dir}"
+                                        
+                                        clean_name = clean_filename(filename, file_index_prefix)
+                                        archive_path = f"{archive_dir}/{clean_name}"
+                                        
+                                        zipf.write(file_path_obj, archive_path)
+                                        processed_files += 1
+                                else:
+                                    # 无子目录：文件直接在文档类型目录下
+                                    for doc_meta in dir_files:
+                                        file_path = doc_meta.get('file_path')
+                                        if not file_path:
+                                            continue
+                                        
+                                        # 解析文件路径
+                                        file_path_obj = Path(file_path)
+                                        if not file_path_obj.is_absolute():
+                                            if file_path.startswith('projects/'):
+                                                base_dir = self.doc_manager.config.projects_base_folder.parent
+                                                file_path_obj = base_dir / file_path
+                                            else:
+                                                project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
+                                                file_path_obj = project_uploads_dir / file_path
+                                        
+                                        if not file_path_obj.exists():
+                                            continue
+                                        
+                                        # 优先使用原始文件名，其次是filename字段，最后是磁盘文件名
+                                        filename = doc_meta.get('original_filename') or doc_meta.get('filename') or file_path_obj.name
+                                        
+                                        # 文件在文档类型内的序号（无子目录时：1.1, 1.2, 1.3...）
+                                        file_seq += 1
+                                        file_index_prefix = f"{cycle_idx}.{file_seq}"
+                                        
+                                        # 构建路径
+                                        clean_cycle = clean_name_prefix(cycle)
+                                        
+                                        if is_single_file:
+                                            # 单文件：直接放在周期目录下
+                                            archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}"
+                                        else:
+                                            # 多文件：7.周期/7.17 文档，文件使用 7.1, 7.2... 序号（无子目录时简化为2层）
+                                            archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}"
+                                        
+                                        clean_name = clean_filename(filename, file_index_prefix)
+                                        
+                                        archive_path = f"{archive_dir}/{clean_name}"
+                                        
+                                        zipf.write(file_path_obj, archive_path)
+                                        processed_files += 1
+                                
+                                # 更新进度
+                                progress = int(100 * processed_files / total_files)
+                                self.tasks_store[task_id]['progress'] = progress
+                                self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files})'
+                                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                                
+                                if processed_files % 5 == 0:
+                                    self._save_tasks()
+                
+                # 完成任务
+                self.tasks_store[task_id]['status'] = 'completed'
+                self.tasks_store[task_id]['progress'] = 100
+                self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
+                self.tasks_store[task_id]['result'] = {
+                    'package_path': str(package_path),
+                    'package_filename': package_filename,
+                    'download_url': f'/api/tasks/download/{task_id}'
+                }
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()
+                
+            except Exception as e:
+                self.tasks_store[task_id]['status'] = 'error'
+                self.tasks_store[task_id]['message'] = f'打包失败: {str(e)}'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()
+        
+        threading.Thread(target=download_package_task).start()
+        
+        return {
+            'status': 'success',
+            'task_id': task_id,
+            'message': '打包任务已启动'
+        }
+
+
 # 创建全局任务服务实例
 task_service = TaskService()

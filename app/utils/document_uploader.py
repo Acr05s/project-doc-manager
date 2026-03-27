@@ -101,11 +101,13 @@ class DocumentUploader:
                 # 获取项目上传目录
                 project_uploads_dir = self.folder_manager.get_documents_folder(project_name) / 'temp'
                 try:
-                    # 计算相对路径作为目录
+                    # 计算相对路径
                     relative_path = file_path.relative_to(project_uploads_dir)
-                    if len(relative_path.parts) > 1:
+                    # 提取目录信息，与文件选择逻辑保持一致
+                    rel_path_parts = relative_path.parts
+                    if len(rel_path_parts) > 1:
                         # 如果文件在子目录中，取第一个目录作为directory
-                        directory = relative_path.parts[0]
+                        directory = rel_path_parts[0]
                 except ValueError:
                     # 如果文件不在项目上传目录中，使用空目录
                     pass

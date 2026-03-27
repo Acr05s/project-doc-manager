@@ -962,6 +962,93 @@ def verify_acceptance(project_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@project_bp.route('/<project_id>/verify-files', methods=['GET'])
+def verify_project_files(project_id):
+    """验证项目所有文件是否存在且可以被打包"""
+    try:
+        from pathlib import Path
+        
+        project_result = doc_manager.load_project(project_id)
+        if project_result['status'] != 'success':
+            return jsonify(project_result), 404
+
+        project_config = project_result['project']
+        project_name = project_config.get('name', project_id)
+        
+        # 检查结果
+        result = {
+            'total_files': 0,
+            'valid_files': 0,
+            'missing_files': [],
+            'path_errors': [],
+            'can_package': True
+        }
+        
+        # 遍历所有周期检查文件
+        for cycle, doc_data in project_config.get('documents', {}).items():
+            uploaded_docs = doc_data.get('uploaded_docs', [])
+            
+            for doc_meta in uploaded_docs:
+                if not isinstance(doc_meta, dict):
+                    continue
+                
+                result['total_files'] += 1
+                
+                file_path = doc_meta.get('file_path', '')
+                doc_name = doc_meta.get('doc_name', '未知')
+                filename = doc_meta.get('filename', '未知')
+                
+                # 检查文件路径是否为空
+                if not file_path:
+                    result['path_errors'].append({
+                        'cycle': cycle,
+                        'doc_name': doc_name,
+                        'filename': filename,
+                        'error': '文件路径为空',
+                        'doc_id': doc_meta.get('doc_id', '')
+                    })
+                    result['can_package'] = False
+                    continue
+                
+                # 解析文件路径
+                file_path_obj = Path(file_path)
+                
+                # 处理相对路径
+                if not file_path_obj.is_absolute():
+                    if file_path.startswith('projects/'):
+                        # 完整相对路径
+                        base_dir = doc_manager.config.projects_base_folder.parent
+                        file_path_obj = base_dir / file_path
+                    else:
+                        # 旧格式或 uploads 格式
+                        project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+                        file_path_obj = project_uploads_dir / file_path
+                
+                # 检查文件是否存在
+                if not file_path_obj.exists():
+                    result['missing_files'].append({
+                        'cycle': cycle,
+                        'doc_name': doc_name,
+                        'filename': filename,
+                        'file_path': str(file_path),
+                        'resolved_path': str(file_path_obj),
+                        'doc_id': doc_meta.get('doc_id', '')
+                    })
+                    result['can_package'] = False
+                else:
+                    result['valid_files'] += 1
+        
+        return jsonify({
+            'status': 'success',
+            'result': result
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def generate_sequential_filename(original_name, seq_num):
     """
     生成顺序编号的文件名
@@ -1129,6 +1216,9 @@ def download_project_package(project_id):
                         pdf_filename = Path(new_filename).stem + '.pdf'
                         final_filename = pdf_filename
                     
+                    # 获取目录信息（用于构建归档路径）
+                    directory = doc_meta.get('directory', '')
+                    
                     files_to_package.append({
                         'source_path': str(file_path_obj),
                         'original_name': original_filename,
@@ -1136,6 +1226,7 @@ def download_project_package(project_id):
                         'final_name': final_filename,
                         'cycle': cycle,
                         'doc_name': doc_meta.get('doc_name', '未知'),
+                        'directory': directory,
                         'needs_conversion': convert_pdf and not original_filename.lower().endswith('.pdf'),
                         'seq_num': file_counter
                     })
@@ -1151,8 +1242,14 @@ def download_project_package(project_id):
                         source_path = Path(file_info['source_path'])
                         final_name = file_info['final_name']
                         
-                        # 构建归档路径
-                        archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{final_name}"
+                        # 构建归档路径：/<项目名>/<周期>/<文档类型>[目录]/<文件>
+                        directory = file_info.get('directory', '')
+                        if directory and directory != '/':
+                            # 有子目录，添加目录层级
+                            archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{directory}/{final_name}"
+                        else:
+                            # 无子目录
+                            archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{final_name}"
                         
                         # 如果需要PDF转换
                         if file_info['needs_conversion']:

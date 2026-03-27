@@ -442,7 +442,7 @@ export function setupEventListeners() {
         btn.addEventListener('click', () => switchMainTab(btn.dataset.tab));
     });
 
-    // ZIP 包选择器
+    // ZIP 包选择器（用于 ZIP 包管理页面）
             const zipPackageSelect = document.getElementById('zipPackageSelect');
             if (zipPackageSelect) {
                 zipPackageSelect.addEventListener('change', () => {
@@ -1089,7 +1089,7 @@ export function closeInputModal() {
 export function showDirectorySelectModal(title, existingDirectories, onConfirm) {
     const modal = document.getElementById('directorySelectModal');
     const titleEl = document.getElementById('directorySelectModalTitle');
-    const selectEl = document.getElementById('directorySelect');
+    const selectEl = document.getElementById('existingDirectorySelect');
     const inputEl = document.getElementById('newDirectoryInput');
     const okBtn = document.getElementById('directorySelectOkBtn');
 

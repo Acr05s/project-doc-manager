@@ -1814,7 +1814,15 @@
           "doc_id": "9、验收_验收申请书_20260325_195739_0",
           "_remark": "",
           "_party_b_seal": true,
-          "_no_seal": false
+          "_no_seal": false,
+          "doc_date": "",
+          "sign_date": "",
+          "party_a_signer": "",
+          "party_b_signer": "",
+          "no_signature": false,
+          "party_a_seal": true,
+          "party_b_seal": true,
+          "no_seal": false
         },
         {
           "cycle": "9、验收",
@@ -2018,20 +2026,6 @@
         },
         {
           "doc_date": "",
-          "doc_id": "其他_入湖确认单_20260325_122049",
-          "doc_name": "入湖确认单",
-          "file_path": "20260325122046_大唐智慧党建平台项目验收文档3.20_20260325122047\\大唐智慧党建平台项目验收文档3.20\\11、其他\\DT-DJ-2023-11-009-V1.0 中国大唐集团有限公司智慧党建管理平台项目入湖确认单.jpg",
-          "filename": "DT-DJ-2023-11-009-V1.0 中国大唐集团有限公司智慧党建管理平台项目入湖确认单.jpg",
-          "has_seal": false,
-          "original_filename": "DT-DJ-2023-11-009-V1.0 中国大唐集团有限公司智慧党建管理平台项目入湖确认单.jpg",
-          "project_name": "智能党建项目",
-          "sign_date": "",
-          "signer": "",
-          "source": "zip",
-          "upload_time": "2026-03-25T12:20:49.568258"
-        },
-        {
-          "doc_date": "",
           "doc_id": "其他_培训记录_20260325_122049",
           "doc_name": "培训记录",
           "file_path": "20260325122046_大唐智慧党建平台项目验收文档3.20_20260325122047\\大唐智慧党建平台项目验收文档3.20\\11、其他\\DT-DJ-2023-11-003-V1.0 中国大唐集团有限公司智慧党建管理平台培训记录-2.png",
@@ -2095,11 +2089,11 @@
           "doc_date": "",
           "sign_date": "",
           "signer": "",
-          "no_signature": false,
+          "no_signature": true,
           "has_seal_marked": false,
-          "party_a_seal": false,
+          "party_a_seal": true,
           "party_b_seal": false,
-          "no_seal": false,
+          "no_seal": true,
           "other_seal": "",
           "upload_time": "2026-03-25T20:01:31.799633",
           "source": "upload",
@@ -2107,7 +2101,9 @@
           "doc_id": "其他_等保测评报告_20260325_200131",
           "_remark": "",
           "_has_seal": false,
-          "_no_seal": false
+          "_no_seal": false,
+          "party_b_signer": "",
+          "has_seal": false
         }
       ]
     }

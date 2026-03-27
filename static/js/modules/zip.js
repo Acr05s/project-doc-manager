@@ -14,6 +14,7 @@ export async function loadZipPackagesList() {
     try {
         const packages = await loadZipPackages(appState.currentProjectId);
         
+        // 使用 zipPackageSelect，与 directorySelect 区分开
         const zipPackageSelect = document.getElementById('zipPackageSelect');
         if (zipPackageSelect) {
             zipPackageSelect.innerHTML = '<option value="">-- 选择文档包 --</option>';
@@ -446,6 +447,13 @@ async function pollMatchTask(taskId, progress) {
                         } catch (e) {
                             console.error('刷新文档列表失败:', e);
                         }
+                    }
+                    
+                    // 刷新ZIP包列表
+                    try {
+                        await loadZipPackagesList();
+                    } catch (e) {
+                        console.error('刷新ZIP包列表失败:', e);
                     }
                     
                     // 关闭进度显示

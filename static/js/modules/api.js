@@ -36,7 +36,15 @@ export async function loadProjectsList() {
  */
 export async function loadProject(projectId) {
     try {
-        // 首先尝试使用新版API路径
+        // 首先尝试使用旧版API路径（按项目ID加载）
+        const oldResponse = await fetch(`/api/projects/${projectId}`);
+        const oldResult = await oldResponse.json();
+        
+        if (oldResult.status === 'success') {
+            return oldResult.project;
+        }
+        
+        // 如果旧版API失败，尝试使用新版API路径（按项目名称加载）
         const response = await fetch(`/api/projects/new/${projectId}/load`);
         const result = await response.json();
         
@@ -68,15 +76,8 @@ export async function loadProject(projectId) {
             return result;
         }
         
-        // 如果新版API失败，尝试使用旧版API路径
-        const oldResponse = await fetch(`/api/projects/${projectId}`);
-        const oldResult = await oldResponse.json();
-        
-        if (oldResult.status === 'success') {
-            return oldResult.project;
-        } else {
-            throw new Error(oldResult.message || '加载项目失败');
-        }
+        // 两个API都失败，抛出错误
+        throw new Error(oldResult.message || result?.message || '加载项目失败');
     } catch (error) {
         console.error('加载项目失败:', error);
         throw error;
@@ -310,30 +311,40 @@ export async function deleteZipPackage(packagePath) {
  * 加载ZIP上传记录
  */
 export async function loadZipRecords(projectId) {
+    console.log('[API] 加载ZIP记录, projectId:', projectId);
     try {
-        const response = await fetch(`/api/documents/zip-records?project_id=${projectId}`, { 
-            method: 'GET'
-        });
+        if (!projectId) {
+            console.warn('[API] projectId 为空');
+            return { status: 'success', records: [] };
+        }
+        
+        const url = `/api/documents/zip-records?project_id=${encodeURIComponent(projectId)}`;
+        console.log('[API] 请求URL:', url);
+        
+        const response = await fetch(url, { method: 'GET' });
+        console.log('[API] 响应状态:', response.status);
         
         // 检查响应状态
         if (!response.ok) {
             if (response.status === 404) {
-                return { status: 'success', records: [] }; // 文件不存在，返回空数组
+                return { status: 'success', records: [] };
             }
             throw new Error(`服务器错误: ${response.status}`);
         }
         
         // 检查内容类型
         const contentType = response.headers.get('content-type');
+        console.log('[API] content-type:', contentType);
+        
         if (!contentType || !contentType.includes('application/json')) {
             throw new Error('服务器返回了非 JSON 响应');
         }
         
         const result = await response.json();
+        console.log('[API] 响应数据:', result);
         return result;
     } catch (error) {
-        console.error('加载ZIP记录失败:', error);
-        // 返回错误状态而不是抛出，让调用方更容易处理
+        console.error('[API] 加载ZIP记录失败:', error);
         return { 
             status: 'error', 
             message: error.message || '加载失败',
@@ -526,6 +537,52 @@ export async function importFullPackage(formData) {
 }
 
 /**
+ * 上传项目包分片（支持断点续传）
+ */
+export async function uploadProjectChunk(chunk, chunkIndex, totalChunks, filename, fileId) {
+    try {
+        const formData = new FormData();
+        formData.append('chunk', chunk);
+        formData.append('chunkIndex', chunkIndex);
+        formData.append('totalChunks', totalChunks);
+        formData.append('filename', filename);
+        formData.append('fileId', fileId);
+        
+        const response = await fetch('/api/projects/import/chunk', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('上传分片失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 合并项目包分片并导入
+ */
+export async function mergeProjectChunks(filename, fileId, overwrite = false) {
+    try {
+        const response = await fetch('/api/projects/import/merge', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ filename, fileId, overwrite })
+        });
+        
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('合并分片失败:', error);
+        throw error;
+    }
+}
+
+/**
  * 加载项目配置（Excel）
  */
 export async function loadProjectConfig(file) {
@@ -630,6 +687,20 @@ export async function confirmAcceptance(projectId, data = {}) {
         return result;
     } catch (error) {
         console.error('确认验收失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 验证项目文件完整性
+ */
+export async function verifyProjectFiles(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/verify-files`);
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('文件验证失败:', error);
         throw error;
     }
 }

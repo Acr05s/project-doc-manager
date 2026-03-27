@@ -337,7 +337,7 @@ function setupEventListeners() {
         btn.addEventListener('click', () => switchMainTab(btn.dataset.tab));
     });
 
-    // ZIP 包选择器
+    // ZIP 包选择器（用于 ZIP 包管理页面）
             const zipPackageSelect = document.getElementById('zipPackageSelect');
             if (zipPackageSelect) {
                 zipPackageSelect.addEventListener('change', () => {
@@ -1804,7 +1804,7 @@ async function loadZipPackages() {
             // 多个包，显示选择器
             if (packageSelector) {
                 packageSelector.style.display = 'flex';
-                const select = document.getElementById('zipPackageSelect');
+                const select = document.getElementById('directorySelect');
                 if (select) {
                     select.innerHTML = packages.map(p =>
                         `<option value="${escapeHtml(p.path)}">${escapeHtml(p.name)}（${p.file_count}个文件）</option>`
@@ -1870,14 +1870,20 @@ async function searchZipFiles(keyword, packagePath) {
     // 使用传入的 packagePath，或者当前选中的包路径
     const pkg = packagePath !== undefined ? packagePath : (appState.currentZipPackagePath || '');
 
+    console.log('[searchZipFiles] 搜索文件:', { keyword, packagePath: pkg });
+
     fileList.innerHTML = '<p class="placeholder">搜索中...</p>';
 
     try {
         let url = `/api/documents/search-zip-files?keyword=${encodeURIComponent(keyword || '')}`;
         if (pkg) url += `&package_path=${encodeURIComponent(pkg)}`;
+        
+        console.log('[searchZipFiles] 请求URL:', url);
 
         const response = await fetch(url);
         const result = await response.json();
+        
+        console.log('[searchZipFiles] API返回:', result);
 
         if (result.status !== 'success') {
             fileList.innerHTML = `<p class="zip-no-result">搜索失败: ${result.message}</p>`;
@@ -1885,6 +1891,7 @@ async function searchZipFiles(keyword, packagePath) {
         }
 
         const files = result.files || [];
+        console.log('[searchZipFiles] 文件数量:', files.length);
         if (files.length === 0) {
             fileList.innerHTML = `<p class="zip-no-result">${keyword ? '未找到匹配文件' : '该ZIP包中暂无文件'}</p>`;
             return;

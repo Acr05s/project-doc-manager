@@ -108,3 +108,47 @@ def start_check_task():
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/download-package', methods=['POST'])
+def start_download_package_task():
+    """启动下载打包任务"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        project_config = data.get('project_config')
+        
+        if not project_id or not project_config:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        result = task_service.start_download_package_task(project_id, project_config)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/download/<task_id>', methods=['GET'])
+def download_task_package(task_id):
+    """下载任务生成的包"""
+    try:
+        from flask import send_file
+        from pathlib import Path
+        
+        task = task_service.get_task_status(task_id)
+        if not task or task.get('status') != 'completed':
+            return jsonify({'status': 'error', 'message': '任务不存在或未完成'}), 404
+        
+        result = task.get('result', {})
+        package_path = result.get('package_path')
+        
+        if not package_path or not Path(package_path).exists():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        return send_file(
+            package_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=result.get('package_filename', 'package.zip')
+        )
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500

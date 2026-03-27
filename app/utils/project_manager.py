@@ -315,12 +315,15 @@ class ProjectManager:
             Dict: 删除结果
         """
         try:
-            # 检查项目是否存在（软删除从projects_db检查，永久删除从deleted_projects检查）
+            # 检查项目是否存在
             if permanent:
-                # 永久删除：从已删除列表中查找
-                if project_id not in self.deleted_projects:
+                # 永久删除：先检查活动项目列表，再检查已删除列表
+                if project_id in self.projects_db:
+                    project_info = self.projects_db[project_id].copy()
+                elif project_id in self.deleted_projects:
+                    project_info = self.deleted_projects[project_id].copy()
+                else:
                     return {'status': 'error', 'message': '项目不存在'}
-                project_info = self.deleted_projects[project_id].copy()
             else:
                 # 软删除：从正常项目列表中查找
                 if project_id not in self.projects_db:
@@ -339,8 +342,10 @@ class ProjectManager:
                 if old_config_file.exists():
                     old_config_file.unlink()
                 
-                # 从已删除列表中移除
-                if project_id in self.deleted_projects:
+                # 从相应的列表中移除
+                if project_id in self.projects_db:
+                    del self.projects_db[project_id]
+                elif project_id in self.deleted_projects:
                     del self.deleted_projects[project_id]
                 
                 logger.info(f"项目已永久删除: {project_id}")

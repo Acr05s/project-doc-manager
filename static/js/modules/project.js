@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -731,54 +731,132 @@ export function closePackageProgressModal() {
 export async function handleImportPackage(e) {
     e.preventDefault();
     
-    const fileInput = document.getElementById('importPackageFile');
+    const fileInput = document.getElementById('packageFile');
     if (!fileInput) {
         showNotification('找不到文件输入框', 'error');
         return;
     }
     
     const file = fileInput.files[0];
-    const conflictActionRadio = document.querySelector('input[name="conflictAction"]:checked');
-    const conflictAction = conflictActionRadio ? conflictActionRadio.value : 'rename';
-    const customName = document.getElementById('importPackageName')?.value || '';
-    
     if (!file) {
         showNotification('请选择文件', 'error');
         return;
     }
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('conflict_action', conflictAction);
-    if (conflictAction === 'manual' && customName) {
-        formData.append('custom_name', customName);
+    // 关闭当前项目（如果有），避免数据冲突
+    if (appState.currentProjectId) {
+        // 重置应用状态
+        appState.currentProjectId = null;
+        appState.projectConfig = null;
+        
+        // 隐藏项目相关按钮
+        hideProjectButtons();
+        
+        // 清空当前项目名称显示
+        const nameEl = document.getElementById('currentProjectName');
+        if (nameEl) {
+            nameEl.textContent = '';
+            nameEl.style.display = 'none';
+        }
+        
+        // 重置项目选择下拉框
+        const projectSelect = document.getElementById('projectSelect');
+        if (projectSelect) {
+            projectSelect.value = '';
+        }
+        
+        // 清空页面内容，显示初始状态
+        renderInitialContent();
+        
+        showNotification('已关闭当前项目，准备导入新项目', 'info');
     }
     
-    showLoading(true);
+    // 显示上传进度条
+    const progressSection = document.getElementById('importProgressSection');
+    const progressBar = document.getElementById('importProgressBar');
+    const progressText = document.getElementById('importProgressText');
+    const progressPercent = document.getElementById('importProgressPercent');
+    
+    if (progressSection) progressSection.style.display = 'block';
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.textContent = '正在上传...';
+    if (progressPercent) progressPercent.textContent = '0%';
+    
+    // 分片上传配置
+    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const fileId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const filename = file.name;
+    
     try {
-        const result = await importPackage(formData);
+        // 上传分片
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            // 更新进度
+            const progress = Math.round((i / totalChunks) * 100);
+            if (progressBar) progressBar.style.width = `${progress}%`;
+            if (progressText) progressText.textContent = `上传分片 ${i + 1}/${totalChunks}`;
+            if (progressPercent) progressPercent.textContent = `${progress}%`;
+            
+            // 上传分片
+            const result = await uploadProjectChunk(chunk, i, totalChunks, filename, fileId);
+            
+            if (result.status !== 'success') {
+                throw new Error(`上传分片失败: ${result.message}`);
+            }
+        }
         
-        if (result.status === 'success') {
-            showNotification('包导入成功', 'success');
+        // 合并分片并导入
+               if (progressText) progressText.textContent = '正在处理...';
+               if (progressPercent) progressPercent.textContent = '100%';
+               if (progressBar) progressBar.style.width = '100%';
+               
+               // 检查项目是否存在
+               const projectName = file.name.replace('.zip', '');
+               const projects = await loadProjectsList();
+               const projectExists = projects.some(p => p.name === projectName);
+               
+               let overwrite = false;
+               if (projectExists) {
+                   overwrite = confirm(`项目 "${projectName}" 已存在，是否覆盖？\n\n选择"确定"将覆盖现有项目，选择"取消"将创建新项目。`);
+               }
+               
+               const mergeResult = await mergeProjectChunks(filename, fileId, overwrite);
+        
+        if (mergeResult.status === 'success') {
+            const projectId = mergeResult.project_id;
+            const projectName = mergeResult.project_name;
+            
+            showNotification('项目导入成功', 'success');
             closeModal(elements.importPackageModal);
             document.getElementById('importPackageForm').reset();
             
             // 刷新项目列表
             const projects = await loadProjectsList();
             renderProjectsList(projects);
+            
+            // 自动加载新导入的项目
+            if (projectId) {
+                showNotification(`正在加载导入的项目: ${projectName}`, 'info');
+                await handleOpenProject(projectId);
+            }
         } else {
-            showNotification('导入失败: ' + result.message, 'error');
+            showNotification('导入失败: ' + mergeResult.message, 'error');
         }
     } catch (error) {
-        console.error('导入包失败:', error);
+        console.error('导入项目失败:', error);
         showNotification('导入失败: ' + error.message, 'error');
     } finally {
-        showLoading(false);
+        // 隐藏进度条
+        if (progressSection) progressSection.style.display = 'none';
     }
 }
 
 /**
- * 处理确认验收
+ * 处理确认验收 - 改为文件完整性检查
  */
 export async function handleConfirmAcceptance() {
     if (!appState.currentProjectId) {
@@ -786,34 +864,179 @@ export async function handleConfirmAcceptance() {
         return;
     }
     
-    showConfirmModal(
-        '确认验收',
-        '确定要确认项目验收吗？',
-        async () => {
-            showLoading(true);
-            try {
-                const result = await confirmAcceptance(appState.currentProjectId, {
-                    accepted_by: '用户',
-                    accepted_time: new Date().toISOString()
-                });
-                
-                if (result.status === 'success') {
-                    showNotification('验收确认成功', 'success');
-                } else {
-                    showNotification('验收失败: ' + result.message, 'error');
-                }
-            } catch (error) {
-                console.error('确认验收失败:', error);
-                showNotification('验收失败: ' + error.message, 'error');
-            } finally {
-                showLoading(false);
-            }
-        }
-    );
+    // 显示文件检查模态框
+    showFileCheckModal();
 }
 
 /**
- * 处理下载项目包
+ * 显示文件完整性检查模态框
+ */
+async function showFileCheckModal() {
+    const modal = document.getElementById('fileCheckModal');
+    const content = document.getElementById('fileCheckContent');
+    
+    if (!modal || !content) {
+        showNotification('模态框未找到', 'error');
+        return;
+    }
+    
+    // 显示模态框
+    modal.classList.add('show');
+    content.innerHTML = '<div class="loading">正在检查文件，请稍候...</div>';
+    
+    try {
+        const result = await verifyProjectFiles(appState.currentProjectId);
+        
+        if (result.status === 'success') {
+            renderFileCheckResult(result.result);
+        } else {
+            content.innerHTML = `<div class="error-message">检查失败: ${result.message}</div>`;
+        }
+    } catch (error) {
+        console.error('文件检查失败:', error);
+        content.innerHTML = `<div class="error-message">检查失败: ${error.message}</div>`;
+    }
+}
+
+/**
+ * 渲染文件检查结果
+ */
+function renderFileCheckResult(result) {
+    const content = document.getElementById('fileCheckContent');
+    
+    const { total_files, valid_files, missing_files, path_errors, can_package } = result;
+    const hasIssues = missing_files.length > 0 || path_errors.length > 0;
+    
+    let html = '';
+    
+    // 统计信息
+    html += `
+        <div class="file-check-stats">
+            <div class="stat-item">
+                <span class="stat-label">总文件数:</span>
+                <span class="stat-value">${total_files}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">有效文件:</span>
+                <span class="stat-value success">${valid_files}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">问题文件:</span>
+                <span class="stat-value ${hasIssues ? 'error' : 'success'}">${missing_files.length + path_errors.length}</span>
+            </div>
+        </div>
+    `;
+    
+    if (hasIssues) {
+        // 有问题，显示问题列表
+        html += '<div class="file-check-issues">';
+        html += '<h3>❌ 发现问题:</h3>';
+        
+        // 缺失文件
+        missing_files.forEach((item, index) => {
+            html += `
+                <div class="issue-item">
+                    <div class="issue-header">
+                        <span class="issue-number">${index + 1}.</span>
+                        <span class="issue-cycle">${item.cycle}</span>
+                        <span class="issue-doc">- ${item.doc_name}</span>
+                    </div>
+                    <div class="issue-detail">
+                        <div class="issue-filename">📄 ${item.filename}</div>
+                        <div class="issue-error">❌ 文件不存在</div>
+                        <div class="issue-path">路径: ${item.file_path}</div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="jumpToDocument('${item.cycle}', '${item.doc_name}', '${item.doc_id}')">
+                        🔧 跳转修改
+                    </button>
+                </div>
+            `;
+        });
+        
+        // 路径错误
+        path_errors.forEach((item, index) => {
+            html += `
+                <div class="issue-item">
+                    <div class="issue-header">
+                        <span class="issue-number">${missing_files.length + index + 1}.</span>
+                        <span class="issue-cycle">${item.cycle}</span>
+                        <span class="issue-doc">- ${item.doc_name}</span>
+                    </div>
+                    <div class="issue-detail">
+                        <div class="issue-filename">📄 ${item.filename}</div>
+                        <div class="issue-error">❌ ${item.error}</div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="jumpToDocument('${item.cycle}', '${item.doc_name}', '${item.doc_id}')">
+                        🔧 跳转修改
+                    </button>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        html += `
+            <div class="file-check-footer">
+                <p class="warning-text">请修复以上问题后再进行打包下载</p>
+                <button class="btn btn-secondary" onclick="closeFileCheckModal()">关闭</button>
+            </div>
+        `;
+    } else {
+        // 全部通过
+        html += `
+            <div class="file-check-success">
+                <div class="success-icon">🎉</div>
+                <h3>恭喜检查通过！</h3>
+                <p>所有 ${total_files} 个文件检查通过</p>
+                <p>文件路径正确，可以正常打包</p>
+            </div>
+            <div class="file-check-footer">
+                <button class="btn btn-secondary" onclick="closeFileCheckModal()">关闭</button>
+                <button class="btn btn-primary" onclick="closeFileCheckModal(); handleDownloadPackage();">立即打包</button>
+            </div>
+        `;
+    }
+    
+    content.innerHTML = html;
+}
+
+/**
+ * 跳转到指定文档进行编辑
+ */
+window.jumpToDocument = function(cycle, docName, docId) {
+    closeFileCheckModal();
+    
+    // 切换到对应周期
+    if (window.switchCycle) {
+        window.switchCycle(cycle);
+    }
+    
+    // 延迟执行，等待页面渲染
+    setTimeout(() => {
+        // 查找并点击编辑按钮
+        const docItem = document.querySelector(`[data-doc-id="${docId}"]`);
+        if (docItem) {
+            docItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            docItem.classList.add('highlight');
+            setTimeout(() => docItem.classList.remove('highlight'), 3000);
+        }
+        
+        // 如果找不到具体文档项，显示提示
+        showNotification(`请手动查找并修复: ${cycle} - ${docName}`, 'info');
+    }, 300);
+};
+
+/**
+ * 关闭文件检查模态框
+ */
+window.closeFileCheckModal = function() {
+    const modal = document.getElementById('fileCheckModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+};
+
+/**
+ * 处理下载项目包 - 带进度显示
  */
 export async function handleDownloadPackage() {
     if (!appState.currentProjectId) {
@@ -821,32 +1044,141 @@ export async function handleDownloadPackage() {
         return;
     }
     
-    showLoading(true);
+    if (!appState.projectConfig) {
+        showNotification('项目配置未加载', 'error');
+        return;
+    }
+    
+    // 显示进度模态框
+    showPackageProgressModal();
+    
     try {
-        const response = await downloadPackage(appState.currentProjectId);
+        // 启动打包任务
+        const response = await fetch('/api/tasks/download-package', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                project_id: appState.currentProjectId,
+                project_config: appState.projectConfig
+            })
+        });
         
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `project-${appState.currentProjectId}-${new Date().toISOString().split('T')[0]}.zip`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            showNotification('项目包下载成功', 'success');
-        } else {
-            showNotification('下载失败', 'error');
+        const result = await response.json();
+        
+        if (result.status !== 'success') {
+            updatePackageProgressError(result.message || '启动任务失败');
+            return;
         }
+        
+        const taskId = result.task_id;
+        
+        // 轮询任务进度
+        const pollInterval = setInterval(async () => {
+            try {
+                const taskResponse = await fetch(`/api/tasks/${taskId}`);
+                const taskResult = await taskResponse.json();
+                
+                if (taskResult.status === 'success' && taskResult.task) {
+                    const task = taskResult.task;
+                    
+                    // 更新进度
+                    updatePackageProgress(task.progress, task.message);
+                    
+                    if (task.status === 'completed') {
+                        clearInterval(pollInterval);
+                        
+                        // 显示下载链接
+                        const downloadUrl = task.result?.download_url;
+                        if (downloadUrl) {
+                            showPackageDownloadLink(downloadUrl);
+                            
+                            // 自动下载
+                            setTimeout(() => {
+                                const a = document.createElement('a');
+                                a.href = downloadUrl;
+                                a.download = task.result?.package_filename || 'package.zip';
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                            }, 500);
+                        }
+                        
+                        // 3秒后关闭模态框
+                        setTimeout(() => {
+                            closePackageProgressModal();
+                        }, 3000);
+                        
+                    } else if (task.status === 'error') {
+                        clearInterval(pollInterval);
+                        updatePackageProgressError(task.message);
+                    }
+                }
+            } catch (error) {
+                console.error('查询任务进度失败:', error);
+            }
+        }, 500);
+        
     } catch (error) {
-        console.error('下载项目包失败:', error);
-        showNotification('下载失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
+        console.error('打包下载失败:', error);
+        updatePackageProgressError('启动打包任务失败');
     }
 }
+
+// 显示进度模态框
+function showPackageProgressModal() {
+    const modal = document.getElementById('packageProgressModal');
+    if (modal) {
+        modal.classList.add('show');
+        updatePackageProgress(0, '准备中...');
+        const downloadSection = document.getElementById('packageDownloadSection');
+        if (downloadSection) downloadSection.style.display = 'none';
+    }
+}
+
+// 关闭进度模态框
+window.closePackageProgressModal = function() {
+    const modal = document.getElementById('packageProgressModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+};
+
+// 更新进度
+function updatePackageProgress(progress, message) {
+    const fill = document.getElementById('packageProgressFill');
+    const text = document.getElementById('packageProgressText');
+    const msg = document.getElementById('packageProgressMessage');
+    
+    if (fill) fill.style.width = progress + '%';
+    if (text) text.textContent = progress + '%';
+    if (msg) msg.textContent = message;
+}
+
+// 显示下载链接
+function showPackageDownloadLink(url) {
+    const section = document.getElementById('packageDownloadSection');
+    const link = document.getElementById('manualDownloadLink');
+    
+    if (section) section.style.display = 'block';
+    if (link) link.href = url;
+}
+
+// 显示错误
+function updatePackageProgressError(message) {
+    const msg = document.getElementById('packageProgressMessage');
+    const fill = document.getElementById('packageProgressFill');
+    
+    if (msg) {
+        msg.textContent = '❌ ' + message;
+        msg.style.color = '#dc3545';
+    }
+    if (fill) fill.style.background = '#dc3545';
+}
+
+// 设置为全局函数
+window.handleDownloadPackage = handleDownloadPackage;
 
 /**
  * 处理重新匹配文件管理
@@ -1510,7 +1842,8 @@ export async function openProjectSelectModal() {
     const modal = document.getElementById('projectSelectModal');
     if (!modal) return;
     
-    modal.style.display = 'block';
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
     
     // 加载项目列表
     await loadProjectSelectList();
@@ -1525,7 +1858,8 @@ export async function openProjectSelectModal() {
 export function closeProjectSelectModal() {
     const modal = document.getElementById('projectSelectModal');
     if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('show');
+        document.body.style.overflow = 'auto';
     }
 }
 
@@ -1558,7 +1892,7 @@ async function loadProjectSelectList() {
                 </div>
                 <div class="project-actions-btns">
                     <button class="btn btn-primary btn-sm" onclick="handleOpenProject('${project.id}')">打开</button>
-                    <button class="btn btn-danger btn-sm" onclick="handleSoftDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>
+                    <button class="btn btn-danger btn-sm" onclick="handlePermanentDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>
                 </div>
             `;
             container.appendChild(item);
