@@ -190,15 +190,22 @@ def merge_chunks():
             # 重新打开临时文件进行读取
             with open(temp_file_path, 'rb') as f:
                 merged_file_content = f.read()
+        except Exception as e:
+            # 清理临时文件
+            import os
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+        finally:
+            # 确保临时文件被清理
+            import os
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
         
         # 上传合并后的文件
         from werkzeug.datastructures import FileStorage
         import io
         file = FileStorage(io.BytesIO(merged_file_content), filename=file_name)
-        
-        # 清理临时文件
-        import os
-        os.unlink(temp_file_path)
         
         result = doc_manager.upload_document(
             file, cycle, doc_name,
@@ -371,6 +378,17 @@ def merge_zip_chunks():
             # 读取合并后的内容
             with open(temp_file_path, 'rb') as f:
                 merged_content = f.read()
+        except Exception as e:
+            # 清理临时文件
+            import os
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+        finally:
+            # 确保临时文件被清理
+            import os
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
         
         # 保存合并后的ZIP文件
         import uuid
@@ -380,10 +398,6 @@ def merge_zip_chunks():
         
         with open(zip_file_path, 'wb') as f:
             f.write(merged_content)
-        
-        # 清理临时文件
-        import os
-        os.unlink(temp_file_path)
         
         # 清理分片临时目录
         import shutil
