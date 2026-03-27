@@ -33,7 +33,11 @@ class PDFConversionService:
             if self.platform == 'Windows':
                 # Windows平台使用原有方法
                 if ext in ['.docx']:
-                    docx_to_pdf(input_path, temp_pdf_path)
+                    try:
+                        docx_to_pdf(input_path, temp_pdf_path)
+                    except Exception as e:
+                        # docx2pdf失败，回退到libreoffice
+                        self._convert_with_libreoffice(input_path, temp_pdf_path)
                 elif ext in ['.doc', '.xls', '.xlsx', '.ppt', '.pptx']:
                     # Windows平台使用COM对象
                     try:
@@ -41,6 +45,9 @@ class PDFConversionService:
                         self._convert_with_com(input_path, temp_pdf_path, ext)
                     except ImportError:
                         # COM不可用，回退到libreoffice
+                        self._convert_with_libreoffice(input_path, temp_pdf_path)
+                    except Exception as e:
+                        # COM转换失败，回退到libreoffice
                         self._convert_with_libreoffice(input_path, temp_pdf_path)
                 else:
                     raise ValueError(f"不支持的文件类型: {ext}")

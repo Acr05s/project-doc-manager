@@ -95,6 +95,9 @@ def create_app(config: Optional[Dict] = None) -> Flask:
 # 导入插件接口
 from app.plugins import create_plugin, process
 
+# 创建应用实例，供WSGI服务器使用
+app = create_app()
+
 if __name__ == '__main__':
     # 设置 UTF-8 编码支持
     import sys
@@ -106,15 +109,24 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='项目文档管理中心')
     parser.add_argument('--port', type=int, default=5000, help='服务器端口')
+    parser.add_argument('--mode', choices=['dev', 'prod'], default='dev', help='运行模式')
     args = parser.parse_args()
     
     print("Starting application...")
     try:
-        # 测试/开发模式
         app = create_app()
         print(f"Application created successfully")
-        print(f"Running on http://0.0.0.0:{args.port}")
-        app.run(debug=True, host='0.0.0.0', port=args.port)
+        
+        if args.mode == 'dev':
+            # 开发模式
+            print(f"Running in development mode on http://0.0.0.0:{args.port}")
+            app.run(debug=True, host='0.0.0.0', port=args.port)
+        else:
+            # 生产模式
+            print(f"Running in production mode")
+            print("请使用WSGI服务器启动，例如:")
+            print(f"  gunicorn -w 4 -b 0.0.0.0:{args.port} main:app")
+            print(f"  或 waitress-serve --listen=0.0.0.0:{args.port} main:app")
     except Exception as e:
         print(f"Error starting application: {e}")
         import traceback

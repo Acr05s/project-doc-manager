@@ -104,44 +104,6 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# 检查PDF转换服务文件是否存在
-if [ -f "src/services/pdf_conversion_service.py" ]; then
-    echo "更新PDF转换服务以支持跨平台..."
-    # 确保PDF转换服务支持Ubuntu
-    sed -i 's/import comtypes.client/import platform\nimport subprocess/g' src/services/pdf_conversion_service.py
-    
-    # 添加平台检测和LibreOffice支持
-    if ! grep -q "_convert_with_libreoffice" src/services/pdf_conversion_service.py; then
-        cat >> src/services/pdf_conversion_service.py << 'EOF'
-    def _convert_with_libreoffice(self, input_path, output_path):
-        """使用libreoffice转换文档（跨平台）"""
-        try:
-            # 调用libreoffice命令进行转换
-            subprocess.run(
-                ['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', 
-                 os.path.dirname(output_path), input_path],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            # 重命名输出文件到指定路径
-            base_name = os.path.splitext(os.path.basename(input_path))[0]
-            generated_pdf = os.path.join(os.path.dirname(output_path), f"{base_name}.pdf")
-            if os.path.exists(generated_pdf):
-                os.rename(generated_pdf, output_path)
-            else:
-                raise Exception("LibreOffice转换失败，未生成PDF文件")
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"LibreOffice转换失败: {e.stderr}")
-EOF
-    fi
-    
-    # 更新convert_to_pdf方法以支持跨平台
-    sed -i 's/def __init__(self):\n        """初始化PDF转换服务"""\n        pass/def __init__(self):\n        """初始化PDF转换服务"""\n        self.platform = platform.system()/g' src/services/pdf_conversion_service.py
-    
-    sed -i 's/    def convert_to_pdf(self, input_path):\n        """将Office文档转换为PDF\n        \n        Args:\n            input_path: 输入文件路径\n            \n        Returns:\n            str: 转换后的PDF文件路径\n        """\n        try:\n            input_path = str(input_path)\n            ext = os.path.splitext(input_path)[1].lower()\n            \n            # 创建临时PDF文件路径\n            temp_pdf_path = tempfile.mktemp(suffix='.pdf')\n            \n            if ext in [\'.docx\']:\n                # 使用docx2pdf转换Word文档\n                docx_to_pdf(input_path, temp_pdf_path)\n            elif ext in [\'.doc\', \'.xls\', \'.xlsx\', \'.ppt\', \'.pptx\']:\n                # 使用COM对象转换其他Office文档\n                self._convert_with_com(input_path, temp_pdf_path, ext)\n            else:\n                raise ValueError(f"不支持的文件类型: {ext}")\n            \n            return temp_pdf_path\n        except Exception as e:\n            raise Exception(f"PDF转换失败: {str(e)}")/    def convert_to_pdf(self, input_path):\n        """将Office文档转换为PDF\n        \n        Args:\n            input_path: 输入文件路径\n            \n        Returns:\n            str: 转换后的PDF文件路径\n        """\n        try:\n            input_path = str(input_path)\n            ext = os.path.splitext(input_path)[1].lower()\n            \n            # 创建临时PDF文件路径\n            temp_pdf_path = tempfile.mktemp(suffix='.pdf')\n            \n            if self.platform == \'Windows\':\n                # Windows平台使用原有方法\n                if ext in [\'.docx\']:\n                    docx_to_pdf(input_path, temp_pdf_path)\n                elif ext in [\'.doc\', \'.xls\', \'.xlsx\', \'.ppt\', \'.pptx\']:\n                    # Windows平台使用COM对象\n                    try:\n                        import comtypes.client\n                        self._convert_with_com(input_path, temp_pdf_path, ext)\n                    except ImportError:\n                        # COM不可用，回退到libreoffice\n                        self._convert_with_libreoffice(input_path, temp_pdf_path)\n                else:\n                    raise ValueError(f"不支持的文件类型: {ext}")\n            else:\n                # Linux平台使用libreoffice\n                self._convert_with_libreoffice(input_path, temp_pdf_path)\n            \n            return temp_pdf_path\n        except Exception as e:\n            raise Exception(f"PDF转换失败: {str(e)}")/g' src/services/pdf_conversion_service.py
-fi
-
 echo "依赖安装成功"
 echo "环境配置完成"
 
