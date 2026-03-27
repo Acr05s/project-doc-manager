@@ -6,8 +6,9 @@
     <title>项目文档管理中心</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032604">
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026032604"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026032701">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026032701"></script>
     <style>
         /* 文件完整性检查模态框样式 */
         .file-check-content {
@@ -1013,8 +1014,19 @@
                     <button class="btn btn-info" id="toolbarExpandAll">📂 展开全部</button>
                     <button class="btn btn-info" id="toolbarCollapseAll">📁 折叠全部</button>
                 </div>
+                <div class="toolbar-group">
+                    <input type="text" id="treeFilterInput" placeholder="🔍 筛选节点..." class="filter-input" style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; width: 150px;">
+                    <select id="treeFilterType" style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="all">全部</option>
+                        <option value="cycle">周期</option>
+                        <option value="document">文档</option>
+                        <option value="folder">目录</option>
+                    </select>
+                </div>
                 <div class="toolbar-group toolbar-right">
                     <span id="autoSaveStatus" class="autosave-status saved"></span>
+                    <button class="btn btn-secondary" id="toolbarImportModule">📥 导入需求</button>
+                    <button class="btn btn-secondary" id="toolbarExportModule">📤 导出需求</button>
                     <button class="btn btn-secondary" id="toolbarLoadTemplate">📚 从模板加载</button>
                     <button class="btn btn-secondary" id="toolbarSaveAsTemplate">📋 另存为模板</button>
                     <button class="btn btn-success" id="toolbarSave">💾 保存配置</button>
@@ -1037,41 +1049,49 @@
                     <p class="attr-panel-hint">勾选该文档需要满足的附加要求</p>
                     
                     <div class="attr-group">
-                        <h4>签字要求</h4>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_party_a_sign"> 甲方签字
-                        </label>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_party_b_sign"> 乙方签字
-                        </label>
-                    </div>
-                    
-                    <div class="attr-group">
-                        <h4>盖章要求</h4>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_party_a_seal"> 甲方盖章
-                        </label>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_party_b_seal"> 乙方盖章
-                        </label>
+                        <h4>签字盖章</h4>
+                        <div style="display: flex; flex-wrap: wrap; gap: 15px;">
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_party_a_sign"> 甲方签字
+                            </label>
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_party_b_sign"> 乙方签字
+                            </label>
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_party_a_seal"> 甲方盖章
+                            </label>
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_party_b_seal"> 乙方盖章
+                            </label>
+                        </div>
                     </div>
                     
                     <div class="attr-group">
                         <h4>日期/编号</h4>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_need_doc_number"> 发文号
-                        </label>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_need_doc_date"> 文档日期
-                        </label>
-                        <label class="attr-checkbox">
-                            <input type="checkbox" id="attr_need_sign_date"> 签字日期
-                        </label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 15px;">
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_need_doc_number"> 发文号
+                            </label>
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_need_doc_date"> 文档日期
+                            </label>
+                            <label class="attr-checkbox" style="margin: 0;">
+                                <input type="checkbox" id="attr_need_sign_date"> 签字日期
+                            </label>
+                        </div>
                     </div>
                     
                     <div class="attr-group">
                         <h4>备注</h4>
                         <textarea id="attrDocNote" rows="3" placeholder="可选的补充说明"></textarea>
+                    </div>
+                    
+                    <!-- 自定义属性区域 -->
+                    <div class="attr-group" id="customAttributesGroup">
+                        <h4>自定义属性 <button class="btn btn-sm btn-primary" onclick="openCustomAttrModal()" style="float: right; padding: 2px 8px; font-size: 12px;">+ 添加</button></h4>
+                        <div id="customAttributesList" class="custom-attr-list">
+                            <!-- 动态渲染自定义属性 -->
+                        </div>
                     </div>
                     
                     <div class="attr-preview-section">
@@ -1216,6 +1236,75 @@
                     📥 手动下载
                 </a>
                 <p style="font-size: 12px; color: #999; margin-top: 10px;">如果未自动下载，请点击上方按钮</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 打包目录结构预览模态框 -->
+    <div id="packagePreviewModal" class="modal">
+        <div class="modal-content wide" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
+            <span class="close" onclick="closePackagePreviewModal()">&times;</span>
+            <h3>📋 打包目录结构预览</h3>
+            <div id="packagePreviewContent" style="margin: 20px 0;">
+                <p>正在生成目录结构...</p>
+            </div>
+            <div class="modal-actions" style="justify-content: flex-end; margin-top: 20px;">
+                <button id="cancelPackagePreviewBtn" class="btn btn-secondary">取消</button>
+                <button id="confirmPackagePreviewBtn" class="btn btn-primary">确认打包</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入需求模态框 -->
+    <div id="importModuleModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="closeImportModuleModal()">&times;</span>
+            <h3>📥 导入文档需求</h3>
+            <p style="color: #666; margin-bottom: 20px;">导入JSON格式的文档需求配置到当前项目</p>
+            
+            <div class="form-group">
+                <label>选择文件：</label>
+                <input type="file" id="importModuleFile" accept=".json" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            
+            <div class="form-group">
+                <label>导入方式：</label>
+                <select id="importModuleMode" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="merge">合并到当前配置（保留现有内容）</option>
+                    <option value="replace">替换当前配置（删除现有内容）</option>
+                </select>
+            </div>
+            
+            <div style="margin-top: 20px; text-align: right;">
+                <button class="btn btn-secondary" onclick="closeImportModuleModal()">取消</button>
+                <button class="btn btn-primary" onclick="confirmImportModule()">导入</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加自定义属性模态框 -->
+    <div id="customAttrModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close" onclick="closeCustomAttrModal()">&times;</span>
+            <h3>➕ 添加自定义属性</h3>
+            
+            <div class="form-group" style="margin-top: 20px;">
+                <label>属性名称：</label>
+                <input type="text" id="customAttrName" placeholder="如：审批状态" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            
+            <div class="form-group">
+                <label>属性类型：</label>
+                <select id="customAttrType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="checkbox">勾选框（是/否）</option>
+                    <option value="text">文本框</option>
+                    <option value="date">日历选择器</option>
+                </select>
+            </div>
+            
+            <div style="margin-top: 20px; text-align: right;">
+                <button class="btn btn-secondary" onclick="closeCustomAttrModal()">取消</button>
+                <button class="btn btn-primary" onclick="confirmAddCustomAttr()">添加</button>
             </div>
         </div>
     </div>

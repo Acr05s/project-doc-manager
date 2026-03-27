@@ -11,6 +11,8 @@ import { renderCycles, renderInitialContent } from './cycle.js';
 
 let currentTreeData = null;
 let selectedNode = null;
+let selectedNodes = [];  // 支持多选
+let lastSelectedNode = null;  // 用于Shift范围选择
 let autoSaveTimer = null;
 let hasUnsavedChanges = false;
 let lastSaveTime = null;
@@ -36,6 +38,9 @@ const ATTRIBUTE_LABELS = {
     need_doc_date: '文档日期',
     need_sign_date: '签字日期'
 };
+
+// 自定义属性定义存储
+let customAttributeDefinitions = [];
 
 // ==================== 自动保存 ====================
 
@@ -431,6 +436,11 @@ function renderTree() {
 }
 
 function renderTreeNode(node, level) {
+    // 如果被筛选掉，不渲染
+    if (node._filtered) {
+        return '';
+    }
+    
     const indent = level * 24;
     const hasChildren = node.children && node.children.length > 0;
     const icon = getNodeIcon(node.type);
@@ -510,11 +520,32 @@ function getAttributeTags(node) {
         need_sign_date: '签字日期'
     };
 
+    // 内置属性
     for (const [key, val] of Object.entries(attrs)) {
         if (val && icons[key]) {
             tags.push(`<span class="attr-tag" title="${shortLabels[key]}">${icons[key]}</span>`);
         }
     }
+    
+    // 自定义属性
+    customAttributeDefinitions.forEach(attrDef => {
+        const val = attrs[attrDef.id];
+        if (val !== undefined && val !== false && val !== '') {
+            // 根据类型选择图标
+            let icon = '🏷️';
+            if (attrDef.type === 'checkbox') icon = '☑️';
+            else if (attrDef.type === 'text') icon = '📝';
+            else if (attrDef.type === 'date') icon = '📅';
+            
+            // 显示属性名和值
+            let displayVal = val;
+            if (attrDef.type === 'checkbox') displayVal = attrDef.name;
+            else if (attrDef.type === 'date' && val) displayVal = val;
+            
+            tags.push(`<span class="attr-tag custom-attr-tag" title="${attrDef.name}: ${displayVal}">${icon}</span>`);
+        }
+    });
+    
     return tags.join('');
 }
 
@@ -594,7 +625,7 @@ function bindTreeEvents() {
     container.querySelectorAll('.tree-node').forEach(nodeEl => {
         nodeEl.addEventListener('click', (e) => {
             if (!e.target.classList.contains('tree-action-btn')) {
-                selectNode(nodeEl.dataset.id);
+                selectNode(nodeEl.dataset.id, e);
             }
         });
     });
@@ -635,17 +666,107 @@ function toggleNode(nodeId) {
     }
 }
 
-function selectNode(nodeId) {
-    document.querySelectorAll('.tree-node.selected').forEach(el => {
-        el.classList.remove('selected');
-    });
+function selectNode(nodeId, event = null) {
+    const isCtrl = event && (event.ctrlKey || event.metaKey);
+    const isShift = event && event.shiftKey;
+    
+    if (isShift && lastSelectedNode) {
+        // Shift范围选择
+        selectRange(lastSelectedNode, nodeId);
+    } else if (isCtrl) {
+        // Ctrl多选/取消
+        toggleNodeSelection(nodeId);
+    } else {
+        // 普通点击：单选
+        clearAllSelections();
+        addNodeSelection(nodeId);
+    }
+    
+    lastSelectedNode = nodeId;
+    updateToolbarState();
+    updateAttributePanelForSelection();
+}
 
+/**
+ * 添加节点到选择
+ */
+function addNodeSelection(nodeId) {
     const nodeEl = document.querySelector(`.tree-node[data-id="${nodeId}"]`);
     if (nodeEl) {
         nodeEl.classList.add('selected');
+        if (!selectedNodes.includes(nodeId)) {
+            selectedNodes.push(nodeId);
+        }
         selectedNode = nodeId;
         window._treeSelectedNode = nodeId;
-        updateToolbarState();
+    }
+}
+
+/**
+ * 切换节点选择状态
+ */
+function toggleNodeSelection(nodeId) {
+    const index = selectedNodes.indexOf(nodeId);
+    if (index > -1) {
+        // 取消选择
+        selectedNodes.splice(index, 1);
+        const nodeEl = document.querySelector(`.tree-node[data-id="${nodeId}"]`);
+        if (nodeEl) nodeEl.classList.remove('selected');
+    } else {
+        // 添加选择
+        addNodeSelection(nodeId);
+    }
+    
+    // 更新当前选中节点
+    if (selectedNodes.length > 0) {
+        selectedNode = selectedNodes[selectedNodes.length - 1];
+        window._treeSelectedNode = selectedNode;
+    } else {
+        selectedNode = null;
+        window._treeSelectedNode = null;
+    }
+    window._treeSelectedNodes = selectedNodes;
+}
+
+/**
+ * 清除所有选择
+ */
+function clearAllSelections() {
+    document.querySelectorAll('.tree-node.selected').forEach(el => {
+        el.classList.remove('selected');
+    });
+    selectedNodes = [];
+    selectedNode = null;
+    window._treeSelectedNode = null;
+    window._treeSelectedNodes = [];
+}
+
+/**
+ * 范围选择
+ */
+function selectRange(fromId, toId) {
+    // 获取所有可见的文档节点
+    const allDocNodes = [];
+    function collectDocNodes(node) {
+        if (node.type === 'document' && !node._filtered) {
+            allDocNodes.push(node.id);
+        }
+        if (node.children) {
+            node.children.forEach(collectDocNodes);
+        }
+    }
+    collectDocNodes(currentTreeData);
+    
+    const fromIndex = allDocNodes.indexOf(fromId);
+    const toIndex = allDocNodes.indexOf(toId);
+    
+    if (fromIndex === -1 || toIndex === -1) return;
+    
+    const start = Math.min(fromIndex, toIndex);
+    const end = Math.max(fromIndex, toIndex);
+    
+    for (let i = start; i <= end; i++) {
+        addNodeSelection(allDocNodes[i]);
     }
 }
 
@@ -806,9 +927,31 @@ window.deleteTreeNode = function(nodeId) {
         renderTree();
         showNotification('删除成功', 'success');
         selectedNode = null;
+        selectedNodes = [];
         updateToolbarState();
         markDirty();
     });
+};
+
+/**
+ * 批量删除节点
+ */
+window.deleteTreeNodes = function(nodeIds) {
+    if (!nodeIds || nodeIds.length === 0) return;
+    
+    let deletedCount = 0;
+    nodeIds.forEach(nodeId => {
+        if (deleteNode(currentTreeData, nodeId)) {
+            deletedCount++;
+        }
+    });
+    
+    renderTree();
+    showNotification(`成功删除 ${deletedCount} 个节点`, 'success');
+    selectedNode = null;
+    selectedNodes = [];
+    updateToolbarState();
+    markDirty();
 };
 
 // ==================== 属性面板（附加要求） ====================
@@ -833,6 +976,9 @@ window.openAttributePanel = function(nodeId) {
     // 备注
     const noteEl = document.getElementById('attrDocNote');
     if (noteEl) noteEl.value = node.doc_note || '';
+
+    // 渲染自定义属性
+    renderCustomAttributes(node);
 
     // 显示面板
     panel.style.display = 'block';
@@ -860,30 +1006,97 @@ export function saveAttributes() {
     const panel = document.getElementById('attributePanel');
     if (!panel) return;
 
-    const nodeId = panel.dataset.editingNodeId;
-    if (!nodeId) return;
-
-    const node = findNode(currentTreeData, nodeId);
-    if (!node) return;
-
-    // 确保attributes对象存在
-    if (!node.attributes) node.attributes = {};
+    const isBatchMode = panel.dataset.batchMode === 'true';
     
-    // 只更新界面上有的属性，保留其他属性
-    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
-        const checkbox = document.getElementById(`attr_${key}`);
-        if (checkbox) node.attributes[key] = checkbox.checked;
+    if (isBatchMode) {
+        // 批量保存
+        const nodeIds = JSON.parse(panel.dataset.editingNodeIds || '[]');
+        const nodes = nodeIds.map(id => findNode(currentTreeData, id)).filter(n => n);
+        
+        let updatedCount = 0;
+        
+        nodes.forEach(node => {
+            if (!node.attributes) node.attributes = {};
+            
+            // 更新内置属性（只更新已勾选的）
+            for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+                const checkbox = document.getElementById(`attr_${key}`);
+                if (checkbox && checkbox.checked && !checkbox.indeterminate) {
+                    node.attributes[key] = true;
+                } else if (checkbox && !checkbox.checked && !checkbox.indeterminate) {
+                    node.attributes[key] = false;
+                }
+            }
+            
+            // 更新自定义属性
+            customAttributeDefinitions.forEach(attrDef => {
+                const inputEl = document.getElementById(`custom_attr_${attrDef.id}`);
+                if (inputEl) {
+                    const val = attrDef.type === 'checkbox' ? inputEl.checked : inputEl.value;
+                    if (val !== '' || attrDef.type === 'checkbox') {
+                        node.attributes[attrDef.id] = val;
+                    }
+                }
+            });
+            
+            updatedCount++;
+        });
+        
+        // 重置面板状态
+        panel.dataset.batchMode = 'false';
+        panel.dataset.editingNodeIds = '';
+        
+        // 恢复单选模式的面板
+        const titleEl = panel.querySelector('h3');
+        if (titleEl) titleEl.textContent = '附加要求';
+        
+        const hintEl = panel.querySelector('.attr-panel-hint');
+        if (hintEl) hintEl.textContent = '勾选该文档需要满足的附加要求';
+        
+        const noteEl = document.getElementById('attrDocNote');
+        if (noteEl) noteEl.disabled = false;
+        
+        // 重新渲染树
+        renderTree();
+        clearAllSelections();
+        showNotification(`批量更新成功，已更新 ${updatedCount} 个文档`, 'success');
+        markDirty();
+        
+    } else {
+        // 单选保存
+        const nodeId = panel.dataset.editingNodeId;
+        if (!nodeId) return;
+
+        const node = findNode(currentTreeData, nodeId);
+        if (!node) return;
+
+        // 确保attributes对象存在
+        if (!node.attributes) node.attributes = {};
+        
+        // 只更新界面上有的属性，保留其他属性
+        for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+            const checkbox = document.getElementById(`attr_${key}`);
+            if (checkbox) node.attributes[key] = checkbox.checked;
+        }
+
+        // 保存自定义属性
+        customAttributeDefinitions.forEach(attrDef => {
+            const inputEl = document.getElementById(`custom_attr_${attrDef.id}`);
+            if (inputEl) {
+                node.attributes[attrDef.id] = attrDef.type === 'checkbox' ? inputEl.checked : inputEl.value;
+            }
+        });
+
+        // 备注
+        const noteEl = document.getElementById('attrDocNote');
+        if (noteEl) node.doc_note = noteEl.value.trim();
+
+        // 重新渲染树
+        renderTree();
+        if (selectedNode) selectNode(selectedNode);
+        showNotification('附加要求已保存', 'success');
+        markDirty();
     }
-
-    // 备注
-    const noteEl = document.getElementById('attrDocNote');
-    if (noteEl) node.doc_note = noteEl.value.trim();
-
-    // 重新渲染树
-    renderTree();
-    if (selectedNode) selectNode(selectedNode);
-    showNotification('附加要求已保存', 'success');
-    markDirty();
 }
 
 /**
@@ -1157,7 +1370,7 @@ function updateToolbarState() {
     const deleteBtn = document.getElementById('toolbarDelete');
     const attrBtn = document.getElementById('toolbarAttr');
 
-    if (!selectedNode) {
+    if (!selectedNode || selectedNodes.length === 0) {
         if (addDocBtn) addDocBtn.disabled = true;
         if (addFolderBtn) addFolderBtn.disabled = true;
         if (editBtn) editBtn.disabled = true;
@@ -1167,6 +1380,24 @@ function updateToolbarState() {
         return;
     }
 
+    // 多选模式
+    if (selectedNodes.length > 1) {
+        // 批量操作模式
+        if (addDocBtn) addDocBtn.disabled = true;
+        if (addFolderBtn) addFolderBtn.disabled = true;
+        if (editBtn) editBtn.disabled = true;  // 批量时不允许编辑名称
+        if (deleteBtn) deleteBtn.disabled = false;  // 允许批量删除
+        
+        // 只有选中的全是文档时才允许批量编辑属性
+        const allDocs = selectedNodes.every(id => {
+            const node = findNode(currentTreeData, id);
+            return node && node.type === 'document';
+        });
+        if (attrBtn) attrBtn.disabled = !allDocs;
+        return;
+    }
+
+    // 单选模式
     const node = findNode(currentTreeData, selectedNode);
     if (!node) return;
 
@@ -1180,13 +1411,136 @@ function updateToolbarState() {
     if (deleteBtn) deleteBtn.disabled = (node.type === 'root');
     // 属性：只有文档可用
     if (attrBtn) attrBtn.disabled = (node.type !== 'document');
+}
 
-    // 属性面板：选中文档时自动显示
-    if (node.type === 'document') {
-        window.openAttributePanel(selectedNode);
-    } else {
+/**
+ * 根据选择更新属性面板（单选/批量）
+ */
+function updateAttributePanelForSelection() {
+    if (selectedNodes.length === 0) {
         hideAttributePanelIfNoSelection();
+        return;
     }
+    
+    // 检查是否全是文档
+    const docNodes = selectedNodes.map(id => findNode(currentTreeData, id)).filter(n => n && n.type === 'document');
+    
+    if (docNodes.length === 0) {
+        hideAttributePanelIfNoSelection();
+        return;
+    }
+    
+    if (docNodes.length === 1) {
+        // 单选文档
+        window.openAttributePanel(docNodes[0].id);
+    } else {
+        // 批量编辑模式
+        openBatchAttributePanel(docNodes);
+    }
+}
+
+/**
+ * 打开批量属性编辑面板
+ */
+function openBatchAttributePanel(nodes) {
+    const panel = document.getElementById('attributePanel');
+    if (!panel) return;
+    
+    // 更新标题
+    const titleEl = panel.querySelector('h3');
+    if (titleEl) titleEl.textContent = `批量编辑属性 (${nodes.length} 个文档)`;
+    
+    const hintEl = panel.querySelector('.attr-panel-hint');
+    if (hintEl) hintEl.textContent = '勾选属性将应用到所有选中文档，留空则保持原值不变';
+    
+    // 填充属性值（显示混合状态）
+    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+        const checkbox = document.getElementById(`attr_${key}`);
+        if (!checkbox) continue;
+        
+        const values = nodes.map(n => n.attributes?.[key]);
+        const allTrue = values.every(v => v === true);
+        const allFalse = values.every(v => v === false || v === undefined);
+        
+        if (allTrue) {
+            checkbox.checked = true;
+            checkbox.indeterminate = false;
+        } else if (allFalse) {
+            checkbox.checked = false;
+            checkbox.indeterminate = false;
+        } else {
+            // 混合状态
+            checkbox.checked = false;
+            checkbox.indeterminate = true;
+        }
+    }
+    
+    // 备注字段在批量模式下禁用
+    const noteEl = document.getElementById('attrDocNote');
+    if (noteEl) {
+        noteEl.value = '';
+        noteEl.placeholder = '批量编辑时不支持修改备注';
+        noteEl.disabled = true;
+    }
+    
+    // 渲染自定义属性
+    renderCustomAttributesForBatch(nodes);
+    
+    // 显示面板
+    panel.style.display = 'block';
+    panel.dataset.editingNodeIds = JSON.stringify(nodes.map(n => n.id));
+    panel.dataset.batchMode = 'true';
+    
+    // 更新预览
+    const previewEl = document.getElementById('attrPreview');
+    if (previewEl) {
+        previewEl.textContent = `已选择 ${nodes.length} 个文档，修改将同时应用到所有选中文档`;
+        previewEl.classList.remove('empty');
+    }
+}
+
+/**
+ * 批量渲染自定义属性
+ */
+function renderCustomAttributesForBatch(nodes) {
+    const container = document.getElementById('customAttributesList');
+    if (!container) return;
+    
+    if (customAttributeDefinitions.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 12px;">暂无自定义属性</p>';
+        return;
+    }
+    
+    container.innerHTML = customAttributeDefinitions.map(attrDef => {
+        const values = nodes.map(n => n.attributes?.[attrDef.id]).filter(v => v !== undefined);
+        const allSame = values.length > 0 && values.every(v => v === values[0]);
+        
+        let value = allSame ? values[0] : (attrDef.type === 'checkbox' ? false : '');
+        let placeholder = allSame ? '' : '（混合值）';
+        
+        let inputHtml = '';
+        switch (attrDef.type) {
+            case 'checkbox':
+                inputHtml = `<input type="checkbox" id="custom_attr_${attrDef.id}" ${value ? 'checked' : ''}>`;
+                break;
+            case 'text':
+                inputHtml = `<input type="text" id="custom_attr_${attrDef.id}" value="${escapeHtml(value)}" placeholder="${placeholder}" style="width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">`;
+                break;
+            case 'date':
+                inputHtml = `<input type="date" id="custom_attr_${attrDef.id}" value="${escapeHtml(value)}" style="width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">`;
+                break;
+        }
+        
+        return `
+            <div class="custom-attr-item" style="margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <label style="font-weight: 500;">${escapeHtml(attrDef.name)}</label>
+                    ${!allSame ? '<span style="color: #999; font-size: 11px;">(混合)</span>' : ''}
+                </div>
+                ${inputHtml}
+            </div>
+        `;
+    }).join('');
 }
 
 /**
@@ -1442,6 +1796,139 @@ export async function loadTemplateToTree() {
     await loadTemplateList();
 }
 
+// ==================== 导入/导出功能 ====================
+
+/**
+ * 打开导入模块模态框
+ */
+export function openImportModuleModal() {
+    const modal = document.getElementById('importModuleModal');
+    if (modal) {
+        // 重置表单
+        const fileInput = document.getElementById('importModuleFile');
+        if (fileInput) fileInput.value = '';
+        openModal(modal);
+    }
+}
+
+/**
+ * 关闭导入模块模态框
+ */
+export function closeImportModuleModal() {
+    const modal = document.getElementById('importModuleModal');
+    if (modal) closeModal(modal);
+}
+
+/**
+ * 确认导入模块
+ */
+export async function confirmImportModule() {
+    const fileInput = document.getElementById('importModuleFile');
+    const modeSelect = document.getElementById('importModuleMode');
+    
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        showNotification('请选择要导入的文件', 'error');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    const mode = modeSelect ? modeSelect.value : 'merge';
+    
+    try {
+        const content = await file.text();
+        const importedData = JSON.parse(content);
+        
+        // 验证数据结构
+        if (!importedData.cycles || !Array.isArray(importedData.cycles)) {
+            showNotification('无效的文档需求配置文件：缺少周期数据', 'error');
+            return;
+        }
+        
+        // 转换导入的数据为树形结构
+        const importedTreeData = buildTreeData(importedData);
+        
+        if (mode === 'replace') {
+            // 替换模式：直接使用导入的数据
+            currentTreeData = importedTreeData;
+        } else {
+            // 合并模式：合并到现有数据
+            mergeTreeData(currentTreeData, importedTreeData);
+        }
+        
+        // 重新渲染树
+        renderTree();
+        markDirty();
+        
+        closeImportModuleModal();
+        showNotification(`文档需求导入成功（${mode === 'replace' ? '替换' : '合并'}模式）`, 'success');
+        
+    } catch (error) {
+        console.error('导入失败:', error);
+        showNotification('导入失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 合并树数据（合并模式使用）
+ */
+function mergeTreeData(target, source) {
+    if (!source.children) return;
+    
+    source.children.forEach(sourceCycle => {
+        // 查找是否已存在相同周期的节点
+        const existingCycle = target.children.find(c => c.name === sourceCycle.name);
+        
+        if (existingCycle) {
+            // 合并周期下的文档
+            if (sourceCycle.children) {
+                sourceCycle.children.forEach(sourceDoc => {
+                    const existingDoc = existingCycle.children.find(d => d.name === sourceDoc.name);
+                    if (!existingDoc) {
+                        // 添加新文档
+                        existingCycle.children.push(sourceDoc);
+                    }
+                });
+            }
+        } else {
+            // 添加新周期
+            target.children.push(sourceCycle);
+        }
+    });
+}
+
+/**
+ * 导出当前树配置为JSON文件
+ */
+export function exportTreeConfig() {
+    if (!currentTreeData) {
+        showNotification('没有可导出的数据', 'error');
+        return;
+    }
+    
+    const config = treeToConfig();
+    const projectName = appState.projectConfig?.name || '项目';
+    const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    
+    const exportData = {
+        name: projectName,
+        export_time: new Date().toISOString(),
+        ...config
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName}_文档需求_${timestamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showNotification('文档需求导出成功', 'success');
+}
+
 async function loadTemplateList() {
     const container = document.getElementById('templateListContainer');
     if (!container) return;
@@ -1502,3 +1989,256 @@ window.loadTemplateToTreeEditor = async function(templateId) {
         showLoading(false);
     }
 };
+
+// 导入/导出功能的全局绑定
+window.openImportModuleModal = openImportModuleModal;
+window.closeImportModuleModal = closeImportModuleModal;
+window.confirmImportModule = confirmImportModule;
+window.exportTreeConfig = exportTreeConfig;
+
+// ==================== 筛选功能 ====================
+
+let filterText = '';
+let filterType = 'all';
+let filterDebounceTimer = null;
+
+/**
+ * 设置筛选条件
+ */
+export function setFilter(text, type) {
+    filterText = text.toLowerCase().trim();
+    filterType = type;
+    applyFilter();
+}
+
+/**
+ * 应用筛选
+ */
+function applyFilter() {
+    if (!currentTreeData) return;
+    
+    // 递归设置节点的可见性
+    setNodeVisibility(currentTreeData);
+    
+    // 重新渲染树
+    renderTree();
+    
+    // 如果有选中节点，保持选中
+    if (selectedNode) {
+        selectNode(selectedNode);
+    }
+}
+
+/**
+ * 递归设置节点可见性
+ * 返回：该节点或其子节点是否匹配
+ */
+function setNodeVisibility(node) {
+    // 检查当前节点是否匹配
+    const matchesText = !filterText || node.name.toLowerCase().includes(filterText);
+    const matchesType = filterType === 'all' || node.type === filterType;
+    const isMatch = matchesText && matchesType;
+    
+    // 检查子节点
+    let childHasMatch = false;
+    if (node.children) {
+        for (const child of node.children) {
+            if (setNodeVisibility(child)) {
+                childHasMatch = true;
+            }
+        }
+    }
+    
+    // 设置可见性：当前节点匹配，或有子节点匹配
+    node._filtered = !(isMatch || childHasMatch);
+    
+    // 如果有匹配，自动展开父节点
+    if (isMatch || childHasMatch) {
+        node.expanded = true;
+    }
+    
+    return isMatch || childHasMatch;
+}
+
+/**
+ * 清除筛选
+ */
+export function clearFilter() {
+    filterText = '';
+    filterType = 'all';
+    
+    // 清除所有节点的筛选标记
+    function clearNodeFilter(node) {
+        node._filtered = false;
+        if (node.children) {
+            node.children.forEach(clearNodeFilter);
+        }
+    }
+    
+    if (currentTreeData) {
+        clearNodeFilter(currentTreeData);
+    }
+    
+    renderTree();
+}
+
+// 筛选功能的全局绑定
+window.setTreeFilter = setFilter;
+window.clearTreeFilter = clearFilter;
+
+// ==================== 自定义属性功能 ====================
+
+/**
+ * 渲染自定义属性列表
+ */
+function renderCustomAttributes(node) {
+    const container = document.getElementById('customAttributesList');
+    if (!container) return;
+    
+    if (customAttributeDefinitions.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 12px;">暂无自定义属性</p>';
+        return;
+    }
+    
+    const attrs = node.attributes || {};
+    
+    container.innerHTML = customAttributeDefinitions.map(attrDef => {
+        const value = attrs[attrDef.id] || (attrDef.type === 'checkbox' ? false : '');
+        let inputHtml = '';
+        
+        switch (attrDef.type) {
+            case 'checkbox':
+                inputHtml = `<input type="checkbox" id="custom_attr_${attrDef.id}" ${value ? 'checked' : ''}>`;
+                break;
+            case 'text':
+                inputHtml = `<input type="text" id="custom_attr_${attrDef.id}" value="${escapeHtml(value)}" placeholder="请输入" style="width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">`;
+                break;
+            case 'date':
+                inputHtml = `<input type="date" id="custom_attr_${attrDef.id}" value="${escapeHtml(value)}" style="width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">`;
+                break;
+        }
+        
+        return `
+            <div class="custom-attr-item" style="margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <label style="font-weight: 500;">${escapeHtml(attrDef.name)}</label>
+                    <button class="btn btn-sm btn-danger" onclick="deleteCustomAttr('${attrDef.id}')" style="padding: 2px 6px; font-size: 11px;">删除</button>
+                </div>
+                ${inputHtml}
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * 打开添加自定义属性模态框
+ */
+export function openCustomAttrModal() {
+    const modal = document.getElementById('customAttrModal');
+    if (modal) {
+        // 重置表单
+        const nameInput = document.getElementById('customAttrName');
+        const typeSelect = document.getElementById('customAttrType');
+        if (nameInput) nameInput.value = '';
+        if (typeSelect) typeSelect.value = 'checkbox';
+        
+        openModal(modal);
+    }
+}
+
+/**
+ * 关闭添加自定义属性模态框
+ */
+export function closeCustomAttrModal() {
+    const modal = document.getElementById('customAttrModal');
+    if (modal) closeModal(modal);
+}
+
+/**
+ * 确认添加自定义属性
+ */
+export function confirmAddCustomAttr() {
+    const nameInput = document.getElementById('customAttrName');
+    const typeSelect = document.getElementById('customAttrType');
+    
+    const name = nameInput ? nameInput.value.trim() : '';
+    const type = typeSelect ? typeSelect.value : 'checkbox';
+    
+    if (!name) {
+        showNotification('请输入属性名称', 'error');
+        return;
+    }
+    
+    // 检查是否已存在同名属性
+    const existing = customAttributeDefinitions.find(a => a.name === name);
+    if (existing) {
+        showNotification('属性名称已存在', 'error');
+        return;
+    }
+    
+    // 生成唯一ID
+    const id = 'custom_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    customAttributeDefinitions.push({
+        id,
+        name,
+        type
+    });
+    
+    // 刷新属性面板
+    const panel = document.getElementById('attributePanel');
+    if (panel) {
+        const nodeId = panel.dataset.editingNodeId;
+        if (nodeId) {
+            const node = findNode(currentTreeData, nodeId);
+            if (node) renderCustomAttributes(node);
+        }
+    }
+    
+    closeCustomAttrModal();
+    showNotification('自定义属性添加成功', 'success');
+    markDirty();
+}
+
+/**
+ * 删除自定义属性
+ */
+export function deleteCustomAttr(attrId) {
+    showConfirmModal('确认删除', '删除后所有文档的该属性值将被清除，确定要继续吗？', () => {
+        // 从定义列表中移除
+        customAttributeDefinitions = customAttributeDefinitions.filter(a => a.id !== attrId);
+        
+        // 从所有节点的 attributes 中移除
+        function removeAttrFromNode(node) {
+            if (node.attributes && node.attributes[attrId] !== undefined) {
+                delete node.attributes[attrId];
+            }
+            if (node.children) {
+                node.children.forEach(removeAttrFromNode);
+            }
+        }
+        
+        if (currentTreeData) {
+            removeAttrFromNode(currentTreeData);
+        }
+        
+        // 刷新属性面板
+        const panel = document.getElementById('attributePanel');
+        if (panel) {
+            const nodeId = panel.dataset.editingNodeId;
+            if (nodeId) {
+                const node = findNode(currentTreeData, nodeId);
+                if (node) renderCustomAttributes(node);
+            }
+        }
+        
+        showNotification('自定义属性已删除', 'success');
+        markDirty();
+    });
+}
+
+// 自定义属性的全局绑定
+window.openCustomAttrModal = openCustomAttrModal;
+window.closeCustomAttrModal = closeCustomAttrModal;
+window.confirmAddCustomAttr = confirmAddCustomAttr;
+window.deleteCustomAttr = deleteCustomAttr;

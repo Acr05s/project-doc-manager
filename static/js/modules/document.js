@@ -395,6 +395,19 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
         if (filterOptions.hideCompleted && hasFiles) {
             return false;
         }
+        
+        // 关键字筛选
+        if (filterOptions.keyword) {
+            const keyword = filterOptions.keyword.toLowerCase();
+            const docName = doc.name.toLowerCase();
+            const requirement = (doc.requirement || '').toLowerCase();
+            
+            // 检查文档名称或要求中是否包含关键字
+            if (!docName.includes(keyword) && !requirement.includes(keyword)) {
+                return false;
+            }
+        }
+        
         return true;
     });
     
@@ -403,18 +416,23 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
 
     // 新布局：左侧组织机构人员，中间文件名+附加属性，右侧确认按钮
         const html = `
-        <h2 style="text-align: left;">📋 ${cycle} - 文档管理</h2>
-        
-        <!-- 过滤选项 -->
-        <div class="filter-options" style="margin-bottom: 15px; padding: 10px 15px; background: #f8f9fa; border-radius: 6px; display: flex; flex-wrap: wrap; gap: 15px 25px; align-items: center;">
-            <label class="checkbox-inline" style="display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;">
-                <input type="checkbox" id="hideArchived" ${appState.filterOptions.hideArchived ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
-                <span>隐藏已归档</span>
-            </label>
-            <label class="checkbox-inline" style="display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;">
-                <input type="checkbox" id="hideCompleted" ${appState.filterOptions.hideCompleted ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
-                <span>隐藏文件完整</span>
-            </label>
+        <!-- 标题和筛选选项在同一行 -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2 style="text-align: left; margin: 0;">📋 ${cycle} - 文档管理</h2>
+            <div class="filter-options" style="padding: 5px 10px; background: #f8f9fa; border-radius: 6px; display: flex; flex-wrap: wrap; gap: 10px 15px; align-items: center;">
+                <label class="checkbox-inline" style="display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">
+                    <input type="checkbox" id="hideArchived" ${appState.filterOptions.hideArchived ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
+                    <span>隐藏已归档</span>
+                </label>
+                <label class="checkbox-inline" style="display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">
+                    <input type="checkbox" id="hideCompleted" ${appState.filterOptions.hideCompleted ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
+                    <span>隐藏文件完整</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <input type="text" id="keywordFilter" placeholder="输入关键字" style="padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; width: 150px; font-size: 14px;" value="${appState.filterOptions.keyword || ''}" onchange="filterDocuments('${cycle}')">
+                    <span style="color: #666; font-size: 14px;">🔍</span>
+                </div>
+            </div>
         </div>
         
         <!-- 新文档管理布局 -->
@@ -423,13 +441,14 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
             <table class="documents-table">
                 <thead>
                     <tr>
+                        <th style="text-align: center; width: 80px; min-width: 80px;">序号</th>
                         <th class="col-org" style="text-align: center;">文档类型</th>
                         <th class="col-files" style="text-align: center;">文件列表</th>
                         <th class="col-action" style="text-align: center;">操作</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${allDocTypes.map(doc => {
+                    ${allDocTypes.map((doc, index) => {
                         const docsList = docsByName[doc.name] || [];
                         
                         // 检查是否已归档
@@ -503,29 +522,35 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
                                     const hasDocDate = getDocValue('doc_date');
                                     const hasSignDate = getDocValue('sign_date');
                                     
-                                    // 检查签字要求
-                                    if (requirement.includes('乙方签字') && !hasSigner && !hasNoSignature) {
-                                        missingRequirements.push('乙方签字');
-                                    }
-                                    if (requirement.includes('甲方签字') && !hasSigner && !hasNoSignature) {
-                                        missingRequirements.push('甲方签字');
-                                    }
-                                    if (requirement.includes('签字') && !hasSigner && !hasNoSignature) {
-                                        missingRequirements.push('签字');
-                                    }
-                                    
-                                    // 检查盖章要求
-                                    if (requirement.includes('乙方盖章') && !hasPartyBSeal && !hasNoSeal) {
-                                        missingRequirements.push('乙方盖章');
-                                    }
-                                    if (requirement.includes('甲方盖章') && !hasPartyASeal && !hasNoSeal) {
-                                        missingRequirements.push('甲方盖章');
-                                    }
-                                    if (requirement.includes('盖章') && !hasHasSealMarked && !hasPartyASeal && !hasPartyBSeal && !hasNoSeal) {
-                                        missingRequirements.push('盖章');
+                                    // 检查签字要求（避免重复）
+                                    const hasSignatureRequirement = requirement.includes('乙方签字') || requirement.includes('甲方签字') || requirement.includes('签字');
+                                    if (hasSignatureRequirement && !hasSigner && !hasNoSignature) {
+                                        if (requirement.includes('乙方签字') && requirement.includes('甲方签字')) {
+                                            missingRequirements.push('甲乙方签字');
+                                        } else if (requirement.includes('乙方签字')) {
+                                            missingRequirements.push('乙方签字');
+                                        } else if (requirement.includes('甲方签字')) {
+                                            missingRequirements.push('甲方签字');
+                                        } else if (requirement.includes('签字')) {
+                                            missingRequirements.push('签字');
+                                        }
                                     }
                                     
-                                    // 检查日期要求
+                                    // 检查盖章要求（避免重复）
+                                    const hasSealRequirement = requirement.includes('乙方盖章') || requirement.includes('甲方盖章') || requirement.includes('盖章');
+                                    if (hasSealRequirement && !hasHasSealMarked && !hasPartyASeal && !hasPartyBSeal && !hasNoSeal) {
+                                        if (requirement.includes('乙方盖章') && requirement.includes('甲方盖章')) {
+                                            missingRequirements.push('甲乙方盖章');
+                                        } else if (requirement.includes('乙方盖章')) {
+                                            missingRequirements.push('乙方盖章');
+                                        } else if (requirement.includes('甲方盖章')) {
+                                            missingRequirements.push('甲方盖章');
+                                        } else if (requirement.includes('盖章')) {
+                                            missingRequirements.push('盖章');
+                                        }
+                                    }
+                                    
+                                    // 检查日期要求（避免重复）
                                     if (requirement.includes('文档日期') && !hasDocDate) {
                                         missingRequirements.push('文档日期');
                                     }
@@ -596,8 +621,12 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
                         
                         console.log('文档信息:', doc);
                         
+                        // 获取文档序号
+                        const docIndex = doc.index || (index + 1);
+                        
                         return `
                         <tr class="doc-row ${isArchived ? 'archived' : ''}">
+                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;">${docIndex}</td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
@@ -2259,16 +2288,19 @@ export async function loadUploadedDocuments(cycle, docName) {
 export async function filterDocuments(cycle) {
     const hideArchived = document.getElementById('hideArchived').checked;
     const hideCompleted = document.getElementById('hideCompleted').checked;
+    const keyword = document.getElementById('keywordFilter')?.value || '';
     
     // 保存筛选状态到全局状态
     appState.filterOptions = {
         hideArchived,
-        hideCompleted
+        hideCompleted,
+        keyword
     };
     
     await renderCycleDocuments(cycle, {
         hideArchived,
-        hideCompleted
+        hideCompleted,
+        keyword
     });
 }
 
@@ -2300,7 +2332,19 @@ export async function generateReport() {
                 name: cycle,
                 requiredDocs: [],
                 uploadedDocs: [],
-                missingDocs: []
+                missingDocs: [],
+                statistics: {
+                    totalDocs: 0,
+                    uploadedDocs: 0,
+                    missingDocs: 0,
+                    archivedDocs: 0,
+                    signatureRate: 0,
+                    sealRate: 0,
+                    complianceRate: 0,
+                    signedDocs: 0,
+                    sealedDocs: 0,
+                    compliantDocs: 0
+                }
             };
             
             // 获取该周期的文档要求
@@ -2308,19 +2352,98 @@ export async function generateReport() {
             if (cycleDocs) {
                 // 收集要求的文档
                 cycleData.requiredDocs = cycleDocs.required_docs || [];
+                cycleData.statistics.totalDocs = cycleData.requiredDocs.length;
                 
                 // 获取已上传的文档
                 const uploadedDocs = await getCycleDocuments(cycle);
-                cycleData.uploadedDocs = uploadedDocs;
+                
+                // 为每个文档添加归档状态和合规性检查
+                const docsWithStatus = uploadedDocs.map(doc => {
+                    const docName = doc.doc_name || doc.name;
+                    const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[docName] || false;
+                    
+                    // 检查文档是否合规
+                    const docConfig = cycleData.requiredDocs.find(d => d.name === docName);
+                    const requirement = docConfig?.requirement || '';
+                    const missing = checkMissingRequirements(doc, requirement);
+                    const isCompliant = missing.length === 0;
+                    
+                    return {
+                        ...doc,
+                        archived: isArchived,
+                        compliant: isCompliant,
+                        missingRequirements: missing
+                    };
+                });
+                
+                cycleData.uploadedDocs = docsWithStatus;
+                cycleData.statistics.uploadedDocs = docsWithStatus.length;
                 
                 // 识别缺失的文档
-                const uploadedDocNames = new Set(uploadedDocs.map(doc => doc.doc_name));
+                const uploadedDocNames = new Set(docsWithStatus.map(doc => doc.doc_name));
                 cycleData.missingDocs = cycleData.requiredDocs.filter(doc => 
                     !uploadedDocNames.has(doc.name)
                 );
+                cycleData.statistics.missingDocs = cycleData.missingDocs.length;
+                
+                // 计算统计数据
+                if (docsWithStatus.length > 0) {
+                    // 归档文档数
+                    cycleData.statistics.archivedDocs = docsWithStatus.filter(doc => doc.archived).length;
+                    
+                    // 签字率
+                    const signedDocs = docsWithStatus.filter(doc => doc.signer || doc.no_signature).length;
+                    cycleData.statistics.signedDocs = signedDocs;
+                    cycleData.statistics.signatureRate = (signedDocs / docsWithStatus.length * 100).toFixed(1);
+                    
+                    // 盖章率
+                    const sealedDocs = docsWithStatus.filter(doc => 
+                        doc.has_seal_marked || doc.has_seal || doc.party_a_seal || doc.party_b_seal || doc.no_seal
+                    ).length;
+                    cycleData.statistics.sealedDocs = sealedDocs;
+                    cycleData.statistics.sealRate = (sealedDocs / docsWithStatus.length * 100).toFixed(1);
+                    
+                    // 合格率
+                    const compliantDocs = docsWithStatus.filter(doc => doc.compliant).length;
+                    cycleData.statistics.compliantDocs = compliantDocs;
+                    cycleData.statistics.complianceRate = (compliantDocs / docsWithStatus.length * 100).toFixed(1);
+                }
             }
             
             reportData.cycles.push(cycleData);
+        }
+        
+        // 计算项目总体统计
+        reportData.statistics = {
+            totalDocs: 0,
+            uploadedDocs: 0,
+            missingDocs: 0,
+            archivedDocs: 0,
+            signatureRate: 0,
+            sealRate: 0,
+            complianceRate: 0,
+            signedDocs: 0,
+            sealedDocs: 0,
+            compliantDocs: 0
+        };
+        
+        let totalUploadedDocs = 0;
+        reportData.cycles.forEach(cycle => {
+            reportData.statistics.totalDocs += cycle.statistics.totalDocs;
+            reportData.statistics.uploadedDocs += cycle.statistics.uploadedDocs;
+            reportData.statistics.missingDocs += cycle.statistics.missingDocs;
+            reportData.statistics.archivedDocs += cycle.statistics.archivedDocs;
+            reportData.statistics.signedDocs += cycle.statistics.signedDocs;
+            reportData.statistics.sealedDocs += cycle.statistics.sealedDocs;
+            reportData.statistics.compliantDocs += cycle.statistics.compliantDocs;
+            totalUploadedDocs += cycle.statistics.uploadedDocs;
+        });
+        
+        // 计算总体率
+        if (totalUploadedDocs > 0) {
+            reportData.statistics.signatureRate = (reportData.statistics.signedDocs / totalUploadedDocs * 100).toFixed(1);
+            reportData.statistics.sealRate = (reportData.statistics.sealedDocs / totalUploadedDocs * 100).toFixed(1);
+            reportData.statistics.complianceRate = (reportData.statistics.compliantDocs / totalUploadedDocs * 100).toFixed(1);
         }
         
         // 显示报告模态框
@@ -2355,6 +2478,67 @@ function showReportModal(reportData) {
             <div class="report-header" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
                 <h3>${reportData.projectName}</h3>
                 <p>生成时间: ${reportData.generatedAt}</p>
+                
+                <!-- 项目总体统计 -->
+                ${reportData.statistics ? `
+                <div class="project-statistics" style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px;">
+                    <h4 style="margin: 0 0 10px 0; font-size: 16px; color: #2c3e50;">项目总体统计</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">总文档数</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #333;">${reportData.statistics.totalDocs}</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">已上传</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #28a745;">${reportData.statistics.uploadedDocs}</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">缺失</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #dc3545;">${reportData.statistics.missingDocs}</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">已归档</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #1890ff;">${reportData.statistics.archivedDocs}</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">签字率</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #ffc107;">${reportData.statistics.signatureRate}%</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">盖章率</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #ffc107;">${reportData.statistics.sealRate}%</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; color: #666;">合格率</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #28a745;">${reportData.statistics.complianceRate}%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 图表区域 -->
+                <div class="report-charts" style="margin-top: 20px;">
+                    <h4 style="margin: 0 0 15px 0; font-size: 16px; color: #2c3e50;">数据可视化</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+                        <!-- 文档状态饼图 -->
+                        <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <h5 style="margin: 0 0 10px 0; font-size: 14px; color: #495057;">文档状态分布</h5>
+                            <canvas id="documentStatusChart" width="400" height="300"></canvas>
+                        </div>
+                        
+                        <!-- 质量指标雷达图 -->
+                        <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <h5 style="margin: 0 0 10px 0; font-size: 14px; color: #495057;">质量指标分析</h5>
+                            <canvas id="qualityMetricsChart" width="400" height="300"></canvas>
+                        </div>
+                        
+                        <!-- 各周期文档情况柱状图 -->
+                        <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); grid-column: 1 / -1;">
+                            <h5 style="margin: 0 0 10px 0; font-size: 14px; color: #495057;">各周期文档情况</h5>
+                            <canvas id="cycleComparisonChart" width="800" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
             </div>
             
             <div class="report-content">
@@ -2366,6 +2550,30 @@ function showReportModal(reportData) {
                             <p>要求文档: ${cycle.requiredDocs.length} 个</p>
                             <p>已上传文档: ${cycle.uploadedDocs.length} 个</p>
                             <p>缺失文档: ${cycle.missingDocs.length} 个</p>
+                            
+                            <!-- 周期统计数据 -->
+                            ${cycle.statistics ? `
+                            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #d1ecf1;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 12px; color: #666;">已归档</div>
+                                        <div style="font-size: 16px; font-weight: bold; color: #1890ff;">${cycle.statistics.archivedDocs}</div>
+                                    </div>
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 12px; color: #666;">签字率</div>
+                                        <div style="font-size: 16px; font-weight: bold; color: #ffc107;">${cycle.statistics.signatureRate}%</div>
+                                    </div>
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 12px; color: #666;">盖章率</div>
+                                        <div style="font-size: 16px; font-weight: bold; color: #ffc107;">${cycle.statistics.sealRate}%</div>
+                                    </div>
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 12px; color: #666;">合格率</div>
+                                        <div style="font-size: 16px; font-weight: bold; color: #28a745;">${cycle.statistics.complianceRate}%</div>
+                                    </div>
+                                </div>
+                            </div>
+                            ` : ''}
                         </div>
                         
                         ${cycle.missingDocs.length > 0 ? `
@@ -2388,34 +2596,55 @@ function showReportModal(reportData) {
                                     docsByType[typeName].push(doc);
                                 });
                                 // 生成按类型分组的表格HTML
-                                return Object.entries(docsByType).map(([typeName, docs]) => `
-                                    <div style="margin-bottom: 20px;">
-                                        <h6 style="margin: 10px 0 8px; color: #495057; font-size: 14px; font-weight: 600; background: #e9ecef; padding: 6px 10px; border-radius: 4px;">
-                                            📄 ${typeName} (${docs.length}个文件)
-                                        </h6>
-                                        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                                            <thead>
-                                                <tr style="background: #f8f9fa;">
-                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
-                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
-                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                ${docs.map(doc => `
-                                                    <tr>
-                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename}</td>
-                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
-                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
-                                                            ${doc.no_signature ? '✓ 无签字' : (doc.signer ? '✓ 有签字' : '⚠ 无签字')}
-                                                            ${doc.no_seal ? ' | ✓ 无盖章' : (doc.has_seal_marked ? ' | ✓ 有盖章' : ' | ⚠ 无盖章')}
-                                                        </td>
-                                                    </tr>
-                                                `).join('')}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                `).join('');
+                                return Object.entries(docsByType).map(([typeName, docs]) => {
+                                    // 按目录分组文档
+                                    const docsByDirectory = {};
+                                    docs.forEach(doc => {
+                                        const directory = doc.directory || '/';
+                                        if (!docsByDirectory[directory]) docsByDirectory[directory] = [];
+                                        docsByDirectory[directory].push(doc);
+                                    });
+                                    
+                                    return `
+                                        <div style="margin-bottom: 20px;">
+                                            <h6 style="margin: 10px 0 8px; color: #495057; font-size: 14px; font-weight: 600; background: #e9ecef; padding: 6px 10px; border-radius: 4px;">
+                                                📄 ${typeName} (${docs.length}个文件)
+                                            </h6>
+                                            ${Object.entries(docsByDirectory).map(([directory, dirDocs]) => {
+                                                const dirName = directory === '/' ? '根目录' : directory;
+                                                return `
+                                                    <div style="margin-left: 20px; margin-top: 10px;">
+                                                        <div style="font-size: 13px; font-weight: 500; color: #6c757d; margin-bottom: 5px;">
+                                                            📁 ${dirName} (${dirDocs.length}个文件)
+                                                        </div>
+                                                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                                            <thead>
+                                                                <tr style="background: #f8f9fa;">
+                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
+                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
+                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                ${dirDocs.map(doc => `
+                                                                    <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}</td>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
+                                                                            ${doc.no_signature ? '✓ 无签字' : (doc.signer ? '✓ 有签字' : '⚠ 无签字')}
+                                                                            ${doc.no_seal ? ' | ✓ 无盖章' : (doc.has_seal_marked ? ' | ✓ 有盖章' : ' | ⚠ 无盖章')}
+                                                                            ${doc.archived ? ' | <span style="color: #1890ff;">✓ 已归档</span>' : ''}
+                                                                        </td>
+                                                                    </tr>
+                                                                `).join('')}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                `;
+                                            }).join('')}
+                                        </div>
+                                    `;
+                                }).join('');
                             })() : `<p>无已上传文档</p>`}
                         </div>
                     </div>
@@ -2432,6 +2661,155 @@ function showReportModal(reportData) {
     modal.innerHTML = html;
     modal.classList.add('show');
     document.body.style.overflow = 'hidden';
+    
+    // 初始化图表
+    if (reportData.statistics) {
+        setTimeout(() => {
+            // 文档状态饼图
+            const statusCtx = document.getElementById('documentStatusChart');
+            if (statusCtx) {
+                new Chart(statusCtx, {
+                    type: 'pie',
+                    data: {
+                        labels: ['已上传', '缺失', '已归档'],
+                        datasets: [{
+                            data: [
+                                reportData.statistics.uploadedDocs,
+                                reportData.statistics.missingDocs,
+                                reportData.statistics.archivedDocs
+                            ],
+                            backgroundColor: [
+                                '#28a745', // 绿色 - 已上传
+                                '#dc3545', // 红色 - 缺失
+                                '#1890ff'  // 蓝色 - 已归档
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                            },
+                            title: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 质量指标雷达图
+            const metricsCtx = document.getElementById('qualityMetricsChart');
+            if (metricsCtx) {
+                new Chart(metricsCtx, {
+                    type: 'radar',
+                    data: {
+                        labels: ['签字率', '盖章率', '合格率'],
+                        datasets: [{
+                            label: '质量指标',
+                            data: [
+                                parseFloat(reportData.statistics.signatureRate),
+                                parseFloat(reportData.statistics.sealRate),
+                                parseFloat(reportData.statistics.complianceRate)
+                            ],
+                            backgroundColor: 'rgba(24, 144, 255, 0.2)',
+                            borderColor: 'rgba(24, 144, 255, 1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'rgba(24, 144, 255, 1)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            r: {
+                                beginAtZero: true,
+                                max: 100,
+                                ticks: {
+                                    stepSize: 20
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 各周期文档情况柱状图
+            const cycleCtx = document.getElementById('cycleComparisonChart');
+            if (cycleCtx) {
+                const cycleNames = reportData.cycles.map(cycle => cycle.name);
+                const uploadedDocs = reportData.cycles.map(cycle => cycle.statistics.uploadedDocs);
+                const missingDocs = reportData.cycles.map(cycle => cycle.statistics.missingDocs);
+                const complianceRates = reportData.cycles.map(cycle => parseFloat(cycle.statistics.complianceRate));
+                
+                new Chart(cycleCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: cycleNames,
+                        datasets: [
+                            {
+                                label: '已上传文档',
+                                data: uploadedDocs,
+                                backgroundColor: '#28a745',
+                                borderColor: '#28a745',
+                                borderWidth: 1
+                            },
+                            {
+                                label: '缺失文档',
+                                data: missingDocs,
+                                backgroundColor: '#dc3545',
+                                borderColor: '#dc3545',
+                                borderWidth: 1
+                            },
+                            {
+                                label: '合格率 (%)',
+                                data: complianceRates,
+                                backgroundColor: '#1890ff',
+                                borderColor: '#1890ff',
+                                borderWidth: 1,
+                                yAxisID: 'y1'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: '文档数量'
+                                }
+                            },
+                            y1: {
+                                beginAtZero: true,
+                                max: 100,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: '合格率 (%)'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            }
+        }, 100);
+    }
 }
 
 /**
@@ -2453,8 +2831,32 @@ function downloadReportAsPDF() {
     // 由于我们没有直接引入html2pdf库，这里使用一个简单的实现
     // 实际项目中应该使用专业的PDF生成库
     
+    const reportModal = document.getElementById('reportModal');
+    if (!reportModal) return;
+    
+    // 获取整个报告内容，包括图表
+    const reportHeader = document.querySelector('.report-header');
     const reportContent = document.querySelector('.report-content');
-    if (!reportContent) return;
+    
+    if (!reportHeader || !reportContent) return;
+    
+    // 处理Canvas图表，将其转换为图片
+    const canvases = document.querySelectorAll('canvas');
+    const canvasData = [];
+    
+    canvases.forEach((canvas, index) => {
+        // 将Canvas转换为base64图片
+        const dataURL = canvas.toDataURL('image/png');
+        canvasData.push(dataURL);
+        // 临时替换Canvas为图片
+        const img = document.createElement('img');
+        img.src = dataURL;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.className = 'canvas-replacement';
+        canvas.parentNode.appendChild(img);
+        canvas.style.display = 'none';
+    });
     
     // 创建一个新的窗口
     const printWindow = window.open('', '_blank');
@@ -2472,16 +2874,32 @@ function downloadReportAsPDF() {
                 th { background: #f8f9fa; }
                 .missing-docs { color: #dc3545; }
                 .uploaded-docs { margin-top: 15px; }
+                .archived-row { background-color: #e6f7ff; }
+                .archived-text { color: #1890ff; font-size: 12px; margin-left: 8px; }
+                .report-charts { margin-top: 20px; }
+                .report-charts canvas { max-width: 100%; height: auto; }
+                .canvas-replacement { max-width: 100%; height: auto; }
             </style>
         </head>
         <body>
             <h1>项目文档审核报告</h1>
             <h2>${appState.projectConfig.name || '未知项目'}</h2>
             <p>生成时间: ${new Date().toLocaleString()}</p>
+            ${reportHeader.innerHTML}
             ${reportContent.innerHTML}
         </body>
         </html>
     `);
+    
+    // 恢复Canvas显示
+    canvases.forEach((canvas, index) => {
+        canvas.style.display = 'block';
+        const img = canvas.parentNode.querySelector('.canvas-replacement');
+        if (img) {
+            img.remove();
+        }
+    });
+    
     printWindow.document.close();
     printWindow.print();
 }

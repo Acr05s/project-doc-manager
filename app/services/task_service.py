@@ -4,9 +4,12 @@ import uuid
 import threading
 import time
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class TaskService:
     """任务服务类"""
@@ -432,39 +435,12 @@ class TaskService:
                         return name[match.start():]
                     return name
                 
-                # 预处理：统计每个文档类型的文件数量
-                doc_file_counts = {}  # {cycle: {doc_name: count}}
-                # 按照 cycles 列表的顺序遍历
-                for cycle in cycles_order:
-                    doc_data = documents.get(cycle)
-                    if not isinstance(doc_data, dict):
-                        continue
-                    doc_file_counts[cycle] = {}
-                    uploaded_docs = doc_data.get('uploaded_docs', [])
-                    for doc_meta in uploaded_docs:
-                        if not isinstance(doc_meta, dict):
-                            continue
-                        doc_name = doc_meta.get('doc_name', '未知')
-                        if doc_name not in doc_file_counts[cycle]:
-                            doc_file_counts[cycle][doc_name] = 0
-                        doc_file_counts[cycle][doc_name] += 1
-                
-                # 预处理：为周期分配序号，标记单文件类型
+                # 预处理：为周期分配序号
                 cycle_order = {}
-                single_file_docs = {}  # 记录单文件文档类型 {cycle: {doc_name: True}}
-                
-                # 按照 cycles 列表的顺序分配序号
                 for cycle_idx, cycle in enumerate(cycles_order, 1):
                     doc_data = documents.get(cycle)
-                    if not isinstance(doc_data, dict):
-                        continue
-                    cycle_order[cycle] = cycle_idx
-                    
-                    single_file_docs[cycle] = {}
-                    
-                    # 标记单文件文档类型
-                    for doc_name, count in doc_file_counts.get(cycle, {}).items():
-                        single_file_docs[cycle][doc_name] = (count == 1)
+                    if isinstance(doc_data, dict):
+                        cycle_order[cycle] = cycle_idx
                 
                 # 创建ZIP文件
                 processed_files = 0
@@ -495,6 +471,7 @@ class TaskService:
                         
                         # 按照 required_docs 的顺序处理文档类型
                         doc_type_seq = 0
+                        
                         for req_doc in required_docs:
                             doc_name = req_doc.get('name', '未知')
                             
@@ -505,108 +482,124 @@ class TaskService:
                             # 文档类型序号递增（1.1, 1.2, 1.3...）
                             doc_type_seq += 1
                             
-                            # 判断是否为单文件类型
-                            is_single_file = single_file_docs.get(cycle, {}).get(doc_name, False)
+                            # 直接遍历该文档类型的所有文件
+                            doc_files = doc_files_map[doc_name]
                             
-                            # 先按子目录对文件分组（无子目录的用 '' 作为键）
-                            files_by_directory = {}
-                            for doc_meta in doc_files_map[doc_name]:
-                                directory = doc_meta.get('directory', '')
-                                # 规范化目录值：'/' 和 '' 都视为无子目录
-                                if directory == '/':
-                                    directory = ''
-                                if directory not in files_by_directory:
-                                    files_by_directory[directory] = []
-                                files_by_directory[directory].append(doc_meta)
+                            # 按子目录排序（无子目录的在前），确保顺序一致
+                            def get_sort_key(doc_meta):
+                                d = doc_meta.get('directory', '') or ''
+                                d = d.strip()
+                                if d == '/':
+                                    d = ''
+                                return (d != '', d)  # 无子目录的排在前面，然后按目录名排序
                             
-                            # 处理该文档类型的所有文件（按子目录分组）
-                            dir_seq = 0
-                            file_seq = 0  # 文件序号在文档类型级别累加
-                            for directory, dir_files in files_by_directory.items():
-                                # 规范化后，'' 表示无子目录，其他值表示有子目录
-                                has_subdir = bool(directory)
+                            sorted_files = sorted(doc_files, key=get_sort_key)
+                            
+                            # 先分组：无子目录的文件 和 有子目录的文件
+                            files_no_subdir = [f for f in sorted_files if not (f.get('directory', '') or '').strip() or (f.get('directory', '') or '').strip() == '/']
+                            files_with_subdir = [f for f in sorted_files if (f.get('directory', '') or '').strip() and (f.get('directory', '') or '').strip() != '/']
+                            
+                            # 为有子目录的文件按目录分组
+                            subdir_groups = {}  # {directory: [files]}
+                            for f in files_with_subdir:
+                                d = f.get('directory', '').strip()
+                                if d not in subdir_groups:
+                                    subdir_groups[d] = []
+                                subdir_groups[d].append(f)
+                            
+                            # 按目录名排序，确保子目录顺序一致
+                            sorted_subdirs = sorted(subdir_groups.keys())
+                            
+                            # -------------------------------------------------------
+                            # 新序号规则（参考图2）：
+                            # 连续递增的 item_seq 分配给每个无子目录的文件和每个子目录：
+                            #   无子目录文件  → X.Y.N   （直接放文档类型目录）
+                            #   子目录        → X.Y.M   （目录名前缀）
+                            #     子目录内文件 → X.Y.M.K  （放子目录下，K从1开始）
+                            # 单文件（整个文档类型只有1个文件且无子目录）
+                            #   → 直接放周期目录，前缀 X.Y（不加第三级序号）
+                            # -------------------------------------------------------
+                            
+                            total_items = len(files_no_subdir) + len(sorted_subdirs)
+                            is_single_file = (total_items == 1 and len(files_no_subdir) == 1)
+                            
+                            logger.info(f"[打包序号] 周期={cycle} 文档类型={doc_name} "
+                                        f"无子目录文件数={len(files_no_subdir)} "
+                                        f"子目录数={len(sorted_subdirs)} "
+                                        f"total_items={total_items} is_single={is_single_file} "
+                                        f"子目录列表={sorted_subdirs} "
+                                        f"子目录文件数={[(d, len(subdir_groups[d])) for d in sorted_subdirs]}")
+                            
+                            # 构建处理列表: (doc_meta, item_seq, subdir_name, inner_seq)
+                            # item_seq = 文件/子目录在文档类型内的全局递增序号（每次进入文档类型时重置为0）
+                            # inner_seq = 子目录内文件的序号（每个子目录内从1开始）
+                            processing_list = []
+                            _item_seq = 0  # 改用 _item_seq 避免与外层循环变量冲突
+                            
+                            # 1. 无子目录的文件，每个占一个 _item_seq
+                            for _f in files_no_subdir:
+                                _item_seq += 1
+                                processing_list.append((_f, _item_seq, None, None))
+                            
+                            # 2. 每个子目录占一个 _item_seq，子目录内文件使用 inner_seq（从1开始）
+                            for _subdir_name in sorted_subdirs:
+                                _item_seq += 1
+                                _subdir_seq = _item_seq  # 该子目录占的序号
+                                _subdir_files = subdir_groups[_subdir_name]
+                                for _inner_idx, _f in enumerate(_subdir_files, 1):
+                                    processing_list.append((_f, _subdir_seq, _subdir_name, _inner_idx))
+                            
+                            logger.info(f"[打包序号] processing_list长度={len(processing_list)} "
+                                        f"分配预览(前5条)={[(p[1], p[2], p[3]) for p in processing_list[:5]]}")
+                            
+                            # 处理所有文件
+                            for _doc_meta, _item_seq_val, _subdir_name, _inner_seq in processing_list:
+                                file_path = _doc_meta.get('file_path')
+                                if not file_path:
+                                    continue
                                 
-                                if has_subdir:
-                                    # 有子目录：子目录有自己的序号
-                                    dir_seq += 1
-                                    for doc_meta in dir_files:
-                                        file_path = doc_meta.get('file_path')
-                                        if not file_path:
-                                            continue
-                                        
-                                        # 解析文件路径
-                                        file_path_obj = Path(file_path)
-                                        if not file_path_obj.is_absolute():
-                                            if file_path.startswith('projects/'):
-                                                base_dir = self.doc_manager.config.projects_base_folder.parent
-                                                file_path_obj = base_dir / file_path
-                                            else:
-                                                project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
-                                                file_path_obj = project_uploads_dir / file_path
-                                        
-                                        if not file_path_obj.exists():
-                                            continue
-                                        
-                                        # 优先使用原始文件名，其次是filename字段，最后是磁盘文件名
-                                        filename = doc_meta.get('original_filename') or doc_meta.get('filename') or file_path_obj.name
-                                        
-                                        # 文件在子目录内的序号（有子目录时：3.3.1.1, 3.3.1.2...）
-                                        file_seq += 1
-                                        file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{dir_seq}.{file_seq}"
-                                        
-                                        # 构建路径：3.周期/3.3 文档类型/3.3.1 子目录/3.3.1.1 文件名
-                                        clean_cycle = clean_name_prefix(cycle)
-                                        clean_dir = clean_name_prefix(directory)
-                                        archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}/{cycle_idx}.{doc_type_seq}.{dir_seq} {clean_dir}"
-                                        
-                                        clean_name = clean_filename(filename, file_index_prefix)
-                                        archive_path = f"{archive_dir}/{clean_name}"
-                                        
-                                        zipf.write(file_path_obj, archive_path)
-                                        processed_files += 1
+                                # 解析文件路径
+                                file_path_obj = Path(file_path)
+                                if not file_path_obj.is_absolute():
+                                    if file_path.startswith('projects/'):
+                                        base_dir = self.doc_manager.config.projects_base_folder.parent
+                                        file_path_obj = base_dir / file_path
+                                    else:
+                                        project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
+                                        file_path_obj = project_uploads_dir / file_path
+                                
+                                if not file_path_obj.exists():
+                                    continue
+                                
+                                # 优先使用原始文件名，其次是filename字段，最后是磁盘文件名
+                                filename = _doc_meta.get('original_filename') or _doc_meta.get('filename') or file_path_obj.name
+                                
+                                # 构建路径
+                                clean_cycle = clean_name_prefix(cycle)
+                                
+                                if is_single_file:
+                                    # 单文件：直接放在周期目录下，前缀 X.Y
+                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}"
+                                    archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}"
+                                elif _inner_seq is not None:
+                                    # 有子目录的文件：前缀 X.Y.M.K，放 X.Y.M 子目录下
+                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{_item_seq_val}.{_inner_seq}"
+                                    clean_dir = clean_name_prefix(_subdir_name)
+                                    archive_dir = (
+                                        f"{project_name}/{cycle_idx}.{clean_cycle}"
+                                        f"/{cycle_idx}.{doc_type_seq} {doc_name}"
+                                        f"/{cycle_idx}.{doc_type_seq}.{_item_seq_val} {clean_dir}"
+                                    )
                                 else:
-                                    # 无子目录：文件直接在文档类型目录下
-                                    for doc_meta in dir_files:
-                                        file_path = doc_meta.get('file_path')
-                                        if not file_path:
-                                            continue
-                                        
-                                        # 解析文件路径
-                                        file_path_obj = Path(file_path)
-                                        if not file_path_obj.is_absolute():
-                                            if file_path.startswith('projects/'):
-                                                base_dir = self.doc_manager.config.projects_base_folder.parent
-                                                file_path_obj = base_dir / file_path
-                                            else:
-                                                project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
-                                                file_path_obj = project_uploads_dir / file_path
-                                        
-                                        if not file_path_obj.exists():
-                                            continue
-                                        
-                                        # 优先使用原始文件名，其次是filename字段，最后是磁盘文件名
-                                        filename = doc_meta.get('original_filename') or doc_meta.get('filename') or file_path_obj.name
-                                        
-                                        # 文件在文档类型内的序号（无子目录时：1.1, 1.2, 1.3...）
-                                        file_seq += 1
-                                        file_index_prefix = f"{cycle_idx}.{file_seq}"
-                                        
-                                        # 构建路径
-                                        clean_cycle = clean_name_prefix(cycle)
-                                        
-                                        if is_single_file:
-                                            # 单文件：直接放在周期目录下
-                                            archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}"
-                                        else:
-                                            # 多文件：7.周期/7.17 文档，文件使用 7.1, 7.2... 序号（无子目录时简化为2层）
-                                            archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}"
-                                        
-                                        clean_name = clean_filename(filename, file_index_prefix)
-                                        
-                                        archive_path = f"{archive_dir}/{clean_name}"
-                                        
-                                        zipf.write(file_path_obj, archive_path)
-                                        processed_files += 1
+                                    # 无子目录：前缀 X.Y.N，放文档类型目录下
+                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{_item_seq_val}"
+                                    archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}"
+                                
+                                clean_name = clean_filename(filename, file_index_prefix)
+                                archive_path = f"{archive_dir}/{clean_name}"
+                                
+                                zipf.write(file_path_obj, archive_path)
+                                processed_files += 1
                                 
                                 # 更新进度
                                 progress = int(100 * processed_files / total_files)

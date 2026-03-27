@@ -1382,14 +1382,15 @@ body {
     margin-bottom: 20px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    position: relative;
 }
 
 .documents-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     background: white;
     border-radius: 8px;
-    overflow: hidden;
 }
 
 .documents-table thead {
@@ -1397,7 +1398,7 @@ body {
     color: white;
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 100;
 }
 
 .documents-table th {
@@ -1405,9 +1406,11 @@ body {
     text-align: center;
     font-weight: 600;
     font-size: 14px;
+    background: linear-gradient(135deg, #0066cc 0%, #004d99 100%);
+    color: white;
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 100;
 }
 
 .documents-table td {
@@ -2158,13 +2161,13 @@ body {
 
 /* 属性面板 */
 .attribute-panel {
-    width: 280px;
-    min-width: 280px;
+    width: 380px;
+    min-width: 380px;
     background: #f8f9fa;
     border: 1px solid #dee2e6;
     border-radius: 8px;
     padding: 16px;
-    max-height: 500px;
+    max-height: 600px;
     overflow-y: auto;
 }
 

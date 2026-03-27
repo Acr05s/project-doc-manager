@@ -1169,7 +1169,7 @@ def download_project_package(project_id):
         try:
             # 收集所有文件
             files_to_package = []
-            file_counter = 1
+            global_file_counter = 1
             
             documents = project_config.get('documents', {})
             if not documents:
@@ -1186,12 +1186,17 @@ def download_project_package(project_id):
                     download_name=zip_filename
                 )
             
+            # 按周期顺序处理
+            cycle_counter = 1
             for cycle, doc_data in documents.items():
                 if not isinstance(doc_data, dict):
                     continue
                 uploaded_docs = doc_data.get('uploaded_docs', [])
                 if not uploaded_docs:
                     continue
+                
+                # 按文档类型和目录分组
+                docs_by_type = {}
                 for doc_meta in uploaded_docs:
                     if not isinstance(doc_meta, dict):
                         continue
@@ -1202,35 +1207,106 @@ def download_project_package(project_id):
                     if not file_path_obj.exists():
                         continue
                     
-                    original_filename = doc_meta.get('filename') or file_path_obj.name
-                    
-                    # 生成新文件名
-                    if renumber:
-                        new_filename = generate_sequential_filename(original_filename, file_counter)
-                    else:
-                        new_filename = original_filename
-                    
-                    # 如果需要PDF转换且不是PDF文件
-                    final_filename = new_filename
-                    if convert_pdf and not new_filename.lower().endswith('.pdf'):
-                        pdf_filename = Path(new_filename).stem + '.pdf'
-                        final_filename = pdf_filename
-                    
-                    # 获取目录信息（用于构建归档路径）
+                    doc_name = doc_meta.get('doc_name', '未知')
                     directory = doc_meta.get('directory', '')
                     
-                    files_to_package.append({
-                        'source_path': str(file_path_obj),
-                        'original_name': original_filename,
-                        'new_name': new_filename,
-                        'final_name': final_filename,
-                        'cycle': cycle,
-                        'doc_name': doc_meta.get('doc_name', '未知'),
-                        'directory': directory,
-                        'needs_conversion': convert_pdf and not original_filename.lower().endswith('.pdf'),
-                        'seq_num': file_counter
-                    })
-                    file_counter += 1
+                    if doc_name not in docs_by_type:
+                        docs_by_type[doc_name] = {}
+                    if directory not in docs_by_type[doc_name]:
+                        docs_by_type[doc_name][directory] = []
+                    
+                    docs_by_type[doc_name][directory].append(doc_meta)
+                
+                # 处理每个文档类型
+                doc_type_counter = 1
+                for doc_name, dirs in docs_by_type.items():
+                    # 先处理根目录文件（无子目录）
+                    if '' in dirs or '/' in dirs:
+                        root_docs = dirs.get('') or dirs.get('/') or []
+                        for i, doc_meta in enumerate(root_docs, 1):
+                            file_path = doc_meta.get('file_path')
+                            file_path_obj = Path(file_path)
+                            original_filename = doc_meta.get('filename') or file_path_obj.name
+                            
+                            # 生成层级序号
+                            level_seq = f"{cycle_counter}.{doc_type_counter}"
+                            
+                            # 生成新文件名
+                            if renumber:
+                                # 为每个文件生成唯一序号
+                                file_seq = global_file_counter
+                                new_filename = f"{level_seq}.{i}_{original_filename}"
+                            else:
+                                new_filename = original_filename
+                            
+                            # 如果需要PDF转换且不是PDF文件
+                            final_filename = new_filename
+                            if convert_pdf and not new_filename.lower().endswith('.pdf'):
+                                pdf_filename = Path(new_filename).stem + '.pdf'
+                                final_filename = pdf_filename
+                            
+                            files_to_package.append({
+                                'source_path': str(file_path_obj),
+                                'original_name': original_filename,
+                                'new_name': new_filename,
+                                'final_name': final_filename,
+                                'cycle': cycle,
+                                'doc_name': doc_name,
+                                'directory': '',
+                                'needs_conversion': convert_pdf and not original_filename.lower().endswith('.pdf'),
+                                'seq_num': f"{cycle_counter}.{doc_type_counter}",
+                                'global_seq': global_file_counter
+                            })
+                            global_file_counter += 1
+                    
+                    # 处理子目录
+                    subdir_counter = 1
+                    for directory, docs in dirs.items():
+                        if directory == '' or directory == '/':
+                            continue
+                        
+                        # 子目录序号
+                        for i, doc_meta in enumerate(docs, 1):
+                            file_path = doc_meta.get('file_path')
+                            file_path_obj = Path(file_path)
+                            original_filename = doc_meta.get('filename') or file_path_obj.name
+                            
+                            # 生成层级序号
+                            level_seq = f"{cycle_counter}.{doc_type_counter}.{subdir_counter}"
+                            
+                            # 生成新文件名
+                            if renumber:
+                                # 为每个文件生成唯一序号
+                                file_seq = global_file_counter
+                                new_filename = f"{level_seq}.{i}_{original_filename}"
+                            else:
+                                new_filename = original_filename
+                            
+                            # 如果需要PDF转换且不是PDF文件
+                            final_filename = new_filename
+                            if convert_pdf and not new_filename.lower().endswith('.pdf'):
+                                pdf_filename = Path(new_filename).stem + '.pdf'
+                                final_filename = pdf_filename
+                            
+                            files_to_package.append({
+                                'source_path': str(file_path_obj),
+                                'original_name': original_filename,
+                                'new_name': new_filename,
+                                'final_name': final_filename,
+                                'cycle': cycle,
+                                'doc_name': doc_name,
+                                'directory': directory,
+                                'needs_conversion': convert_pdf and not original_filename.lower().endswith('.pdf'),
+                                'seq_num': f"{cycle_counter}.{doc_type_counter}.{subdir_counter}.{i}",
+                                'global_seq': global_file_counter
+                            })
+                            global_file_counter += 1
+                        
+                        subdir_counter += 1
+                    
+                    doc_type_counter += 1
+                
+                cycle_counter += 1
             
             # 创建 ZIP
             zip_buffer = io.BytesIO()
@@ -1275,7 +1351,7 @@ def download_project_package(project_id):
                 # 添加文件清单
                 manifest = []
                 for f in files_to_package:
-                    manifest.append(f"{f['seq_num']:03d}. {f['original_name']} -> {f['final_name']}")
+                    manifest.append(f"{f['seq_num']}. {f['original_name']} -> {f['final_name']}")
                 if manifest:
                     zipf.writestr('文件清单.txt', '\n'.join(manifest))
 

@@ -306,11 +306,17 @@ export function setupEventListeners() {
     const toolbarDelete = document.getElementById('toolbarDelete');
     if (toolbarDelete) {
         toolbarDelete.addEventListener('click', () => {
-            if (!window._treeSelectedNode) {
+            // 支持多选删除
+            if (window._treeSelectedNodes && window._treeSelectedNodes.length > 1) {
+                const count = window._treeSelectedNodes.length;
+                showConfirmModal('确认批量删除', `确定要删除选中的 ${count} 个节点吗？`, () => {
+                    window.deleteTreeNodes(window._treeSelectedNodes);
+                });
+            } else if (window._treeSelectedNode) {
+                window.deleteTreeNode(window._treeSelectedNode);
+            } else {
                 showNotification('请先在下方树中选择要删除的节点', 'info');
-                return;
             }
-            window.deleteTreeNode(window._treeSelectedNode);
         });
     }
     
@@ -334,9 +340,44 @@ export function setupEventListeners() {
         toolbarSaveAsTemplate.addEventListener('click', saveTreeAsTemplate);
     }
     
+    const toolbarImportModule = document.getElementById('toolbarImportModule');
+    if (toolbarImportModule) {
+        toolbarImportModule.addEventListener('click', openImportModuleModal);
+    }
+    
+    const toolbarExportModule = document.getElementById('toolbarExportModule');
+    if (toolbarExportModule) {
+        toolbarExportModule.addEventListener('click', exportTreeConfig);
+    }
+    
     const toolbarLoadTemplate = document.getElementById('toolbarLoadTemplate');
     if (toolbarLoadTemplate) {
         toolbarLoadTemplate.addEventListener('click', loadTemplateToTree);
+    }
+    
+    // 筛选功能
+    const treeFilterInput = document.getElementById('treeFilterInput');
+    const treeFilterType = document.getElementById('treeFilterType');
+    
+    if (treeFilterInput) {
+        treeFilterInput.addEventListener('input', (e) => {
+            clearTimeout(window.filterDebounceTimer);
+            window.filterDebounceTimer = setTimeout(() => {
+                const type = treeFilterType ? treeFilterType.value : 'all';
+                if (window.setTreeFilter) {
+                    window.setTreeFilter(e.target.value, type);
+                }
+            }, 300);
+        });
+    }
+    
+    if (treeFilterType) {
+        treeFilterType.addEventListener('change', (e) => {
+            const text = treeFilterInput ? treeFilterInput.value : '';
+            if (window.setTreeFilter) {
+                window.setTreeFilter(text, e.target.value);
+            }
+        });
     }
     
     // 保存模板模态框

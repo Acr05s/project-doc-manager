@@ -563,6 +563,121 @@ export function updateClearRequirementsBtnState() {
 }
 
 /**
+ * 生成打包目录结构预览
+ */
+function generatePackagePreview(projectConfig) {
+    let html = '';
+    let totalFiles = 0;
+    
+    const documents = projectConfig.documents || {};
+    const cyclesOrder = projectConfig.cycles || [];
+    
+    // 按照cycles列表的顺序处理周期
+    cyclesOrder.forEach((cycle, cycleIndex) => {
+        const docData = documents[cycle];
+        if (!docData || typeof docData !== 'object') return;
+        
+        const cycleNum = cycleIndex + 1;
+        html += `<div style="margin-left: 0px; margin-bottom: 15px;">
+            <div style="font-weight: bold; color: #333;">${cycleNum}. ${cycle}</div>`;
+        
+        const uploadedDocs = docData.uploaded_docs || [];
+        if (uploadedDocs.length === 0) {
+            html += `<div style="margin-left: 20px; color: #999;">（无文档）</div>`;
+            html += `</div>`;
+            return;
+        }
+        
+        // 按文档类型和目录分组
+        const docsByType = {};
+        uploadedDocs.forEach(doc => {
+            if (!doc || typeof doc !== 'object') return;
+            const docName = doc.doc_name || '未知';
+            const directory = doc.directory || '';
+            
+            if (!docsByType[docName]) {
+                docsByType[docName] = {};
+            }
+            if (!docsByType[docName][directory]) {
+                docsByType[docName][directory] = [];
+            }
+            docsByType[docName][directory].push(doc);
+        });
+        
+        // 获取需求文档列表（定义了页面上文档类型的顺序）
+        const requiredDocs = docData.required_docs || [];
+        const docNamesOrder = requiredDocs.map(reqDoc => reqDoc.name).filter(name => name in docsByType);
+        
+        // 如果required_docs为空，使用docsByType的键作为顺序
+        const allDocNames = docNamesOrder.length > 0 ? docNamesOrder : Object.keys(docsByType);
+        
+        allDocNames.forEach((docName, docIndex) => {
+            const dirs = docsByType[docName];
+            if (!dirs) return;
+            
+            const docNum = docIndex + 1;
+            html += `<div style="margin-left: 20px; margin-top: 10px;">
+                <div style="font-weight: 500; color: #555;">${cycleNum}.${docNum} ${docName}</div>`;
+            
+            // 处理根目录文件
+            if (dirs[''] || dirs['/']) {
+                const rootDocs = dirs[''] || dirs['/'] || [];
+                rootDocs.forEach((doc, fileIndex) => {
+                    const fileNum = fileIndex + 1;
+                    const filename = doc.filename || doc.original_filename || '未知文件名';
+                    html += `<div style="margin-left: 20px; color: #666;">
+                        <span style="color: #888;">${cycleNum}.${docNum}.${fileNum}</span> ${filename}
+                    </div>`;
+                    totalFiles++;
+                });
+            }
+            
+            // 处理子目录
+            const subdirs = Object.keys(dirs).filter(dir => dir !== '' && dir !== '/').sort();
+            subdirs.forEach((directory, dirIndex) => {
+                const docs = dirs[directory];
+                if (!docs || docs.length === 0) return;
+                
+                const dirNum = dirIndex + 1;
+                html += `<div style="margin-left: 20px; margin-top: 8px;">
+                    <div style="font-style: italic; color: #666;">${cycleNum}.${docNum}.${dirNum} ${directory}</div>`;
+                
+                docs.forEach((doc, fileIndex) => {
+                    const fileNum = fileIndex + 1;
+                    const filename = doc.filename || doc.original_filename || '未知文件名';
+                    html += `<div style="margin-left: 20px; color: #777;">
+                        <span style="color: #999;">${cycleNum}.${docNum}.${dirNum}.${fileNum}</span> ${filename}
+                    </div>`;
+                    totalFiles++;
+                });
+                
+                html += `</div>`;
+            });
+            
+            html += `</div>`;
+        });
+        
+        html += `</div>`;
+    });
+    
+    html += `<div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #eee; color: #666;">
+        <strong>总计：</strong> ${totalFiles} 个文件
+    </div>`;
+    
+    return html;
+}
+
+/**
+ * 关闭打包预览模态框
+ */
+export function closePackagePreviewModal() {
+    const modal = document.getElementById('packagePreviewModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+/**
  * 处理打包项目（异步任务方式）
  */
 export async function handlePackageProject() {
@@ -578,140 +693,166 @@ export async function handlePackageProject() {
         return;
     }
     
-    // 显示进度模态框
-    const modal = document.getElementById('packageProgressModal');
-    const progressBar = document.getElementById('packageProgressBar');
-    const progressMessage = document.getElementById('packageProgressMessage');
-    const cancelBtn = document.getElementById('cancelPackageBtn');
-    const downloadBtn = document.getElementById('downloadPackageBtn');
-    const closeBtn = document.getElementById('closePackageModalBtn');
+    // 显示目录结构预览模态框
+    const previewModal = document.getElementById('packagePreviewModal');
+    const previewContent = document.getElementById('packagePreviewContent');
+    const cancelBtn = document.getElementById('cancelPackagePreviewBtn');
+    const confirmBtn = document.getElementById('confirmPackagePreviewBtn');
     
-    if (modal) {
-        modal.style.display = 'block';
-        progressBar.style.width = '0%';
-        progressMessage.textContent = '正在启动打包任务...';
-        cancelBtn.style.display = 'inline-block';
-        downloadBtn.style.display = 'none';
-        closeBtn.style.display = 'none';
-    }
-    
-    let taskId = null;
-    let pollInterval = null;
-    
-    try {
-        // 启动打包任务
-        const result = await packageProject(appState.currentProjectId, projectConfig);
+    if (previewModal && previewContent) {
+        // 生成目录结构预览
+        previewContent.innerHTML = generatePackagePreview(projectConfig);
+        previewModal.style.display = 'block';
         
-        if (result.status !== 'success') {
-            throw new Error(result.message || '启动打包任务失败');
-        }
-        
-        taskId = result.task_id;
-        
-        // 轮询任务状态
-        pollInterval = setInterval(async () => {
-            try {
-                const statusResult = await getTaskStatus(taskId);
-                
-                if (statusResult.status !== 'success') {
-                    clearInterval(pollInterval);
-                    progressMessage.textContent = '获取任务状态失败: ' + statusResult.message;
-                    cancelBtn.style.display = 'none';
-                    closeBtn.style.display = 'inline-block';
-                    return;
-                }
-                
-                const task = statusResult.task;
-                
-                // 更新进度
-                if (task.progress !== undefined) {
-                    progressBar.style.width = task.progress + '%';
-                }
-                if (task.message) {
-                    progressMessage.textContent = task.message;
-                }
-                
-                // 任务完成
-                if (task.status === 'completed') {
-                    clearInterval(pollInterval);
-                    progressBar.style.width = '100%';
-                    progressMessage.textContent = '打包完成，正在下载...';
-                    cancelBtn.style.display = 'none';
-                    downloadBtn.style.display = 'inline-block';
-                    closeBtn.style.display = 'inline-block';
-                    
-                    // 自动触发下载
-                    const downloadUrl = getPackageDownloadUrl(appState.currentProjectId, taskId);
-                    console.log('[打包] 自动下载URL:', downloadUrl);
-                    
-                    // 使用 iframe 方式下载（避免弹窗拦截）
-                    const iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = downloadUrl;
-                    document.body.appendChild(iframe);
-                    
-                    // 3秒后移除 iframe
-                    setTimeout(() => {
-                        if (iframe.parentNode) {
-                            iframe.parentNode.removeChild(iframe);
-                        }
-                    }, 3000);
-                    
-                    // 同时设置下载按钮（备用）
-                    downloadBtn.onclick = () => {
-                        window.location.href = downloadUrl;
-                    };
-                    
-                    showNotification('项目打包成功，正在下载...', 'success');
-                }
-                
-                // 任务失败
-                if (task.status === 'error') {
-                    clearInterval(pollInterval);
-                    progressMessage.textContent = '打包失败: ' + task.message;
-                    cancelBtn.style.display = 'none';
-                    closeBtn.style.display = 'inline-block';
-                    showNotification('打包失败: ' + task.message, 'error');
-                }
-                
-                // 任务取消
-                if (task.status === 'cancelled') {
-                    clearInterval(pollInterval);
-                    progressMessage.textContent = '任务已取消';
-                    cancelBtn.style.display = 'none';
-                    closeBtn.style.display = 'inline-block';
-                }
-                
-            } catch (error) {
-                clearInterval(pollInterval);
-                console.error('轮询任务状态失败:', error);
-                progressMessage.textContent = '获取进度失败: ' + error.message;
-                cancelBtn.style.display = 'none';
-                closeBtn.style.display = 'inline-block';
-            }
-        }, 500); // 每500ms轮询一次
-        
-        // 取消按钮事件
+        // 绑定按钮事件
         if (cancelBtn) {
-            cancelBtn.onclick = async () => {
-                if (taskId) {
-                    try {
-                        await cancelTask(taskId);
-                        progressMessage.textContent = '正在取消任务...';
-                    } catch (error) {
-                        console.error('取消任务失败:', error);
-                    }
-                }
+            cancelBtn.onclick = () => {
+                previewModal.style.display = 'none';
             };
         }
         
-    } catch (error) {
-        if (pollInterval) clearInterval(pollInterval);
-        console.error('打包项目失败:', error);
-        progressMessage.textContent = '打包失败: ' + error.message;
-        if (cancelBtn) cancelBtn.style.display = 'none';
-        if (closeBtn) closeBtn.style.display = 'inline-block';
-        showNotification('打包失败: ' + error.message, 'error');
+        if (confirmBtn) {
+            confirmBtn.onclick = async () => {
+                // 关闭预览模态框
+                previewModal.style.display = 'none';
+                
+                // 显示进度模态框
+                const modal = document.getElementById('packageProgressModal');
+                const progressBar = document.getElementById('packageProgressBar');
+                const progressMessage = document.getElementById('packageProgressMessage');
+                const cancelBtn = document.getElementById('cancelPackageBtn');
+                const downloadBtn = document.getElementById('downloadPackageBtn');
+                const closeBtn = document.getElementById('closePackageModalBtn');
+                
+                if (modal) {
+                    modal.style.display = 'block';
+                    progressBar.style.width = '0%';
+                    progressMessage.textContent = '正在启动打包任务...';
+                    cancelBtn.style.display = 'inline-block';
+                    downloadBtn.style.display = 'none';
+                    closeBtn.style.display = 'none';
+                }
+    
+                let taskId = null;
+                let pollInterval = null;
+    
+                try {
+                    // 启动打包任务
+                    const result = await packageProject(appState.currentProjectId, projectConfig);
+                    
+                    if (result.status !== 'success') {
+                        throw new Error(result.message || '启动打包任务失败');
+                    }
+                    
+                    taskId = result.task_id;
+                    
+                    // 轮询任务状态
+                    pollInterval = setInterval(async () => {
+                        try {
+                            const statusResult = await getTaskStatus(taskId);
+                            
+                            if (statusResult.status !== 'success') {
+                                clearInterval(pollInterval);
+                                progressMessage.textContent = '获取任务状态失败: ' + statusResult.message;
+                                cancelBtn.style.display = 'none';
+                                closeBtn.style.display = 'inline-block';
+                                return;
+                            }
+                            
+                            const task = statusResult.task;
+                            
+                            // 更新进度
+                            if (task.progress !== undefined) {
+                                progressBar.style.width = task.progress + '%';
+                            }
+                            if (task.message) {
+                                progressMessage.textContent = task.message;
+                            }
+                            
+                            // 任务完成
+                            if (task.status === 'completed') {
+                                clearInterval(pollInterval);
+                                progressBar.style.width = '100%';
+                                progressMessage.textContent = '打包完成，正在下载...';
+                                cancelBtn.style.display = 'none';
+                                downloadBtn.style.display = 'inline-block';
+                                closeBtn.style.display = 'inline-block';
+                                
+                                // 自动触发下载
+                                const downloadUrl = getPackageDownloadUrl(appState.currentProjectId, taskId);
+                                console.log('[打包] 自动下载URL:', downloadUrl);
+                                
+                                // 使用 iframe 方式下载（避免弹窗拦截）
+                                const iframe = document.createElement('iframe');
+                                iframe.style.display = 'none';
+                                iframe.src = downloadUrl;
+                                document.body.appendChild(iframe);
+                                
+                                // 3秒后移除 iframe
+                                setTimeout(() => {
+                                    if (iframe.parentNode) {
+                                        iframe.parentNode.removeChild(iframe);
+                                    }
+                                }, 3000);
+                                
+                                // 同时设置下载按钮（备用）
+                                downloadBtn.onclick = () => {
+                                    window.location.href = downloadUrl;
+                                };
+                                
+                                showNotification('项目打包成功，正在下载...', 'success');
+                            }
+                            
+                            // 任务失败
+                            if (task.status === 'error') {
+                                clearInterval(pollInterval);
+                                progressMessage.textContent = '打包失败: ' + task.message;
+                                cancelBtn.style.display = 'none';
+                                closeBtn.style.display = 'inline-block';
+                                showNotification('打包失败: ' + task.message, 'error');
+                            }
+                            
+                            // 任务取消
+                            if (task.status === 'cancelled') {
+                                clearInterval(pollInterval);
+                                progressMessage.textContent = '任务已取消';
+                                cancelBtn.style.display = 'none';
+                                closeBtn.style.display = 'inline-block';
+                            }
+                            
+                        } catch (error) {
+                            clearInterval(pollInterval);
+                            console.error('轮询任务状态失败:', error);
+                            progressMessage.textContent = '获取进度失败: ' + error.message;
+                            cancelBtn.style.display = 'none';
+                            closeBtn.style.display = 'inline-block';
+                        }
+                    }, 500); // 每500ms轮询一次
+                    
+                    // 取消按钮事件
+                    if (cancelBtn) {
+                        cancelBtn.onclick = async () => {
+                            if (taskId) {
+                                try {
+                                    await cancelTask(taskId);
+                                    progressMessage.textContent = '正在取消任务...';
+                                } catch (error) {
+                                    console.error('取消任务失败:', error);
+                                }
+                            }
+                        };
+                    }
+                    
+                } catch (error) {
+                    if (pollInterval) clearInterval(pollInterval);
+                    console.error('打包项目失败:', error);
+                    progressMessage.textContent = '打包失败: ' + error.message;
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    if (closeBtn) closeBtn.style.display = 'inline-block';
+                    showNotification('打包失败: ' + error.message, 'error');
+                }
+            };
+        }
     }
 }
 
@@ -724,6 +865,9 @@ export function closePackageProgressModal() {
         modal.style.display = 'none';
     }
 }
+
+// 设置为全局函数
+window.closePackagePreviewModal = closePackagePreviewModal;
 
 /**
  * 处理导入包
