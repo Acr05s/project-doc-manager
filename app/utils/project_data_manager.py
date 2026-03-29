@@ -616,6 +616,11 @@ class ProjectDataManager:
             bool: 是否保存成功
         """
         try:
+            logger.info(f"[DEBUG] save_full_config 开始: project_name={project_name}, config_id={config.get('id')}")
+            # 确保项目目录存在
+            project_folder = self._get_project_folder(project_name)
+            logger.info(f"[DEBUG] 项目目录: {project_folder}, 存在: {project_folder.exists()}")
+            
             # 保存项目基本信息
             project_info = {
                 'id': config.get('id'),
@@ -695,6 +700,10 @@ class ProjectDataManager:
                 'versions': self.config.get_project_versions_folder(project_name),
                 'logs': self.config.get_project_logs_folder(project_name)
             }
+            # 确保所有目录都存在
+            for key, path in structure.items():
+                path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"[DEBUG] 创建目录 {key}: {path}, 存在: {path.exists()}")
             logger.info(f"项目目录结构已创建: {project_name}")
             return structure
         except Exception as e:
