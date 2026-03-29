@@ -31,6 +31,25 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 
 ### Linux / macOS
 
+**方式 1：Git Clone 快速安装（推荐）**
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/Acr05s/project-doc-manager.git
+cd project-doc-manager
+
+# 2. 安装依赖（首次运行）
+chmod +x launcher.sh
+./launcher.sh install
+
+# 3. 启动服务
+./launcher.sh start
+
+# 访问 http://localhost:5000
+```
+
+**方式 2：已有代码直接启动**
+
 ```bash
 # 添加执行权限并启动
 chmod +x launcher.sh
