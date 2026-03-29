@@ -269,6 +269,7 @@ class ProjectManager:
             logger.info(f"[DEBUG] 项目名称: {project_name}")
             
             # 使用新的数据管理器加载完整配置
+            logger.info(f"[DEBUG] 调用 load_full_config: project_name={project_name}")
             config = self.data_manager.load_full_config(project_name)
             logger.info(f"[DEBUG] 从新数据管理器加载配置结果: {config is not None}")
             

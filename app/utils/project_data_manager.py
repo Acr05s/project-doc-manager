@@ -416,13 +416,18 @@ class ProjectDataManager:
             Optional[Dict]: 完整配置，如果没有找到任何配置文件返回 None
         """
         try:
+            logger.info(f"[DEBUG] load_full_config 开始: project_name={project_name}")
+            
             # 检查是否存在任何配置文件
             project_info_path = self._get_project_info_path(project_name)
             requirements_path = self._get_requirements_path(project_name)
             
+            logger.info(f"[DEBUG] project_info_path: {project_info_path}, exists: {project_info_path.exists()}")
+            logger.info(f"[DEBUG] requirements_path: {requirements_path}, exists: {requirements_path.exists()}")
+            
             # 如果没有任何配置文件，返回 None 以触发旧格式加载
             if not (project_info_path.exists() or requirements_path.exists()):
-                logger.info(f"未找到项目 {project_name} 的配置文件，返回 None 以触发旧格式加载")
+                logger.info(f"[DEBUG] 未找到项目 {project_name} 的配置文件")
                 return None
             
             # 加载项目基本信息
