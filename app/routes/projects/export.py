@@ -1268,6 +1268,14 @@ def import_from_preview():
             # 刷新项目管理的内存缓存（重要：否则新导入的项目在列表中不显示）
             if hasattr(doc_manager, 'projects') and doc_manager.projects:
                 doc_manager.projects._load_projects_index()
+                logger.info(f"[导入] 已刷新项目索引，项目ID: {project_id}")
+            
+            # 验证索引文件是否创建成功
+            index_file = doc_manager.config.projects_base_folder / 'projects_index.json'
+            if index_file.exists():
+                logger.info(f"[导入] 索引文件已创建: {index_file}")
+            else:
+                logger.warning(f"[导入] 索引文件未创建: {index_file}")
             
             return jsonify(result)
             
@@ -1321,6 +1329,9 @@ def ensure_project_index(doc_manager, project_id, project_name, project_config):
         import json
         
         index_file = doc_manager.config.projects_base_folder / 'projects_index.json'
+        
+        # 确保目录存在
+        index_file.parent.mkdir(parents=True, exist_ok=True)
         
         # 使用与 ProjectManager._save_projects_index 兼容的旧格式
         # 格式: {project_id: project_info, ..., 'deleted_projects': {...}, 'updated_time': ...}
