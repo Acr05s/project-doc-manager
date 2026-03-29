@@ -19,7 +19,9 @@ def save_draft(project_id):
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
         project = config['project']
-        project_folder = doc_manager.projects_base_folder / project_id
+        # 使用项目名称作为目录名（与导入时一致）
+        project_name = project.get('name', project_id)
+        project_folder = doc_manager.projects_base_folder / project_name
         draft_path = project_folder / '.draft.json'
         
         draft_data = {
@@ -49,7 +51,9 @@ def load_draft(project_id):
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
         project = config['project']
-        project_folder = doc_manager.projects_base_folder / project_id
+        # 使用项目名称作为目录名（与导入时一致）
+        project_name = project.get('name', project_id)
+        project_folder = doc_manager.projects_base_folder / project_name
         draft_path = project_folder / '.draft.json'
         
         if not draft_path.exists():
@@ -75,7 +79,9 @@ def clear_draft(project_id):
             return jsonify({'status': 'error', 'message': '项目不存在'}), 404
         
         project = config['project']
-        project_folder = doc_manager.projects_base_folder / project_id
+        # 使用项目名称作为目录名（与导入时一致）
+        project_name = project.get('name', project_id)
+        project_folder = doc_manager.projects_base_folder / project_name
         draft_path = project_folder / '.draft.json'
         
         if draft_path.exists():
