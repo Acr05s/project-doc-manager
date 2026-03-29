@@ -15,10 +15,82 @@ export let appState = {
     currentZipPackageName: '',   // 当前选中的ZIP包名称
     filterOptions: {             // 筛选选项
         hideArchived: false,
-        hideCompleted: false
+        hideCompleted: false,
+        keyword: ''
     },
-    projectLoaded: false         // 项目是否已加载
+    projectLoaded: false,        // 项目是否已加载
+    isPackaging: false,          // 是否正在打包
+    packagingProjectId: null,     // 正在打包的项目ID
+    // 会话锁定相关
+    sessionId: null,             // 当前会话ID
+    heartbeatInterval: null      // 心跳定时器
 };
+
+// 生成唯一会话ID（不再持久化到localStorage，刷新后自动失效）
+function generateSessionId() {
+    return 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// 初始化会话ID（每次页面加载生成新的会话）
+export function initSession() {
+    // 每次都生成新的 session_id，刷新页面后自动失效
+    const sessionId = generateSessionId();
+    appState.sessionId = sessionId;
+    console.log('新会话ID:', sessionId);
+    return sessionId;
+}
+
+// 启动心跳
+export function startHeartbeat(projectId) {
+    // 清除已有的心跳
+    if (appState.heartbeatInterval) {
+        clearInterval(appState.heartbeatInterval);
+    }
+    
+    // 每分钟发送一次心跳
+    appState.heartbeatInterval = setInterval(async () => {
+        if (appState.currentProjectId && appState.sessionId) {
+            try {
+                await fetch('/api/tasks/heartbeat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: appState.currentProjectId,
+                        session_id: appState.sessionId
+                    })
+                });
+            } catch (error) {
+                console.error('心跳失败:', error);
+            }
+        }
+    }, 60000); // 60秒
+}
+
+// 停止心跳
+export function stopHeartbeat() {
+    if (appState.heartbeatInterval) {
+        clearInterval(appState.heartbeatInterval);
+        appState.heartbeatInterval = null;
+    }
+}
+
+// 解锁项目
+export async function unlockCurrentProject() {
+    if (appState.currentProjectId && appState.sessionId) {
+        try {
+            await fetch('/api/tasks/unlock-project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    project_id: appState.currentProjectId,
+                    session_id: appState.sessionId
+                })
+            });
+        } catch (error) {
+            console.error('解锁项目失败:', error);
+        }
+    }
+}
 
 // DOM元素缓存（延迟获取，避免在DOM加载前访问）
 export const elements = {

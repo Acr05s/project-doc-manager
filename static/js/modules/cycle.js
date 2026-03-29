@@ -217,13 +217,23 @@ export async function loadCycleProgresses(cycles, docsData) {
             currentItem.classList.add('active');
         }
     } else {
-        // 显示欢迎信息
-        elements.contentArea.innerHTML = `
-            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
-                <h2>欢迎使用文档管理系统</h2>
-                <p>请从上方选择一个周期开始管理文档</p>
-            </div>
-        `;
+        // 如果正在打包，显示备份提示
+        if (appState.isPackaging) {
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>正在备份项目...</h2>
+                    <p>项目数据暂时不可操作</p>
+                </div>
+            `;
+        } else {
+            // 显示欢迎信息
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>欢迎使用文档管理系统</h2>
+                    <p>请从上方选择一个周期开始管理文档</p>
+                </div>
+            `;
+        }
     }
 }
 
@@ -245,13 +255,23 @@ export function selectCycle(cycle) {
             });
         }
         
-        // 显示欢迎信息
-        elements.contentArea.innerHTML = `
-            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
-                <h2>欢迎使用文档管理系统</h2>
-                <p>请从上方选择一个周期开始管理文档</p>
-            </div>
-        `;
+        // 如果正在打包，显示备份提示
+        if (appState.isPackaging) {
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>正在备份项目...</h2>
+                    <p>项目数据暂时不可操作</p>
+                </div>
+            `;
+        } else {
+            // 显示欢迎信息
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>欢迎使用文档管理系统</h2>
+                    <p>请从上方选择一个周期开始管理文档</p>
+                </div>
+            `;
+        }
     } else {
         appState.currentCycle = cycle;
 
@@ -283,11 +303,21 @@ export function renderInitialContent() {
     const cycles = appState.projectConfig.cycles;
     // 始终显示欢迎信息，让用户手动选择周期
     if (!appState.currentCycle) {
-        elements.contentArea.innerHTML = `
-            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
-                <h2>欢迎使用文档管理系统</h2>
-                <p>请从上方选择一个周期开始管理文档</p>
-            </div>
-        `;
+        // 如果正在打包，显示备份提示
+        if (appState.isPackaging) {
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>正在备份项目...</h2>
+                    <p>项目数据暂时不可操作</p>
+                </div>
+            `;
+        } else {
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>欢迎使用文档管理系统</h2>
+                    <p>请从上方选择一个周期开始管理文档</p>
+                </div>
+            `;
+        }
     }
 }

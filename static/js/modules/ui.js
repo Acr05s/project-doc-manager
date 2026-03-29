@@ -10,12 +10,13 @@ import {
     selectProject, populateProjectManageSelects, handleAddCycle, 
     handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, 
     populateDocSelect, handleConfirmAcceptance, handleDownloadPackage, 
-    handleDeleteProject, resetImportPackageModal, loadZipRecords, handleRematchFromZip, handleDeleteZipRecord
+    handleDeleteProject, resetImportPackageModal, loadZipRecords, handleRematchFromZip, handleDeleteZipRecord,
+    handlePackageFileSelect, handlePackageFileSelectInModal, handleImportPackageInModal
 } from './project.js';
 
 import { 
     handleUploadDocument, handleFileSelect, handleEditDocument, 
-    handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments
+    handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments, renderCycleDocuments
 } from './document.js';
 import { 
     handleZipArchive, handleZipUpload, handleBackgroundMatch, handleImportMatchedFiles, 
@@ -91,6 +92,20 @@ export function setupEventListeners() {
             if (!dataBackupBtn.contains(e.target) && !dataBackupDropdown.contains(e.target)) {
                 dataBackupDropdown.classList.remove('show');
             }
+        });
+    }
+
+    // 清理重复文档按钮
+    const cleanupDuplicatesBtn = document.getElementById('cleanupDuplicatesBtn');
+    if (cleanupDuplicatesBtn) {
+        cleanupDuplicatesBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 关闭下拉菜单
+            const docManageDropdown = document.getElementById('documentManagementDropdown');
+            if (docManageDropdown) docManageDropdown.classList.remove('show');
+            // 打开清理模态框
+            openCleanupDuplicatesModal();
         });
     }
 
@@ -457,6 +472,12 @@ export function setupEventListeners() {
             }
         });
     });
+    
+    // 文件选择处理 - 检测项目名称和重名
+    const packageFileInput = document.getElementById('packageFile');
+    if (packageFileInput) {
+        packageFileInput.addEventListener('change', handlePackageFileSelect);
+    }
 
     console.log('事件监听器设置完成');
 
@@ -639,10 +660,21 @@ export function setupEventListeners() {
 
 
 
-    // 导入包表单
-    const importPackageForm = document.getElementById('importPackageForm');
-    if (importPackageForm) {
-        importPackageForm.addEventListener('submit', handleImportPackage);
+
+
+    // 项目选择Modal中的导入功能
+    const importPackageFormInModal = document.getElementById('importPackageFormInModal');
+    if (importPackageFormInModal) {
+        importPackageFormInModal.addEventListener('submit', (e) => {
+            e.preventDefault();
+            handleImportPackageInModal(e);
+        });
+    }
+    
+    // 文件选择处理 - 检测项目名称和重名（Modal中）
+    const packageFileInputInModal = document.getElementById('packageFileInModal');
+    if (packageFileInputInModal) {
+        packageFileInputInModal.addEventListener('change', handlePackageFileSelectInModal);
     }
 
     // 项目管理
@@ -1265,17 +1297,17 @@ export function showLoading(show = true) {
 /**
  * 显示通知
  */
-export function showNotification(message, type = 'info') {
+export function showNotification(message, type = 'info', duration = 3000) {
     if (elements.notification) {
         elements.notification.textContent = message;
         elements.notification.className = `notification show ${type}`;
 
-        // 3秒后自动隐藏
+        // 指定时间后自动隐藏（默认3秒）
         setTimeout(() => {
             if (elements.notification) {
                 elements.notification.classList.remove('show');
             }
-        }, 3000);
+        }, duration);
     } else {
         console.log('Notification element not found:', message);
     }
@@ -1435,7 +1467,7 @@ export function updateSelectedDocumentsList() {
 export function showProjectButtons() {
     const menus = [
         'documentRequirementsMenu', 'documentManagementMenu', 
-        'dataBackupMenu', 'acceptanceMenu'
+        'acceptanceMenu'
     ];
     
     menus.forEach(menuId => {
@@ -1446,6 +1478,10 @@ export function showProjectButtons() {
     // 显示生成报告按钮
     const generateReportBtn = document.getElementById('generateReportBtn');
     if (generateReportBtn) generateReportBtn.style.display = 'inline-block';
+    
+    // 显示备份项目按钮
+    const packageProjectBtn = document.getElementById('packageProjectBtn');
+    if (packageProjectBtn) packageProjectBtn.style.display = 'inline-block';
 }
 
 /**
@@ -1454,7 +1490,7 @@ export function showProjectButtons() {
 export function hideProjectButtons() {
     const menus = [
         'documentRequirementsMenu', 'documentManagementMenu', 
-        'dataBackupMenu', 'acceptanceMenu'
+        'acceptanceMenu'
     ];
     
     menus.forEach(menuId => {
@@ -1465,4 +1501,182 @@ export function hideProjectButtons() {
     // 隐藏生成报告按钮
     const generateReportBtn = document.getElementById('generateReportBtn');
     if (generateReportBtn) generateReportBtn.style.display = 'none';
+    
+    // 隐藏备份项目按钮
+    const packageProjectBtn = document.getElementById('packageProjectBtn');
+    if (packageProjectBtn) packageProjectBtn.style.display = 'none';
+}
+
+/**
+ * 打开清理重复文档模态框
+ */
+export function openCleanupDuplicatesModal() {
+    const modal = document.getElementById('cleanupDuplicatesModal');
+    if (!modal) return;
+    
+    // 重置状态
+    document.getElementById('cleanupInitialState').style.display = 'block';
+    document.getElementById('cleanupProgressState').style.display = 'none';
+    document.getElementById('cleanupResultState').style.display = 'none';
+    document.getElementById('cleanupProgressBar').style.width = '0%';
+    document.getElementById('cleanupProgressMessage').textContent = '准备中...';
+    
+    modal.classList.add('show');
+}
+
+/**
+ * 关闭清理重复文档模态框
+ */
+export function closeCleanupDuplicatesModal() {
+    const modal = document.getElementById('cleanupDuplicatesModal');
+    if (modal) modal.classList.remove('show');
+}
+
+/**
+ * 开始清理重复文档
+ */
+export async function startCleanupDuplicates() {
+    if (!appState.currentProjectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+    
+    // 显示进度状态
+    document.getElementById('cleanupInitialState').style.display = 'none';
+    document.getElementById('cleanupProgressState').style.display = 'block';
+    document.getElementById('cleanupProgressBar').style.width = '30%';
+    document.getElementById('cleanupProgressMessage').textContent = '正在锁定项目...';
+    
+    try {
+        // 先锁定项目
+        const lockResponse = await fetch('/api/tasks/lock-project', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project_id: appState.currentProjectId,
+                session_id: appState.sessionId
+            })
+        });
+        
+        const lockResult = await lockResponse.json();
+        if (lockResult.status === 'error' && lockResult.locked) {
+            document.getElementById('cleanupProgressBar').style.width = '100%';
+            document.getElementById('cleanupProgressMessage').textContent = '项目已被其他会话锁定，无法处理';
+            showNotification('项目正在被其他用户使用，请稍后再试', 'error');
+            setTimeout(() => {
+                closeCleanupDuplicatesModal();
+            }, 2000);
+            return;
+        }
+        
+        document.getElementById('cleanupProgressBar').style.width = '50%';
+        document.getElementById('cleanupProgressMessage').textContent = '正在扫描重复文档...';
+        
+        // 调用清理API
+        const response = await fetch('/api/documents/cleanup-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project_id: appState.currentProjectId,
+                project_name: appState.projectConfig?.name
+            })
+        });
+        
+        document.getElementById('cleanupProgressBar').style.width = '80%';
+        document.getElementById('cleanupProgressMessage').textContent = '正在处理结果...';
+        
+        const result = await response.json();
+        
+        // 解锁项目
+        await fetch('/api/tasks/unlock-project', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project_id: appState.currentProjectId,
+                session_id: appState.sessionId
+            })
+        });
+        
+        document.getElementById('cleanupProgressBar').style.width = '100%';
+        
+        if (result.status === 'success') {
+            const data = result.data;
+            
+            // 显示结果
+            document.getElementById('cleanupProgressState').style.display = 'none';
+            document.getElementById('cleanupResultState').style.display = 'block';
+            
+            // 设置摘要
+            const summaryText = `
+                总文档数：<strong>${data.total}</strong><br>
+                发现重复组：<strong>${data.duplicates_found}</strong><br>
+                已删除重复：<strong style="color: #dc3545;">${data.removed}</strong><br>
+                剩余文档：<strong style="color: #28a745;">${data.remaining}</strong>
+            `;
+            document.getElementById('cleanupSummaryText').innerHTML = summaryText;
+            
+            // 设置详细记录
+            const detailsList = document.getElementById('cleanupDetailsList');
+            if (data.duplicate_groups.length > 0) {
+                detailsList.innerHTML = data.duplicate_groups.map(group => `
+                    <div style="border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; overflow: hidden;">
+                        <div style="background: #f8f9fa; padding: 10px; font-weight: bold; border-bottom: 1px solid #ddd;">
+                            📄 ${group.filename}
+                        </div>
+                        <div style="padding: 10px;">
+                            <div style="color: #28a745; margin-bottom: 8px;">
+                                ✅ <strong>保留</strong>：${group.kept.doc_id}<br>
+                                <span style="font-size: 12px; color: #666; margin-left: 24px;">
+                                    周期：${group.kept.cycle || '未知'} | 时间：${group.kept.upload_time || '未知'}
+                                </span>
+                            </div>
+                            <div style="color: #dc3545;">
+                                ❌ <strong>删除</strong>：${group.removed.doc_id}<br>
+                                <span style="font-size: 12px; color: #666; margin-left: 24px;">
+                                    周期：${group.removed.cycle || '未知'} | 时间：${group.removed.upload_time || '未知'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                detailsList.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">未发现重复文档</p>';
+            }
+            
+            showNotification(`清理完成：已删除 ${data.removed} 个重复文档`, 'success');
+        } else {
+            document.getElementById('cleanupProgressMessage').textContent = '处理失败：' + result.message;
+            showNotification('清理失败：' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('清理重复文档失败:', error);
+        document.getElementById('cleanupProgressBar').style.width = '100%';
+        document.getElementById('cleanupProgressMessage').textContent = '处理失败：' + error.message;
+        showNotification('清理失败：' + error.message, 'error');
+        
+        // 尝试解锁项目
+        try {
+            await fetch('/api/tasks/unlock-project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    project_id: appState.currentProjectId,
+                    session_id: appState.sessionId
+                })
+            });
+        } catch (e) {}
+    }
+}
+
+/**
+ * 清理完成后刷新页面
+ */
+export function refreshAfterCleanup() {
+    closeCleanupDuplicatesModal();
+    // 刷新当前周期的文档列表
+    if (appState.currentCycle) {
+        import('./document.js').then(module => {
+            module.renderCycleDocuments(appState.currentCycle);
+        });
+    }
 }

@@ -344,17 +344,133 @@ export async function handleDeleteDocument(docId) {
 }
 
 /**
+ * 分析要求完成状态
+ * 从 attributes 字段读取要求，而不是解析 requirement 字符串
+ * 返回每个要求的状态: 'none'-无文件, 'full'-全部完成, 'partial'-部分完成, 'empty'-全未完成
+ * 
+ * @param {Object} attributes - requirements.json 中的 attributes 字段
+ * @param {Array} docsList - 文档列表
+ */
+function analyzeRequirementStatus(attributes, docsList) {
+    if (!attributes || docsList.length === 0) return [];
+    
+    // 定义 attributes 到要求名称的映射
+    const attrMap = [
+        { key: 'party_a_sign', name: '甲方签字' },
+        { key: 'party_b_sign', name: '乙方签字' },
+        { key: 'party_a_seal', name: '甲方盖章' },
+        { key: 'party_b_seal', name: '乙方盖章' },
+        { key: 'need_doc_date', name: '文档日期' },
+        { key: 'need_sign_date', name: '签字日期' },
+        { key: 'need_doc_number', name: '发文号' }
+    ];
+    
+    // 根据 attributes 确定需要检查哪些属性（只检查值为true的）
+    const activeAttributes = [];
+    for (const attr of attrMap) {
+        if (attributes[attr.key] === true) {
+            activeAttributes.push(attr);
+        }
+    }
+    
+    if (activeAttributes.length === 0) {
+        return [];
+    }
+    
+    // 检查每个属性的完成状态
+    return activeAttributes.map(attr => {
+        let completedCount = 0;
+        let totalCount = docsList.length;
+        
+        docsList.forEach(doc => {
+            const getDocValue = (fieldName) => {
+                if (doc[fieldName] !== undefined) return doc[fieldName];
+                if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                return null;
+            };
+            
+            let isCompleted = false;
+            
+            if (attr.key === 'party_a_sign') {
+                // 甲方签字
+                const signer = getDocValue('signer');
+                const partyASigner = getDocValue('party_a_signer');
+                const noSignature = getDocValue('no_signature');
+                isCompleted = partyASigner || noSignature || signer;
+            } else if (attr.key === 'party_b_sign') {
+                // 乙方签字
+                const signer = getDocValue('signer');
+                const partyBSigner = getDocValue('party_b_signer');
+                const noSignature = getDocValue('no_signature');
+                isCompleted = partyBSigner || noSignature || signer;
+            } else if (attr.key === 'party_a_seal') {
+                // 甲方盖章
+                const partyASeal = getDocValue('party_a_seal');
+                const hasSealMarked = getDocValue('has_seal_marked') || getDocValue('has_seal');
+                const noSeal = getDocValue('no_seal');
+                isCompleted = partyASeal || hasSealMarked || noSeal;
+            } else if (attr.key === 'party_b_seal') {
+                // 乙方盖章
+                const partyBSeal = getDocValue('party_b_seal');
+                const hasSealMarked = getDocValue('has_seal_marked') || getDocValue('has_seal');
+                const noSeal = getDocValue('no_seal');
+                isCompleted = partyBSeal || hasSealMarked || noSeal;
+            } else if (attr.key === 'need_doc_date') {
+                // 文档日期
+                isCompleted = getDocValue('doc_date');
+            } else if (attr.key === 'need_sign_date') {
+                // 签字日期
+                isCompleted = getDocValue('sign_date') || getDocValue('no_signature');
+            } else if (attr.key === 'need_doc_number') {
+                // 发文号
+                isCompleted = getDocValue('doc_number');
+            }
+            
+            if (isCompleted) completedCount++;
+        });
+        
+        // 确定状态
+        let status = 'empty';
+        if (completedCount === totalCount && totalCount > 0) {
+            status = 'full'; // 全部完成
+        } else if (completedCount > 0) {
+            status = 'partial'; // 部分完成
+        }
+        
+        return {
+            name: attr.name,
+            status: status,
+            description: `${completedCount}/${totalCount} 文件已完成`
+        };
+    });
+}
+
+/**
  * 渲染周期内的文档
  */
-export async function renderCycleDocuments(cycle, filterOptions = {}) {
+export async function renderCycleDocuments(cycle, filterOptions = null) {
+    if (!appState.projectConfig) {
+        elements.contentArea.innerHTML = '<p class="placeholder">请先加载项目配置</p>';
+        return;
+    }
+    
+    // 如果没有传入筛选选项，使用全局保存的筛选选项
+    if (filterOptions === null) {
+        filterOptions = appState.filterOptions || {};
+    }
+    
     const docsInfo = appState.projectConfig.documents[cycle];
     if (!docsInfo) {
         elements.contentArea.innerHTML = '<p class="placeholder">该周期暂无文档</p>';
         return;
     }
 
-    // 按序号排序
-    const requiredDocs = (docsInfo.required_docs || []).sort((a, b) => (a.index || 0) - (b.index || 0));
+    // 获取原始 required_docs 并保存原始序号（使用原始顺序的索引+1作为序号）
+    const requiredDocsRaw = docsInfo.required_docs || [];
+    const requiredDocs = requiredDocsRaw.map((doc, idx) => ({
+        ...doc,
+        _originalIndex: doc.index !== undefined && doc.index !== null ? doc.index : (idx + 1)
+    })).sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
 
     // 获取已上传的文档
     const uploadedDocs = await getCycleDocuments(cycle);
@@ -374,12 +490,17 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
     let allDocTypes = [...requiredDocs];
     
     // 添加已上传但不在required_docs中的文档类型
+    let maxIndex = requiredDocs.length > 0 
+        ? Math.max(...requiredDocs.map(d => d._originalIndex || 0)) 
+        : 0;
     uploadedDocTypes.forEach(docType => {
         if (!requiredDocs.some(reqDoc => reqDoc.name === docType)) {
+            maxIndex++;
             allDocTypes.push({
                 name: docType,
                 requirement: '无要求',
-                index: 9999 // 放在最后
+                index: maxIndex,
+                _originalIndex: maxIndex
             });
         }
     });
@@ -418,7 +539,12 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
         const html = `
         <!-- 标题和筛选选项在同一行 -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h2 style="text-align: left; margin: 0;">📋 ${cycle} - 文档管理</h2>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <h2 style="text-align: left; margin: 0;">📋 ${cycle} - 文档管理</h2>
+                <button type="button" class="btn btn-success btn-sm" onclick="batchArchiveCycle('${cycle}')" title="一键归档当前周期内所有符合要求的文档">
+                    📥 一键归档
+                </button>
+            </div>
             <div class="filter-options" style="padding: 5px 10px; background: #f8f9fa; border-radius: 6px; display: flex; flex-wrap: wrap; gap: 10px 15px; align-items: center;">
                 <label class="checkbox-inline" style="display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; font-size: 14px;">
                     <input type="checkbox" id="hideArchived" ${appState.filterOptions.hideArchived ? 'checked' : ''} onchange="filterDocuments('${cycle}')">
@@ -429,8 +555,8 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
                     <span>隐藏文件完整</span>
                 </label>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <input type="text" id="keywordFilter" placeholder="输入关键字" style="padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; width: 150px; font-size: 14px;" value="${appState.filterOptions.keyword || ''}" onchange="filterDocuments('${cycle}')">
-                    <span style="color: #666; font-size: 14px;">🔍</span>
+                    <input type="text" id="keywordFilter" placeholder="输入关键字，回车搜索" style="padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; width: 180px; font-size: 14px;" value="${appState.filterOptions.keyword || ''}" onkeydown="if(event.key==='Enter') filterDocuments('${cycle}')">
+                    <button onclick="filterDocuments('${cycle}')" style="padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; background: #f5f5f5; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">🔍</button>
                 </div>
             </div>
         </div>
@@ -464,9 +590,21 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
                             docsByDirectory[directory].push(d);
                         });
                         
+                        // 对目录进行排序，确保 '/' 目录在最前面，然后是其他目录，最后是'无目录'
+                        const sortedDirectories = Object.entries(docsByDirectory).sort(([dirA], [dirB]) => {
+                            // '/' 目录放最前面
+                            if (dirA === '/') return -1;
+                            if (dirB === '/') return 1;
+                            // '无目录' 放最后面
+                            if (dirA === '无目录') return 1;
+                            if (dirB === '无目录') return -1;
+                            // 其他目录按字母排序
+                            return dirA.localeCompare(dirB);
+                        });
+                        
                         // 生成文件列表，按目录分组显示
                         const fileListHtml = docsList.length > 0 ? 
-                            Object.entries(docsByDirectory).map(([directory, directoryDocs]) => {
+                            sortedDirectories.map(([directory, directoryDocs]) => {
                                 // 生成目录标题
                                 const directoryTitleHtml = (directory !== '无目录' && directory !== '/' && directory !== '') ? `
                                     <div class="doc-directory-title" style="margin: 10px 0 5px 0; padding: 8px; background: #f1f5f9; border-radius: 4px; font-weight: bold; display: flex; align-items: center; gap: 8px;">
@@ -582,47 +720,33 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
 
 
                         
-                        // 检查文档是否符合要求（是否有任何文档缺失要求）
-                        let hasMissingRequirements = false;
-                        if (docsList.length > 0 && doc.requirement) {
-                            const requirement = doc.requirement;
-                            for (const d of docsList) {
-                                const getDocValue = (fieldName) => {
-                                    if (d[fieldName] !== undefined) return d[fieldName];
-                                    if (d[`_${fieldName}`] !== undefined) return d[`_${fieldName}`];
-                                    return null;
-                                };
-                                
-                                const hasSigner = getDocValue('signer');
-                                const hasNoSignature = getDocValue('no_signature');
-                                const hasPartyASeal = getDocValue('party_a_seal');
-                                const hasPartyBSeal = getDocValue('party_b_seal');
-                                const hasHasSealMarked = getDocValue('has_seal_marked') || getDocValue('has_seal');
-                                const hasNoSeal = getDocValue('no_seal');
-                                const hasDocDate = getDocValue('doc_date');
-                                const hasSignDate = getDocValue('sign_date');
-                                
-                                // 检查是否有缺失的要求
-                                if (requirement.includes('乙方签字') && !hasSigner && !hasNoSignature) hasMissingRequirements = true;
-                                if (requirement.includes('甲方签字') && !hasSigner && !hasNoSignature) hasMissingRequirements = true;
-                                if (requirement.includes('签字') && !hasSigner && !hasNoSignature) hasMissingRequirements = true;
-                                if (requirement.includes('乙方盖章') && !hasPartyBSeal && !hasNoSeal) hasMissingRequirements = true;
-                                if (requirement.includes('甲方盖章') && !hasPartyASeal && !hasNoSeal) hasMissingRequirements = true;
-                                if (requirement.includes('盖章') && !hasHasSealMarked && !hasPartyASeal && !hasPartyBSeal && !hasNoSeal) hasMissingRequirements = true;
-                                if (requirement.includes('文档日期') && !hasDocDate) hasMissingRequirements = true;
-                                if (requirement.includes('签字日期') && !hasSignDate) hasMissingRequirements = true;
-                                
-                                if (hasMissingRequirements) break;
-                            }
-                        }
+                        // 分析要求并计算每个要求的完成状态
+                        // 从 required_docs 中找到当前文档的 attributes
+                        const currentDocInfo = requiredDocs.find(rd => rd.name === doc.name);
+                        const attributes = currentDocInfo?.attributes;
+                        // 要求状态: 'none'-无文件或无要求, 'full'-全部完成, 'partial'-部分完成, 'empty'-全未完成
+                        const requirementStatus = analyzeRequirementStatus(attributes, docsList);
                         
-                        const isCompliant = docsList.length > 0 && !hasMissingRequirements;
-                        const requirementColor = isCompliant ? '#d4edda' : (docsList.length > 0 ? '#fff3cd' : '#fff3cd');
+                        // 生成要求标签HTML
+                        const requirementHtml = requirementStatus.length > 0 
+                            ? requirementStatus.map(r => {
+                                let style = '';
+                                if (r.status === 'full') {
+                                    // 全部完成: 绿色底色
+                                    style = 'background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; margin: 2px; display: inline-block; font-size: 12px;';
+                                } else if (r.status === 'partial') {
+                                    // 部分完成: 绿色边框
+                                    style = 'background: #fff; color: #28a745; border: 1px solid #28a745; padding: 2px 8px; border-radius: 4px; margin: 2px; display: inline-block; font-size: 12px;';
+                                } else {
+                                    // 未完成: 黄色底色
+                                    style = 'background: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 4px; margin: 2px; display: inline-block; font-size: 12px;';
+                                }
+                                return `<span style="${style}" title="${r.description}">${r.name}</span>`;
+                            }).join('')
+                            : (doc.requirement ? `<span style="background: #fff3cd; padding: 3px 12px; border-radius: 4px; display: inline-block; text-align: center;">${doc.requirement}</span>` : '');
                         
-                        console.log('文档信息:', doc);
-                        
-                        // 获取文档序号
-                        const docIndex = doc.index || (index + 1);
+                        // 获取文档序号 - 使用原始序号，确保筛选后序号不变
+                        const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
                         
                         return `
                         <tr class="doc-row ${isArchived ? 'archived' : ''}">
@@ -632,7 +756,7 @@ export async function renderCycleDocuments(cycle, filterOptions = {}) {
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : ''}
                                         <div class="doc-type" style="text-align: center;">${doc.name}</div>
-                                        ${doc.requirement ? `<div class="doc-requirement" style="background: ${requirementColor}; padding: 3px 12px; border-radius: 4px; margin-top: 5px; display: inline-block; text-align: center; margin: 5px auto 0;">${doc.requirement}</div>` : ''}
+                                        <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">${requirementHtml}</div>
                                     </div>
                                 </div>
                             </td>
@@ -1024,14 +1148,21 @@ export function initUploadMethodTabs() {
         };
     });
 
-    
-    // 显示文档附加属性要求
-    displayDocumentRequirements();
-    
     // 加载目录按钮（用 onclick 避免重复绑定）
     const loadDirectoriesBtn = document.getElementById('loadDirectoriesBtn');
     if (loadDirectoriesBtn) {
         loadDirectoriesBtn.onclick = loadDirectories;
+    }
+    
+    // 目录选择变化时自动刷新搜索结果
+    const directorySelect = document.getElementById('directorySelect');
+    if (directorySelect) {
+        directorySelect.onchange = function() {
+            const keyword = document.getElementById('selectFileKeyword')?.value;
+            if (keyword) {
+                searchFiles(keyword);
+            }
+        };
     }
     
     // 搜索文件按钮
@@ -1064,6 +1195,16 @@ export function initUploadMethodTabs() {
         selectArchiveBtn.onclick = handleSelectArchive;
     }
     
+    // 清空已选按钮
+    const clearSelectedBtn = document.getElementById('clearSelectedBtn');
+    if (clearSelectedBtn) {
+        clearSelectedBtn.onclick = function() {
+            import('./zip.js').then(module => {
+                module.clearSelectedFiles();
+            });
+        };
+    }
+    
     // 批量操作按钮
     const batchEditBtn = document.getElementById('batchEditBtn');
     if (batchEditBtn) {
@@ -1088,29 +1229,48 @@ function displayDocumentRequirements() {
     const requirementText = document.getElementById('requirementText');
     const dynamicDocInfo = document.getElementById('dynamicDocInfo');
     
+    console.log('displayDocumentRequirements called');
+    console.log('appState.projectConfig:', appState.projectConfig);
+    console.log('appState.currentCycle:', appState.currentCycle);
+    console.log('appState.currentDocument:', appState.currentDocument);
+    
     // 从项目配置中获取文档要求
     let requirement = '';
     let attributes = [];
     
     if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
+        console.log('All required appState properties are set');
         const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
+        console.log('cycleDocs:', cycleDocs);
         if (cycleDocs && cycleDocs.required_docs) {
+            console.log('cycleDocs.required_docs exists:', cycleDocs.required_docs.length, 'docs');
             const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
+            console.log('docInfo:', docInfo);
             if (docInfo) {
                 requirement = docInfo.requirement || '无特殊要求';
+                console.log('requirement:', requirement);
                 // 解析附加属性
                 attributes = parseRequirementAttributes(requirement);
+                console.log('attributes:', attributes);
+            } else {
+                console.log('docInfo not found for document:', appState.currentDocument);
             }
+        } else {
+            console.log('cycleDocs or cycleDocs.required_docs not found');
         }
+    } else {
+        console.log('Missing required appState properties');
     }
     
     // 显示要求文本
     if (requirementText) {
+        console.log('Updating requirementText to:', requirement);
         requirementText.textContent = requirement;
     }
     
     // 动态生成表单
     if (dynamicDocInfo) {
+        console.log('Generating dynamic form with attributes:', attributes);
         generateDynamicForm(dynamicDocInfo, attributes);
     }
 }
@@ -1494,30 +1654,93 @@ async function searchFiles(keyword) {
 }
 
 /**
+ * 格式化路径显示，提取目录名
+ * @param {string} path - 原始路径
+ * @returns {string} 格式化后的目录名
+ */
+function formatPathDisplay(path) {
+    if (!path) return '';
+    
+    // 统一使用正斜杠处理路径（处理Windows反斜杠）
+    let formatted = path.replace(/\\/g, '/');
+    
+    // 移除 projects/xxx/uploads/ 前缀
+    const uploadsMatch = formatted.match(/(?:projects\/[^\/]+\/uploads\/|uploads\/)(.*)/);
+    if (uploadsMatch) {
+        formatted = uploadsMatch[1];
+    }
+    
+    // 移除文件名，只保留目录部分
+    const lastSlashIndex = formatted.lastIndexOf('/');
+    if (lastSlashIndex > 0) {
+        formatted = formatted.substring(0, lastSlashIndex);
+    } else if (lastSlashIndex === 0) {
+        formatted = formatted.substring(1);
+    }
+    
+    // 将路径分割成部分进行处理
+    const parts = formatted.split('/');
+    
+    // 过滤掉包含随机ID的部分（通常是ZIP包解压后的顶层目录）
+    const filteredParts = parts.filter(part => {
+        // 如果部分包含看起来像随机ID的子串（10位以上字母数字混合），则跳过
+        if (/[a-z0-9]{10,}/i.test(part) && !/^[^a-z0-9]*$/.test(part)) {
+            // 但如果这部分全是中文（如"大唐智慧党建平台项目验收文档3.20"），则保留
+            if (/^[\u4e00-\u9fa5\d\.]+$/.test(part.replace(/[a-z0-9]{10,}/gi, ''))) {
+                return true;
+            }
+            return false;
+        }
+        return true;
+    });
+    
+    // 如果过滤后还有内容，使用过滤后的路径
+    if (filteredParts.length > 0) {
+        formatted = filteredParts.join(' / ');
+    }
+    
+    return formatted || '根目录';
+}
+
+/**
  * 显示选择的文件列表
  */
 export function displaySelectedFiles(files) {
-    const selectedFilesList = document.getElementById('selectedFilesList');
-    if (!selectedFilesList) return;
+    const zipFilesList = document.getElementById('zipFilesList');
+    if (!zipFilesList) return;
     
     if (files.length === 0) {
-        selectedFilesList.innerHTML = '<p class="placeholder">未找到匹配的文件</p>';
+        zipFilesList.innerHTML = '<p class="placeholder">未找到匹配的文件</p>';
     } else {
-        selectedFilesList.innerHTML = files.map(file => {
+        zipFilesList.innerHTML = files.map(file => {
             const isUsed = file.used || false;
+            const usedByList = file.used_by || [];
+            // 生成tooltip文本，显示被哪些文档类型使用
+            const usedByText = usedByList.length > 0 ? usedByList.join('，') : '已被其他文档使用';
+            // 格式化路径显示
+            const displayPath = formatPathDisplay(file.rel_path || file.path);
             return `
                 <div class="zip-file-item ${isUsed ? 'used' : ''}" data-path="${file.path}" data-name="${file.name}">
                     <input type="checkbox" class="zip-file-checkbox" ${isUsed ? 'disabled' : ''} />
                     <span class="zip-file-name">${file.name}</span>
-                    <span class="zip-file-path">${file.rel_path || file.path}</span>
-                    ${isUsed ? '<span class="file-used-badge">已被使用</span>' : ''}
+                    <span class="zip-file-path" title="${file.rel_path || file.path}">${displayPath}</span>
+                    ${isUsed ? `<span class="file-used-badge" title="${usedByText}">已被使用</span>` : ''}
                 </div>
             `;
         }).join('');
         
         // 添加复选框事件
         document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
-            checkbox.addEventListener('change', updateSelectedFilesCount);
+            checkbox.addEventListener('change', function(e) {
+                import('./zip.js').then(module => {
+                    module.handleZipFileSelect(e);
+                });
+            });
+        });
+        
+        // 恢复已选中状态
+        import('./zip.js').then(module => {
+            module.fixZipSelectionIssue();
         });
     }
 }
@@ -1526,30 +1749,18 @@ export function displaySelectedFiles(files) {
  * 更新已选择文件数量
  */
 function updateSelectedFilesCount() {
-    const selectedCheckboxes = document.querySelectorAll('.zip-file-checkbox:checked');
-    const selectedCount = selectedCheckboxes.length;
-    const selectedInfo = document.getElementById('selectedInfo');
-    const selectArchiveBtn = document.getElementById('selectArchiveBtn');
-    
-    if (selectedInfo) {
-        selectedInfo.style.display = selectedCount > 0 ? 'block' : 'none';
-        selectedInfo.textContent = `已选择 ${selectedCount} 个文件`;
-    }
-    
-    if (selectArchiveBtn) {
-        selectArchiveBtn.disabled = selectedCount === 0;
-    }
+    // 这个函数现在由 zip.js 中的 updateZipSelectedInfo 函数替代
+    // 保留此函数以兼容旧代码
+    import('./zip.js').then(module => {
+        module.updateZipSelectedInfo();
+    });
 }
 
 /**
  * 处理选择文档归档
  */
 async function handleSelectArchive() {
-    const selectedCheckboxes = document.querySelectorAll('.zip-file-checkbox:checked');
-    const selectedFiles = Array.from(selectedCheckboxes).map(cb => ({
-        path: cb.closest('.zip-file-item').dataset.path,
-        name: cb.closest('.zip-file-item').dataset.name
-    }));
+    const selectedFiles = appState.zipSelectedFiles;
     
     if (selectedFiles.length === 0) {
         showNotification('请先选择文件', 'error');
@@ -1582,6 +1793,12 @@ async function handleSelectArchive() {
         
         if (result.status === 'success') {
             showNotification(`成功选择 ${selectedFiles.length} 个文件`, 'success');
+            
+            // 清空选中状态
+            appState.zipSelectedFiles = [];
+            import('./zip.js').then(module => {
+                module.updateZipSelectedInfo();
+            });
             
             // 关闭文档模态框
             closeModal(elements.documentModal);
@@ -1627,6 +1844,9 @@ export function openUploadModal(cycle, docName) {
     
     // 打开模态框
     openModal(elements.documentModal);
+    
+    // 显示文档附加属性要求（在模态框打开后调用）
+    displayDocumentRequirements();
 }
 
 /**
@@ -2010,6 +2230,172 @@ export async function archiveDocument(cycle, docName) {
 }
 
 /**
+ * 一键归档当前周期内所有符合要求的文档
+ * @param {string} cycle - 周期名称
+ */
+export async function batchArchiveCycle(cycle) {
+    try {
+        // 获取当前周期的文档配置
+        const docsInfo = appState.projectConfig.documents?.[cycle];
+        if (!docsInfo) {
+            showNotification('文档配置不存在', 'error');
+            return;
+        }
+        
+        // 获取已上传的文档列表
+        const uploadedDocs = await getCycleDocuments(cycle);
+        
+        // 找出所有未归档且有文件的文档类型
+        const requiredDocs = docsInfo.required_docs || [];
+        const archivedDocs = appState.projectConfig.documents_archived?.[cycle] || {};
+        
+        // 筛选出可以归档的文档类型（未归档且有文件）
+        const docsToArchive = [];
+        const docsWithMissingRequirements = [];
+        
+        for (const docConfig of requiredDocs) {
+            const docName = typeof docConfig === 'object' ? docConfig.name : docConfig;
+            
+            // 跳过已归档的
+            if (archivedDocs[docName]) continue;
+            
+            // 获取该文档类型的文件
+            const docTypeFiles = uploadedDocs.filter(d => d.doc_name === docName);
+            
+            // 如果没有文件，跳过
+            if (docTypeFiles.length === 0) continue;
+            
+            // 检查是否满足要求
+            const requirement = docConfig?.requirement || '';
+            let hasMissingRequirements = false;
+            const unmetFiles = [];
+            
+            for (const doc of docTypeFiles) {
+                const missing = checkMissingRequirements(doc, requirement);
+                if (missing.length > 0) {
+                    hasMissingRequirements = true;
+                    unmetFiles.push({
+                        filename: doc.original_filename || doc.filename,
+                        missing: missing
+                    });
+                }
+            }
+            
+            if (hasMissingRequirements) {
+                docsWithMissingRequirements.push({
+                    docName,
+                    unmetFiles
+                });
+            } else {
+                docsToArchive.push(docName);
+            }
+        }
+        
+        // 如果没有可归档的文档
+        if (docsToArchive.length === 0 && docsWithMissingRequirements.length === 0) {
+            showNotification('当前周期没有需要归档的文档', 'info');
+            return;
+        }
+        
+        // 构建确认消息
+        let confirmMessage = '';
+        
+        if (docsToArchive.length > 0) {
+            confirmMessage += `<div style="margin-bottom: 15px;">
+                <div style="font-weight: bold; color: #28a745; margin-bottom: 8px;">以下 ${docsToArchive.length} 个文档类型将被归档：</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                    ${docsToArchive.map(name => `<span style="background: #d4edda; padding: 2px 8px; border-radius: 4px; font-size: 12px;">${name}</span>`).join('')}
+                </div>
+            </div>`;
+        }
+        
+        if (docsWithMissingRequirements.length > 0) {
+            confirmMessage += `<div style="margin-bottom: 15px;">
+                <div style="font-weight: bold; color: #856404; margin-bottom: 8px;">
+                    以下 ${docsWithMissingRequirements.length} 个文档类型未满足要求，将不会被归档：
+                </div>
+                <div style="max-height: 150px; overflow-y: auto;">
+                    ${docsWithMissingRequirements.map(item => `
+                        <div style="background: #fff3cd; padding: 8px; border-radius: 4px; margin-bottom: 5px; font-size: 12px;">
+                            <div style="font-weight: bold;">${item.docName}</div>
+                            ${item.unmetFiles.map(f => `<div style="margin-left: 10px; color: #666;">• ${f.filename}：缺少 ${f.missing.join('、')}</div>`).join('')}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        }
+        
+        confirmMessage += '<div style="color: #666; font-size: 12px;">确认要开始一键归档吗？</div>';
+        
+        // 显示确认对话框
+        const confirmed = await new Promise((resolve) => {
+            showConfirmModal(
+                '一键归档确认',
+                confirmMessage,
+                () => resolve(true),
+                () => resolve(false),
+                { allowHtml: true }
+            );
+        });
+        
+        if (!confirmed) {
+            return;
+        }
+        
+        // 开始批量归档
+        showLoading(true);
+        let successCount = 0;
+        let failCount = 0;
+        
+        // 初始化归档对象
+        if (!appState.projectConfig.documents_archived) {
+            appState.projectConfig.documents_archived = {};
+        }
+        if (!appState.projectConfig.documents_archived[cycle]) {
+            appState.projectConfig.documents_archived[cycle] = {};
+        }
+        
+        // 批量标记归档
+        for (const docName of docsToArchive) {
+            appState.projectConfig.documents_archived[cycle][docName] = true;
+        }
+        
+        // 保存到服务器
+        try {
+            const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(appState.projectConfig)
+            });
+            
+            if (response.ok) {
+                successCount = docsToArchive.length;
+                showNotification(`成功归档 ${successCount} 个文档类型${failCount > 0 ? '，' + failCount + '个失败' : ''}`, 
+                    failCount > 0 ? 'warning' : 'success');
+                
+                // 刷新显示
+                await renderCycleDocuments(cycle);
+                // 刷新周期导航栏状态
+                import('./cycle.js').then(module => {
+                    module.refreshCycleProgress();
+                });
+            } else {
+                showNotification('归档保存失败', 'error');
+            }
+        } catch (error) {
+            console.error('批量归档保存失败:', error);
+            showNotification('归档失败: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    } catch (error) {
+        console.error('一键归档失败:', error);
+        showNotification('一键归档失败: ' + error.message, 'error');
+        showLoading(false);
+    }
+}
+
+/**
  * 取消归档文档
  */
 export async function unarchiveDocument(cycle, docName) {
@@ -2155,6 +2541,12 @@ export async function loadMaintainDocumentsList(cycle, docName) {
             docCount.textContent = documents.length;
         }
         
+        // 显示或隐藏全选/反选按钮容器
+        const maintainSelectAllContainer = document.getElementById('maintainSelectAllContainer');
+        if (maintainSelectAllContainer) {
+            maintainSelectAllContainer.style.display = documents.length > 0 ? 'block' : 'none';
+        }
+        
         if (documentsList) {
             if (documents.length === 0) {
                 documentsList.innerHTML = '<p class="placeholder">暂无已上传文档</p>';
@@ -2167,14 +2559,16 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                     return groups;
                 }, {});
                 
-                // 添加全选和反选按钮
+                // 对目录进行排序，确保 '/' 目录在最前面
+                const sortedDirectories = Object.entries(groupedDocs).sort(([dirA], [dirB]) => {
+                    if (dirA === '/') return -1; // '/' 目录放最前面
+                    if (dirB === '/') return 1;
+                    return dirA.localeCompare(dirB); // 其他目录按字母排序
+                });
+                
                 documentsList.innerHTML = `
-                    <div class="batch-actions" style="margin-bottom: 10px;">
-                        <button class="btn btn-sm btn-primary" onclick="selectAllMaintainDocuments()">全选</button>
-                        <button class="btn btn-sm btn-warning" onclick="deselectAllMaintainDocuments()">反选</button>
-                    </div>
                     <div class="documents-tree">
-                        ${Object.entries(groupedDocs).map(([directory, docs]) => {
+                        ${sortedDirectories.map(([directory, docs]) => {
                             const directoryDisplay = directory === '/' ? '/' : `/${directory}`;
                             return `
                                 <div class="directory-group" style="margin-bottom: 15px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
@@ -2232,6 +2626,17 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                 const batchMoveBtn = document.getElementById('batchMoveBtn');
                 if (batchMoveBtn) {
                     batchMoveBtn.addEventListener('click', handleBatchMove);
+                }
+                
+                // 绑定全选/反选按钮事件
+                const maintainSelectAllBtn = document.getElementById('maintainSelectAllBtn');
+                if (maintainSelectAllBtn) {
+                    maintainSelectAllBtn.onclick = selectAllMaintainDocuments;
+                }
+                
+                const maintainDeselectAllBtn = document.getElementById('maintainDeselectAllBtn');
+                if (maintainDeselectAllBtn) {
+                    maintainDeselectAllBtn.onclick = deselectAllMaintainDocuments;
                 }
             }
         } else {
@@ -3005,6 +3410,7 @@ if (typeof window !== 'undefined') {
     window.handleDeleteDocument = handleDeleteDocument;
     window.unarchiveDocument = unarchiveDocument;
     window.openUploadModal = openUploadModal;
+    window.batchArchiveCycle = batchArchiveCycle;
 }
 
 /**
@@ -3411,6 +3817,71 @@ export function updateSelectedCount() {
 }
 
 /**
+ * 获取选中文档的当前属性状态
+ * @param {Array} docIds - 文档ID数组
+ * @returns {Object} - 各属性的状态统计（使camelCase id作为key）
+ */
+function getSelectedDocsAttributeStatus(docIds) {
+    const status = {};
+    const docs = [];
+    
+    // 从项目配置中获取文档数据
+    if (appState.projectConfig && appState.projectConfig.documents) {
+        for (const [cycleKey, cycleInfo] of Object.entries(appState.projectConfig.documents)) {
+            if (cycleInfo.uploaded_docs) {
+                for (const doc of cycleInfo.uploaded_docs) {
+                    const docId = doc.doc_id || doc.id || `${cycleKey}_${doc.doc_name || doc.name}_${doc.upload_time || Date.now()}`;
+                    if (docIds.includes(docId)) {
+                        docs.push(doc);
+                    }
+                }
+            }
+        }
+    }
+    
+    if (docs.length === 0) return status;
+    
+    // 定义需要检查的属性（同时支持snake_case和camelCase）
+    const attributes = [
+        { key: 'party_a_seal', camelKey: 'partyASeal', name: '甲方盖章' },
+        { key: 'party_b_seal', camelKey: 'partyBSeal', name: '乙方盖章' },
+        { key: 'has_seal_marked', camelKey: 'hasSealMarked', name: '已盖章' },
+        { key: 'has_seal', camelKey: 'hasSeal', name: '已盖章' },
+        { key: 'no_seal', camelKey: 'noSeal', name: '不涉及盖章' },
+        { key: 'party_a_signer', camelKey: 'partyASigner', name: '甲方签字' },
+        { key: 'party_b_signer', camelKey: 'partyBSigner', name: '乙方签字' },
+        { key: 'signer', camelKey: 'signer', name: '签字人' },
+        { key: 'no_signature', camelKey: 'noSignature', name: '不涉及签字' },
+        { key: 'sign_date', camelKey: 'signDate', name: '签字日期' },
+        { key: 'doc_date', camelKey: 'docDate', name: '文档日期' }
+    ];
+    
+    // 统计每个属性的完成状态
+    attributes.forEach(attr => {
+        let completedCount = 0;
+        
+        docs.forEach(doc => {
+            const value = doc[attr.key] || doc[`_${attr.key}`];
+            if (value && value !== '' && value !== false && value !== 'false') {
+                completedCount++;
+            }
+        });
+        
+        let state = 'empty';
+        if (completedCount === docs.length && docs.length > 0) {
+            state = 'full'; // 全部完成
+        } else if (completedCount > 0) {
+            state = 'partial'; // 部分完成
+        }
+        
+        // 使用camelKey作为status的key，与parseRequirementAttributes返回的id一致
+        status[attr.camelKey] = state;
+    });
+    
+    return status;
+}
+
+/**
  * 处理批量编辑 - 复用编辑文档模态框
  */
 export function handleBatchEdit() {
@@ -3421,6 +3892,9 @@ export function handleBatchEdit() {
         showNotification('请先选择文档', 'error');
         return;
     }
+    
+    // 获取选中文档的当前属性状态
+    const attrStatus = getSelectedDocsAttributeStatus(selectedDocIds);
     
     // 从项目配置中获取文档要求
     let requirement = '';
@@ -3455,6 +3929,17 @@ export function handleBatchEdit() {
         <table class="edit-form-table">
     `;
     
+    // 根据属性状态获取标签样式
+    const getLabelStyle = (attrKey) => {
+        const status = attrStatus[attrKey];
+        if (status === 'full') {
+            return 'style="background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; display: inline-block;"';
+        } else if (status === 'partial') {
+            return 'style="background: #fff; color: #28a745; border: 1px solid #28a745; padding: 2px 8px; border-radius: 4px; font-size: 12px; display: inline-block;"';
+        }
+        return '';
+    };
+    
     // 两两配对，每行显示两个属性
     for (let i = 0; i < attributes.length; i += 2) {
         const attr1 = attributes[i];
@@ -3464,33 +3949,44 @@ export function handleBatchEdit() {
         
         // 第一个属性
         if (attr1) {
+            // 确定属性key（使用id，因为attrStatus的key已经是camelCase了）
+            const attr1Key = attr1.id || '';
+            const attr1Status = attr1Key ? attrStatus[attr1Key] : 'empty';
+            const attr1Checked = attr1Status === 'full' ? 'checked' : '';
+            const attr1LabelStyle = getLabelStyle(attr1Key);
+            
             if (attr1.type === 'date') {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
                     <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value=""></td>
                 `;
             } else if (attr1.type === 'text') {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
                     <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value=""></td>
                 `;
             } else if (attr1.type === 'checkbox' && attr1.inline) {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr1.label}</label></td>
+                    <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
                     <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}">
+                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1Checked}>
                             <span>${attr1.label}</span>
                         </label>
                     </td>
                 `;
             } else if (attr1.type === 'checkbox_group') {
-                const optionsHtml = attr1.options.map(opt => `
-                    <label class="checkbox-item">
-                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}">
-                        <span>${opt.label}</span>
-                    </label>
-                `).join('');
+                const optionsHtml = attr1.options.map(opt => {
+                    const optStatus = attrStatus[opt.id];
+                    const optChecked = optStatus === 'full' ? 'checked' : '';
+                    const optLabelStyle = getLabelStyle(opt.id);
+                    return `
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}" ${optChecked}>
+                            <span ${optLabelStyle}>${opt.label}</span>
+                        </label>
+                    `;
+                }).join('');
                 rowHtml += `
                     <td class="label-cell"><label>${attr1.label}</label></td>
                     <td class="input-cell checkbox-group">${optionsHtml}</td>
@@ -3502,33 +3998,44 @@ export function handleBatchEdit() {
         
         // 第二个属性
         if (attr2) {
+            // 确定属性key
+            const attr2Key = attr2.id || '';
+            const attr2Status = attr2Key ? attrStatus[attr2Key] : 'empty';
+            const attr2Checked = attr2Status === 'full' ? 'checked' : '';
+            const attr2LabelStyle = getLabelStyle(attr2Key);
+            
             if (attr2.type === 'date') {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
                     <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value=""></td>
                 `;
             } else if (attr2.type === 'text') {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
                     <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value=""></td>
                 `;
             } else if (attr2.type === 'checkbox' && attr2.inline) {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr2.label}</label></td>
+                    <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
                     <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}">
+                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2Checked}>
                             <span>${attr2.label}</span>
                         </label>
                     </td>
                 `;
             } else if (attr2.type === 'checkbox_group') {
-                const optionsHtml = attr2.options.map(opt => `
-                    <label class="checkbox-item">
-                        <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}">
-                        <span>${opt.label}</span>
-                    </label>
-                `).join('');
+                const optionsHtml = attr2.options.map(opt => {
+                    const optStatus = attrStatus[opt.id];
+                    const optChecked = optStatus === 'full' ? 'checked' : '';
+                    const optLabelStyle = getLabelStyle(opt.id);
+                    return `
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="edit${opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}" ${optChecked}>
+                            <span ${optLabelStyle}>${opt.label}</span>
+                        </label>
+                    `;
+                }).join('');
                 rowHtml += `
                     <td class="label-cell"><label>${attr2.label}</label></td>
                     <td class="input-cell checkbox-group">${optionsHtml}</td>
@@ -3561,14 +4068,6 @@ export function handleBatchEdit() {
             </td>
         </tr>
     </table>
-    `;
-    
-    // 添加表单操作按钮（复用样式）
-    formHtml += `
-        <div class="form-actions">
-            <button type="submit" class="btn btn-success">批量保存修改 (${selectedDocIds.length}个)</button>
-            <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
-        </div>
     `;
     
     // 更新表单内容

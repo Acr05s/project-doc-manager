@@ -473,6 +473,21 @@ export async function cancelTask(taskId) {
     }
 }
 
+export async function clearProjectPackaging(projectId) {
+    try {
+        const response = await fetch('/api/tasks/clear-packaging', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: projectId })
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('清除打包状态失败:', error);
+        throw error;
+    }
+}
+
 /**
  * 完整打包项目（包含整个项目目录）
  */
@@ -747,6 +762,53 @@ export async function searchImportedDocuments(keyword) {
         return result;
     } catch (error) {
         console.error('搜索历史导入文档失败:', error);
+        throw error;
+    }
+}
+/**
+ * 预览导入的ZIP包 - 上传并获取项目信息
+ * @param {File} file - ZIP文件
+ */
+export async function previewImportPackage(file) {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/projects/package/preview', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('预览导入包失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 从预览的临时文件执行实际导入
+ * @param {string} tempId - 临时文件ID
+ * @param {string} conflictAction - 冲突处理方式: overwrite, rename, merge
+ * @param {string} customName - 自定义项目名称
+ */
+export async function importFromPreview(tempId, conflictAction = 'rename', customName = '') {
+    try {
+        const response = await fetch('/api/projects/package/import-from-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                temp_id: tempId,
+                conflict_action: conflictAction,
+                custom_name: customName
+            })
+        });
+        
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('导入项目失败:', error);
         throw error;
     }
 }

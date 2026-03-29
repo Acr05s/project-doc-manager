@@ -3,6 +3,20 @@
  */
 
 import { initApp } from './modules/index.js';
+import { unlockCurrentProject, stopHeartbeat, appState } from './modules/app-state.js';
+
+// 页面关闭或刷新时解锁项目
+window.addEventListener('beforeunload', async () => {
+    if (appState.currentProjectId) {
+        stopHeartbeat();
+        // 使用 navigator.sendBeacon 异步发送解锁请求
+        const data = JSON.stringify({
+            project_id: appState.currentProjectId,
+            session_id: appState.sessionId
+        });
+        navigator.sendBeacon('/api/tasks/unlock-project', data);
+    }
+});
 
 // 加载版本信息
 function loadVersionInfo() {
@@ -70,7 +84,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const appState = (await import('./modules/app-state.js')).appState;
             const { showNotification, showLoading } = await import('./modules/ui.js');
             const { saveProject } = await import('./modules/api.js');
-            const { renderInitialContent } = await import('./modules/cycle.js');
             
             if (appState.currentProjectId && appState.projectConfig) {
                 // 保存当前项目
@@ -81,6 +94,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     // 重置应用状态
                     appState.currentProjectId = null;
                     appState.projectConfig = null;
+                    appState.currentCycle = null;
                     
                     // 隐藏项目相关按钮
                     const hideProjectButtons = (await import('./modules/project.js')).hideProjectButtons;
@@ -99,13 +113,42 @@ document.addEventListener('DOMContentLoaded', function() {
                         projectSelect.value = '';
                     }
                     
-                    // 清空页面内容，显示初始状态
-                    renderInitialContent();
+                    // 清空周期导航栏
+                    const cycleNavBar = document.getElementById('cycleNavBar');
+                    const cycleNavList = document.getElementById('cycleNavList');
+                    if (cycleNavBar) cycleNavBar.style.display = 'none';
+                    if (cycleNavList) cycleNavList.innerHTML = '';
+                    
+                    // 清空周期列表侧边栏
+                    const cycleListEl = document.getElementById('cycleList');
+                    if (cycleListEl) cycleListEl.innerHTML = '<div class="empty-state">请先选择项目</div>';
+                    
+                    // 清空内容区域，显示欢迎信息
+                    const contentArea = document.getElementById('contentArea');
+                    if (contentArea) {
+                        contentArea.innerHTML = `
+                            <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                                <h2>欢迎使用项目文档管理中心</h2>
+                                <p>请在顶部选择项目，加载配置文件</p>
+                                <p>然后在顶部周期导航中选择周期，管理文档</p>
+                            </div>
+                        `;
+                    }
+                    
+                    // 清空文档容器
+                    const docContainer = document.getElementById('documentContainer');
+                    if (docContainer) docContainer.innerHTML = '<div class="empty-state">请先选择项目</div>';
+                    
+                    // 更新URL，移除项目参数
+                    const url = new URL(window.location);
+                    url.searchParams.delete('project');
+                    window.history.replaceState({}, '', url);
                     
                     showNotification('当前项目已保存并关闭', 'success');
                 } catch (error) {
                     console.error('保存项目失败:', error);
                     showNotification('保存项目失败: ' + error.message, 'error');
+                    return; // 出错时不打开项目选择模态框
                 } finally {
                     showLoading(false);
                 }
@@ -276,6 +319,12 @@ window.handleOpenProject = function(projectId) {
     });
 };
 
+window.handleClearPackaging = function(projectId) {
+    import('./modules/project.js').then(module => {
+        module.handleClearPackaging(projectId);
+    });
+};
+
 window.handleSoftDeleteProject = function(projectId, projectName) {
     import('./modules/project.js').then(module => {
         module.handleSoftDeleteProject(projectId, projectName);
@@ -316,5 +365,30 @@ window.handleRematchFromZip = function(zipId, filename, path) {
 window.handleDeleteZipRecord = function(zipId, filename) {
     import('./modules/project.js').then(module => {
         module.handleDeleteZipRecord(zipId, filename);
+    });
+};
+
+// 清理重复文档相关函数
+window.openCleanupDuplicatesModal = function() {
+    import('./modules/ui.js').then(module => {
+        module.openCleanupDuplicatesModal();
+    });
+};
+
+window.closeCleanupDuplicatesModal = function() {
+    import('./modules/ui.js').then(module => {
+        module.closeCleanupDuplicatesModal();
+    });
+};
+
+window.startCleanupDuplicates = function() {
+    import('./modules/ui.js').then(module => {
+        module.startCleanupDuplicates();
+    });
+};
+
+window.refreshAfterCleanup = function() {
+    import('./modules/ui.js').then(module => {
+        module.refreshAfterCleanup();
     });
 };

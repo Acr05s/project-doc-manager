@@ -4,6 +4,37 @@ from flask import request, jsonify
 from pathlib import Path
 from datetime import datetime
 from .utils import get_doc_manager
+import re
+
+
+def normalize_used_by(used_by_list):
+    """
+    规范化 used_by 列表，去除重复项。
+    处理周期名称格式差异（如 "1.项目立项" 和 "项目立项" 视为相同）
+    """
+    if not used_by_list:
+        return []
+    
+    seen = set()
+    result = []
+    
+    for item in used_by_list:
+        # 提取周期名称和文档名称
+        if ' - ' in item:
+            cycle_part, doc_part = item.split(' - ', 1)
+        else:
+            cycle_part, doc_part = '', item
+        
+        # 去除周期名称中的序号前缀（如 "1."、"1、"等）用于比对
+        normalized_cycle = re.sub(r'^\d+[\.、\s]+', '', cycle_part)
+        normalized_key = f"{normalized_cycle}-{doc_part}"
+        
+        if normalized_key not in seen:
+            seen.add(normalized_key)
+            # 保留原始格式中更完整的那个（优先保留有序号的）
+            result.append(item)
+    
+    return result
 
 
 def get_directories():
@@ -148,12 +179,46 @@ def search_files():
                 if keyword and keyword not in file_path.name.lower():
                     continue
                 
-                # 检查是否已被其他文档使用
-                is_used = any(
-                    meta.get('file_path') == str(file_path) or 
-                    meta.get('original_filename') == file_path.name
-                    for meta in doc_manager.documents_db.values()
-                )
+                # 检查是否已被其他文档使用，并获取使用信息
+                is_used = False
+                used_by = []
+                for meta in doc_manager.documents_db.values():
+                    if meta.get('file_path') == str(file_path) or meta.get('original_filename') == file_path.name:
+                        is_used = True
+                        doc_name = meta.get('doc_name', '')
+                        cycle = meta.get('cycle', '')
+                        if doc_name and doc_name not in used_by:
+                            used_by.append(f"{cycle} - {doc_name}" if cycle else doc_name)
+                
+                # 同时从项目配置中检查
+                try:
+                    project_result = doc_manager.load_project(project_id)
+                    if project_result.get('status') == 'success':
+                        project_config = project_result.get('project', {})
+                        documents = project_config.get('documents', {})
+                        for cycle_name, cycle_info in documents.items():
+                            uploaded_docs = cycle_info.get('uploaded_docs', [])
+                            for doc in uploaded_docs:
+                                doc_file_path = doc.get('file_path', '')
+                                doc_original_name = doc.get('original_filename', '')
+                                # 检查文件名匹配或路径匹配
+                                if doc_file_path and (doc_file_path.endswith(file_path.name) or file_path.name in doc_file_path):
+                                    is_used = True
+                                    doc_name = doc.get('doc_name', '')
+                                    display_name = f"{cycle_name} - {doc_name}" if cycle_name else doc_name
+                                    if display_name not in used_by:
+                                        used_by.append(display_name)
+                                elif doc_original_name and doc_original_name == file_path.name:
+                                    is_used = True
+                                    doc_name = doc.get('doc_name', '')
+                                    display_name = f"{cycle_name} - {doc_name}" if cycle_name else doc_name
+                                    if display_name not in used_by:
+                                        used_by.append(display_name)
+                except Exception:
+                    pass
+                
+                # 规范化 used_by 列表，去除重复
+                used_by = normalize_used_by(used_by)
                 
                 # 计算相对路径
                 rel_path = file_path.name
@@ -173,7 +238,8 @@ def search_files():
                     'rel_path': rel_path,
                     'size': file_path.stat().st_size,
                     'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                    'used': is_used
+                    'used': is_used,
+                    'used_by': used_by
                 })
         elif zip_file and zip_file.exists():
             # 搜索ZIP文件
@@ -189,12 +255,46 @@ def search_files():
                         if keyword and keyword not in file_path.name.lower():
                             continue
                         
-                        # 检查是否已被其他文档使用
-                        is_used = any(
-                            meta.get('file_path') == info.filename or 
-                            meta.get('original_filename') == file_path.name
-                            for meta in doc_manager.documents_db.values()
-                        )
+                        # 检查是否已被其他文档使用，并获取使用信息
+                        is_used = False
+                        used_by = []
+                        for meta in doc_manager.documents_db.values():
+                            if meta.get('file_path') == info.filename or meta.get('original_filename') == file_path.name:
+                                is_used = True
+                                doc_name = meta.get('doc_name', '')
+                                cycle = meta.get('cycle', '')
+                                if doc_name and doc_name not in used_by:
+                                    used_by.append(f"{cycle} - {doc_name}" if cycle else doc_name)
+                        
+                        # 同时从项目配置中检查
+                        try:
+                            project_result = doc_manager.load_project(project_id)
+                            if project_result.get('status') == 'success':
+                                project_config = project_result.get('project', {})
+                                documents = project_config.get('documents', {})
+                                for cycle_name, cycle_info in documents.items():
+                                    uploaded_docs = cycle_info.get('uploaded_docs', [])
+                                    for doc in uploaded_docs:
+                                        doc_file_path = doc.get('file_path', '')
+                                        doc_original_name = doc.get('original_filename', '')
+                                        # 检查文件名匹配或路径匹配
+                                        if doc_file_path and (doc_file_path.endswith(file_path.name) or file_path.name in doc_file_path or info.filename in doc_file_path):
+                                            is_used = True
+                                            doc_name = doc.get('doc_name', '')
+                                            display_name = f"{cycle_name} - {doc_name}" if cycle_name else doc_name
+                                            if display_name not in used_by:
+                                                used_by.append(display_name)
+                                        elif doc_original_name and doc_original_name == file_path.name:
+                                            is_used = True
+                                            doc_name = doc.get('doc_name', '')
+                                            display_name = f"{cycle_name} - {doc_name}" if cycle_name else doc_name
+                                            if display_name not in used_by:
+                                                used_by.append(display_name)
+                        except Exception:
+                            pass
+                        
+                        # 规范化 used_by 列表，去除重复
+                        used_by = normalize_used_by(used_by)
                         
                         files.append({
                             'id': info.filename,
@@ -203,7 +303,8 @@ def search_files():
                             'rel_path': info.filename,
                             'size': info.file_size,
                             'modified': datetime.fromtimestamp(info.date_time[0:6]).isoformat(),
-                            'used': is_used
+                            'used': is_used,
+                            'used_by': used_by
                         })
             except Exception:
                 # 如果ZIP文件损坏，返回空列表

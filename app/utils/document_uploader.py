@@ -96,21 +96,11 @@ class DocumentUploader:
                     logger.warning(f"图像分析失败: {e}")
             
             # 提取目录信息
-            directory = ''
-            if project_name:
-                # 获取项目上传目录
-                project_uploads_dir = self.folder_manager.get_documents_folder(project_name) / 'temp'
-                try:
-                    # 计算相对路径
-                    relative_path = file_path.relative_to(project_uploads_dir)
-                    # 提取目录信息，与文件选择逻辑保持一致
-                    rel_path_parts = relative_path.parts
-                    if len(rel_path_parts) > 1:
-                        # 如果文件在子目录中，取第一个目录作为directory
-                        directory = rel_path_parts[0]
-                except ValueError:
-                    # 如果文件不在项目上传目录中，使用空目录
-                    pass
+            # 默认保存到根目录 "/"，与从ZIP中选择的文件保持一致
+            directory = '/'
+            if category:
+                # 如果指定了分类，使用分类作为目录
+                directory = category
             
             # 构建返回信息
             result = {

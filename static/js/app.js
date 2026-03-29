@@ -831,9 +831,27 @@ function renderProjectsList(projects) {
 }
 
 /**
- * 选择项目
+ * 选择项目（带打包状态检查）
  */
 async function selectProject(projectId) {
+    // 检查是否正在打包当前项目（前端状态）
+    if (appState.isPackaging && appState.packagingProjectId === projectId) {
+        showNotification('该项目正在打包中，请等待打包完成后再打开', 'warning');
+        return;
+    }
+    
+    // 先检查后端的项目状态
+    try {
+        const statusResponse = await fetch(`/api/tasks/project-status/${projectId}`);
+        const statusResult = await statusResponse.json();
+        if (statusResult.status === 'success' && statusResult.packaging) {
+            showNotification('该项目正在打包中，请等待打包完成后再打开', 'warning');
+            return;
+        }
+    } catch (e) {
+        console.error('检查项目状态失败:', e);
+    }
+    
     try {
         const response = await fetch(`/api/projects/${projectId}`);
         const result = await response.json();

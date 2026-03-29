@@ -7,6 +7,7 @@ from src.services.preview_service import PreviewService
 from src.services.pdf_conversion_service import PDFConversionService
 
 
+
 def preview_document(doc_id):
     """预览文档（返回JSON格式的预览内容）"""
     try:
@@ -133,97 +134,38 @@ def view_document(doc_id):
         
         doc_manager = get_doc_manager()
         
-        # 首先从 documents_db 中查找
-        if doc_id not in doc_manager.documents_db:
-            # 尝试从项目配置中查找
-            doc = None
-            if hasattr(doc_manager, 'projects') and doc_manager.projects:
-                for project_id, project_data in doc_manager.projects.projects_db.items():
-                    if 'documents' in project_data:
-                        for cycle, cycle_info in project_data['documents'].items():
-                            if 'uploaded_docs' in cycle_info:
-                                for d in cycle_info['uploaded_docs']:
-                                    if d.get('doc_id') == doc_id:
-                                        doc = d
-                                        break
-                                if doc:
-                                    break
-                        if doc:
-                            break
-            
-            # 尝试从项目文件中查找
-            if not doc:
-                import json
-                projects_dir = doc_manager.config.projects_base_folder
-                for project_file in projects_dir.glob('*.json'):
-                    try:
-                        with open(project_file, 'r', encoding='utf-8') as f:
-                            project_data = json.load(f)
-                        if 'documents' in project_data:
-                            for cycle, cycle_info in project_data['documents'].items():
-                                if 'uploaded_docs' in cycle_info:
-                                    for d in cycle_info['uploaded_docs']:
-                                        if d.get('doc_id') == doc_id:
-                                            doc = d
-                                            break
-                                    if doc:
-                                        break
-                            if doc:
-                                break
-                    except Exception as e:
-                        pass
-            
-            if not doc:
-                return jsonify({'status': 'error', 'message': '文档不存在'}), 404
-            
-            # 将找到的文档信息添加到 documents_db
-            doc_manager.documents_db[doc_id] = doc
-            metadata = doc
-        else:
-            metadata = doc_manager.documents_db[doc_id]
+        # 获取文档元数据
+        metadata = _get_document_metadata(doc_manager, doc_id)
+        if not metadata:
+            return jsonify({'status': 'error', 'message': '文档不存在'}), 404
         
-        file_path = metadata.get('file_path')
-        
-        # 处理相对路径
-        file_path_obj = Path(file_path)
-        if not file_path_obj.is_absolute():
-            # 相对路径，相对于项目的uploads目录
-            project_name = metadata.get('project_name')
-            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                project_name = doc_manager.current_project.get('name')
-            
-            if project_name:
-                project_uploads_dir = doc_manager.get_documents_folder(project_name)
-                file_path_obj = project_uploads_dir / file_path
-            else:
-                # 如果没有项目名称，尝试使用绝对路径
-                # 检查文件是否存在于uploads目录中
-                if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
-                    upload_folder = doc_manager.config.upload_folder
-                else:
-                    upload_folder = Path('uploads')
-                file_path_obj = upload_folder / file_path
-        
-        if not file_path or not file_path_obj.exists():
+        # 解析文件路径
+        file_path_obj = _resolve_file_path(doc_manager, metadata)
+        if not file_path_obj or not file_path_obj.exists():
+            print(f"[view_document] 文件不存在: {file_path_obj}")
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
         
         file_ext = file_path_obj.suffix.lower()
         file_path = str(file_path_obj)
         
-        # 检查是否为Office文档，如果是则转换为PDF
+        print(f"[view_document] 处理文件: {file_path}, 扩展名: {file_ext}")
+        
+        # 检查是否为Office文档，转换为PDF
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
         if file_ext in office_extensions:
             try:
-                # 转换为PDF
                 pdf_service = PDFConversionService()
                 pdf_path = pdf_service.convert_to_pdf(file_path)
-                
-                # 返回PDF文件
-                return send_file(pdf_path, mimetype='application/pdf', as_attachment=False, download_name=f"{file_path_obj.stem}.pdf")
+                print(f"[view_document] PDF转换成功: {pdf_path}")
+                return send_file(pdf_path, mimetype='application/pdf', 
+                               as_attachment=False, 
+                               download_name=f"{file_path_obj.stem}.pdf")
             except Exception as e:
-                # 转换失败，返回原始文件
-                print(f"PDF转换失败: {e}")
+                print(f"[view_document] PDF转换失败: {e}")
+                # 转换失败，返回本地预览
+                return preview_document_local(doc_id)
         
+        # 直接返回文件
         mime_types = {
             '.pdf': 'application/pdf',
             '.png': 'image/png',
@@ -235,7 +177,125 @@ def view_document(doc_id):
         }
         
         content_type = mime_types.get(file_ext, 'application/octet-stream')
-        
         return send_file(file_path, mimetype=content_type)
+        
     except Exception as e:
+        import traceback
+        print(f"[view_document] 错误: {e}")
+        print(traceback.format_exc())
         return jsonify({'status': 'error', 'message': f'查看失败: {str(e)}'}), 500
+
+
+def _get_document_metadata(doc_manager, doc_id):
+    """获取文档元数据"""
+    # 首先从 documents_db 中查找
+    if doc_id in doc_manager.documents_db:
+        return doc_manager.documents_db[doc_id]
+    
+    # 尝试从项目配置中查找
+    if hasattr(doc_manager, 'projects') and doc_manager.projects:
+        for project_id, project_data in doc_manager.projects.projects_db.items():
+            if 'documents' in project_data:
+                for cycle, cycle_info in project_data['documents'].items():
+                    if 'uploaded_docs' in cycle_info:
+                        for d in cycle_info['uploaded_docs']:
+                            if d.get('doc_id') == doc_id:
+                                doc_manager.documents_db[doc_id] = d
+                                return d
+    
+    # 尝试从项目文件中查找
+    import json
+    projects_dir = doc_manager.config.projects_base_folder
+    for project_file in projects_dir.glob('*.json'):
+        try:
+            with open(project_file, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+            if 'documents' in project_data:
+                for cycle, cycle_info in project_data['documents'].items():
+                    if 'uploaded_docs' in cycle_info:
+                        for d in cycle_info['uploaded_docs']:
+                            if d.get('doc_id') == doc_id:
+                                doc_manager.documents_db[doc_id] = d
+                                return d
+        except:
+            pass
+    
+    return None
+
+
+def _resolve_file_path(doc_manager, metadata):
+    """解析文件路径，处理相对路径和绝对路径"""
+    file_path = metadata.get('file_path')
+    if not file_path:
+        return None
+    
+    file_path_obj = Path(file_path)
+    
+    # 如果是绝对路径，直接返回
+    if file_path_obj.is_absolute():
+        return file_path_obj
+    
+    # 获取项目名
+    project_name = metadata.get('project_name')
+    if not project_name:
+        # 尝试从doc_id中解析项目名
+        doc_id = metadata.get('doc_id', '')
+        if '_' in doc_id and not doc_id.startswith('_'):
+            parts = doc_id.split('_')
+            if parts[0]:
+                project_name = parts[0]
+    
+    # 优先：处理新的完整相对路径格式：projects/{项目名}/uploads/...
+    if file_path.startswith('projects/') or file_path.startswith('projects\\'):
+        base_dir = doc_manager.config.projects_base_folder.parent
+        full_path = base_dir / file_path
+        if full_path.exists():
+            return full_path
+    
+    # 处理 uploads/ 相对路径（不带项目名前缀）
+    if file_path.startswith('uploads/') or file_path.startswith('uploads\\'):
+        if project_name:
+            base_dir = doc_manager.config.projects_base_folder.parent
+            full_path = base_dir / 'projects' / project_name / file_path
+            if full_path.exists():
+                return full_path
+        # 尝试从当前项目查找
+        if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+            project_name = doc_manager.current_project.get('name', project_name)
+            if project_name:
+                base_dir = doc_manager.config.projects_base_folder.parent
+                full_path = base_dir / 'projects' / project_name / file_path
+                if full_path.exists():
+                    return full_path
+    
+    if project_name:
+        project_uploads_dir = doc_manager.get_documents_folder(project_name)
+        return project_uploads_dir / file_path
+    
+    # 最后尝试uploads目录
+    if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+        upload_folder = doc_manager.config.upload_folder
+    else:
+        upload_folder = Path('uploads')
+    return upload_folder / file_path
+
+
+def preview_status(file_hash):
+    """获取文档预览转换状态"""
+    try:
+        status = progressive_pdf_service.get_status(file_hash)
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def preview_page(file_hash, page):
+    """获取指定预览页面图片"""
+    try:
+        page_path = progressive_pdf_service.get_page(file_hash, page)
+        if page_path and page_path.exists():
+            return send_file(str(page_path), mimetype='image/png')
+        else:
+            return jsonify({'status': 'error', 'message': '页面尚未准备好'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500

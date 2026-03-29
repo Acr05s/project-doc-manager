@@ -3,7 +3,7 @@
 from flask import Blueprint
 from .upload import upload_document, upload_chunk, merge_chunks, get_upload_progress, upload_zip_chunk, merge_zip_chunks
 from .list import list_documents, get_document
-from .preview import preview_document, preview_document_local, view_document
+from .preview import preview_document, preview_document_local, view_document, preview_status, preview_page
 from .download import download_document
 from .progress import get_cycle_progress
 from .delete import delete_document, batch_delete_documents
@@ -12,6 +12,7 @@ from .recognize import smart_recognize
 from .category import get_categories, create_category, delete_category
 from .files import get_directories, search_files, select_files
 from .zip import get_zip_records, add_zip_record, delete_zip_record, start_zip_match, get_zip_match_status, check_zip_chunk
+from .cleanup import cleanup_duplicates
 from .utils import init_doc_manager
 
 # 创建蓝图
@@ -49,6 +50,7 @@ document_bp.route('/zip-chunk-merge', methods=['POST'])(merge_zip_chunks)
 document_bp.route('/zip-check-chunk', methods=['GET'])(check_zip_chunk)
 document_bp.route('/zip-match-start', methods=['POST'])(start_zip_match)
 document_bp.route('/zip-match-status', methods=['GET'])(get_zip_match_status)
+document_bp.route('/cleanup-duplicates', methods=['POST'])(cleanup_duplicates)
 
 # 导出
 __all__ = ['document_bp', 'init_doc_manager']

@@ -353,10 +353,23 @@ export async function handleSaveTemplate(e) {
     }
     
     const config = appState.projectConfig;
+    
+    // 复制并清理模板数据，删除匹配文件信息
     const templateData = {
         cycles: config.cycles || [],
-        documents: config.documents || {}
+        documents: {}
     };
+    
+    // 清理documents，删除uploaded_docs等匹配文件信息
+    const originalDocuments = config.documents || {};
+    for (const cycle in originalDocuments) {
+        const cycleData = originalDocuments[cycle];
+        templateData.documents[cycle] = {
+            required_docs: cycleData.required_docs || [],
+            categories: cycleData.categories || {}
+            // 故意不包含uploaded_docs，避免隐私泄露
+        };
+    }
     
     showLoading(true);
     try {

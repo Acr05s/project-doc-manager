@@ -6,6 +6,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -457,6 +458,12 @@ class ProjectDataManager:
                     config['documents'][cycle]['categories'] = {}
                 config['documents'][cycle]['categories'].update(cycle_cats)
             
+            # 清空 uploaded_docs，确保从 documents_index.json 重新加载
+            # 避免 requirements.json 中的旧数据造成重复
+            for cycle in config['documents']:
+                if 'uploaded_docs' in config['documents'][cycle]:
+                    config['documents'][cycle]['uploaded_docs'] = []
+            
             # 加载文档索引并合并到 documents
             doc_index = self.load_documents_index(project_name)
             documents = doc_index.get('documents', {})
@@ -470,23 +477,40 @@ class ProjectDataManager:
                 
                 # 如果没有 cycle 或 doc_name，尝试从 doc_id 中提取
                 if not cycle or not doc_name:
-                    # 首先尝试匹配已知的周期
+                    # 首先尝试匹配已知的周期（支持带序号和不带序号的匹配）
                     matched_cycle = None
                     for known_cycle in known_cycles:
+                        # 尝试直接匹配
                         if doc_id.startswith(known_cycle + '_'):
+                            matched_cycle = known_cycle
+                            break
+                        # 尝试去除序号的匹配（如 "1.项目立项" 匹配 "项目立项_xxx"）
+                        cycle_without_prefix = re.sub(r'^\d+[\.、\s]+', '', known_cycle)
+                        if cycle_without_prefix != known_cycle:
+                            if doc_id.startswith(cycle_without_prefix + '_') or doc_id.startswith(known_cycle + '_'):
+                                matched_cycle = known_cycle
+                                break
+                        # 尝试反向匹配：doc_id 去除序号后匹配周期
+                        doc_id_without_prefix = re.sub(r'^\d+[\.、\s]+', '', doc_id)
+                        if doc_id_without_prefix.startswith(cycle_without_prefix + '_') or doc_id_without_prefix.startswith(known_cycle + '_'):
                             matched_cycle = known_cycle
                             break
                     
                     if matched_cycle:
                         cycle = matched_cycle
                         # 提取文档名称：从周期后到时间戳前的部分
-                        cycle_prefix = matched_cycle + '_'
-                        remaining_part = doc_id[len(cycle_prefix):]
+                        # 使用原始 cycle 名称（带序号）去除前缀
+                        cycle_prefixes = [matched_cycle + '_', re.sub(r'^\d+[\.、\s]+', '', matched_cycle) + '_']
+                        remaining_part = doc_id
+                        for prefix in cycle_prefixes:
+                            if doc_id.startswith(prefix):
+                                remaining_part = doc_id[len(prefix):]
+                                break
                         # 找到时间戳部分
                         timestamp_part = None
                         parts = remaining_part.split('_')
                         for i, part in enumerate(parts):
-                            if any(c.isdigit() for c in part):
+                            if any(c.isdigit() for c in part) and len(part) >= 8:  # 时间戳至少8位数字
                                 timestamp_part = part
                                 break
                         if timestamp_part:
@@ -504,9 +528,22 @@ class ProjectDataManager:
                         config['documents'][cycle] = {}
                     if 'uploaded_docs' not in config['documents'][cycle]:
                         config['documents'][cycle]['uploaded_docs'] = []
-                    # 检查是否已存在
-                    existing = next((d for d in config['documents'][cycle]['uploaded_docs'] 
-                                   if d.get('doc_id') == doc_id), None)
+                    # 检查是否已存在（基于 doc_id、file_path 或 original_filename）
+                    file_path = doc_info.get('file_path', '')
+                    original_filename = doc_info.get('original_filename', '')
+                    existing = None
+                    for d in config['documents'][cycle]['uploaded_docs']:
+                        if d.get('doc_id') == doc_id:
+                            existing = d
+                            break
+                        # 也检查 file_path 和 original_filename
+                        if file_path and d.get('file_path') == file_path:
+                            existing = d
+                            break
+                        if original_filename and d.get('original_filename') == original_filename:
+                            existing = d
+                            break
+                    
                     if existing:
                         # 更新已存在的文档信息，确保状态同步，但保留原有的文档要求等属性
                         # 只更新文档索引中的属性，不覆盖原有的属性
@@ -518,6 +555,40 @@ class ProjectDataManager:
                         # 只有当文档在文档索引中存在时才添加到 uploaded_docs
                         # 这样可以避免已删除的文档被重新添加
                         config['documents'][cycle]['uploaded_docs'].append(doc_info)
+            
+            # 对每个周期的 uploaded_docs 进行去重清理
+            # 基于 file_path 和 original_filename 去重，保留最新的
+            for cycle_name in config['documents']:
+                if 'uploaded_docs' in config['documents'][cycle_name]:
+                    uploaded_docs = config['documents'][cycle_name]['uploaded_docs']
+                    seen_files = {}  # key: file_path or original_filename, value: index
+                    unique_docs = []
+                    
+                    for doc in uploaded_docs:
+                        # 使用 file_path 或 original_filename 作为去重键
+                        file_key = doc.get('file_path') or doc.get('original_filename') or doc.get('doc_id')
+                        if not file_key:
+                            unique_docs.append(doc)
+                            continue
+                            
+                        if file_key in seen_files:
+                            # 已存在，保留时间戳更新的（或后面的）
+                            existing_idx = seen_files[file_key]
+                            existing_doc = unique_docs[existing_idx]
+                            
+                            # 比较上传时间，保留更新的
+                            existing_time = existing_doc.get('upload_time', '') or existing_doc.get('timestamp', '')
+                            current_time = doc.get('upload_time', '') or doc.get('timestamp', '')
+                            
+                            if current_time >= existing_time:
+                                # 替换为当前的（更新的或相同但后面的）
+                                unique_docs[existing_idx] = doc
+                                seen_files[file_key] = existing_idx
+                        else:
+                            seen_files[file_key] = len(unique_docs)
+                            unique_docs.append(doc)
+                    
+                    config['documents'][cycle_name]['uploaded_docs'] = unique_docs
             
             # 加载归档状态
             try:
@@ -561,6 +632,8 @@ class ProjectDataManager:
             self.save_project_info(project_name, project_info)
             
             # 保存需求配置
+            # 注意：uploaded_docs 不再保存到 requirements.json，
+            # 而是单独保存到 documents_index.json，避免重复数据
             requirements = {
                 'cycles': config.get('cycles', []),
                 'documents': {}
@@ -569,7 +642,7 @@ class ProjectDataManager:
                 if isinstance(cycle_info, dict):
                     requirements['documents'][cycle] = {
                         'required_docs': cycle_info.get('required_docs', []),
-                        'uploaded_docs': cycle_info.get('uploaded_docs', []),
+                        # 'uploaded_docs': cycle_info.get('uploaded_docs', []),  # 不再保存 uploaded_docs
                         'categories': cycle_info.get('categories', {})
                     }
             self.save_requirements(project_name, requirements)

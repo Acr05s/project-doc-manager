@@ -1552,16 +1552,34 @@ function hideAttributePanelIfNoSelection() {
 }
 
 export function expandAll() {
+    console.log('[TreeEditor] expandAll 点击, currentTreeData 存在:', !!currentTreeData);
+    if (!currentTreeData) {
+        console.log('[TreeEditor] currentTreeData 为空');
+        showNotification('请先打开树形编辑器', 'warning');
+        return;
+    }
+    // 清除筛选状态
+    clearFilter();
     setAllExpanded(currentTreeData, true);
     renderTree();
     if (selectedNode) selectNode(selectedNode);
+    console.log('[TreeEditor] 展开完成');
 }
 
 export function collapseAll() {
+    console.log('[TreeEditor] collapseAll 点击, currentTreeData 存在:', !!currentTreeData);
+    if (!currentTreeData) {
+        console.log('[TreeEditor] currentTreeData 为空');
+        showNotification('请先打开树形编辑器', 'warning');
+        return;
+    }
+    // 清除筛选状态
+    clearFilter();
     // 只折叠到项目周期级别，保持根节点展开
     collapseToCycleLevel(currentTreeData);
     renderTree();
     if (selectedNode) selectNode(selectedNode);
+    console.log('[TreeEditor] 折叠完成');
 }
 
 /**
@@ -1796,6 +1814,73 @@ export async function loadTemplateToTree() {
     await loadTemplateList();
 }
 
+export async function openTemplateManageModal() {
+    const modal = document.getElementById('templateManageModal');
+    if (!modal) return;
+    openModal(modal);
+    await loadTemplateListForManage();
+}
+
+async function loadTemplateListForManage() {
+    const container = document.getElementById('templateManageList');
+    if (!container) return;
+
+    container.innerHTML = '<div class="loading">加载中...</div>';
+
+    try {
+        const response = await fetch('/api/projects/templates');
+        const result = await response.json();
+
+        if (result.status !== 'success') throw new Error(result.message || '加载失败');
+
+        const templates = result.templates || [];
+        if (templates.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>暂无模板</p></div>';
+            return;
+        }
+
+        container.innerHTML = templates.map(t => `
+            <div class="template-item" data-id="${t.id}">
+                <div class="template-info">
+                    <h4>${escapeHtml(t.name)}</h4>
+                    <p class="template-meta">周期: ${t.cycle_count} | 文档: ${t.document_count}</p>
+                    <p class="template-description">${escapeHtml(t.description || '')}</p>
+                </div>
+                <div class="template-actions">
+                    <button class="btn btn-sm btn-primary" onclick="loadTemplateToTreeEditor('${t.id}')">加载</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteTemplateConfirm('${t.id}', '${escapeHtml(t.name)}')">删除</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('加载模板列表失败:', error);
+        container.innerHTML = `<div class="error-state">加载失败: ${error.message}</div>`;
+    }
+}
+
+window.deleteTemplateConfirm = function(templateId, templateName) {
+    showConfirmModal(
+        '确认删除',
+        `确定要删除模板"${templateName}"吗？`,
+        async () => {
+            try {
+                const response = await fetch(`/api/projects/templates/${templateId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showNotification('模板删除成功', 'success');
+                    await loadTemplateListForManage();
+                } else {
+                    showNotification('删除失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showNotification('删除失败: ' + error.message, 'error');
+            }
+        }
+    );
+};
+
 // ==================== 导入/导出功能 ====================
 
 /**
@@ -1996,6 +2081,9 @@ window.closeImportModuleModal = closeImportModuleModal;
 window.confirmImportModule = confirmImportModule;
 window.exportTreeConfig = exportTreeConfig;
 
+// 模板管理功能的全局绑定
+window.openTemplateManageModal = openTemplateManageModal;
+
 // ==================== 筛选功能 ====================
 
 let filterText = '';
@@ -2085,6 +2173,10 @@ export function clearFilter() {
 // 筛选功能的全局绑定
 window.setTreeFilter = setFilter;
 window.clearTreeFilter = clearFilter;
+
+// 展开/折叠功能的全局绑定
+window.expandAllTree = expandAll;
+window.collapseAllTree = collapseAll;
 
 // ==================== 自定义属性功能 ====================
 

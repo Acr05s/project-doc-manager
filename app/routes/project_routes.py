@@ -5,7 +5,15 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify
 from app.utils.document_manager import DocumentManager
 
+# 使用 get_doc_manager 方式获取 doc_manager
+def get_doc_manager():
+    """获取当前模块的 doc_manager（用于独立运行时）"""
+    from app.routes.projects.utils import get_doc_manager as _get
+    return _get()
+
 project_bp = Blueprint('project', __name__)
+
+# 为兼容旧代码，提供模块级 doc_manager（需要先调用 init_doc_manager）
 doc_manager = None
 
 def init_doc_manager(manager):
@@ -390,6 +398,9 @@ def package_full_project(project_id):
         import tempfile
         from flask import make_response
         
+        # 获取 doc_manager
+        doc_manager = get_doc_manager()
+        
         # 1. 先获取项目配置并保存，确保数据已持久化
         project = doc_manager.load_project(project_id)
         if not project or project.get('status') != 'success':
@@ -568,11 +579,21 @@ def import_package():
             project_config['created_time'] = datetime.now().isoformat()
             project_config['updated_time'] = datetime.now().isoformat()
 
-        # 保存项目配置
-        doc_manager._save_project(new_project_id, project_config)
-
-        # 复制文档文件并更新元数据
+        # 复制文档文件并更新元数据（先处理文件，再保存配置）
         imported_count = 0
+        # 加载现有的文档索引（用于merge模式去重）
+        if conflict_action == 'merge':
+            try:
+                existing_doc_index = doc_manager.data_manager.load_documents_index(final_name)
+                existing_docs = existing_doc_index.get('documents', {})
+            except:
+                existing_docs = {}
+        else:
+            existing_docs = {}
+        
+        # 用于跟踪已导入的文件（避免重复）
+        imported_files = {}  # key: original_filename, value: doc_meta
+        
         for doc_meta in documents_metadata:
             old_path = doc_meta.get('file_path')
             if old_path and Path(old_path).exists():
@@ -580,8 +601,25 @@ def import_package():
                     # 计算新的存储路径
                     cycle = doc_meta.get('cycle', 'unknown').replace('/', '_')
                     doc_name = doc_meta.get('doc_name', 'unknown').replace('/', '_')
+                    original_filename = doc_meta.get('original_filename', Path(old_path).name)
 
-                    new_cycle_folder = doc_manager.upload_folder / cycle / doc_name
+                    # 检查是否已存在相同文件（基于 original_filename 去重）
+                    file_key = original_filename.strip().lower()
+                    if file_key in imported_files:
+                        continue  # 跳过重复文件
+                    
+                    # 检查现有文档索引中是否已存在
+                    if conflict_action == 'merge':
+                        exists_in_index = False
+                        for existing_doc_id, existing_doc in existing_docs.items():
+                            existing_name = existing_doc.get('original_filename', '').strip().lower()
+                            if existing_name == file_key:
+                                exists_in_index = True
+                                break
+                        if exists_in_index:
+                            continue  # 跳过已存在的文件
+
+                    new_cycle_folder = doc_manager.upload_folder / final_name / 'uploads' / cycle / doc_name
                     new_cycle_folder.mkdir(parents=True, exist_ok=True)
 
                     # 复制文件
@@ -591,30 +629,36 @@ def import_package():
 
                     # 更新元数据
                     doc_meta['file_path'] = str(new_file_path)
-                    doc_meta['id'] = f"{cycle}_{doc_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    doc_meta['doc_id'] = f"{cycle}_{doc_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
                     doc_meta['project_id'] = new_project_id
+                    doc_meta['project_name'] = final_name
 
                     # 保存到数据库
-                    doc_manager.documents_db[doc_meta['id']] = doc_meta
+                    doc_manager.documents_db[doc_meta['doc_id']] = doc_meta
                     
-                    # 如果是merge模式，还需要更新项目配置中的uploaded_docs
-                    if conflict_action == 'merge':
-                        if 'documents' in project_config:
-                            if cycle in project_config['documents']:
-                                if 'uploaded_docs' not in project_config['documents'][cycle]:
-                                    project_config['documents'][cycle]['uploaded_docs'] = []
-                                # 检查是否已存在相同文件
-                                exists = False
-                                for existing_doc in project_config['documents'][cycle]['uploaded_docs']:
-                                    if existing_doc.get('filename') == new_filename and existing_doc.get('doc_name') == doc_name:
-                                        exists = True
-                                        break
-                                if not exists:
-                                    project_config['documents'][cycle]['uploaded_docs'].append(doc_meta)
+                    # 直接添加到 documents_index.json
+                    doc_manager.data_manager.add_document_to_index(final_name, doc_meta['doc_id'], doc_meta)
+                    
+                    # 记录已导入的文件
+                    imported_files[file_key] = doc_meta
+                    
+                    # 更新项目配置中的 uploaded_docs（用于内存中的展示）
+                    if 'documents' not in project_config:
+                        project_config['documents'] = {}
+                    if cycle not in project_config['documents']:
+                        project_config['documents'][cycle] = {}
+                    if 'uploaded_docs' not in project_config['documents'][cycle]:
+                        project_config['documents'][cycle]['uploaded_docs'] = []
+                    project_config['documents'][cycle]['uploaded_docs'].append(doc_meta)
                     
                     imported_count += 1
                 except Exception as e:
-                    pass
+                    import traceback
+                    print(f"导入文档失败: {e}")
+                    print(traceback.format_exc())
+        
+        # 保存项目配置（不再包含 uploaded_docs 到 requirements.json）
+        doc_manager._save_project(new_project_id, project_config)
 
         # 清理临时文件
         shutil.rmtree(extract_dir, ignore_errors=True)

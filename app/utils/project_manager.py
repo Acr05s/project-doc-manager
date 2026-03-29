@@ -109,6 +109,57 @@ class ProjectManager:
         except Exception as e:
             logger.error(f"保存项目索引失败: {e}")
     
+    def update_project_status(self, project_id: str, **kwargs) -> bool:
+        """更新项目索引状态字段（如 packaging, locked, session_id）
+        
+        Args:
+            project_id: 项目ID
+            **kwargs: 要更新的字段，如 packaging=True, locked=True, session_id='xxx'
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        try:
+            if project_id not in self.projects_db:
+                logger.warning(f"项目不存在: {project_id}")
+                return False
+            
+            # 更新字段
+            for key, value in kwargs.items():
+                self.projects_db[project_id][key] = value
+            
+            self._save_projects_index()
+            logger.info(f"项目状态已更新: {project_id}, {kwargs}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"更新项目状态失败: {e}")
+            return False
+    
+    def get_project_status(self, project_id: str) -> Dict[str, Any]:
+        """获取项目状态字段
+        
+        Args:
+            project_id: 项目ID
+            
+        Returns:
+            Dict: 项目状态（packaging, locked, session_id 等）
+        """
+        if project_id in self.projects_db:
+            project = self.projects_db[project_id]
+            return {
+                'packaging': project.get('packaging', False),
+                'locked': project.get('locked', False),
+                'session_id': project.get('session_id', None),
+                'session_expire': project.get('session_expire', None)
+            }
+        return {
+            'packaging': False,
+            'locked': False,
+            'session_id': None,
+            'session_expire': None
+        }
+    
     def create(self, name: str, description: str = '',
               requirements_file: Optional[str] = None,
               party_a: str = '', party_b: str = '',
@@ -891,9 +942,9 @@ class ProjectManager:
             Dict: 保存结果
         """
         try:
-            # 创建模板目录
-            templates_dir = self.config.projects_folder / 'templates'
-            templates_dir.mkdir(parents=True, exist_ok=True)
+            # 创建公共模板目录
+            common_dir = self.config.projects_folder / 'common'
+            common_dir.mkdir(parents=True, exist_ok=True)
             
             # 生成模板ID
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -910,7 +961,7 @@ class ProjectManager:
             }
             
             # 保存模板文件
-            template_path = templates_dir / f"{template_id}.json"
+            template_path = common_dir / f"{template_id}.json"
             with open(template_path, 'w', encoding='utf-8') as f:
                 json.dump(template, f, ensure_ascii=False, indent=2)
             
@@ -933,13 +984,31 @@ class ProjectManager:
             Dict: 模板列表
         """
         try:
-            templates_dir = self.config.projects_folder / 'templates'
+            # 首先检查旧模板目录，如有模板则移动到新目录
+            old_templates_dir = self.config.projects_folder / 'templates'
+            new_templates_dir = self.config.projects_folder / 'common'
+            new_templates_dir.mkdir(parents=True, exist_ok=True)
             
-            if not templates_dir.exists():
-                return {'status': 'success', 'templates': []}
+            # 移动旧模板到新目录
+            if old_templates_dir.exists():
+                for template_file in old_templates_dir.glob('template_*.json'):
+                    try:
+                        new_path = new_templates_dir / template_file.name
+                        template_file.rename(new_path)
+                        logger.info(f"已移动模板文件: {template_file.name} 到 common 目录")
+                    except Exception as e:
+                        logger.warning(f"移动模板文件失败: {template_file} - {e}")
+                
+                # 删除旧模板目录
+                try:
+                    old_templates_dir.rmdir()
+                    logger.info(f"已删除旧模板目录: {old_templates_dir}")
+                except Exception as e:
+                    logger.warning(f"删除旧模板目录失败: {e}")
             
+            # 列出新目录中的模板
             templates = []
-            for template_file in templates_dir.glob('template_*.json'):
+            for template_file in new_templates_dir.glob('template_*.json'):
                 try:
                     with open(template_file, 'r', encoding='utf-8') as f:
                         template = json.load(f)
@@ -975,7 +1044,7 @@ class ProjectManager:
             Dict: 模板数据
         """
         try:
-            template_path = self.config.projects_folder / 'templates' / f"{template_id}.json"
+            template_path = self.config.projects_folder / 'common' / f"{template_id}.json"
             
             if not template_path.exists():
                 return {'status': 'error', 'message': '模板不存在'}
@@ -1002,7 +1071,7 @@ class ProjectManager:
             Dict: 删除结果
         """
         try:
-            template_path = self.config.projects_folder / 'templates' / f"{template_id}.json"
+            template_path = self.config.projects_folder / 'common' / f"{template_id}.json"
             
             if not template_path.exists():
                 return {'status': 'error', 'message': '模板不存在'}

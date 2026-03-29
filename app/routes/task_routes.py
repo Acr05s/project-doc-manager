@@ -5,6 +5,192 @@ from app.services.task_service import task_service
 
 task_bp = Blueprint('task', __name__)
 
+# 获取 doc_manager 的方式
+def get_doc_manager():
+    """获取文档管理器"""
+    from app.routes.projects.utils import get_doc_manager as _get
+    return _get()
+
+
+@task_bp.route('/api/tasks/set-packaging', methods=['POST'])
+def set_project_packaging():
+    """设置项目为打包状态"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        
+        if not project_id:
+            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
+        
+        doc_manager = get_doc_manager()
+        success = doc_manager.projects.update_project_status(project_id, packaging=True)
+        
+        if success:
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/clear-packaging', methods=['POST'])
+def clear_project_packaging():
+    """清除项目打包状态"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        
+        if not project_id:
+            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
+        
+        doc_manager = get_doc_manager()
+        success = doc_manager.projects.update_project_status(project_id, packaging=False)
+        
+        if success:
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/project-status/<project_id>', methods=['GET'])
+def get_project_packaging_status(project_id):
+    """获取项目打包状态"""
+    try:
+        doc_manager = get_doc_manager()
+        status = doc_manager.projects.get_project_status(project_id)
+        
+        return jsonify({
+            'status': 'success',
+            'packaging': status['packaging'],
+            'locked': status['locked'],
+            'session_id': status['session_id'],
+            'session_expire': status['session_expire']
+        })
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/lock-project', methods=['POST'])
+def lock_project():
+    """锁定项目（防止多会话冲突）"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        session_id = data.get('session_id')
+        
+        if not project_id or not session_id:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        doc_manager = get_doc_manager()
+        
+        # 检查项目是否已被其他会话锁定
+        status = doc_manager.projects.get_project_status(project_id)
+        if status['locked'] and status['session_id'] != session_id:
+            # 检查是否超时
+            expire_time = status.get('session_expire')
+            if expire_time:
+                from datetime import datetime
+                try:
+                    expire_dt = datetime.fromisoformat(expire_time.replace('Z', '+00:00'))
+                    if expire_dt > datetime.now():
+                        return jsonify({
+                            'status': 'error', 
+                            'message': '项目已被其他会话锁定',
+                            'locked': True
+                        }), 409
+                except:
+                    pass
+        
+        # 锁定项目（5分钟超时）
+        from datetime import datetime, timedelta
+        expire_time = (datetime.now() + timedelta(minutes=5)).isoformat()
+        
+        success = doc_manager.projects.update_project_status(
+            project_id, 
+            locked=True, 
+            session_id=session_id,
+            session_expire=expire_time
+        )
+        
+        if success:
+            return jsonify({'status': 'success', 'session_expire': expire_time})
+        else:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/heartbeat', methods=['POST'])
+def project_heartbeat():
+    """项目会话心跳（保持锁定）"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        session_id = data.get('session_id')
+        
+        if not project_id or not session_id:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        doc_manager = get_doc_manager()
+        
+        # 检查是否是当前会话锁定
+        status = doc_manager.projects.get_project_status(project_id)
+        if not status['locked'] or status['session_id'] != session_id:
+            return jsonify({'status': 'error', 'message': '项目未被当前会话锁定'}), 400
+        
+        # 更新过期时间
+        from datetime import datetime, timedelta
+        expire_time = (datetime.now() + timedelta(minutes=5)).isoformat()
+        
+        success = doc_manager.projects.update_project_status(
+            project_id, 
+            session_expire=expire_time
+        )
+        
+        if success:
+            return jsonify({'status': 'success', 'session_expire': expire_time})
+        else:
+            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/unlock-project', methods=['POST'])
+def unlock_project():
+    """解锁项目"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        session_id = data.get('session_id')
+        
+        if not project_id or not session_id:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+        
+        doc_manager = get_doc_manager()
+        
+        # 检查是否是当前会话锁定
+        status = doc_manager.projects.get_project_status(project_id)
+        if status['locked'] and status['session_id'] == session_id:
+            # 只有当前会话可以解锁
+            doc_manager.projects.update_project_status(
+                project_id, 
+                locked=False, 
+                session_id=None,
+                session_expire=None
+            )
+        
+        return jsonify({'status': 'success'})
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @task_bp.route('/api/tasks', methods=['GET'])
 def get_tasks():
     """获取所有任务"""
