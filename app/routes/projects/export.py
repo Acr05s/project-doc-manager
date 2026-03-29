@@ -1052,11 +1052,15 @@ def preview_import_package():
         existing_project = None
         try:
             projects = doc_manager.get_projects_list()
+            logger.info(f"[预览] 检查同名项目: '{project_name}', 平台现有项目数: {len(projects)}")
             for p in projects:
+                logger.info(f"[预览] 比对: 平台'{p.get('name')}' vs 导入'{project_name}' -> 匹配: {p.get('name') == project_name}")
                 if p.get('name') == project_name:
                     existing_project = p
                     break
-        except:
+            logger.info(f"[预览] 同名项目检查结果: {'找到' if existing_project else '未找到'}")
+        except Exception as e:
+            logger.error(f"[预览] 检查同名项目出错: {e}")
             pass
         
         # 统计ZIP包中的文档数量
@@ -1101,7 +1105,8 @@ def preview_import_package():
 
 def import_from_preview():
     """
-    从预览的临时文件执行实际导入
+    从预览的临时文件执行实际导入（简化版）
+    直接复制整个项目目录，不需要复杂的合并逻辑
     """
     try:
         from flask import request, jsonify
@@ -1114,179 +1119,160 @@ def import_from_preview():
         
         data = request.get_json()
         temp_id = data.get('temp_id')
-        conflict_action = data.get('conflict_action', 'rename')  # overwrite, rename, merge
+        conflict_action = data.get('conflict_action', 'rename')
         custom_name = data.get('custom_name', '')
         
         if not temp_id:
             return jsonify({'status': 'error', 'message': '缺少临时文件ID'}), 400
         
-        # 检查临时文件是否存在
+        # 检查临时文件
         upload_folder = doc_manager.folders.upload_folder if doc_manager.folders else Path('uploads')
         extract_dir = upload_folder / 'temp' / f'preview_{temp_id}'
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
         
         if not extract_dir.exists():
-            return jsonify({'status': 'error', 'message': '临时文件已过期，请重新上传'}), 400
+            return jsonify({'status': 'error', 'message': '临时文件已过期'}), 400
         
         try:
-            # 查找项目配置文件
-            project_config_file = None
+            # 1. 找到项目配置文件
             project_info_file = None
+            for json_file in extract_dir.rglob('project_info.json'):
+                project_info_file = json_file
+                break
             
-            for json_file in extract_dir.rglob('*.json'):
-                if json_file.name == 'project_config.json':
-                    project_config_file = json_file
-                    break
-                elif json_file.name == 'project_info.json':
+            if not project_info_file:
+                # 尝试找 project_config.json
+                for json_file in extract_dir.rglob('project_config.json'):
                     project_info_file = json_file
+                    break
             
-            config_file = project_config_file or project_info_file
-            
-            if not config_file:
+            if not project_info_file:
                 return jsonify({'status': 'error', 'message': '未找到项目配置文件'}), 400
             
-            # 读取项目配置
-            with open(config_file, 'r', encoding='utf-8') as f:
+            # 2. 读取项目配置
+            with open(project_info_file, 'r', encoding='utf-8') as f:
                 project_config = json.load(f)
             
-            project_name = custom_name or project_config.get('name', '')
+            # 3. 确定项目名称（优先使用用户输入的名称）
+            original_name = project_config.get('name', '')
+            project_name = custom_name or original_name
             if not project_name:
                 return jsonify({'status': 'error', 'message': '项目名称不能为空'}), 400
             
-            # 确定项目源目录
-            if project_config_file:
-                project_source_dir = project_config_file.parent
-            elif project_info_file:
-                project_source_dir = project_info_file.parent
-            else:
-                project_source_dir = extract_dir
+            # 4. 确定项目源目录（包含 project_info.json 的目录）
+            project_source_dir = project_info_file.parent
+            logger.info(f"[导入] 源目录: {project_source_dir}")
+            logger.info(f"[导入] 源目录内容: {list(project_source_dir.iterdir())}")
             
-            # 检查是否已存在同名项目
+            # 5. 检查同名项目
             existing_project = None
             projects = doc_manager.get_projects_list()
+            logger.info(f"[导入] 检查同名项目: '{project_name}', 平台现有项目数: {len(projects)}")
             for p in projects:
+                logger.info(f"[导入] 比对: 平台'{p.get('name')}' vs 导入'{project_name}' -> 匹配: {p.get('name') == project_name}")
                 if p.get('name') == project_name:
                     existing_project = p
                     break
             
-            # 确定目标项目目录
+            logger.info(f"[导入] 同名项目检查结果: {'找到' if existing_project else '未找到'}, 冲突处理方式: {conflict_action}")
+            
+            # 6. 处理重命名
+            if existing_project and conflict_action == 'rename' and not custom_name:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                project_name = f"{project_name}_{timestamp}"
+            
+            # 7. 确定项目ID和目标目录
             projects_base = doc_manager.config.projects_base_folder
             
-            def find_project_dir(proj_id, proj_name):
-                """查找现有项目目录"""
-                possible_paths = [
-                    projects_base / proj_id,
-                    projects_base / proj_name,
-                    projects_base / f"{proj_name}_{proj_id}",
-                ]
-                for path in possible_paths:
-                    if path.exists() and path.is_dir():
-                        return path
-                return projects_base / proj_id
+            # 获取备份中的原始项目ID
+            original_project_id = project_config.get('id', '')
             
             if existing_project and conflict_action == 'overwrite':
-                # 覆盖模式：删除现有项目，使用项目名称作为目录名
+                # 覆盖模式：使用现有项目ID，删除旧目录
                 project_id = existing_project['id']
-                existing_name = existing_project.get('name', '')
-                # 优先使用项目名称作为目录名
-                target_project_dir = projects_base / existing_name
-                # 如果项目名称目录不存在，尝试查找现有目录
-                if not target_project_dir.exists():
-                    target_project_dir = find_project_dir(project_id, existing_name)
+                target_project_dir = projects_base / project_name
                 if target_project_dir.exists():
                     shutil.rmtree(str(target_project_dir))
+                    logger.info(f"[导入] 覆盖模式-删除旧目录: {target_project_dir}")
             elif existing_project and conflict_action == 'merge':
-                # 合并模式：保留现有项目ID，但使用项目名称作为目录名（与DataManager一致）
+                # 合并模式：使用现有项目ID和目录
                 project_id = existing_project['id']
-                existing_name = existing_project.get('name', '')
-                # 优先使用项目名称作为目录名，确保与DataManager一致
-                target_project_dir = projects_base / existing_name
-                # 如果项目名称目录不存在，尝试查找现有目录
-                if not target_project_dir.exists():
-                    target_project_dir = find_project_dir(project_id, existing_name)
+                target_project_dir = projects_base / project_name
+                # 删除旧目录，因为我们要完整替换
+                if target_project_dir.exists():
+                    shutil.rmtree(str(target_project_dir))
+                    logger.info(f"[导入] 合并模式-删除旧目录: {target_project_dir}")
+            elif not existing_project and conflict_action == 'merge':
+                # 没有同名项目但选择了合并：直接复制，使用原始项目ID
+                project_id = original_project_id or f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                target_project_dir = projects_base / project_name
+                logger.info(f"[导入] 无同名项目-直接复制模式，使用原始ID: {project_id}")
             else:
-                # 重命名模式或新项目：创建新项目ID
-                if existing_project and not custom_name:
-                    # 自动生成新名称
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    project_name = f"{project_name}_{timestamp}"
-                
+                # 新建项目（重命名或全新导入）
                 project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 target_project_dir = projects_base / project_name
+                logger.info(f"[导入] 新建项目模式，生成新ID: {project_id}")
             
-            # 更新项目配置
+            logger.info(f"[导入] 目标目录: {target_project_dir}")
+            logger.info(f"[导入] 项目ID: {project_id}, 项目名称: {project_name}")
+            
+            # 8. 复制整个项目目录
+            if target_project_dir.exists():
+                shutil.rmtree(str(target_project_dir))
+            
+            # 使用 copytree 复制整个目录
+            shutil.copytree(str(project_source_dir), str(target_project_dir))
+            logger.info(f"[导入] 目录复制完成: {project_source_dir} -> {target_project_dir}")
+            
+            # 验证关键文件
+            zip_file = target_project_dir / 'zip_uploads.json'
+            doc_index = target_project_dir / 'data' / 'documents_index.json'
+            logger.info(f"[导入] 验证文件 - zip_uploads.json: {zip_file.exists()}, documents_index.json: {doc_index.exists()}")
+            if zip_file.exists():
+                with open(zip_file, 'r') as f:
+                    zip_data = json.load(f)
+                    logger.info(f"[导入] zip_uploads.json 包含 {len(zip_data)} 条记录")
+            
+            # 列出目标目录内容
+            logger.info(f"[导入] 目标目录内容: {[p.name for p in target_project_dir.iterdir()]}")
+            data_dir = target_project_dir / 'data'
+            if data_dir.exists():
+                logger.info(f"[导入] data目录内容: {[p.name for p in data_dir.iterdir()]}")
+            
+            # 9. 更新项目信息文件
             project_config['id'] = project_id
             project_config['name'] = project_name
             project_config['updated_time'] = datetime.now().isoformat()
-            if not project_config.get('created_time'):
-                project_config['created_time'] = datetime.now().isoformat()
             
-            # 执行导入
-            if existing_project and conflict_action == 'merge':
-                # 确保目标目录存在（如果不存在则创建）
-                target_project_dir.mkdir(parents=True, exist_ok=True)
-                logger.info(f"[导入] 确保合并目标目录存在: {target_project_dir}")
-                
-                # 合并数据
-                merge_stats = merge_project_data(
-                    project_source_dir,
-                    target_project_dir,
-                    project_name,
-                    doc_manager
-                )
-                
-                # 更新项目信息
-                update_imported_project_info(target_project_dir, project_config)
-                
-                # 确保项目索引存在
-                ensure_project_index(doc_manager, project_id, project_name, project_config)
-                
-                result = {
-                    'status': 'success',
-                    'message': f'项目数据合并完成',
-                    'project_id': project_id,
-                    'project_name': project_name,
-                    'merged': True,
-                    'merge_stats': merge_stats
-                }
-            else:
-                # 确保父目录存在
-                target_project_dir.parent.mkdir(parents=True, exist_ok=True)
-                logger.info(f"[导入] 确保父目录存在: {target_project_dir.parent}")
-                
-                # 复制项目目录
-                if target_project_dir.exists():
-                    shutil.rmtree(str(target_project_dir))
-                shutil.copytree(str(project_source_dir), str(target_project_dir))
-                logger.info(f"[导入] 项目目录已复制: {target_project_dir}")
-                
-                # 更新项目信息文件
-                update_imported_project_info(target_project_dir, project_config)
-                
-                # 确保项目索引存在
-                ensure_project_index(doc_manager, project_id, project_name, project_config)
-                
-                result = {
-                    'status': 'success',
-                    'message': f'项目"{project_name}"导入成功',
-                    'project_id': project_id,
-                    'project_name': project_name,
-                    'renamed': existing_project is not None and conflict_action != 'overwrite'
-                }
+            # 更新 project_info.json
+            target_info_file = target_project_dir / 'project_info.json'
+            with open(target_info_file, 'w', encoding='utf-8') as f:
+                json.dump(project_config, f, ensure_ascii=False, indent=2)
             
-            # 刷新项目管理的内存缓存（重要：否则新导入的项目在列表中不显示）
+            # 同时更新 project_config.json（如果存在）
+            target_config_file = target_project_dir / 'project_config.json'
+            if target_config_file.exists():
+                with open(target_config_file, 'w', encoding='utf-8') as f:
+                    json.dump(project_config, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"[导入] 项目信息已更新")
+            
+            # 10. 添加到项目索引
+            ensure_project_index(doc_manager, project_id, project_name, project_config)
+            
+            # 11. 刷新索引缓存
             if hasattr(doc_manager, 'projects') and doc_manager.projects:
                 doc_manager.projects._load_projects_index()
-                logger.info(f"[导入] 已刷新项目索引，项目ID: {project_id}")
             
-            # 验证索引文件是否创建成功
-            index_file = doc_manager.config.projects_base_folder / 'projects_index.json'
-            if index_file.exists():
-                logger.info(f"[导入] 索引文件已创建: {index_file}")
-            else:
-                logger.warning(f"[导入] 索引文件未创建: {index_file}")
+            logger.info(f"[导入] 项目导入成功: {project_name}")
             
-            return jsonify(result)
+            return jsonify({
+                'status': 'success',
+                'message': f'项目"{project_name}"导入成功',
+                'project_id': project_id,
+                'project_name': project_name,
+                'renamed': existing_project is not None and conflict_action == 'rename'
+            })
             
         finally:
             # 清理临时文件
