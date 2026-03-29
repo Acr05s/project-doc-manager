@@ -338,3 +338,9 @@ def download_task_package(task_id):
         )
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@task_bp.route('/api/tasks/test', methods=['GET'])
+def test_task_bp():
+    """测试任务蓝图是否正常工作"""
+    return jsonify({'status': 'success', 'message': 'Task blueprint is working'})
