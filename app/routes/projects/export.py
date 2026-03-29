@@ -1223,6 +1223,10 @@ def import_from_preview():
             
             # 执行导入
             if existing_project and conflict_action == 'merge':
+                # 确保目标目录存在（如果不存在则创建）
+                target_project_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"[导入] 确保合并目标目录存在: {target_project_dir}")
+                
                 # 合并数据
                 merge_stats = merge_project_data(
                     project_source_dir,
@@ -1246,10 +1250,15 @@ def import_from_preview():
                     'merge_stats': merge_stats
                 }
             else:
+                # 确保父目录存在
+                target_project_dir.parent.mkdir(parents=True, exist_ok=True)
+                logger.info(f"[导入] 确保父目录存在: {target_project_dir.parent}")
+                
                 # 复制项目目录
                 if target_project_dir.exists():
                     shutil.rmtree(str(target_project_dir))
                 shutil.copytree(str(project_source_dir), str(target_project_dir))
+                logger.info(f"[导入] 项目目录已复制: {target_project_dir}")
                 
                 # 更新项目信息文件
                 update_imported_project_info(target_project_dir, project_config)
