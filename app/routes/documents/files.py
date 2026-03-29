@@ -56,6 +56,8 @@ def get_directories():
         if not project_name:
             return jsonify({'status': 'success', 'directories': []})
         
+        print(f"[get_directories] 项目ID: {project_id}, 项目名称: {project_name}", flush=True)
+        
         # 项目上传目录
         project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
         
@@ -63,6 +65,7 @@ def get_directories():
         
         # 只从 zip_uploads.json 读取记录
         zip_uploads_file = doc_manager.config.projects_base_folder / project_name / 'zip_uploads.json'
+        print(f"[get_directories] ZIP记录文件: {zip_uploads_file}, 存在: {zip_uploads_file.exists()}", flush=True)
         if zip_uploads_file.exists():
             import json
             try:

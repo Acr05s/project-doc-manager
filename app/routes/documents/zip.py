@@ -69,10 +69,17 @@ def get_zip_records():
         # 获取项目文件路径（新位置）
         project_folder = doc_manager.config.projects_base_folder / project_name
         project_file = project_folder / 'project_config.json'
+        zip_uploads_file = project_folder / 'zip_uploads.json'
+        
+        print(f"[get_zip_records] 项目ID: {project_id}, 项目名称: {project_name}", flush=True)
+        print(f"[get_zip_records] 项目文件夹: {project_folder}, 存在: {project_folder.exists()}", flush=True)
+        print(f"[get_zip_records] ZIP记录文件: {zip_uploads_file}, 存在: {zip_uploads_file.exists()}", flush=True)
         
         # 使用JSON文件管理器获取ZIP上传记录
         from app.utils.json_file_manager import json_file_manager
         records = json_file_manager.get_zip_upload_records(str(project_file))
+        
+        print(f"[get_zip_records] 读取到 {len(records)} 条记录", flush=True)
         
         # 格式化记录，兼容旧数据格式
         formatted_records = []
