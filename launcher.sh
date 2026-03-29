@@ -54,6 +54,8 @@ show_help() {
     echo "Examples:"
     echo "  ./launcher.sh start           # Start server"
     echo "  ./launcher.sh start -p 8080   # Start on port 8080"
+    echo "  ./launcher.sh install         # Install dependencies"
+    echo "  ./launcher.sh install --mirror  # Install using Tsinghua mirror (China)"
     echo "  ./launcher.sh logs            # View logs in real-time"
     echo ""
 }
@@ -97,15 +99,24 @@ cmd_install() {
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
+    # 检查是否使用国内镜�?
+    local USE_MIRROR="${1:-}"
+    local PIP_ARGS=""
+    
+    if [ "$USE_MIRROR" = "--mirror" ] || [ "$USE_MIRROR" = "-m" ]; then
+        echo -e "${YELLOW}Using Tsinghua Mirror (China)...${NC}"
+        PIP_ARGS="-i https://pypi.tuna.tsinghua.edu.cn/simple"
+    fi
+    
     check_python
     setup_venv
     
     echo -e "${YELLOW}Upgrading pip...${NC}"
-    "$PIP_BIN" install --upgrade pip -q
+    "$PIP_BIN" install --upgrade pip -q $PIP_ARGS
     
     echo -e "${YELLOW}Installing requirements...${NC}"
     if [ -f "$APP_DIR/requirements.txt" ]; then
-        "$PIP_BIN" install -r "$APP_DIR/requirements.txt"
+        "$PIP_BIN" install -r "$APP_DIR/requirements.txt" $PIP_ARGS
         echo -e "${GREEN}[OK] Dependencies installed successfully!${NC}"
     else
         echo -e "${RED}[ERROR] requirements.txt not found!${NC}"
@@ -117,7 +128,7 @@ cmd_install() {
     echo -e "${GREEN}[OK] Directories initialized${NC}"
 }
 
-# 检查服务器状�?
+# 检查服务器状�?
 check_status() {
     if [ -f "$PID_FILE" ]; then
         PID=$(cat "$PID_FILE")
@@ -136,14 +147,14 @@ check_status() {
     fi
 }
 
-# 启动服务�?
+# 启动服务�?
 cmd_start() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  $APP_NAME v$VERSION${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
-    # 检查是否已在运�?
+    # 检查是否已在运�?
     if [ -f "$PID_FILE" ]; then
         PID=$(cat "$PID_FILE")
         if ps -p "$PID" > /dev/null 2>&1; then
@@ -155,7 +166,7 @@ cmd_start() {
     
     check_python
     
-    # 检查虚拟环�?
+    # 检查虚拟环�?
     if [ ! -d "$VENV_DIR" ]; then
         echo -e "${YELLOW}Virtual environment not found, creating...${NC}"
         cmd_install
@@ -172,12 +183,12 @@ cmd_start() {
     echo -e "${BLUE}    Log: $LOG_DIR/server.log${NC}"
     echo ""
     
-    # 设置环境变量并启�?
+    # 设置环境变量并启�?
     export PYTHONIOENCODING=utf-8
     export FLASK_ENV=production
     export PYTHONUTF8=1
     
-    # 后台启动服务�?
+    # 后台启动服务�?
     nohup "$PYTHON_BIN" "$APP_DIR/main.py" \
         --mode=prod \
         --port="$PORT" \
@@ -187,7 +198,7 @@ cmd_start() {
     SERVER_PID=$!
     echo $SERVER_PID > "$PID_FILE"
     
-    # 等待服务器启�?
+    # 等待服务器启�?
     echo -n "Waiting for server to start"
     for i in {1..10}; do
         sleep 1
@@ -199,7 +210,7 @@ cmd_start() {
             echo -e "${BLUE}  Access: http://localhost:$PORT${NC}"
             echo -e "${BLUE}========================================${NC}"
             
-            # 尝试自动打开浏览器（桌面环境�?
+            # 尝试自动打开浏览器（桌面环境�?
             if command -v xdg-open &> /dev/null; then
                 xdg-open "http://localhost:$PORT" 2>/dev/null || true
             elif command -v open &> /dev/null; then
@@ -215,7 +226,7 @@ cmd_start() {
     return 0
 }
 
-# 停止服务�?
+# 停止服务�?
 cmd_stop() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  Stopping Server${NC}"
@@ -260,7 +271,7 @@ cmd_stop() {
     fi
 }
 
-# 重启服务�?
+# 重启服务�?
 cmd_restart() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  Restarting Server${NC}"
@@ -299,7 +310,7 @@ cmd_log() {
     fi
 }
 
-# 检查升�?
+# 检查升�?
 cmd_upgrade() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  Checking for Updates${NC}"
@@ -337,7 +348,7 @@ cmd_enable_service() {
     SERVICE_NAME="doc-manager"
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
     
-    # 获取当前用户名（用于服务运行�?
+    # 获取当前用户名（用于服务运行�?
     CURRENT_USER=${SUDO_USER:-$USER}
     CURRENT_GROUP=$(id -gn "$CURRENT_USER")
     
@@ -392,7 +403,7 @@ EOF
     
     sleep 2
     
-    # 检查服务状�?
+    # 检查服务状�?
     if systemctl is-active --quiet "$SERVICE_NAME"; then
         echo ""
         echo -e "${GREEN}[OK] Service installed and started successfully!${NC}"
@@ -435,7 +446,7 @@ cmd_disable_service() {
     SERVICE_NAME="doc-manager"
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
     
-    # 检查服务是否存�?
+    # 检查服务是否存�?
     if [ ! -f "$SERVICE_FILE" ]; then
         echo -e "${YELLOW}[WARN] Service not found: $SERVICE_NAME${NC}"
         exit 0
@@ -458,7 +469,7 @@ cmd_disable_service() {
     echo -e "${YELLOW}The service will no longer auto-start on boot.${NC}"
 }
 
-# 查看服务状�?
+# 查看服务状�?
 cmd_service_status() {
     SERVICE_NAME="doc-manager"
     
@@ -467,7 +478,7 @@ cmd_service_status() {
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
-    # 检查服务是否存�?
+    # 检查服务是否存�?
     if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
         systemctl status "$SERVICE_NAME" --no-pager
     else
@@ -476,7 +487,7 @@ cmd_service_status() {
         echo "To install as system service:"
         echo "  sudo ./launcher.sh enable"
         echo ""
-        # 显示手动运行状�?
+        # 显示手动运行状�?
         check_status
     fi
 }
@@ -509,7 +520,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 切换到应用目�?
+# 切换到应用目�?
 cd "$APP_DIR"
 
 # 执行命令
@@ -518,7 +529,7 @@ case $COMMAND in
         cmd_start
         ;;
     install)
-        cmd_install
+        cmd_install "$2"
         ;;
     restart)
         cmd_restart
