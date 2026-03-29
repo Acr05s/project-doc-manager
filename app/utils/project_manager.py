@@ -266,7 +266,8 @@ class ProjectManager:
                 return None
             
             project_name = project_info['name'] if project_info and 'name' in project_info else project_id
-            logger.info(f"[DEBUG] 项目名称: {project_name}")
+            logger.info(f"[DEBUG] 项目名称: {project_name}, 项目ID: {project_id}")
+            logger.info(f"[DEBUG] project_info 内容: {project_info}")
             
             # 使用新的数据管理器加载完整配置
             logger.info(f"[DEBUG] 调用 load_full_config: project_name={project_name}")

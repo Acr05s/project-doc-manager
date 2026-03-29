@@ -428,10 +428,30 @@ class ProjectDataManager:
             # 如果没有任何配置文件，返回 None 以触发旧格式加载
             if not (project_info_path.exists() or requirements_path.exists()):
                 logger.info(f"[DEBUG] 未找到项目 {project_name} 的配置文件")
+                # 列出目录内容帮助调试
+                project_folder = self._get_project_folder(project_name)
+                if project_folder.exists():
+                    logger.info(f"[DEBUG] 目录存在但配置文件不存在: {project_folder}")
+                    try:
+                        contents = list(project_folder.iterdir())
+                        logger.info(f"[DEBUG] 目录内容: {[p.name for p in contents]}")
+                    except Exception as e:
+                        logger.info(f"[DEBUG] 列出目录内容失败: {e}")
+                else:
+                    logger.info(f"[DEBUG] 项目目录不存在: {project_folder}")
                 return None
             
             # 加载项目基本信息
-            config = self.load_project_info(project_name) or {}
+            config = self.load_project_info(project_name)
+            logger.info(f"[DEBUG] load_project_info 返回: {config is not None}")
+            if config is None:
+                logger.info(f"[DEBUG] load_project_info 返回 None，尝试读取文件内容")
+                try:
+                    with open(project_info_path, 'r', encoding='utf-8') as f:
+                        logger.info(f"[DEBUG] 文件内容预览: {f.read()[:200]}")
+                except Exception as e:
+                    logger.info(f"[DEBUG] 读取文件失败: {e}")
+            config = config or {}
             
             # 加载需求配置
             requirements = self.load_requirements(project_name)
