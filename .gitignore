@@ -35,9 +35,10 @@ env/
 .workbuddy/
 
 # Project Data (user generated)
-projects/
-uploads/
-logs/
+# 只忽略根目录的项目数据，不忽略 app/routes/projects 代码目录
+/projects/
+/uploads/
+/logs/
 *.log
 
 # Build outputs
