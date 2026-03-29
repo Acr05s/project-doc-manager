@@ -42,6 +42,9 @@ cd project-doc-manager
 chmod +x launcher.sh
 ./launcher.sh install
 
+# 国内用户推荐使用清华镜像加速
+./launcher.sh install --mirror
+
 # 3. 启动服务
 ./launcher.sh start
 
@@ -191,6 +194,8 @@ venv\Scripts\python main.py
 ### Linux/Mac (launcher.sh)
 
 ```bash
+./launcher.sh install     # 安装依赖
+./launcher.sh install --mirror  # 使用清华镜像安装（国内推荐）
 ./launcher.sh start       # 启动服务
 ./launcher.sh stop        # 停止服务
 ./launcher.sh restart     # 重启服务
