@@ -99,7 +99,7 @@ cmd_install() {
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
-    # 检查是否使用国内镜�?
+    # 检查是否使用国内镜�?
     local USE_MIRROR="${1:-}"
     local PIP_ARGS=""
     
@@ -494,10 +494,15 @@ cmd_service_status() {
 
 # 解析参数
 COMMAND="start"
+MIRROR_FLAG=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         start|install|restart|stop|status|logs|log|upgrade|enable|disable|service|help)
             COMMAND="$1"
+            shift
+            ;;
+        --mirror|-m)
+            MIRROR_FLAG="--mirror"
             shift
             ;;
         -p|--port)
@@ -529,7 +534,7 @@ case $COMMAND in
         cmd_start
         ;;
     install)
-        cmd_install "$2"
+        cmd_install "$MIRROR_FLAG"
         ;;
     restart)
         cmd_restart
