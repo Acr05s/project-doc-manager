@@ -7,7 +7,7 @@
     python test_duplicate_cleanup.py <项目名称>
     
 示例:
-    python test_duplicate_cleanup.py 智慧党建
+    python test_duplicate_cleanup.py 示例项目
 """
 
 import json

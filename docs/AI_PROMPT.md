@@ -14,7 +14,7 @@
 **数据存储**: JSON文件系统（无需数据库）
 
 ### 核心功能
-1. 项目全生命周期文档管理（从立项到验收的11个阶段）
+1. 项目全生命周期文档管理（多个阶段）
 2. ZIP批量导入文档并智能匹配到对应文档类型
 3. 自动签字检测（OpenCV边缘检测算法）
 4. 自动盖章识别（颜色分析算法）
@@ -504,7 +504,7 @@ document_bp.route('/cleanup-duplicates', methods=['POST'])(cleanup.cleanup_dupli
   "updated_time": "2026-03-29T13:36:20.999911",
   "project_20260327133326": {
     "id": "project_20260327133326",
-    "name": "智慧党建",
+    "name": "示例项目",
     "description": "",
     "created_time": "2026-03-27T13:33:26.990228",
     "updated_time": "2026-03-29T13:21:20.904930",
@@ -517,15 +517,15 @@ document_bp.route('/cleanup-duplicates', methods=['POST'])(cleanup.cleanup_dupli
 ```json
 {
   "id": "project_20260327133326",
-  "name": "智慧党建",
-  "cycles": ["项目立项", "项目组织及管理", "项目准备", "项目开工", "项目启动", "方案设计", "系统开发测试", "上线试用", "验收", "运维", "其他"],
+  "name": "示例项目",
+  "cycles": ["阶段一", "阶段二", "阶段三", "阶段四", "阶段五"],
   "documents": {
-    "项目立项": {
+    "阶段一": {
       "required_docs": [
         {
-          "name": "项目立项申请书",
-          "requirement": "甲方签字 乙方签字",
-          "attributes": ["甲方签字", "乙方签字"]
+          "name": "示例文档",
+          "requirement": "签字要求",
+          "attributes": ["签字人一", "签字人二"]
         }
       ],
       "uploaded_docs": []
@@ -539,14 +539,14 @@ document_bp.route('/cleanup-duplicates', methods=['POST'])(cleanup.cleanup_dupli
 ```json
 {
   "documents": {
-    "项目立项_项目立项申请书_20260327_133733_0": {
-      "doc_id": "项目立项_项目立项申请书_20260327_133733_0",
-      "doc_name": "项目立项申请书",
+    "阶段一_示例文档_20260327_133733_0": {
+      "doc_id": "阶段一_示例文档_20260327_133733_0",
+      "doc_name": "示例文档",
       "filename": "xxx.docx",
       "original_filename": "原始文件名.docx",
       "file_path": "projects/xxx/uploads/xxx.docx",
-      "project_name": "智慧党建",
-      "cycle": "项目立项",
+      "project_name": "示例项目",
+      "cycle": "阶段一",
       "upload_time": "2026-03-27T13:37:33.230431",
       "file_size": 82801,
       "has_signature": true,

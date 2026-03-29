@@ -10,7 +10,7 @@ import {
     selectProject, populateProjectManageSelects, handleAddCycle, 
     handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, 
     populateDocSelect, handleConfirmAcceptance, handleDownloadPackage, 
-    handleDeleteProject, resetImportPackageModal, loadZipRecords, handleRematchFromZip, handleDeleteZipRecord,
+    handleRematchFileManagement, resetImportPackageModal, loadZipRecords, handleRematchFromZip, handleDeleteZipRecord,
     handlePackageFileSelect, handlePackageFileSelectInModal, handleImportPackageInModal
 } from './project.js';
 
@@ -820,7 +820,7 @@ export function setupEventListeners() {
             const docManageDropdown = document.getElementById('documentManagementDropdown');
             if (docManageDropdown) docManageDropdown.classList.remove('show');
             if (appState.currentProjectId) {
-                handleDeleteProject();
+                handleRematchFileManagement();
             } else {
                 showNotification('请先选择一个项目', 'warning');
             }

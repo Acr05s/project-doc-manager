@@ -197,7 +197,7 @@ project_doc_manager/
   "updated_time": "2026-03-29T13:36:20.999911",
   "project_20260327133326": {
     "id": "project_20260327133326",
-    "name": "智慧党建",
+    "name": "示例项目",
     "description": "",
     "created_time": "2026-03-27T13:33:26.990228",
     "updated_time": "2026-03-29T13:21:20.904930",
@@ -214,34 +214,34 @@ project_doc_manager/
 ```json
 {
   "id": "project_20260327133326",
-  "name": "智慧党建",
+  "name": "示例项目",
   "description": "",
   "party_a": "甲方单位",
   "party_b": "乙方单位",
   "supervisor": "监理单位",
   "manager": "管理单位",
-  "duration": "2024-01-01 至 2024-12-31",
+  "duration": "YYYY-MM-DD 至 YYYY-MM-DD",
   "created_time": "2026-03-27T13:33:26.990228",
   "updated_time": "2026-03-29T13:21:20.904930",
-  "cycles": ["项目立项", "项目组织及管理", "项目准备", "项目开工", "项目启动", "方案设计", "系统开发测试", "上线试用", "验收", "运维", "其他"],
+  "cycles": ["阶段一", "阶段二", "阶段三", "阶段四", "阶段五"],
   "documents": {
-    "项目立项": {
+    "阶段一": {
       "required_docs": [
         {
-          "name": "项目立项申请书",
-          "requirement": "甲方签字 乙方签字",
-          "attributes": ["甲方签字", "乙方签字"]
+          "name": "示例文档",
+          "requirement": "签字要求示例",
+          "attributes": ["签字人一", "签字人二"]
         }
       ],
       "uploaded_docs": [
         {
           "doc_id": "项目立项_项目立项申请书_20260327_133733_0",
-          "doc_name": "项目立项申请书",
+          "doc_name": "示例文档",
           "filename": "xxx.docx",
           "original_filename": "原始文件名.docx",
-          "file_path": "projects/智慧党建/uploads/xxx.docx",
-          "project_name": "智慧党建",
-          "cycle": "项目立项",
+          "file_path": "projects/示例项目/uploads/xxx.docx",
+          "project_name": "示例项目",
+          "cycle": "阶段一",
           "upload_time": "2026-03-27T13:37:33.230431",
           "file_size": 82801,
           "has_signature": true,
@@ -254,8 +254,8 @@ project_doc_manager/
     }
   },
   "documents_archived": {
-    "项目立项": {
-      "项目立项申请书": true
+    "阶段一": {
+      "示例文档": true
     }
   }
 }
@@ -267,12 +267,12 @@ project_doc_manager/
 {
   "documents": {
     "项目立项_项目立项申请书_20260327_133733_0": {
-      "doc_id": "项目立项_项目立项申请书_20260327_133733_0",
-      "doc_name": "项目立项申请书",
-      "filename": "DT-DJ-2023-01-001-V1.0 xxx.docx",
-      "original_filename": "DT-DJ-2023-01-001-V1.0 xxx.docx",
-      "file_path": "projects/智慧党建/uploads/xxx/xxx.docx",
-      "project_name": "智慧党建",
+      "doc_id": "阶段一_示例文档_20260327_133733_0",
+      "doc_name": "示例文档",
+      "filename": "示例文件.docx",
+      "original_filename": "示例文件.docx",
+      "file_path": "projects/示例项目/uploads/xxx/xxx.docx",
+      "project_name": "示例项目",
       "cycle": "项目立项",
       "upload_time": "2026-03-27T13:37:33.230431",
       "source": "select",

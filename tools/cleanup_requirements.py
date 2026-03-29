@@ -7,7 +7,7 @@
     python cleanup_requirements.py <项目名称>
     
 示例:
-    python cleanup_requirements.py 智慧党建
+    python cleanup_requirements.py 示例项目
 """
 
 import json
@@ -60,7 +60,7 @@ def main():
     if len(sys.argv) < 2:
         print("用法: python cleanup_requirements.py <项目名称>")
         print("示例:")
-        print("  python cleanup_requirements.py 智慧党建")
+        print("  python cleanup_requirements.py 示例项目")
         sys.exit(1)
     
     project_name = sys.argv[1]

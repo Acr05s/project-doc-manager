@@ -7,7 +7,7 @@
     python cleanup_duplicates.py <项目ID或项目名称>
     
 示例:
-    python cleanup_duplicates.py 智慧党建
+    python cleanup_duplicates.py 示例项目
     python cleanup_duplicates.py project_20260327133326
 """
 
@@ -143,7 +143,7 @@ def main():
     if len(sys.argv) < 2:
         print("用法: python cleanup_duplicates.py <项目ID或项目名称>")
         print("示例:")
-        print("  python cleanup_duplicates.py 智慧党建")
+        print("  python cleanup_duplicates.py 示例项目")
         print("  python cleanup_duplicates.py project_20260327133326")
         sys.exit(1)
     

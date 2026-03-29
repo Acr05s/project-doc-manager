@@ -1,15 +1,30 @@
-# 虚拟环境
-venv/
-env/
-ENV/
-.venv
-
-# Python缓存
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
 
 # IDE
 .vscode/
@@ -17,45 +32,24 @@ __pycache__/
 *.swp
 *.swo
 *~
-.DS_Store
-
-# 上传文件
-uploads/
-../uploads/
-*.xlsx
-*.xls
-../*.xlsx
-../*.xls
-
-# 日志
-*.log
-logs/
-
-# 环境变量
-.env
-.env.local
-
-# 临时文件
-*.tmp
-temp/
-tmp/
-
-# OS
-Thumbs.db
-.AppleDouble
-
-# 工作区数据
-../.workbuddy/
 .workbuddy/
 
-# 项目根目录文件
-../plugin_development_guide.md
-../需求清单.xlsx
-
-# 项目数据
+# Project Data (user generated)
 projects/
+uploads/
+logs/
+*.log
 
-# 临时文件
-commit_message.txt
+# Build outputs
+installer_output/
+*.spec
+*.zip
 
-# 测试目录
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.cache

@@ -1097,7 +1097,7 @@ def generate_sequential_filename(original_name, seq_num):
     """
     生成顺序编号的文件名
     规则：去掉源文件名第一个中文字符前的所有字符，加上序号
-    例："DT-DJ-2023-03-002-V1.0 中国大唐集团..." -> "001_中国大唐集团..."
+    例："XXX-2023-03-002-V1.0 项目名称..." -> "001_项目名称..."
     """
     import re
     from pathlib import Path

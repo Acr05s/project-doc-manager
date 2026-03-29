@@ -72,7 +72,7 @@ function formatPathDisplay(path) {
     const filteredParts = parts.filter(part => {
         // 如果部分包含看起来像随机ID的子串（10位以上字母数字混合），则跳过
         if (/[a-z0-9]{10,}/i.test(part) && !/^[^a-z0-9]*$/.test(part)) {
-            // 但如果这部分全是中文（如"大唐智慧党建平台项目验收文档3.20"），则保留
+            // 但如果这部分全是中文，则保留
             if (/^[\u4e00-\u9fa5\d\.]+$/.test(part.replace(/[a-z0-9]{10,}/gi, ''))) {
                 return true;
             }

@@ -2179,7 +2179,7 @@ window.handleDownloadPackage = handleDownloadPackage;
 /**
  * 处理重新匹配文件管理
  */
-export async function handleDeleteProject() {
+export async function handleRematchFileManagement() {
     if (!appState.currentProjectId) {
         showNotification('请先选择项目', 'error');
         return;
@@ -3285,7 +3285,7 @@ async function loadProjectSelectList() {
             let actionsHtml = `
                 <div class="project-actions-btns">
                     <button class="btn btn-primary btn-sm" onclick="handleOpenProject('${project.id}')">打开</button>
-                    <button class="btn btn-danger btn-sm" onclick="handlePermanentDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>
+                    <button class="btn btn-warning btn-sm" onclick="handleSoftDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>
             `;
             
             // 如果项目正在打包中，添加清除打包状态按钮
