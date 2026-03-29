@@ -1324,6 +1324,7 @@ def ensure_project_index(doc_manager, project_id, project_name, project_config):
         import json
         
         index_file = doc_manager.config.projects_base_folder / 'projects_index.json'
+        logger.info(f"[索引] 更新项目索引: {index_file}")
         
         # 确保目录存在
         index_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1335,10 +1336,14 @@ def ensure_project_index(doc_manager, project_id, project_name, project_config):
         if index_file.exists():
             with open(index_file, 'r', encoding='utf-8') as f:
                 index_data = json.load(f)
+            logger.info(f"[索引] 读取现有索引，包含 {len([k for k in index_data.keys() if k not in ['deleted_projects', 'updated_time']])} 个项目")
+        else:
+            logger.info(f"[索引] 索引文件不存在，创建新索引")
         
         # 移除旧的同ID项目（如果有）
         if project_id in index_data and project_id != 'deleted_projects' and project_id != 'updated_time':
             del index_data[project_id]
+            logger.info(f"[索引] 移除旧项目条目: {project_id}")
         
         # 添加/更新项目条目（以项目ID为键）
         index_data[project_id] = {
@@ -1348,14 +1353,19 @@ def ensure_project_index(doc_manager, project_id, project_name, project_config):
             'created_time': project_config.get('created_time', ''),
             'updated_time': project_config.get('updated_time', '')
         }
+        logger.info(f"[索引] 添加项目条目: {project_id} -> {project_name}")
         
-        # 确保有 deleted_projects 和 updated_time 字段
+        # 确保有 deleted_projects  and updated_time 字段
         if 'deleted_projects' not in index_data:
             index_data['deleted_projects'] = {}
         index_data['updated_time'] = datetime.now().isoformat()
         
         with open(index_file, 'w', encoding='utf-8') as f:
             json.dump(index_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"[索引] 索引文件已更新: {index_file}")
             
     except Exception as e:
-        logger.error(f"更新项目索引失败: {e}")
+        logger.error(f"[索引] 更新项目索引失败: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
