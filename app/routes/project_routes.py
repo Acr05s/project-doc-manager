@@ -179,10 +179,19 @@ def list_requirements_configs():
 def delete_project(project_id):
     """删除项目（软删除）"""
     try:
+        logger.info(f"[DEBUG] 删除项目请求: project_id='{project_id}'")
         permanent = request.args.get('permanent', 'false').lower() == 'true'
+        logger.info(f"[DEBUG] permanent={permanent}")
+        
+        # 检查项目列表
+        projects = doc_manager.get_projects_list()
+        logger.info(f"[DEBUG] 当前项目列表: {[p.get('id') for p in projects]}")
+        
         result = doc_manager.delete_project(project_id, permanent)
+        logger.info(f"[DEBUG] 删除结果: {result}")
         return jsonify(result)
     except Exception as e:
+        logger.error(f"[DEBUG] 删除项目异常: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @project_bp.route('/deleted/list', methods=['GET'])
