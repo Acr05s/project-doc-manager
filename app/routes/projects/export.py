@@ -1187,42 +1187,54 @@ def import_from_preview():
             # 获取备份中的原始项目ID
             original_project_id = project_config.get('id', '')
             
+            # 7. 确定项目ID和目标目录
+            target_project_dir = projects_base / project_name
+            
             if existing_project and conflict_action == 'overwrite':
-                # 覆盖模式：使用现有项目ID，删除旧目录
+                # 覆盖模式：使用现有项目ID，删除旧目录后复制
                 project_id = existing_project['id']
-                target_project_dir = projects_base / project_name
                 if target_project_dir.exists():
                     shutil.rmtree(str(target_project_dir))
                     logger.info(f"[导入] 覆盖模式-删除旧目录: {target_project_dir}")
+                # 复制整个目录
+                shutil.copytree(str(project_source_dir), str(target_project_dir))
+                logger.info(f"[导入] 覆盖模式-复制完成")
+                
             elif existing_project and conflict_action == 'merge':
-                # 合并模式：使用现有项目ID和目录
+                # 合并模式：使用现有项目ID，合并数据
                 project_id = existing_project['id']
-                target_project_dir = projects_base / project_name
-                # 删除旧目录，因为我们要完整替换
-                if target_project_dir.exists():
-                    shutil.rmtree(str(target_project_dir))
-                    logger.info(f"[导入] 合并模式-删除旧目录: {target_project_dir}")
+                logger.info(f"[导入] 合并模式-开始合并数据到: {target_project_dir}")
+                
+                # 确保目标目录存在
+                target_project_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 调用合并函数
+                merge_stats = merge_project_data(
+                    project_source_dir,
+                    target_project_dir,
+                    project_name,
+                    doc_manager
+                )
+                logger.info(f"[导入] 合并模式-合并完成: {merge_stats}")
+                
             elif not existing_project and conflict_action == 'merge':
                 # 没有同名项目但选择了合并：直接复制，使用原始项目ID
                 project_id = original_project_id or f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-                target_project_dir = projects_base / project_name
                 logger.info(f"[导入] 无同名项目-直接复制模式，使用原始ID: {project_id}")
+                # 复制整个目录
+                shutil.copytree(str(project_source_dir), str(target_project_dir))
+                logger.info(f"[导入] 复制完成")
+                
             else:
                 # 新建项目（重命名或全新导入）
                 project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-                target_project_dir = projects_base / project_name
                 logger.info(f"[导入] 新建项目模式，生成新ID: {project_id}")
+                # 复制整个目录
+                shutil.copytree(str(project_source_dir), str(target_project_dir))
+                logger.info(f"[导入] 复制完成")
             
             logger.info(f"[导入] 目标目录: {target_project_dir}")
             logger.info(f"[导入] 项目ID: {project_id}, 项目名称: {project_name}")
-            
-            # 8. 复制整个项目目录
-            if target_project_dir.exists():
-                shutil.rmtree(str(target_project_dir))
-            
-            # 使用 copytree 复制整个目录
-            shutil.copytree(str(project_source_dir), str(target_project_dir))
-            logger.info(f"[导入] 目录复制完成: {project_source_dir} -> {target_project_dir}")
             
             # 验证关键文件
             zip_file = target_project_dir / 'zip_uploads.json'
@@ -1266,13 +1278,23 @@ def import_from_preview():
             
             logger.info(f"[导入] 项目导入成功: {project_name}")
             
-            return jsonify({
+            # 构建返回结果
+            result = {
                 'status': 'success',
                 'message': f'项目"{project_name}"导入成功',
                 'project_id': project_id,
                 'project_name': project_name,
                 'renamed': existing_project is not None and conflict_action == 'rename'
-            })
+            }
+            
+            # 如果是合并模式，添加合并统计
+            if conflict_action == 'merge' and existing_project:
+                result['message'] = f'项目数据合并完成'
+                result['merged'] = True
+                if 'merge_stats' in locals():
+                    result['merge_stats'] = merge_stats
+            
+            return jsonify(result)
             
         finally:
             # 清理临时文件
