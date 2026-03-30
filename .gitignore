@@ -42,6 +42,7 @@ env/
 *.log
 
 # Build outputs
+installer/
 installer_output/
 *.spec
 *.zip
