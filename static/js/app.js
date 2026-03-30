@@ -1,5 +1,7 @@
 /**
  * 项目文档管理中心 - 主应用脚本
+ * Version: 2.1.1
+ * Last updated: 2026-03-30
  */
 
 // 全局状态
@@ -833,16 +835,19 @@ async function selectProject(projectId) {
     }
     
     try {
+        showLoading(true);
         const response = await fetch(`/api/projects/${projectId}`);
         const result = await response.json();
         
         if (result.status === 'success') {
             appState.currentProjectId = projectId;
             appState.projectConfig = result.project;
+            appState.currentCycle = null; // 重置周期选择
             
             // 更新下拉菜单选中状态
-            if (elements.projectSelect) {
-                elements.projectSelect.value = projectId;
+            const projectSelectEl = document.getElementById('projectSelect');
+            if (projectSelectEl) {
+                projectSelectEl.value = projectId;
             }
             
             // 更新URL参数
@@ -850,14 +855,39 @@ async function selectProject(projectId) {
             url.searchParams.set('project', projectId);
             window.history.replaceState({}, '', url);
             
-            // 渲染周期
+            // 恢复周期导航栏显示
+            const cycleNavBar = document.getElementById('cycleNavBar');
+            if (cycleNavBar) cycleNavBar.style.display = '';
+            
+            // 渲染周期（同步操作）
             renderCycles();
+            
+            // 渲染初始内容
+            renderInitialContent();
+            
+            // 等待DOM更新完成
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // 确保周期导航渲染完成
+            const cycleNavListEl = document.getElementById('cycleNavList');
+            if (cycleNavListEl) {
+                console.log('周期导航元素存在，检查内容:', cycleNavListEl.innerHTML);
+            } else {
+                console.error('周期导航元素不存在');
+            }
+            
+            // 确保内容区域更新
+            const contentAreaEl = document.getElementById('contentArea');
+            if (contentAreaEl) {
+                console.log('内容区域元素存在，检查内容:', contentAreaEl.innerHTML);
+            } else {
+                console.error('内容区域元素不存在');
+            }
             
             // 更新当前项目名显示
             updateCurrentProjectName();
             
             showProjectButtons();
-            showNotification('已加载项目: ' + result.project.name, 'success');
             
             // 检查项目是否有数据
             if (result.project.cycles && result.project.cycles.length > 0) {
@@ -866,12 +896,17 @@ async function selectProject(projectId) {
             if (result.project.documents && Object.keys(result.project.documents).length > 0) {
                 console.log('项目已有文档数据:', result.project.documents);
             }
+            
+            console.log('项目加载完成，周期导航已渲染');
+            showNotification('已加载项目: ' + result.project.name, 'success');
         } else {
             showNotification('加载项目失败: ' + result.message, 'error');
         }
     } catch (error) {
         console.error('选择项目失败:', error);
         showNotification('加载项目失败', 'error');
+    } finally {
+        showLoading(false);
     }
 }
 
@@ -1125,14 +1160,37 @@ async function handleLoadProject(e) {
  * 渲染项目周期列表
  */
 function renderCycles() {
+    console.log('开始渲染周期导航');
+    console.log('appState.projectConfig:', appState.projectConfig);
+    
     if (!appState.projectConfig || !appState.projectConfig.cycles) {
-        elements.cycleNavList.innerHTML = '<span class="placeholder">无可用周期</span>';
+        console.log('项目配置或周期数据不存在');
+        // 确保cycleNavList元素存在
+        const cycleNavListEl = document.getElementById('cycleNavList');
+        if (cycleNavListEl) {
+            console.log('找到cycleNavList元素，设置为空周期状态');
+            cycleNavListEl.innerHTML = '<span class="placeholder">无可用周期</span>';
+        } else {
+            console.error('cycleNavList元素未找到');
+        }
         return;
     }
 
     const cycles = appState.projectConfig.cycles;
     const docsData = appState.projectConfig.documents || {};
+    
+    console.log('周期数据:', cycles);
+    console.log('文档数据:', docsData);
 
+    // 确保cycleNavList元素存在
+    const cycleNavListEl = document.getElementById('cycleNavList');
+    if (!cycleNavListEl) {
+        console.error('cycleNavList元素未找到，无法渲染周期导航');
+        return;
+    }
+    
+    console.log('找到cycleNavList元素，开始加载周期进度');
+    
     // 异步加载每个周期的进度
     loadCycleProgresses(cycles, docsData);
 }
@@ -1205,106 +1263,151 @@ async function refreshCycleProgress() {
  * 加载所有周期的进度
  */
 async function loadCycleProgresses(cycles, docsData) {
+    console.log('开始加载周期进度');
+    console.log('周期列表:', cycles);
+    
     // 并行获取所有周期的状态和进度
     const statusPromises = cycles.map(async (cycle) => {
-        const status = await calculateCycleStatus(cycle);
+        console.log('处理周期:', cycle);
         try {
-            const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}`);
-            const result = await response.json();
-            const progressPercent = result.total_required > 0
-                ? Math.round((result.completed_count / result.total_required) * 100)
-                : 0;
-            return { cycle, status, progress: progressPercent, data: result };
+            const status = await calculateCycleStatus(cycle);
+            console.log('周期', cycle, '状态:', status);
+            
+            try {
+                const response = await fetch(`/api/documents/progress?cycle=${encodeURIComponent(cycle)}`);
+                const result = await response.json();
+                const progressPercent = result.total_required > 0
+                    ? Math.round((result.completed_count / result.total_required) * 100)
+                    : 0;
+                console.log('周期', cycle, '进度:', progressPercent);
+                return { cycle, status, progress: progressPercent, data: result };
+            } catch (e) {
+                console.error(`获取周期 ${cycle} 进度失败:`, e);
+                return { cycle, status, progress: 0, data: null };
+            }
         } catch (e) {
-            console.error(`获取周期 ${cycle} 进度失败:`, e);
-            return { cycle, status, progress: 0, data: null };
+            console.error(`计算周期 ${cycle} 状态失败:`, e);
+            return { cycle, status: 'incomplete', progress: 0, data: null };
         }
     });
 
-    const statusResults = await Promise.all(statusPromises);
-    const statusMap = {};
-    const progressMap = {};
-    statusResults.forEach(r => {
-        statusMap[r.cycle] = r.status;
-        progressMap[r.cycle] = r.progress;
-    });
-
-    // 渲染顶部导航栏：横向排列，用箭头连接
-    // 计算哪些周期后面需要显示虚线箭线
-    const incompleteIndices = [];
-    cycles.forEach((cycle, index) => {
-        const status = statusMap[cycle] || 'incomplete';
-        if (status !== 'complete') {
-            incompleteIndices.push(index);
-        }
-    });
-
-    // 渲染周期和箭线
-    let html = '';
-    cycles.forEach((cycle, index) => {
-        const status = statusMap[cycle] || 'incomplete';
+    try {
+        const statusResults = await Promise.all(statusPromises);
+        console.log('所有周期状态结果:', statusResults);
         
-        // 渲染周期项
+        const statusMap = {};
+        const progressMap = {};
+        statusResults.forEach(r => {
+            statusMap[r.cycle] = r.status;
+            progressMap[r.cycle] = r.progress;
+        });
+
+        // 渲染顶部导航栏：横向排列，用箭头连接
+        // 计算哪些周期后面需要显示虚线箭线
+        const incompleteIndices = [];
+        cycles.forEach((cycle, index) => {
+            const status = statusMap[cycle] || 'incomplete';
+            if (status !== 'complete') {
+                incompleteIndices.push(index);
+            }
+        });
+
+        // 渲染周期和箭线
+        let html = '';
+        cycles.forEach((cycle, index) => {
+            const status = statusMap[cycle] || 'incomplete';
+            
+            // 渲染周期项
+            html += `
+                <div class="cycle-nav-item status-${status}" data-cycle="${cycle}" data-status="${status}">
+                    <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
+                    <span class="cycle-name" style="text-align:center;">${cycle}</span>
+                </div>
+            `;
+            
+            // 运维和其它之间不需要箭线，但需要保持间距
+            if (index < cycles.length - 1) {
+                if ((cycle.includes('运维') || cycle.includes('运营')) && (cycles[index + 1].includes('其它') || cycles[index + 1].includes('其他'))) {
+                    // 运维和其它之间添加占位元素
+                    html += `<span class="cycle-nav-placeholder"></span>`;
+                } else {
+                    // 检查是否需要显示虚线箭线
+                    const isDashed = incompleteIndices.some(incompleteIndex => index >= incompleteIndex);
+                    html += `<span class="cycle-nav-arrow ${isDashed ? 'dashed' : ''}">→</span>`;
+                }
+            }
+        });
+
+        // 添加颜色说明方块作为最后一个周期项（图例，不可点击）
         html += `
-            <div class="cycle-nav-item status-${status}" data-cycle="${cycle}" data-status="${status}">
-                <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
-                <span class="cycle-name" style="text-align:center;">${cycle}</span>
+            <div class="cycle-nav-item status-legend" style="cursor:default;pointer-events:none;">
+                <span class="cycle-index" style="font-size:11px;opacity:0.8;"></span>
+                <div class="status-legend-content">
+                    <div class="status-item">
+                        <span class="status-dot" style="background:#17a2b8;"></span>
+                        <span>完整无误</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-dot" style="background:#ffc107;"></span>
+                        <span>属性待补</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-dot" style="background:#dc3545;"></span>
+                        <span>文件不全</span>
+                    </div>
+                </div>
             </div>
         `;
-        
-        // 运维和其它之间不需要箭线，但需要保持间距
-        if (index < cycles.length - 1) {
-            if ((cycle.includes('运维') || cycle.includes('运营')) && (cycles[index + 1].includes('其它') || cycles[index + 1].includes('其他'))) {
-                // 运维和其它之间添加占位元素
-                html += `<span class="cycle-nav-placeholder"></span>`;
-            } else {
-                // 检查是否需要显示虚线箭线
-                const isDashed = incompleteIndices.some(incompleteIndex => index >= incompleteIndex);
-                html += `<span class="cycle-nav-arrow ${isDashed ? 'dashed' : ''}">→</span>`;
+
+        // 确保cycleNavList元素存在
+        const cycleNavListEl = document.getElementById('cycleNavList');
+        if (cycleNavListEl) {
+            console.log('找到cycleNavList元素，设置HTML内容');
+            cycleNavListEl.innerHTML = html;
+
+            // 添加周期点击事件（排除图例项）
+            console.log('添加周期点击事件');
+            document.querySelectorAll('.cycle-nav-item:not(.status-legend)').forEach(item => {
+                item.addEventListener('click', () => {
+                    console.log('点击周期:', item.dataset.cycle);
+                    selectCycle(item.dataset.cycle);
+                });
+            });
+        } else {
+            console.error('cycleNavList元素未找到，无法渲染周期导航');
+        }
+
+        // 不默认选中任何周期，只显示周期数据
+        const currentCycle = appState.currentCycle;
+        if (currentCycle) {
+            // 确保当前选中周期仍然可见
+            const currentItem = document.querySelector(`.cycle-nav-item[data-cycle="${currentCycle}"]`);
+            if (currentItem) {
+                currentItem.classList.add('active');
             }
         }
-    });
-
-    // 添加颜色说明方块作为最后一个周期项（图例，不可点击）
-    html += `
-        <div class="cycle-nav-item status-legend" style="cursor:default;pointer-events:none;">
-            <span class="cycle-index" style="font-size:11px;opacity:0.8;"></span>
-            <div class="status-legend-content">
-                <div class="status-item">
-                    <span class="status-dot" style="background:#17a2b8;"></span>
-                    <span>完整无误</span>
+        
+        // 清空内容区域，不显示文档
+        const contentAreaEl = document.getElementById('contentArea');
+        if (contentAreaEl) {
+            console.log('更新内容区域');
+            contentAreaEl.innerHTML = `
+                <div class="welcome-message">
+                    <h2>📋 ${appState.projectConfig.name}</h2>
+                    <p>请在上方周期导航中选择一个周期，查看详细文档</p>
                 </div>
-                <div class="status-item">
-                    <span class="status-dot" style="background:#ffc107;"></span>
-                    <span>属性待补</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-dot" style="background:#dc3545;"></span>
-                    <span>文件不全</span>
-                </div>
-            </div>
-        </div>
-    `;
-
-    elements.cycleNavList.innerHTML = html;
-
-    // 添加周期点击事件（排除图例项）
-    document.querySelectorAll('.cycle-nav-item:not(.status-legend)').forEach(item => {
-        item.addEventListener('click', () => {
-            selectCycle(item.dataset.cycle);
-        });
-    });
-
-    // 只有在没有选中任何周期时才默认选中第一个
-    // 这样刷新进度时不会改变当前选中的周期
-    const currentCycle = appState.currentCycle;
-    if (!currentCycle && cycles.length > 0) {
-        selectCycle(cycles[0]);
-    } else if (currentCycle) {
-        // 确保当前选中周期仍然可见
-        const currentItem = document.querySelector(`.cycle-nav-item[data-cycle="${currentCycle}"]`);
-        if (currentItem) {
-            currentItem.classList.add('active');
+            `;
+        } else {
+            console.error('contentArea元素未找到');
+        }
+        
+        console.log('周期导航渲染完成');
+    } catch (error) {
+        console.error('加载周期进度失败:', error);
+        // 显示错误信息
+        const cycleNavListEl = document.getElementById('cycleNavList');
+        if (cycleNavListEl) {
+            cycleNavListEl.innerHTML = '<span class="placeholder">加载周期失败，请刷新页面</span>';
         }
     }
 }
@@ -1331,9 +1434,24 @@ function selectCycle(cycle) {
 function renderInitialContent() {
     if (!appState.projectConfig) return;
 
-    const cycles = appState.projectConfig.cycles;
-    if (cycles.length > 0) {
-        selectCycle(cycles[0]);
+    // 始终显示欢迎信息，让用户手动选择周期
+    if (!appState.currentCycle) {
+        // 如果正在打包，显示备份提示
+        if (appState.isPackaging) {
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>正在备份项目...</h2>
+                    <p>项目数据暂时不可操作</p>
+                </div>
+            `;
+        } else {
+            elements.contentArea.innerHTML = `
+                <div class="welcome-message" style="text-align: center; padding: 100px 20px;">
+                    <h2>欢迎使用文档管理系统</h2>
+                    <p>请从上方选择一个周期开始管理文档</p>
+                </div>
+            `;
+        }
     }
 }
 

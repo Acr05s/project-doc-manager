@@ -1,5 +1,7 @@
 /**
  * 项目模块 - 处理项目相关功能
+ * Version: 2.1.1
+ * Last updated: 2026-03-30
  */
 
 import { appState, elements, initSession, unlockCurrentProject } from './app-state.js';
@@ -106,7 +108,9 @@ export async function selectProject(projectId) {
         
         appState.currentProjectId = projectId;
         appState.projectConfig = project;
-        console.log('项目配置已设置到appState');
+        appState.currentCycle = null; // 重置周期选择
+        console.log('项目配置已设置到appState，currentCycle已重置');
+        console.log('appState:', appState);
         
         // 初始化会话并锁定项目
         const sessionId = initSession();
@@ -130,12 +134,37 @@ export async function selectProject(projectId) {
         url.searchParams.set('project', projectId);
         window.history.replaceState({}, '', url);
         
+        // 恢复周期导航栏显示
+        const cycleNavBar = document.getElementById('cycleNavBar');
+        if (cycleNavBar) cycleNavBar.style.display = '';
+        
         // 渲染周期
         console.log('开始渲染周期');
         renderCycles();
         
-        // 渲染初始内容（显示第一个周期或欢迎信息）
+        // 等待DOM更新完成
+        await new Promise(resolve => setTimeout(resolve, 100));
+        console.log('DOM更新完成');
+        
+        // 确保周期导航元素存在
+        const cycleNavListEl = document.getElementById('cycleNavList');
+        if (cycleNavListEl) {
+            console.log('周期导航元素存在，内容:', cycleNavListEl.innerHTML);
+        } else {
+            console.error('周期导航元素不存在');
+        }
+        
+        // 渲染初始内容（显示欢迎信息）
+        console.log('开始渲染初始内容');
         renderInitialContent();
+        
+        // 确保内容区域更新
+        const contentAreaEl = document.getElementById('contentArea');
+        if (contentAreaEl) {
+            console.log('内容区域元素存在，内容:', contentAreaEl.innerHTML);
+        } else {
+            console.error('内容区域元素不存在');
+        }
         
         // 更新顶部项目名显示
         const nameEl = document.getElementById('currentProjectName');
@@ -3375,6 +3404,7 @@ export async function handleOpenProject(projectId) {
         
         appState.currentProjectId = projectId;
         appState.projectConfig = project;
+        appState.currentCycle = null; // 重置周期选择
         
         // 关闭模态框
         closeProjectSelectModal();
@@ -3390,6 +3420,32 @@ export async function handleOpenProject(projectId) {
             nameEl.textContent = project.name || '未命名项目';
             nameEl.style.display = '';
             nameEl.title = project.name || '';
+            nameEl.style.cursor = 'pointer';
+            nameEl.title = '点击刷新项目数据';
+            nameEl.onclick = async () => {
+                if (appState.currentProjectId) {
+                    showNotification('正在刷新项目数据...', 'info');
+                    try {
+                        const response = await fetch(`/api/projects/${appState.currentProjectId}`);
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            appState.projectConfig = result.project;
+                            // 重新渲染周期和文档
+                            renderCycles();
+                            if (appState.currentCycle) {
+                                const { renderCycleDocuments } = await import('./document.js');
+                                await renderCycleDocuments(appState.currentCycle);
+                            }
+                            showNotification('项目数据已刷新', 'success');
+                        } else {
+                            showNotification('刷新失败: ' + result.message, 'error');
+                        }
+                    } catch (error) {
+                        console.error('刷新项目数据失败:', error);
+                        showNotification('刷新失败', 'error');
+                    }
+                }
+            };
         }
         
         // 显示项目按钮
@@ -3398,11 +3454,28 @@ export async function handleOpenProject(projectId) {
         // 更新删除需求按钮状态
         updateClearRequirementsBtnState();
         
-        // 渲染周期
-        renderCycles();
+        // 恢复周期导航栏显示（防止被之前的关闭操作隐藏）
+        const cycleNavBar = document.getElementById('cycleNavBar');
+        if (cycleNavBar) cycleNavBar.style.display = '';
         
-        // 渲染初始内容（显示第一个周期或欢迎信息）
+        // 渲染周期
+        console.log('开始渲染周期');
+        await renderCycles();
+        
+        // 等待DOM更新完成
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // 渲染初始内容（显示欢迎信息，不默认选择周期）
+        console.log('开始渲染初始内容');
         renderInitialContent();
+        
+        // 确保内容区域更新
+        const contentArea = document.getElementById('contentArea');
+        if (contentArea) {
+            console.log('内容区域元素存在，内容:', contentArea.innerHTML);
+        } else {
+            console.error('内容区域元素不存在');
+        }
         
         // 更新下拉菜单
         const projectSelect = document.getElementById('projectSelect');
