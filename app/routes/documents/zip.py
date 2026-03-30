@@ -259,7 +259,7 @@ def start_zip_match():
                         project_config=project_config,
                         progress_callback=progress_callback,
                         project_name=project_name,
-                        skip_archived=False
+                        skip_archived=True
                     )
                     
                     if result is None:

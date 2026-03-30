@@ -504,6 +504,19 @@ export async function handleZipUpload(e) {
         uploadProgressText.textContent = '上传完成！';
         startMatchSection.style.display = 'block';
         
+        // 自动关闭上传模态框（如果用户10秒内未点击匹配按钮）
+        setTimeout(() => {
+            const startMatchSection = document.getElementById('startMatchSection');
+            if (startMatchSection && startMatchSection.style.display === 'block') {
+                closeModal(elements.zipUploadModal);
+                // 重置表单
+                document.getElementById('zipUploadForm').reset();
+                document.getElementById('uploadProgressSection').style.display = 'none';
+                document.getElementById('startMatchSection').style.display = 'none';
+                document.getElementById('uploadSubmitBtn').style.display = 'inline-block';
+            }
+        }, 10000);
+        
     } catch (error) {
         console.error('上传ZIP文件失败:', error);
         showNotification('上传失败: ' + error.message, 'error');
@@ -521,6 +534,14 @@ export async function handleBackgroundMatch() {
         return;
     }
     
+    if (!appState.currentProjectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+    
+    // 保存上传路径
+    const zipPath = currentUploadZipPath;
+    
     // 关闭上传模态框
     closeModal(elements.zipUploadModal);
     
@@ -529,6 +550,9 @@ export async function handleBackgroundMatch() {
     document.getElementById('uploadProgressSection').style.display = 'none';
     document.getElementById('startMatchSection').style.display = 'none';
     document.getElementById('uploadSubmitBtn').style.display = 'inline-block';
+    
+    // 重置当前上传路径
+    currentUploadZipPath = null;
     
     // 创建底部进度显示
     const progressId = 'zip-match-' + Date.now();
@@ -540,7 +564,7 @@ export async function handleBackgroundMatch() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                zip_path: currentUploadZipPath,
+                zip_path: zipPath,
                 project_id: appState.currentProjectId
             })
         });

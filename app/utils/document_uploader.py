@@ -76,11 +76,19 @@ class DocumentUploader:
             
             cycle_folder.mkdir(parents=True, exist_ok=True)
             
-            # 生成唯一文件名
+            # 生成唯一文件名（保留原始文件名）
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             original_filename = file.filename
             file_ext = Path(original_filename).suffix
-            new_filename = f"{signer or 'unknown'}_{timestamp}{file_ext}"
+            # 提取原始文件名主体（不含扩展名）
+            original_name = Path(original_filename).stem
+            # 清理不安全字符，保留字母、数字、中文、下划线、连字符和点
+            safe_name = ''.join(c for c in original_name if c.isalnum() or c in '._- ' or ord(c) > 127)
+            # 确保文件名不为空
+            if not safe_name:
+                safe_name = 'unknown'
+            # 生成新文件名：原始文件名_时间戳.扩展名
+            new_filename = f"{safe_name}_{timestamp}{file_ext}"
             
             file_path = cycle_folder / new_filename
             file.save(str(file_path))

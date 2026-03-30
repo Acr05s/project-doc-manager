@@ -908,32 +908,41 @@ def copy_document_files(source_dir, target_dir, project_name, stats):
     # 获取源目录中的所有文件（排除 JSON 配置文件）
     excluded_extensions = {'.json'}
     
-    for item in source_dir.iterdir():
-        if item.is_file() and item.suffix.lower() not in excluded_extensions:
-            target_file = target_dir / item.name
-            
-            if target_file.exists():
-                # 文件已存在，比较修改时间
-                source_stat = item.stat()
-                target_stat = target_file.stat()
+    for root, dirs, files in os.walk(source_dir):
+        # 计算相对路径
+        relative_path = Path(root).relative_to(source_dir)
+        target_root = target_dir / relative_path
+        
+        # 确保目标目录存在
+        target_root.mkdir(parents=True, exist_ok=True)
+        
+        for file in files:
+            if Path(file).suffix.lower() not in excluded_extensions:
+                source_file = Path(root) / file
+                target_file = target_root / file
                 
-                if source_stat.st_mtime > target_stat.st_mtime:
-                    # 源文件较新，备份旧文件
-                    backup_name = f"{item.stem}_backup_{datetime.now().strftime('%Y%m%d%H%M%S')}{item.suffix}"
-                    backup_file = target_dir / backup_name
-                    shutil.move(str(target_file), str(backup_file))
-                    shutil.copy2(str(item), str(target_file))
-                    stats['files_backed_up'] += 1
-                    stats['files_copied'] += 1
-                    logger.debug(f"文件已更新: {item.name}")
+                if target_file.exists():
+                    # 文件已存在，比较修改时间
+                    source_stat = source_file.stat()
+                    target_stat = target_file.stat()
+                    
+                    if source_stat.st_mtime > target_stat.st_mtime:
+                        # 源文件较新，备份旧文件
+                        backup_name = f"{target_file.stem}_backup_{datetime.now().strftime('%Y%m%d%H%M%S')}{target_file.suffix}"
+                        backup_file = target_file.parent / backup_name
+                        shutil.move(str(target_file), str(backup_file))
+                        shutil.copy2(str(source_file), str(target_file))
+                        stats['files_backed_up'] += 1
+                        stats['files_copied'] += 1
+                        logger.debug(f"文件已更新: {source_file}")
+                    else:
+                        # 目标文件较新或相同，跳过
+                        logger.debug(f"文件已存在且较新，跳过: {source_file}")
                 else:
-                    # 目标文件较新或相同，跳过
-                    logger.debug(f"文件已存在且较新，跳过: {item.name}")
-            else:
-                # 新文件，直接复制
-                shutil.copy2(str(item), str(target_file))
-                stats['files_copied'] += 1
-                logger.debug(f"复制新文件: {item.name}")
+                    # 新文件，直接复制
+                    shutil.copy2(str(source_file), str(target_file))
+                    stats['files_copied'] += 1
+                    logger.debug(f"复制新文件: {source_file}")
     
     logger.info(f"文档文件复制完成: 复制 {stats['files_copied']}, 备份 {stats['files_backed_up']}")
 
@@ -1105,8 +1114,8 @@ def preview_import_package():
 
 def import_from_preview():
     """
-    从预览的临时文件执行实际导入（简化版）
-    直接复制整个项目目录，不需要复杂的合并逻辑
+    从预览的临时文件执行实际导入
+    处理同名项目的冲突，支持合并、覆盖和重命名
     """
     try:
         from flask import request, jsonify
@@ -1119,7 +1128,7 @@ def import_from_preview():
         
         data = request.get_json()
         temp_id = data.get('temp_id')
-        conflict_action = data.get('conflict_action', 'rename')
+        conflict_action = data.get('conflict_action', 'rename')  # 'overwrite', 'rename', 'merge'
         custom_name = data.get('custom_name', '')
         
         if not temp_id:
@@ -1177,18 +1186,19 @@ def import_from_preview():
             logger.info(f"[导入] 同名项目检查结果: {'找到' if existing_project else '未找到'}, 冲突处理方式: {conflict_action}")
             
             # 6. 处理重命名
+            is_renamed = False
             if existing_project and conflict_action == 'rename' and not custom_name:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 project_name = f"{project_name}_{timestamp}"
+                is_renamed = True
+                logger.info(f"[导入] 项目已存在，生成新名称: {project_name}")
             
             # 7. 确定项目ID和目标目录
             projects_base = doc_manager.config.projects_base_folder
-            
-            # 获取备份中的原始项目ID
-            original_project_id = project_config.get('id', '')
-            
-            # 7. 确定项目ID和目标目录
             target_project_dir = projects_base / project_name
+            
+            # 8. 处理不同的冲突情况
+            merge_stats = None
             
             if existing_project and conflict_action == 'overwrite':
                 # 覆盖模式：使用现有项目ID，删除旧目录后复制
@@ -1217,14 +1227,6 @@ def import_from_preview():
                 )
                 logger.info(f"[导入] 合并模式-合并完成: {merge_stats}")
                 
-            elif not existing_project and conflict_action == 'merge':
-                # 没有同名项目但选择了合并：直接复制，使用原始项目ID
-                project_id = original_project_id or f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-                logger.info(f"[导入] 无同名项目-直接复制模式，使用原始ID: {project_id}")
-                # 复制整个目录
-                shutil.copytree(str(project_source_dir), str(target_project_dir))
-                logger.info(f"[导入] 复制完成")
-                
             else:
                 # 新建项目（重命名或全新导入）
                 project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
@@ -1236,22 +1238,7 @@ def import_from_preview():
             logger.info(f"[导入] 目标目录: {target_project_dir}")
             logger.info(f"[导入] 项目ID: {project_id}, 项目名称: {project_name}")
             
-            # 验证关键文件
-            zip_file = target_project_dir / 'zip_uploads.json'
-            doc_index = target_project_dir / 'data' / 'documents_index.json'
-            logger.info(f"[导入] 验证文件 - zip_uploads.json: {zip_file.exists()}, documents_index.json: {doc_index.exists()}")
-            if zip_file.exists():
-                with open(zip_file, 'r') as f:
-                    zip_data = json.load(f)
-                    logger.info(f"[导入] zip_uploads.json 包含 {len(zip_data)} 条记录")
-            
-            # 列出目标目录内容
-            logger.info(f"[导入] 目标目录内容: {[p.name for p in target_project_dir.iterdir()]}")
-            data_dir = target_project_dir / 'data'
-            if data_dir.exists():
-                logger.info(f"[导入] data目录内容: {[p.name for p in data_dir.iterdir()]}")
-            
-            # 9. 更新项目信息文件
+            # 9. 更新项目配置文件
             project_config['id'] = project_id
             project_config['name'] = project_name
             project_config['updated_time'] = datetime.now().isoformat()
@@ -1281,18 +1268,17 @@ def import_from_preview():
             # 构建返回结果
             result = {
                 'status': 'success',
-                'message': f'项目"{project_name}"导入成功',
+                'message': '项目数据合并完成' if merge_stats else f'项目"{project_name}"导入成功',
                 'project_id': project_id,
                 'project_name': project_name,
-                'renamed': existing_project is not None and conflict_action == 'rename'
+                'renamed': is_renamed,
+                'merged': merge_stats is not None
             }
             
-            # 如果是合并模式，添加合并统计
-            if conflict_action == 'merge' and existing_project:
-                result['message'] = f'项目数据合并完成'
-                result['merged'] = True
-                if 'merge_stats' in locals():
-                    result['merge_stats'] = merge_stats
+            # 如果是合并操作，添加合并统计
+            if merge_stats:
+                result['merge_stats'] = merge_stats
+                logger.info(f"[导入] 返回合并统计: {merge_stats}")
             
             return jsonify(result)
             

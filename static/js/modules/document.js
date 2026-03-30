@@ -199,7 +199,8 @@ export async function handleEditDocument(e) {
         'editPartyASeal': 'party_a_seal',
         'editPartyBSeal': 'party_b_seal',
         'editNoSeal': 'no_seal',
-        'editOtherSeal': 'other_seal'
+        'editOtherSeal': 'other_seal',
+        'editNotInvolved': 'not_involved'  // 本次项目不涉及
     };
     
     // 动态收集表单数据
@@ -225,6 +226,20 @@ export async function handleEditDocument(e) {
         
         if (result.status === 'success') {
             showNotification('文档编辑成功', 'success');
+            
+            // 如果勾选了"本次项目不涉及"，自动归档
+            if (docData.not_involved && appState.currentCycle && appState.currentDocument) {
+                try {
+                    const { archiveDocument } = await import('./api.js');
+                    const archiveResult = await archiveDocument(appState.currentCycle, appState.currentDocument);
+                    if (archiveResult.status === 'success') {
+                        showNotification('文档已自动归档', 'success');
+                    }
+                } catch (e) {
+                    console.error('自动归档失败:', e);
+                }
+            }
+            
             const editModal = document.getElementById('editDocModal');
             if (editModal) {
                 editModal.classList.remove('show');
@@ -380,7 +395,7 @@ function analyzeRequirementStatus(attributes, docsList) {
     // 检查每个属性的完成状态
     return activeAttributes.map(attr => {
         let completedCount = 0;
-        let totalCount = docsList.length;
+        let totalCount = 0;
         
         docsList.forEach(doc => {
             const getDocValue = (fieldName) => {
@@ -388,6 +403,14 @@ function analyzeRequirementStatus(attributes, docsList) {
                 if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
                 return null;
             };
+            
+            // 跳过标记为"本次项目不涉及"的文档，视为已完成
+            if (getDocValue('not_involved')) {
+                completedCount++;
+                return;
+            }
+            
+            totalCount++;
             
             let isCompleted = false;
             
@@ -431,7 +454,8 @@ function analyzeRequirementStatus(attributes, docsList) {
         
         // 确定状态
         let status = 'empty';
-        if (completedCount === totalCount && totalCount > 0) {
+        const totalDocs = totalCount + (docsList.length - totalCount); // 包括不涉及的文档
+        if (completedCount === totalDocs && totalDocs > 0) {
             status = 'full'; // 全部完成
         } else if (completedCount > 0) {
             status = 'partial'; // 部分完成
@@ -440,7 +464,7 @@ function analyzeRequirementStatus(attributes, docsList) {
         return {
             name: attr.name,
             status: status,
-            description: `${completedCount}/${totalCount} 文件已完成`
+            description: `${completedCount}/${totalDocs} 文件已完成`
         };
     });
 }
@@ -506,31 +530,32 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     });
     
     // 应用过滤
-    allDocTypes = allDocTypes.filter(doc => {
-        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
-        const hasFiles = (docsByName[doc.name] || []).length > 0;
-        
-        if (filterOptions.hideArchived && isArchived) {
-            return false;
-        }
-        if (filterOptions.hideCompleted && hasFiles) {
-            return false;
-        }
-        
-        // 关键字筛选
-        if (filterOptions.keyword) {
-            const keyword = filterOptions.keyword.toLowerCase();
-            const docName = doc.name.toLowerCase();
-            const requirement = (doc.requirement || '').toLowerCase();
+        allDocTypes = allDocTypes.filter(doc => {
+            const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
+            const hasFiles = (docsByName[doc.name] || []).length > 0;
+            const isNotInvolved = (docsByName[doc.name] || []).some(d => d.not_involved || d._not_involved);
             
-            // 检查文档名称或要求中是否包含关键字
-            if (!docName.includes(keyword) && !requirement.includes(keyword)) {
+            if (filterOptions.hideArchived && isArchived) {
                 return false;
             }
-        }
-        
-        return true;
-    });
+            if (filterOptions.hideCompleted && (hasFiles || isNotInvolved)) {
+                return false;
+            }
+            
+            // 关键字筛选
+            if (filterOptions.keyword) {
+                const keyword = filterOptions.keyword.toLowerCase();
+                const docName = doc.name.toLowerCase();
+                const requirement = (doc.requirement || '').toLowerCase();
+                
+                // 检查文档名称或要求中是否包含关键字
+                if (!docName.includes(keyword) && !requirement.includes(keyword)) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
     
     // 重新排序
     allDocTypes.sort((a, b) => (a.index || 0) - (b.index || 0));
@@ -639,17 +664,20 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     if (hasSealMarked) attrParts.push('🔖');
                                     if (noSeal) attrParts.push('❌不盖章');
                                     if (otherSeal) attrParts.push(`📍${otherSeal}`);
-                                    
-                                    // 检查文件是否满足要求（支持带下划线前缀的字段名）
-                                    const requirement = doc.requirement || '';
-                                    let missingRequirements = [];
-                                    
                                     // 辅助函数：获取字段值（支持带下划线前缀）
                                     const getDocValue = (fieldName) => {
                                         if (d[fieldName] !== undefined) return d[fieldName];
                                         if (d[`_${fieldName}`] !== undefined) return d[`_${fieldName}`];
                                         return null;
                                     };
+                                    
+                                    // 显示本次项目不涉及状态
+                                    if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
+
+                                    
+                                    // 检查文件是否满足要求（支持带下划线前缀的字段名）
+                                    const requirement = doc.requirement || '';
+                                    let missingRequirements = [];
                                     
                                     const hasSigner = getDocValue('signer');
                                     const hasNoSignature = getDocValue('no_signature');
@@ -727,6 +755,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         // 要求状态: 'none'-无文件或无要求, 'full'-全部完成, 'partial'-部分完成, 'empty'-全未完成
                         const requirementStatus = analyzeRequirementStatus(attributes, docsList);
                         
+                        // 检查是否标记为不涉及
+                        const isNotInvolved = docsList.some(d => d.not_involved || d._not_involved);
+                        
                         // 生成要求标签HTML
                         const requirementHtml = requirementStatus.length > 0 
                             ? requirementStatus.map(r => {
@@ -756,27 +787,37 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : ''}
                                         <div class="doc-type" style="text-align: center;">${doc.name}</div>
-                                        <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">${requirementHtml}</div>
+                                        <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">
+                                            ${requirementHtml}
+                                            ${isNotInvolved ? `<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; margin: 2px; display: inline-block; font-size: 12px;">🚫不涉及</span>` : ''}
+                                        </div>
                                     </div>
                                 </div>
                             </td>
                             <td class="col-files">
-                                ${fileListHtml}
+                                ${isNotInvolved ? '<span style="color: #6c757d; font-style: italic; display: block; text-align: center; padding: 10px;">本次项目不涉及该文档</span>' : fileListHtml}
                             </td>
                             <td class="col-action">
                                 <div class="action-buttons">
                                     ${!isArchived ? `
-                                        <button class="btn btn-primary btn-sm" onclick="openUploadModal('${cycle}', '${doc.name}')">
-                                            📁 上传/选择文档
+                                        ${!isNotInvolved ? `
+                                            <button class="btn btn-primary btn-sm" onclick="openUploadModal('${cycle}', '${doc.name}')">
+                                                📁 上传/选择文档
+                                            </button>
+                                            ${docsList.length > 0 ? `
+                                                <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
+                                                    ✏️ 编辑
+                                                </button>
+                                            ` : ''}
+                                        ` : ''}
+                                        <button class="btn btn-warning btn-sm" onclick="markDocumentNotInvolved('${cycle}', '${doc.name}')">
+                                            ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
                                         </button>
-                                        ${docsList.length > 0 ? `
-                                            <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
-                                                ✏️ 编辑
+                                        ${!isNotInvolved ? `
+                                            <button class="btn btn-info btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
+                                                📦 确认归档
                                             </button>
                                         ` : ''}
-                                        <button class="btn btn-info btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
-                                            📦 确认归档
-                                        </button>
                                     ` : `
                                         <button class="btn btn-warning btn-sm" onclick="unarchiveDocument('${cycle}', '${doc.name}')">
                                             📤 撤销归档
@@ -794,6 +835,82 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     `;
     
     elements.contentArea.innerHTML = html;
+}
+
+/**
+ * 标记文档为本次项目不涉及或撤销不涉及
+ */
+export async function markDocumentNotInvolved(cycle, docName) {
+    try {
+        // 检查文档当前状态
+        const docsList = await getCycleDocuments(cycle);
+        const doc = docsList.find(d => d.doc_name === docName);
+        const isCurrentlyNotInvolved = doc && (doc.not_involved || doc._not_involved);
+        
+        // 根据当前状态显示不同的确认弹窗
+        const title = isCurrentlyNotInvolved ? '撤销不涉及' : '标记为不涉及';
+        const message = isCurrentlyNotInvolved 
+            ? `确定将「${docName}」撤销标记为不涉及吗？`
+            : `确定将「${docName}」标记为本次项目不涉及并自动归档吗？`;
+        
+        showConfirmModal(
+            title,
+            message,
+            async () => {
+                showLoading(true);
+                try {
+                    if (isCurrentlyNotInvolved && doc) {
+                        // 撤销不涉及标记
+                        const docData = { not_involved: false };
+                        const result = await editDocument(doc.id, docData);
+                        
+                        if (result.status === 'success') {
+                            // 取消归档
+                            await unarchiveDocument(cycle, docName);
+                            showNotification('文档已撤销不涉及标记', 'success');
+                        } else {
+                            showNotification('操作失败: ' + result.message, 'error');
+                        }
+                    } else if (doc) {
+                        // 标记为不涉及
+                        const docData = { not_involved: true };
+                        const result = await editDocument(doc.id, docData);
+                        
+                        if (result.status === 'success') {
+                            // 自动归档
+                            const archiveResult = await archiveDocument(cycle, docName);
+                            if (archiveResult.status === 'success') {
+                                showNotification('文档已标记为不涉及并归档', 'success');
+                            } else {
+                                showNotification('文档已标记为不涉及，但归档失败', 'warning');
+                            }
+                        } else {
+                            showNotification('标记失败: ' + result.message, 'error');
+                        }
+                    } else {
+                        // 如果没有文档，直接归档并标记为不涉及
+                        // 先归档
+                        const archiveResult = await archiveDocument(cycle, docName);
+                        if (archiveResult.status === 'success') {
+                            showNotification('文档已标记为不涉及并归档', 'success');
+                        } else {
+                            showNotification('标记失败: ' + archiveResult.message, 'error');
+                        }
+                    }
+                } catch (error) {
+                    console.error('操作失败:', error);
+                    showNotification('操作失败: ' + error.message, 'error');
+                } finally {
+                    showLoading(false);
+                    // 刷新文档列表
+                    await renderCycleDocuments(cycle);
+                }
+            }
+        );
+    } catch (error) {
+        console.error('操作失败:', error);
+        showNotification('操作失败: ' + error.message, 'error');
+    }
 }
 
 /**
@@ -2150,7 +2267,7 @@ export async function archiveDocument(cycle, docName) {
         const docsInfo = appState.projectConfig.documents?.[cycle];
         if (!docsInfo) {
             showNotification('文档配置不存在', 'error');
-            return;
+            return { status: 'error', message: '文档配置不存在' };
         }
         
         // 查找当前文档类型的要求
@@ -2192,7 +2309,7 @@ export async function archiveDocument(cycle, docName) {
             });
             
             if (!confirmed) {
-                return; // 用户取消归档
+                return { status: 'cancelled', message: '用户取消归档' };
             }
         }
         
@@ -2220,12 +2337,15 @@ export async function archiveDocument(cycle, docName) {
             import('./cycle.js').then(module => {
                 module.refreshCycleProgress();
             });
+            return { status: 'success' };
         } else {
             showNotification('归档失败', 'error');
+            return { status: 'error', message: '归档失败' };
         }
     } catch (error) {
         console.error('归档文档失败:', error);
         showNotification('归档失败: ' + error.message, 'error');
+        return { status: 'error', message: error.message };
     }
 }
 
@@ -2926,6 +3046,12 @@ function showReportModal(reportData) {
                             <canvas id="qualityMetricsChart" width="400" height="300"></canvas>
                         </div>
                         
+                        <!-- 文档缺失情况柱状图 -->
+                        <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); grid-column: 1 / -1;">
+                            <h5 style="margin: 0 0 10px 0; font-size: 14px; color: #495057;">文档缺失情况</h5>
+                            <canvas id="missingDocsChart" width="800" height="300"></canvas>
+                        </div>
+                        
                         <!-- 各周期文档情况柱状图 -->
                         <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); grid-column: 1 / -1;">
                             <h5 style="margin: 0 0 10px 0; font-size: 14px; color: #495057;">各周期文档情况</h5>
@@ -3135,6 +3261,61 @@ function showReportModal(reportData) {
                 });
             }
             
+            // 文档缺失情况柱状图
+            const missingDocsCtx = document.getElementById('missingDocsChart');
+            if (missingDocsCtx) {
+                const cycleNames = reportData.cycles.map(cycle => cycle.name);
+                const missingDocs = reportData.cycles.map(cycle => cycle.statistics.missingDocs);
+                const totalDocs = reportData.cycles.map(cycle => cycle.statistics.totalDocs);
+                
+                new Chart(missingDocsCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: cycleNames,
+                        datasets: [
+                            {
+                                label: '总文档数',
+                                data: totalDocs,
+                                backgroundColor: '#1890ff',
+                                borderColor: '#1890ff',
+                                borderWidth: 1
+                            },
+                            {
+                                label: '缺失文档',
+                                data: missingDocs,
+                                backgroundColor: '#dc3545',
+                                borderColor: '#dc3545',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: '文档数量'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            },
+                            title: {
+                                display: true,
+                                text: '各周期文档缺失情况',
+                                font: {
+                                    size: 16
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
             // 各周期文档情况柱状图
             const cycleCtx = document.getElementById('cycleComparisonChart');
             if (cycleCtx) {
@@ -3302,6 +3483,7 @@ function downloadReportAsPDF() {
 // 暴露给全局作用域
 window.closeReportModal = closeReportModal;
 window.downloadReportAsPDF = downloadReportAsPDF;
+window.markDocumentNotInvolved = markDocumentNotInvolved;
 // 确保generateReport函数被添加到全局作用域
 if (typeof window !== 'undefined') {
     window.generateReport = generateReport;
