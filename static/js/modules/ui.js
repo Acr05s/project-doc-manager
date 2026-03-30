@@ -32,7 +32,6 @@ import {
 } from './version.js';
 import {
     openTreeEditor, closeTreeEditor,
-    expandAll, collapseAll,
     saveTreeConfig, saveTreeAsTemplate, loadTemplateToTree,
     closeAttributePanel, saveAttributes
 } from './tree-editor.js';
@@ -337,14 +336,16 @@ export function setupEventListeners() {
     
     const toolbarExpandAll = document.getElementById('toolbarExpandAll');
     if (toolbarExpandAll) {
-        console.log('[UI] 绑定展开全部按钮事件, expandAll函数:', typeof expandAll);
+        console.log('[UI] 绑定展开全部按钮事件 (动态导入)');
         toolbarExpandAll.addEventListener('click', () => {
-            console.log('[UI] 展开全部按钮被点击');
-            if (typeof expandAll === 'function') {
-                expandAll();
-            } else {
-                console.error('[UI] expandAll 不是函数');
-            }
+            console.log('[UI] 展开全部按钮被点击 (动态导入)');
+            import('./tree-editor.js').then(mod => {
+                if (typeof mod.expandAll === 'function') {
+                    mod.expandAll();
+                } else {
+                    console.error('[UI] tree-editor 模块中未导出 expandAll');
+                }
+            }).catch(err => console.error('[UI] 动态导入 tree-editor 失败:', err));
         });
     } else {
         console.log('[UI] 未找到展开全部按钮');
@@ -352,14 +353,16 @@ export function setupEventListeners() {
     
     const toolbarCollapseAll = document.getElementById('toolbarCollapseAll');
     if (toolbarCollapseAll) {
-        console.log('[UI] 绑定折叠全部按钮事件, collapseAll函数:', typeof collapseAll);
+        console.log('[UI] 绑定折叠全部按钮事件 (动态导入)');
         toolbarCollapseAll.addEventListener('click', () => {
-            console.log('[UI] 折叠全部按钮被点击');
-            if (typeof collapseAll === 'function') {
-                collapseAll();
-            } else {
-                console.error('[UI] collapseAll 不是函数');
-            }
+            console.log('[UI] 折叠全部按钮被点击 (动态导入)');
+            import('./tree-editor.js').then(mod => {
+                if (typeof mod.collapseAll === 'function') {
+                    mod.collapseAll();
+                } else {
+                    console.error('[UI] tree-editor 模块中未导出 collapseAll');
+                }
+            }).catch(err => console.error('[UI] 动态导入 tree-editor 失败:', err));
         });
     } else {
         console.log('[UI] 未找到折叠全部按钮');

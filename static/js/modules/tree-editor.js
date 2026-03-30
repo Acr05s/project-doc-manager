@@ -1835,10 +1835,11 @@ export function collapseAll() {
         showNotification('请先打开树形编辑器', 'warning');
         return;
     }
-    // 调用 clearFilter 清除筛选（其内部会 renderTree，这里再操作折叠并重新渲染）
+    // 清除筛选标记
     clearFilter();
-    // 只折叠到项目周期级别，保持根节点和周期节点展开
-    collapseToCycleLevel(currentTreeData);
+    // 将所有节点折叠（保留根节点展开），以确保视觉上折叠至最顶层
+    setAllExpanded(currentTreeData, false);
+    if (currentTreeData) currentTreeData.expanded = true; // 保持根节点可见
     renderTree();
     if (selectedNode) selectNode(selectedNode);
     console.log('[TreeEditor] 折叠完成');
