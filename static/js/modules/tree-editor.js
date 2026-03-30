@@ -587,10 +587,19 @@ function getNodeActions(node) {
     } else if (node.type === 'cycle') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('document')" title="添加文档">➕ 文档</button>`;
         actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加目录">➕ 目录</button>`;
+        // 周期排序按钮
+        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'up')" title="上移">⬆️</button>`;
+        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'down')" title="下移">⬇️</button>`;
     } else if (node.type === 'document') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加子目录">➕ 目录</button>`;
+        // 文档层级按钮
+        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'promote')" title="提级为周期">⬆️</button>`;
+        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'demote')" title="降级为子文档">⬇️</button>`;
     } else if (node.type === 'folder') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('file')" title="添加文件">➕ 文件</button>`;
+        // 目录层级按钮
+        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'promote')" title="提级">⬆️</button>`;
+        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'demote')" title="降级">⬇️</button>`;
     }
 
     if (node.type !== 'root') {
@@ -907,6 +916,123 @@ window.addTreeNode = function(type) {
 
 window.editTreeNode = function(nodeId) {
     startEditNodeName(nodeId);
+};
+
+/**
+ * 移动节点（上移、下移、提级、降级）
+ */
+window.moveTreeNode = function(nodeId, action) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    // 找到父节点和兄弟节点
+    const parent = findParentNode(currentTreeData, nodeId);
+    if (!parent) {
+        showNotification('无法移动根节点', 'error');
+        return;
+    }
+
+    const siblings = parent.children || [];
+    const currentIndex = siblings.findIndex(n => n.id === nodeId);
+    if (currentIndex === -1) return;
+
+    let moved = false;
+
+    switch (action) {
+        case 'up':
+            // 上移：与前一个兄弟节点交换位置
+            if (currentIndex > 0) {
+                [siblings[currentIndex], siblings[currentIndex - 1]] = [siblings[currentIndex - 1], siblings[currentIndex]];
+                moved = true;
+            } else {
+                showNotification('已经是第一个了', 'info');
+                return;
+            }
+            break;
+
+        case 'down':
+            // 下移：与后一个兄弟节点交换位置
+            if (currentIndex < siblings.length - 1) {
+                [siblings[currentIndex], siblings[currentIndex + 1]] = [siblings[currentIndex + 1], siblings[currentIndex]];
+                moved = true;
+            } else {
+                showNotification('已经是最后一个了', 'info');
+                return;
+            }
+            break;
+
+        case 'promote':
+            // 提级：将节点移动到父节点的同级
+            const grandParent = findParentNode(currentTreeData, parent.id);
+            if (!grandParent) {
+                // 如果父节点是根节点，且当前是文档/目录，则提级为周期
+                if (node.type === 'document' || node.type === 'folder') {
+                    if (parent.type === 'root') {
+                        // 已经在根级别，将类型改为周期
+                        node.type = 'cycle';
+                        // 移动文档和目录的子节点到新周期
+                        if (node.children) {
+                            node.children.forEach(child => {
+                                if (child.type === 'folder') {
+                                    // 保持目录结构
+                                }
+                            });
+                        }
+                        moved = true;
+                    } else {
+                        showNotification('无法提级此节点', 'warning');
+                        return;
+                    }
+                }
+            } else {
+                // 从当前父节点中移除
+                parent.children.splice(currentIndex, 1);
+                // 添加到祖父节点
+                const parentIndex = grandParent.children.findIndex(n => n.id === parent.id);
+                grandParent.children.splice(parentIndex + 1, 0, node);
+                moved = true;
+            }
+            break;
+
+        case 'demote':
+            // 降级：将节点作为前一个兄弟节点的子节点
+            if (currentIndex > 0) {
+                const prevSibling = siblings[currentIndex - 1];
+                // 前一个兄弟必须是能包含子节点的类型
+                if (['cycle', 'document', 'folder'].includes(prevSibling.type)) {
+                    // 从当前父节点中移除
+                    parent.children.splice(currentIndex, 1);
+                    // 添加到前一个兄弟的子节点
+                    if (!prevSibling.children) prevSibling.children = [];
+                    prevSibling.children.push(node);
+                    // 如果节点类型是周期，降级为文档
+                    if (node.type === 'cycle') {
+                        node.type = 'document';
+                    }
+                    moved = true;
+                } else {
+                    showNotification('前一个节点不能包含子节点', 'warning');
+                    return;
+                }
+            } else {
+                showNotification('前面没有可依附的节点', 'warning');
+                return;
+            }
+            break;
+
+        default:
+            return;
+    }
+
+    if (moved) {
+        renderTree();
+        // 保持选中状态
+        selectedNode = node;
+        selectedNodes = [node];
+        updateToolbarState();
+        markDirty();
+        showNotification('移动成功', 'success');
+    }
 };
 
 window.deleteTreeNode = function(nodeId) {
@@ -1247,6 +1373,16 @@ function findNode(tree, nodeId) {
             const found = findNode(child, nodeId);
             if (found) return found;
         }
+    }
+    return null;
+}
+
+function findParentNode(tree, nodeId) {
+    if (!tree.children) return null;
+    for (const child of tree.children) {
+        if (child.id === nodeId) return tree;
+        const found = findParentNode(child, nodeId);
+        if (found) return found;
     }
     return null;
 }
