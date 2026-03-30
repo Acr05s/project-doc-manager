@@ -623,12 +623,16 @@ function bindTreeEvents() {
     const container = document.getElementById('treeEditorContainer');
     if (!container) return;
 
-    container.querySelectorAll('.tree-expand-icon').forEach(icon => {
-        icon.style.cursor = 'pointer';
-        icon.addEventListener('click', (e) => {
-            const nodeEl = e.target.closest('.tree-node');
-            toggleNode(nodeEl.dataset.id);
-        });
+    // 使用事件委托处理展开/折叠图标点击
+    container.addEventListener('click', (e) => {
+        const expandIcon = e.target.closest('.tree-expand-icon');
+        if (expandIcon) {
+            e.stopPropagation(); // 阻止事件冒泡
+            const nodeEl = expandIcon.closest('.tree-node');
+            if (nodeEl && nodeEl.dataset.id) {
+                toggleNode(nodeEl.dataset.id);
+            }
+        }
     });
 
     container.querySelectorAll('.tree-node').forEach(nodeEl => {
