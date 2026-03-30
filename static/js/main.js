@@ -223,19 +223,9 @@ window.unarchiveDocument = function(cycle, docName) {
 };
 
 window.loadMaintainDocuments = function() {
-    try {
-        import('./modules/document.js').then(module => {
-            if (module.loadMaintainDocuments) {
-                module.loadMaintainDocuments();
-            } else {
-                console.error('[loadMaintainDocuments] 模块函数不存在');
-            }
-        }).catch(err => {
-            console.error('[loadMaintainDocuments] 加载模块失败:', err);
-        });
-    } catch (error) {
-        console.error('[loadMaintainDocuments] 调用失败:', error);
-    }
+    import('./modules/document.js').then(module => {
+        module.loadMaintainDocuments();
+    });
 };
 
 window.loadZipPackages = function() {

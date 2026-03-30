@@ -729,26 +729,6 @@ function initDocModalResizer() {
  * 修复ZIP文件选择问题，确保选中的文件能够正确保存和显示
  */
 function fixZipSelectionIssue() {
-    // 确保zipSelectedFiles数组正确保存所有选中的文件
-    const originalSearchZipFiles = searchZipFiles;
-    searchZipFiles = function(keyword, packagePath) {
-        // 调用原始函数
-        originalSearchZipFiles(keyword, packagePath);
-        
-        // 重新应用选中状态
-        setTimeout(() => {
-            const zipFileItems = document.querySelectorAll('.zip-file-item');
-            zipFileItems.forEach(item => {
-                const filePath = item.dataset.path;
-                if (appState.zipSelectedFiles.some(f => f.path === filePath)) {
-                    item.classList.add('selected');
-                    const checkbox = item.querySelector('.zip-file-checkbox');
-                    if (checkbox) checkbox.checked = true;
-                }
-            });
-        }, 100);
-    };
-    
     // 修复确认选择按钮的状态更新
     const originalHandleZipArchive = handleZipArchive;
     handleZipArchive = function() {
@@ -1888,105 +1868,6 @@ function resetZipPanel() {
     }
 }
 
-/**
- * 搜索 ZIP 包中的文件
- */
-async function searchZipFiles(keyword, packagePath) {
-    const fileList = document.getElementById('zipFileList');
-    if (!fileList) return;
-
-    // 使用传入的 packagePath，或者当前选中的包路径
-    const pkg = packagePath !== undefined ? packagePath : (appState.currentZipPackagePath || '');
-
-    console.log('[searchZipFiles] 搜索文件:', { keyword, packagePath: pkg });
-
-    fileList.innerHTML = '<p class="placeholder">搜索中...</p>';
-
-    try {
-        let url = `/api/documents/search-zip-files?keyword=${encodeURIComponent(keyword || '')}`;
-        if (pkg) url += `&package_path=${encodeURIComponent(pkg)}`;
-        
-        console.log('[searchZipFiles] 请求URL:', url);
-
-        const response = await fetch(url);
-        const result = await response.json();
-        
-        console.log('[searchZipFiles] API返回:', result);
-
-        if (result.status !== 'success') {
-            fileList.innerHTML = `<p class="zip-no-result">搜索失败: ${result.message}</p>`;
-            return;
-        }
-
-        const files = result.files || [];
-        console.log('[searchZipFiles] 文件数量:', files.length);
-        if (files.length === 0) {
-            fileList.innerHTML = `<p class="zip-no-result">${keyword ? '未找到匹配文件' : '该ZIP包中暂无文件'}</p>`;
-            return;
-        }
-
-        const kw = keyword || '';
-        fileList.innerHTML = files.map(f => {
-            let icon = '📄';
-            if (f.ext === '.pdf') icon = '📕';
-            else if (['.doc', '.docx'].includes(f.ext)) icon = '📝';
-            else if (['.xls', '.xlsx'].includes(f.ext)) icon = '📊';
-            else if (['.jpg', '.jpeg', '.png', '.gif'].includes(f.ext)) icon = '🖼️';
-            else if (['.ppt', '.pptx'].includes(f.ext)) icon = '📊';
-
-            const sizeStr = f.size > 1024 * 1024
-                ? (f.size / 1024 / 1024).toFixed(1) + ' MB'
-                : (f.size / 1024).toFixed(1) + ' KB';
-
-            // 高亮关键词
-            let displayName = escapeHtml(f.name);
-            if (kw) {
-                const re = new RegExp(escapeRegExp(kw), 'gi');
-                displayName = displayName.replace(re, m => `<mark>${m}</mark>`);
-            }
-
-            // 显示相对于ZIP包内的路径（去掉包名前缀）
-            let relInPkg = f.rel_path;
-            const pkgName = appState.currentZipPackageName || '';
-            if (pkgName && relInPkg.startsWith(pkgName)) {
-                relInPkg = relInPkg.slice(pkgName.length).replace(/^[\\/]/, '');
-            }
-            // 只显示目录部分（不含文件名）
-            const parts = relInPkg.replace(/\\/g, '/').split('/');
-            const dirPart = parts.length > 1 ? parts.slice(0, -1).join(' / ') : '';
-
-            // 检查是否已选中
-            const isSelected = appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === f.path);
-            const checkedAttr = isSelected ? 'checked' : '';
-
-            // 已归档的文件特殊样式
-            const isArchived = f.archived === true;
-            const archivedClass = isArchived ? 'archived' : '';
-            const archivedBadge = isArchived ? '<span class="zip-file-badge archived-badge">已归档</span>' : '';
-
-            // 已归档的文件禁用选择
-            const disabledAttr = isArchived ? 'disabled' : '';
-            const archivedStyle = isArchived ? 'opacity: 0.5; background: #f5f5f5;' : '';
-
-            return `<div class="zip-file-item ${isSelected ? 'selected' : ''} ${archivedClass}" data-path="${escapeHtml(f.path)}" data-name="${escapeHtml(f.name)}" style="${archivedStyle}">
-                        <input type="checkbox" class="zip-file-checkbox" ${checkedAttr} ${disabledAttr}
-                            onclick="event.stopPropagation(); toggleZipFileSelect(this, ${JSON.stringify(f.path)}, ${JSON.stringify(f.name)})">
-                        <span class="zip-file-icon">${icon}</span>
-                        <div class="zip-file-info" title="${escapeHtml(f.rel_path || f.name)}" onclick="${isArchived ? '' : 'toggleZipFileCheck(this)'}">
-                            <div class="zip-file-name">${displayName}${archivedBadge}</div>
-                            ${dirPart ? `<div class="zip-file-dir">${escapeHtml(dirPart)}</div>` : ''}
-                        </div>
-                        <span class="zip-file-size">${sizeStr}</span>
-                    </div>`;
-        }).join('');
-
-        // 渲染完成后更新按钮状态
-        updateZipSelectedUI();
-
-    } catch (e) {
-        fileList.innerHTML = `<p class="zip-no-result">请求失败: ${e.message}</p>`;
-    }
-}
 
 
 

@@ -512,11 +512,12 @@ def import_project_merge():
             with open(target_config_file, 'w', encoding='utf-8') as f:
                 json.dump(project_config, f, ensure_ascii=False, indent=2)
         
-        # 更新项目索引
-        doc_manager.projects.create(
+        # 更新项目索引（使用add_to_index而不是create，避免重复创建目录）
+        doc_manager.projects.add_to_index(
+            project_id=new_project_id,
             name=project_name,
             description=project_config.get('description', ''),
-            requirements_file=str(requirements_file) if requirements_file.exists() else None
+            created_time=project_config.get('created_time')
         )
         
         # 清理临时文件

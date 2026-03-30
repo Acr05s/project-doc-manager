@@ -134,6 +134,9 @@ export async function selectProject(projectId) {
         console.log('开始渲染周期');
         renderCycles();
         
+        // 渲染初始内容（显示第一个周期或欢迎信息）
+        renderInitialContent();
+        
         // 更新顶部项目名显示
         const nameEl = document.getElementById('currentProjectName');
         if (nameEl) {
@@ -3397,6 +3400,9 @@ export async function handleOpenProject(projectId) {
         
         // 渲染周期
         renderCycles();
+        
+        // 渲染初始内容（显示第一个周期或欢迎信息）
+        renderInitialContent();
         
         // 更新下拉菜单
         const projectSelect = document.getElementById('projectSelect');

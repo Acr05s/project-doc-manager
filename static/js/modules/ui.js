@@ -337,12 +337,32 @@ export function setupEventListeners() {
     
     const toolbarExpandAll = document.getElementById('toolbarExpandAll');
     if (toolbarExpandAll) {
-        toolbarExpandAll.addEventListener('click', expandAll);
+        console.log('[UI] 绑定展开全部按钮事件, expandAll函数:', typeof expandAll);
+        toolbarExpandAll.addEventListener('click', () => {
+            console.log('[UI] 展开全部按钮被点击');
+            if (typeof expandAll === 'function') {
+                expandAll();
+            } else {
+                console.error('[UI] expandAll 不是函数');
+            }
+        });
+    } else {
+        console.log('[UI] 未找到展开全部按钮');
     }
     
     const toolbarCollapseAll = document.getElementById('toolbarCollapseAll');
     if (toolbarCollapseAll) {
-        toolbarCollapseAll.addEventListener('click', collapseAll);
+        console.log('[UI] 绑定折叠全部按钮事件, collapseAll函数:', typeof collapseAll);
+        toolbarCollapseAll.addEventListener('click', () => {
+            console.log('[UI] 折叠全部按钮被点击');
+            if (typeof collapseAll === 'function') {
+                collapseAll();
+            } else {
+                console.error('[UI] collapseAll 不是函数');
+            }
+        });
+    } else {
+        console.log('[UI] 未找到折叠全部按钮');
     }
     
     const toolbarSave = document.getElementById('toolbarSave');

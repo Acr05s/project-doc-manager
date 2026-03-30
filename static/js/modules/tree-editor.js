@@ -445,7 +445,7 @@ function renderTreeNode(node, level) {
     const hasChildren = node.children && node.children.length > 0;
     const icon = getNodeIcon(node.type);
     const expandIcon = hasChildren ?
-        `<span class="tree-expand-icon" style="cursor:pointer;">${node.expanded ? '▼' : '▶'}</span>` :
+        (node.expanded ? '▼' : '▶') :
         '<span style="width:14px;display:inline-block;"></span>';
 
     // 属性标签
@@ -462,7 +462,7 @@ function renderTreeNode(node, level) {
              style="padding-left:${indent}px;"
              draggable="true">
             <div class="tree-node-content">
-                ${expandIcon}
+                <span class="tree-expand-icon">${expandIcon}</span>
                 <span class="tree-icon">${icon}</span>
                 <span class="tree-name" contenteditable="false">${escapeHtml(node.name)}</span>
                 ${attrTags ? `<span class="tree-attr-tags">${attrTags}</span>` : ''}
@@ -587,22 +587,28 @@ function getNodeActions(node) {
     } else if (node.type === 'cycle') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('document')" title="添加文档">➕ 文档</button>`;
         actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加目录">➕ 目录</button>`;
-        // 周期排序按钮
-        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'up')" title="上移">⬆️</button>`;
-        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'down')" title="下移">⬇️</button>`;
     } else if (node.type === 'document') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加子目录">➕ 目录</button>`;
-        // 文档层级按钮
-        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'promote')" title="提级为周期">⬆️</button>`;
-        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'demote')" title="降级为子文档">⬇️</button>`;
     } else if (node.type === 'folder') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('file')" title="添加文件">➕ 文件</button>`;
-        // 目录层级按钮
-        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'promote')" title="提级">⬆️</button>`;
-        actions += `<button class="tree-action-btn" onclick="moveTreeNode('${node.id}', 'demote')" title="降级">⬇️</button>`;
     }
 
     if (node.type !== 'root') {
+        // 上移下移按钮
+        actions += `<button class="tree-action-btn" onclick="moveNodeUp('${node.id}')" title="上移">⬆️</button>`;
+        actions += `<button class="tree-action-btn" onclick="moveNodeDown('${node.id}')" title="下移">⬇️</button>`;
+        
+        // 提级降级按钮（周期不能提级）
+        if (node.type !== 'cycle') {
+            actions += `<button class="tree-action-btn" onclick="outdentNode('${node.id}')" title="提级">⬅️</button>`;
+            actions += `<button class="tree-action-btn" onclick="indentNode('${node.id}')" title="降级">➡️</button>`;
+        }
+        
+        // 移动到其它周期（仅限文档、目录、文件）
+        if (['document', 'folder', 'file'].includes(node.type)) {
+            actions += `<button class="tree-action-btn" onclick="moveNodeToCycle('${node.id}')" title="移动到其它周期">📂</button>`;
+        }
+        
         if (node.type === 'document') {
             actions += `<button class="tree-action-btn" onclick="openAttributePanel('${node.id}')" title="设置属性">⚙️</button>`;
         }
@@ -623,16 +629,12 @@ function bindTreeEvents() {
     const container = document.getElementById('treeEditorContainer');
     if (!container) return;
 
-    // 使用事件委托处理展开/折叠图标点击
-    container.addEventListener('click', (e) => {
-        const expandIcon = e.target.closest('.tree-expand-icon');
-        if (expandIcon) {
-            e.stopPropagation(); // 阻止事件冒泡
-            const nodeEl = expandIcon.closest('.tree-node');
-            if (nodeEl && nodeEl.dataset.id) {
-                toggleNode(nodeEl.dataset.id);
-            }
-        }
+    container.querySelectorAll('.tree-expand-icon').forEach(icon => {
+        icon.style.cursor = 'pointer';
+        icon.addEventListener('click', (e) => {
+            const nodeEl = e.target.closest('.tree-node');
+            toggleNode(nodeEl.dataset.id);
+        });
     });
 
     container.querySelectorAll('.tree-node').forEach(nodeEl => {
@@ -920,123 +922,6 @@ window.addTreeNode = function(type) {
 
 window.editTreeNode = function(nodeId) {
     startEditNodeName(nodeId);
-};
-
-/**
- * 移动节点（上移、下移、提级、降级）
- */
-window.moveTreeNode = function(nodeId, action) {
-    const node = findNode(currentTreeData, nodeId);
-    if (!node) return;
-
-    // 找到父节点和兄弟节点
-    const parent = findParentNode(currentTreeData, nodeId);
-    if (!parent) {
-        showNotification('无法移动根节点', 'error');
-        return;
-    }
-
-    const siblings = parent.children || [];
-    const currentIndex = siblings.findIndex(n => n.id === nodeId);
-    if (currentIndex === -1) return;
-
-    let moved = false;
-
-    switch (action) {
-        case 'up':
-            // 上移：与前一个兄弟节点交换位置
-            if (currentIndex > 0) {
-                [siblings[currentIndex], siblings[currentIndex - 1]] = [siblings[currentIndex - 1], siblings[currentIndex]];
-                moved = true;
-            } else {
-                showNotification('已经是第一个了', 'info');
-                return;
-            }
-            break;
-
-        case 'down':
-            // 下移：与后一个兄弟节点交换位置
-            if (currentIndex < siblings.length - 1) {
-                [siblings[currentIndex], siblings[currentIndex + 1]] = [siblings[currentIndex + 1], siblings[currentIndex]];
-                moved = true;
-            } else {
-                showNotification('已经是最后一个了', 'info');
-                return;
-            }
-            break;
-
-        case 'promote':
-            // 提级：将节点移动到父节点的同级
-            const grandParent = findParentNode(currentTreeData, parent.id);
-            if (!grandParent) {
-                // 如果父节点是根节点，且当前是文档/目录，则提级为周期
-                if (node.type === 'document' || node.type === 'folder') {
-                    if (parent.type === 'root') {
-                        // 已经在根级别，将类型改为周期
-                        node.type = 'cycle';
-                        // 移动文档和目录的子节点到新周期
-                        if (node.children) {
-                            node.children.forEach(child => {
-                                if (child.type === 'folder') {
-                                    // 保持目录结构
-                                }
-                            });
-                        }
-                        moved = true;
-                    } else {
-                        showNotification('无法提级此节点', 'warning');
-                        return;
-                    }
-                }
-            } else {
-                // 从当前父节点中移除
-                parent.children.splice(currentIndex, 1);
-                // 添加到祖父节点
-                const parentIndex = grandParent.children.findIndex(n => n.id === parent.id);
-                grandParent.children.splice(parentIndex + 1, 0, node);
-                moved = true;
-            }
-            break;
-
-        case 'demote':
-            // 降级：将节点作为前一个兄弟节点的子节点
-            if (currentIndex > 0) {
-                const prevSibling = siblings[currentIndex - 1];
-                // 前一个兄弟必须是能包含子节点的类型
-                if (['cycle', 'document', 'folder'].includes(prevSibling.type)) {
-                    // 从当前父节点中移除
-                    parent.children.splice(currentIndex, 1);
-                    // 添加到前一个兄弟的子节点
-                    if (!prevSibling.children) prevSibling.children = [];
-                    prevSibling.children.push(node);
-                    // 如果节点类型是周期，降级为文档
-                    if (node.type === 'cycle') {
-                        node.type = 'document';
-                    }
-                    moved = true;
-                } else {
-                    showNotification('前一个节点不能包含子节点', 'warning');
-                    return;
-                }
-            } else {
-                showNotification('前面没有可依附的节点', 'warning');
-                return;
-            }
-            break;
-
-        default:
-            return;
-    }
-
-    if (moved) {
-        renderTree();
-        // 保持选中状态
-        selectedNode = node;
-        selectedNodes = [node];
-        updateToolbarState();
-        markDirty();
-        showNotification('移动成功', 'success');
-    }
 };
 
 window.deleteTreeNode = function(nodeId) {
@@ -1381,16 +1266,6 @@ function findNode(tree, nodeId) {
     return null;
 }
 
-function findParentNode(tree, nodeId) {
-    if (!tree.children) return null;
-    for (const child of tree.children) {
-        if (child.id === nodeId) return tree;
-        const found = findParentNode(child, nodeId);
-        if (found) return found;
-    }
-    return null;
-}
-
 function deleteNode(tree, nodeId) {
     if (tree.children) {
         const index = tree.children.findIndex(child => child.id === nodeId);
@@ -1500,6 +1375,234 @@ function isDescendant(node, targetId) {
     }
     return false;
 }
+
+// ==================== 节点移动操作（上移、下移、提级、降级）====================
+
+/**
+ * 获取节点的父节点和兄弟列表
+ */
+function getParentAndSiblings(nodeId) {
+    if (!currentTreeData) return null;
+    
+    // 如果是根节点，没有父节点
+    if (currentTreeData.id === nodeId) {
+        return { parent: null, siblings: [currentTreeData], index: 0 };
+    }
+    
+    function findParent(node, targetId) {
+        if (!node.children) return null;
+        for (let i = 0; i < node.children.length; i++) {
+            if (node.children[i].id === targetId) {
+                return { parent: node, siblings: node.children, index: i };
+            }
+            const result = findParent(node.children[i], targetId);
+            if (result) return result;
+        }
+        return null;
+    }
+    
+    return findParent(currentTreeData, nodeId);
+}
+
+/**
+ * 上移节点
+ */
+function moveNodeUp(nodeId) {
+    const result = getParentAndSiblings(nodeId);
+    if (!result || result.index <= 0) {
+        showNotification('已经是第一个了', 'warning');
+        return;
+    }
+    
+    const { siblings, index } = result;
+    // 交换位置
+    [siblings[index - 1], siblings[index]] = [siblings[index], siblings[index - 1]];
+    
+    renderTree();
+    markDirty();
+    showNotification('上移成功', 'success');
+}
+
+/**
+ * 下移节点
+ */
+function moveNodeDown(nodeId) {
+    const result = getParentAndSiblings(nodeId);
+    if (!result || result.index >= result.siblings.length - 1) {
+        showNotification('已经是最后一个了', 'warning');
+        return;
+    }
+    
+    const { siblings, index } = result;
+    // 交换位置
+    [siblings[index], siblings[index + 1]] = [siblings[index + 1], siblings[index]];
+    
+    renderTree();
+    markDirty();
+    showNotification('下移成功', 'success');
+}
+
+/**
+ * 提级（减少缩进）- 将节点移动到父节点的同级
+ */
+function outdentNode(nodeId) {
+    const result = getParentAndSiblings(nodeId);
+    if (!result || !result.parent || result.parent.type === 'root') {
+        showNotification('无法继续提级', 'warning');
+        return;
+    }
+    
+    const { parent, siblings, index } = result;
+    const node = siblings[index];
+    
+    // 找到父节点的父节点
+    const grandParentResult = getParentAndSiblings(parent.id);
+    if (!grandParentResult) {
+        showNotification('无法提级', 'warning');
+        return;
+    }
+    
+    // 从当前父节点中移除
+    siblings.splice(index, 1);
+    
+    // 添加到祖父节点
+    const grandParent = grandParentResult.parent || currentTreeData;
+    if (!grandParent.children) grandParent.children = [];
+    
+    // 找到父节点在祖父节点中的位置，将当前节点插入到父节点之后
+    const parentIndex = grandParent.children.findIndex(n => n.id === parent.id);
+    grandParent.children.splice(parentIndex + 1, 0, node);
+    
+    renderTree();
+    markDirty();
+    showNotification('提级成功', 'success');
+}
+
+/**
+ * 降级（增加缩进）- 将节点移动到前一个兄弟节点的子节点中
+ */
+function indentNode(nodeId) {
+    const result = getParentAndSiblings(nodeId);
+    if (!result || result.index <= 0) {
+        showNotification('无法继续降级', 'warning');
+        return;
+    }
+    
+    const { siblings, index } = result;
+    const node = siblings[index];
+    const prevSibling = siblings[index - 1];
+    
+    // 前一个兄弟节点不能是文件类型（文件不能有子节点）
+    if (prevSibling.type === 'file') {
+        showNotification('前一个节点是文件，无法降级', 'warning');
+        return;
+    }
+    
+    // 从当前位置移除
+    siblings.splice(index, 1);
+    
+    // 添加到前一个兄弟节点的子节点中
+    if (!prevSibling.children) prevSibling.children = [];
+    prevSibling.children.push(node);
+    prevSibling.expanded = true;
+    
+    renderTree();
+    markDirty();
+    showNotification('降级成功', 'success');
+}
+
+/**
+ * 移动节点到其它周期
+ */
+function moveNodeToCycle(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+    
+    // 获取所有周期
+    const cycles = currentTreeData.children.filter(n => n.type === 'cycle');
+    if (cycles.length <= 1) {
+        showNotification('只有一个周期，无法移动', 'warning');
+        return;
+    }
+    
+    // 排除当前节点所在的周期
+    const currentResult = getParentAndSiblings(nodeId);
+    if (!currentResult || !currentResult.parent) {
+        showNotification('无法移动根节点', 'warning');
+        return;
+    }
+    
+    // 找到当前周期
+    let currentCycle = currentResult.parent;
+    while (currentCycle && currentCycle.type !== 'cycle' && currentCycle.type !== 'root') {
+        const r = getParentAndSiblings(currentCycle.id);
+        currentCycle = r ? r.parent : null;
+    }
+    
+    // 生成周期选择对话框
+    const cycleOptions = cycles
+        .filter(c => c.id !== currentCycle?.id)
+        .map(c => `<option value="${c.id}">${c.name}</option>`)
+        .join('');
+    
+    if (!cycleOptions) {
+        showNotification('没有其他周期可选', 'warning');
+        return;
+    }
+    
+    // 显示选择对话框
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.display = 'block';
+    dialog.innerHTML = `
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>移动到其它周期</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>选择目标周期：</p>
+                <select id="targetCycleSelect" style="width: 100%; padding: 8px; margin: 10px 0;">
+                    ${cycleOptions}
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="confirmMoveToCycle">确认移动</button>
+                <button class="btn" onclick="this.closest('.modal').remove()">取消</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(dialog);
+    
+    // 绑定确认按钮事件
+    dialog.querySelector('#confirmMoveToCycle').addEventListener('click', () => {
+        const targetCycleId = document.getElementById('targetCycleSelect').value;
+        const targetCycle = cycles.find(c => c.id === targetCycleId);
+        
+        if (targetCycle) {
+            // 从原位置删除
+            deleteNode(currentTreeData, nodeId);
+            
+            // 添加到目标周期
+            if (!targetCycle.children) targetCycle.children = [];
+            targetCycle.children.push(node);
+            targetCycle.expanded = true;
+            
+            renderTree();
+            markDirty();
+            showNotification('移动成功', 'success');
+        }
+        
+        dialog.remove();
+    });
+}
+
+// 导出到全局，供HTML调用
+window.moveNodeUp = moveNodeUp;
+window.moveNodeDown = moveNodeDown;
+window.outdentNode = outdentNode;
+window.indentNode = indentNode;
+window.moveNodeToCycle = moveNodeToCycle;
 
 // ==================== 工具栏 ====================
 
@@ -1698,7 +1801,7 @@ export function expandAll() {
         showNotification('请先打开树形编辑器', 'warning');
         return;
     }
-    // 清除筛选状态
+    // 调用 clearFilter 清除筛选（其内部会 renderTree，这里再调一次以确保展开状态生效）
     clearFilter();
     setAllExpanded(currentTreeData, true);
     renderTree();
@@ -1713,9 +1816,9 @@ export function collapseAll() {
         showNotification('请先打开树形编辑器', 'warning');
         return;
     }
-    // 清除筛选状态
+    // 调用 clearFilter 清除筛选（其内部会 renderTree，这里再操作折叠并重新渲染）
     clearFilter();
-    // 只折叠到项目周期级别，保持根节点展开
+    // 只折叠到项目周期级别，保持根节点和周期节点展开
     collapseToCycleLevel(currentTreeData);
     renderTree();
     if (selectedNode) selectNode(selectedNode);

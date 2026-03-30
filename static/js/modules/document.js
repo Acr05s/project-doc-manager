@@ -426,7 +426,6 @@ function analyzeRequirementStatus(attributes, docsList) {
     return activeAttributes.map(attr => {
         let completedCount = 0;
         let totalCount = 0;
-        const signers = []; // 收集签字人姓名
         
         docsList.forEach(doc => {
             const getDocValue = (fieldName) => {
@@ -451,18 +450,12 @@ function analyzeRequirementStatus(attributes, docsList) {
                 const partyASigner = getDocValue('party_a_signer');
                 const noSignature = getDocValue('no_signature');
                 isCompleted = partyASigner || noSignature || signer;
-                // 收集签字人姓名
-                if (partyASigner) signers.push(`甲方:${partyASigner}`);
-                else if (signer) signers.push(signer);
             } else if (attr.key === 'party_b_sign') {
                 // 乙方签字
                 const signer = getDocValue('signer');
                 const partyBSigner = getDocValue('party_b_signer');
                 const noSignature = getDocValue('no_signature');
                 isCompleted = partyBSigner || noSignature || signer;
-                // 收集签字人姓名
-                if (partyBSigner) signers.push(`乙方:${partyBSigner}`);
-                else if (signer) signers.push(signer);
             } else if (attr.key === 'party_a_seal') {
                 // 甲方盖章
                 const partyASeal = getDocValue('party_a_seal');
@@ -498,20 +491,10 @@ function analyzeRequirementStatus(attributes, docsList) {
             status = 'partial'; // 部分完成
         }
         
-        // 生成描述：包含完成数量和签字人信息
-        let description = `${completedCount}/${totalDocs} 文件已完成`;
-        if (signers.length > 0) {
-            // 去重并限制显示数量
-            const uniqueSigners = [...new Set(signers)];
-            const signerText = uniqueSigners.slice(0, 3).join('、');
-            const moreCount = uniqueSigners.length - 3;
-            description += `\n签字人：${signerText}${moreCount > 0 ? ` 等${moreCount}人` : ''}`;
-        }
-        
         return {
             name: attr.name,
             status: status,
-            description: description
+            description: `${completedCount}/${totalDocs} 文件已完成`
         };
     });
 }
@@ -696,22 +679,24 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     const attrParts = [];
                                     const docDate = getField('doc_date');
                                     const signer = getField('signer');
+                                    const partyASigner = getField('party_a_signer');
+                                    const partyBSigner = getField('party_b_signer');
                                     const signDate = getField('sign_date');
                                     const noSignature = getField('no_signature');
                                     const partyASeal = getField('party_a_seal');
                                     const partyBSeal = getField('party_b_seal');
-                                    const partyASigner = getField('party_a_signer');
-                                    const partyBSigner = getField('party_b_signer');
                                     const hasSealMarked = getField('has_seal_marked') || getField('has_seal');
                                     const noSeal = getField('no_seal');
                                     const otherSeal = getField('other_seal');
                                     
                                     if (docDate) attrParts.push(`📅${formatDateToMonth(docDate)}`);
                                     if (signer) attrParts.push(`✍️${signer}`);
+                                    if (partyASigner) attrParts.push(`🏢甲:${partyASigner}`);
+                                    if (partyBSigner) attrParts.push(`🏭乙:${partyBSigner}`);
                                     if (signDate) attrParts.push(`📆${formatDateToMonth(signDate)}`);
                                     if (noSignature) attrParts.push('❌不签字');
-                                    if (partyASeal) attrParts.push(`<span title="甲方已盖章">🏢甲</span>`);
-                                    if (partyBSeal) attrParts.push(`<span title="乙方已盖章">🏭乙</span>`);
+                                    if (partyASeal) attrParts.push('🏢甲方盖章');
+                                    if (partyBSeal) attrParts.push('🏭乙方盖章');
                                     if (hasSealMarked) attrParts.push('🔖');
                                     if (noSeal) attrParts.push('❌不盖章');
                                     if (otherSeal) attrParts.push(`📍${otherSeal}`);
@@ -731,9 +716,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     let missingRequirements = [];
                                     
                                     const hasSigner = getDocValue('signer');
+                                    const hasNoSignature = getDocValue('no_signature');
                                     const hasPartyASigner = getDocValue('party_a_signer');
                                     const hasPartyBSigner = getDocValue('party_b_signer');
-                                    const hasNoSignature = getDocValue('no_signature');
                                     const hasPartyASeal = getDocValue('party_a_seal');
                                     const hasPartyBSeal = getDocValue('party_b_seal');
                                     const hasHasSealMarked = getDocValue('has_seal_marked') || getDocValue('has_seal');
@@ -741,20 +726,22 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     const hasDocDate = getDocValue('doc_date');
                                     const hasSignDate = getDocValue('sign_date');
                                     
-                                    // 检查签字要求（避免重复）
-                                    const hasSignatureRequirement = requirement.includes('乙方签字') || requirement.includes('甲方签字') || requirement.includes('签字');
-                                    // 判断是否有任何签字信息（通用签字人、甲方签字人或乙方签字人）
-                                    const hasAnySigner = hasSigner || hasPartyASigner || hasPartyBSigner || hasNoSignature;
-                                    if (hasSignatureRequirement && !hasAnySigner) {
-                                        if (requirement.includes('乙方签字') && requirement.includes('甲方签字')) {
-                                            missingRequirements.push('甲乙方签字');
-                                        } else if (requirement.includes('乙方签字')) {
-                                            missingRequirements.push('乙方签字');
-                                        } else if (requirement.includes('甲方签字')) {
-                                            missingRequirements.push('甲方签字');
-                                        } else if (requirement.includes('签字')) {
-                                            missingRequirements.push('签字');
-                                        }
+                                    // 检查签字要求（分别检查甲方签字和乙方签字）
+                                    const hasPartyASignReq = requirement.includes('甲方签字');
+                                    const hasPartyBSignReq = requirement.includes('乙方签字');
+                                    const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
+                                    
+                                    // 检查甲方签字
+                                    if (hasPartyASignReq && !hasPartyASigner && !hasNoSignature) {
+                                        missingRequirements.push('甲方签字');
+                                    }
+                                    // 检查乙方签字
+                                    if (hasPartyBSignReq && !hasPartyBSigner && !hasNoSignature) {
+                                        missingRequirements.push('乙方签字');
+                                    }
+                                    // 检查通用签字
+                                    if (hasGeneralSignReq && !hasSigner && !hasNoSignature) {
+                                        missingRequirements.push('签字');
                                     }
                                     
                                     // 检查盖章要求（避免重复）
@@ -786,17 +773,6 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         </span>
                                     ` : '';
                                     
-                                    // 生成已满足要求的提示（显示签字人信息）
-                                    const metRequirements = [];
-                                    if (partyASigner) metRequirements.push(`甲方签字人：${partyASigner}`);
-                                    if (partyBSigner) metRequirements.push(`乙方签字人：${partyBSigner}`);
-                                    if (!partyASigner && !partyBSigner && signer) metRequirements.push(`签字人：${signer}`);
-                                    const metHtml = metRequirements.length > 0 ? `
-                                        <span class="met-requirements" style="background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 5px;" title="${metRequirements.join('\n')}">
-                                            ✓ ${metRequirements.join(' | ')}
-                                        </span>
-                                    ` : '';
-                                    
                                     return `<div class="doc-file-row" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: 20px;">
                                         <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
                                               title="点击预览文件" 
@@ -804,7 +780,6 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                             ${d.original_filename || d.filename}
                                         </span>
                                         ${attrParts.length > 0 ? `<span class="doc-attrs">${attrParts.join(' ')}</span>` : ''}
-                                        ${metHtml}
                                         ${missingHtml}
                                     </div>`;
                                 }).join('');
@@ -1922,21 +1897,20 @@ async function searchFiles(keyword) {
             let files = result.files || [];
             console.log('[searchFiles] 搜索到', files.length, '个文件');
             
-            // 如果搜索无结果且有关键词，显示所有文件
-            if (files.length === 0 && keyword && keyword.trim()) {
-                console.log('[searchFiles] 搜索无结果，显示所有文件');
-                showNotification('未找到匹配文件，显示所有文件', 'info');
-                // 重新请求所有文件（不传关键词）
+            // 如果搜索无结果但有关键词，则获取全部文件
+            let noMatchHint = '';
+            if (files.length === 0 && keyword) {
+                noMatchHint = '<p class="placeholder" style="color:#ff9800;background:#fff3e0;padding:8px 12px;border-radius:4px;margin-bottom:10px;">⚠️ 无匹配结果，已显示全部文档</p>';
+                // 重新调用API获取全部文件
                 const allFilesUrl = `/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(selectedPackageId)}&keyword=`;
-                const allFilesResponse = await fetch(allFilesUrl);
-                const allFilesResult = await allFilesResponse.json();
-                if (allFilesResult.status === 'success') {
-                    files = allFilesResult.files || [];
+                const allResponse = await fetch(allFilesUrl);
+                const allResult = await allResponse.json();
+                if (allResult.status === 'success') {
+                    files = allResult.files || [];
                 }
-                displaySelectedFiles(files, false);
-            } else {
-                displaySelectedFiles(files, !!(keyword && keyword.trim()));
             }
+            
+            displaySelectedFiles(files, noMatchHint);
         } else {
             console.error('[searchFiles] 搜索失败:', result.message || '未知错误');
             showNotification('搜索失败: ' + (result.message || '未知错误'), 'error');
@@ -2002,142 +1976,199 @@ function formatPathDisplay(path) {
 }
 
 /**
- * 将文件列表按目录结构组织成树状
- * @param {Array} files - 文件列表
- * @returns {Object} 目录树结构
+ * 显示选择的文件列表（递归树状结构，支持展开/折叠/目录全选）
  */
-function buildFileTree(files) {
-    const root = { name: '根目录', children: {}, files: [] };
-    
-    files.forEach(file => {
-        const path = file.rel_path || file.path || '';
-        // 统一使用正斜杠
-        const normalizedPath = path.replace(/\\/g, '/');
-        // 移除文件名，保留目录路径
-        const lastSlashIndex = normalizedPath.lastIndexOf('/');
-        const dirPath = lastSlashIndex > 0 ? normalizedPath.substring(0, lastSlashIndex) : '';
-        const fileName = lastSlashIndex >= 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
-        
-        // 如果没有目录，放到根目录
-        if (!dirPath) {
-            root.files.push({ ...file, displayName: fileName });
-            return;
-        }
-        
-        // 按目录层级遍历
-        const parts = dirPath.split('/').filter(p => p);
-        let current = root;
-        
-        parts.forEach(part => {
-            if (!current.children[part]) {
-                current.children[part] = { name: part, children: {}, files: [] };
-            }
-            current = current.children[part];
-        });
-        
-        current.files.push({ ...file, displayName: fileName });
-    });
-    
-    return root;
-}
-
-/**
- * 渲染文件树
- * @param {Object} node - 目录节点
- * @param {string} path - 当前路径
- * @param {number} level - 层级
- * @returns {string} HTML
- */
-function renderFileTree(node, path = '', level = 0) {
-    const indent = level * 20;
-    let html = '';
-    
-    // 渲染当前目录下的文件
-    node.files.forEach(file => {
-        const isUsed = file.used || false;
-        const usedByList = file.used_by || [];
-        const usedByText = usedByList.length > 0 ? usedByList.join('，') : '已被其他文档使用';
-        
-        html += `
-            <div class="zip-file-item ${isUsed ? 'used' : ''}" 
-                 data-path="${file.path}" 
-                 data-name="${file.name}"
-                 style="padding-left: ${indent + 20}px;">
-                <input type="checkbox" class="zip-file-checkbox" ${isUsed ? 'disabled' : ''} />
-                <span class="zip-file-icon">📄</span>
-                <span class="zip-file-name" title="${file.name}">${file.displayName || file.name}</span>
-                ${isUsed ? `<span class="file-used-badge" title="${usedByText}">已被使用</span>` : ''}
-            </div>
-        `;
-    });
-    
-    // 渲染子目录
-    Object.values(node.children).forEach(child => {
-        const childPath = path ? `${path}/${child.name}` : child.name;
-        const hasContent = child.files.length > 0 || Object.keys(child.children).length > 0;
-        
-        if (hasContent) {
-            html += `
-                <div class="zip-folder-item" style="padding-left: ${indent}px;">
-                    <div class="zip-folder-header">
-                        <span class="zip-folder-icon">📁</span>
-                        <span class="zip-folder-name">${child.name}</span>
-                        <span class="zip-folder-count">(${child.files.length + Object.values(child.children).reduce((sum, c) => sum + c.files.length, 0)} 个文件)</span>
-                    </div>
-                    <div class="zip-folder-content">
-                        ${renderFileTree(child, childPath, level + 1)}
-                    </div>
-                </div>
-            `;
-        }
-    });
-    
-    return html;
-}
-
-/**
- * 显示选择的文件列表（树状目录结构）
- * @param {Array} files - 文件列表
- * @param {boolean} isSearchResult - 是否为搜索结果
- */
-export function displaySelectedFiles(files, isSearchResult = false) {
+export function displaySelectedFiles(files, noMatchHint = '') {
     const zipFilesList = document.getElementById('zipFilesList');
     if (!zipFilesList) return;
     
-    if (files.length === 0) {
+    if (!files || files.length === 0) {
         zipFilesList.innerHTML = '<p class="placeholder">未找到匹配的文件</p>';
         return;
     }
     
-    // 建立目录树
-    const tree = buildFileTree(files);
-    
-    // 渲染树状结构
-    let html = '';
-    
-    // 如果有搜索结果提示
-    if (isSearchResult) {
-        html += `<div class="search-result-info">搜索结果：找到 ${files.length} 个文件</div>`;
-    }
-    
-    html += `<div class="zip-file-tree">`;
-    html += renderFileTree(tree);
-    html += `</div>`;
-    
-    zipFilesList.innerHTML = html;
-    
-    // 添加复选框事件
-    document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', function(e) {
-            import('./zip.js').then(module => {
+    // 直接委托给 zip.js 的树状渲染（通过动态 import）
+    // 先把 files 放到临时变量，再调 zip.js 的渲染能力
+    // 注意：此处 files 已经有 rel_dir 字段（来自后端返回），可直接使用
+    // 如果没有 rel_dir，从 rel_path 推断
+    const normalizedFiles = files.map(f => {
+        if (!f.rel_dir && (f.rel_path || f.path)) {
+            const relPath = (f.rel_path || f.path || '').replace(/\\/g, '/');
+            const lastSlash = relPath.lastIndexOf('/');
+            f = { ...f, rel_dir: lastSlash > 0 ? relPath.substring(0, lastSlash) : '' };
+        }
+        return f;
+    });
+
+    import('./zip.js').then(module => {
+        // 临时覆盖 appState 并调用树渲染
+        // 实际上我们复用 zip.js 的渲染，通过触发一次虚拟搜索来显示
+        // 但这里有循环依赖风险，改为内联树渲染
+
+        // 内联构建目录树
+        function buildTree(fileList) {
+            const root = { name: '', path: '', children: {}, files: [] };
+            for (const file of fileList) {
+                const relDir = (file.rel_dir || '').replace(/\\/g, '/');
+                const parts = relDir ? relDir.split('/').filter(Boolean) : [];
+                let node = root;
+                let currentPath = '';
+                for (const part of parts) {
+                    currentPath = currentPath ? `${currentPath}/${part}` : part;
+                    if (!node.children[part]) {
+                        node.children[part] = { name: part, path: currentPath, children: {}, files: [] };
+                    }
+                    node = node.children[part];
+                }
+                node.files.push(file);
+            }
+            return root;
+        }
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function collectFiles(node) {
+            let result = [...node.files];
+            for (const child of Object.values(node.children)) result = result.concat(collectFiles(child));
+            return result;
+        }
+
+        function renderTree(node, depth) {
+            let html = '';
+            const indent = depth * 16;
+            const childDirs = Object.values(node.children).sort((a,b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }));
+            for (const dir of childDirs) {
+                const escaped = dir.path.replace(/"/g,'&quot;');
+                const allInDir = collectFiles(dir);
+                const totalCount = allInDir.length;
+                const selCount = allInDir.filter(f => appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === f.path)).length;
+                const dirChecked = totalCount > 0 && selCount === totalCount;
+                html += `
+                <div class="directory-group" data-dir-group="${escaped}" style="margin-left:${indent}px;margin-bottom:4px;">
+                    <div class="directory-header zip-dir-row" data-dir="${escaped}"
+                         style="display:flex;align-items:center;gap:6px;padding:5px 10px;
+                                background:linear-gradient(135deg,#e8f0fe,#f0f5ff);
+                                border:1px solid #d0ddf5;border-radius:5px;
+                                cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;">
+                        <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;">▼</span>
+                        <input type="checkbox" class="zip-dir-checkbox" data-dir="${escaped}"
+                               ${dirChecked ? 'checked' : ''}
+                               style="cursor:pointer;flex-shrink:0;"
+                               onclick="event.stopPropagation();" />
+                        <span style="flex:1;">📁 ${escHtml(dir.name)}</span>
+                        <span style="color:#5a7fa8;font-size:11px;font-weight:normal;">(${selCount}/${totalCount})</span>
+                    </div>
+                    <div class="zip-dir-children" data-dir-files="${escaped}" style="display:block;">
+                        ${renderTree(dir, depth + 1)}
+                    </div>
+                </div>`;
+            }
+            // 当前目录的直属文件
+            for (const file of [...node.files].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))) {
+                    const isUsed = !!file.archived;
+                const isSelected = appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === file.path);
+                const isDisabled = isUsed && !isSelected;  // 未被选中但已被使用才禁用
+                const ePath = file.path.replace(/"/g,'&quot;');
+                const eName = file.name.replace(/"/g,'&quot;');
+                const eDir = (file.rel_dir || '').replace(/"/g,'&quot;');
+                // 获取被哪些文档使用的信息
+                const usedByList = file.used_by || [];
+                const usedByTitle = usedByList.length > 0 ? usedByList.join('\n') : '';
+                html += `
+                <div class="zip-file-item ${isSelected ? 'selected' : ''} ${isUsed ? 'used' : ''}"
+                     data-path="${ePath}" data-name="${eName}" data-dir="${eDir}"
+                     style="margin-left:${indent+16}px;padding:4px 8px;margin-bottom:2px;border-radius:4px;
+                            display:flex;align-items:center;gap:8px;
+                            ${isSelected ? 'background:#e3f2fd;' : isUsed ? 'opacity:0.7;background:#f0f0f0;' : 'background:#fafafa;'}">
+                    <input type="checkbox" class="zip-file-checkbox" ${isSelected?'checked':''} ${isDisabled?'disabled':''} style="flex-shrink:0;" />
+                    <span style="flex:1;word-break:break-all;font-size:13px;line-height:1.4;" title="${eName}">📄 ${escHtml(file.name)}</span>
+                    ${isUsed ? `<span style="background:#ff9800;color:white;padding:2px 5px;border-radius:3px;font-size:11px;flex-shrink:0;" title="${usedByTitle}">已被使用</span>` : ''}
+                </div>`;
+            }
+            return html;
+        }
+
+        const tree = buildTree(normalizedFiles);
+        const treeHtml = renderTree(tree, 0);
+        zipFilesList.innerHTML = `${noMatchHint}<div class="files-tree">${treeHtml || '<p class="placeholder">暂无文件</p>'}</div>`;
+
+        // 绑定展开/折叠事件
+        zipFilesList.querySelectorAll('.zip-dir-row').forEach(header => {
+            header.addEventListener('click', function(e) {
+                if (e.target.type === 'checkbox') return;
+                const dirPath = this.dataset.dir;
+                const container = Array.from(zipFilesList.querySelectorAll('.zip-dir-children'))
+                    .find(el => el.dataset.dirFiles === dirPath);
+                const icon = this.querySelector('.dir-toggle-icon');
+                if (container) {
+                    const collapsed = container.style.display === 'none';
+                    container.style.display = collapsed ? 'block' : 'none';
+                    if (icon) icon.style.transform = collapsed ? '' : 'rotate(-90deg)';
+                }
+            });
+        });
+
+        // 绑定目录复选框
+        zipFilesList.querySelectorAll('.zip-dir-checkbox').forEach(cb => {
+            cb.addEventListener('change', function(e) {
+                module.handleZipDirTreeSelect ? module.handleZipDirTreeSelect(e) : (() => {
+                    // fallback: 选中/取消该目录下所有文件
+                    const dirPath = cb.dataset.dir;
+                    const isChecked = cb.checked;
+                    zipFilesList.querySelectorAll('.zip-file-item').forEach(item => {
+                        const d = item.dataset.dir || '';
+                        if (d !== dirPath && !d.startsWith(dirPath + '/')) return;
+                        const fc = item.querySelector('.zip-file-checkbox');
+                        if (!fc || fc.disabled) return;
+                        const fp = item.dataset.path, fn = item.dataset.name, fd = item.dataset.dir || '';
+                        if (isChecked) {
+                            if (!fc.checked) {
+                                fc.checked = true; item.classList.add('selected'); item.style.background='#e3f2fd';
+                                if (appState.zipSelectedFiles && !appState.zipSelectedFiles.some(f=>f.path===fp))
+                                    appState.zipSelectedFiles.push({path:fp,name:fn,source_dir:fd});
+                            }
+                        } else {
+                            fc.checked = false; item.classList.remove('selected'); item.style.background='#fafafa';
+                            if (appState.zipSelectedFiles) appState.zipSelectedFiles = appState.zipSelectedFiles.filter(f=>f.path!==fp);
+                        }
+                    });
+                    module.updateZipSelectedInfo();
+                    module.updateSelectAllButtonState();
+                })();
+            });
+            // 设置 indeterminate
+            const dirPath = cb.dataset.dir;
+            const allInDir = Array.from(zipFilesList.querySelectorAll('.zip-file-item')).filter(item => {
+                const d = item.dataset.dir || '';
+                return d === dirPath || d.startsWith(dirPath + '/');
+            });
+            const enabled = allInDir.filter(i => !i.querySelector('.zip-file-checkbox')?.disabled);
+            const checked = enabled.filter(i => i.querySelector('.zip-file-checkbox')?.checked);
+            cb.indeterminate = checked.length > 0 && checked.length < enabled.length;
+        });
+
+        // 绑定文件复选框
+        zipFilesList.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', function(e) {
                 module.handleZipFileSelect(e);
             });
         });
+
+        module.updateZipSelectedInfo();
+        module.updateSelectAllButtonState();
     });
-    
-    // 恢复已选中状态
+}
+
+/**
+ * 处理ZIP目录选择（选择/取消选择整个目录）- 保留兼容旧代码
+ */
+function handleZipDirSelect(e) {
     import('./zip.js').then(module => {
-        module.fixZipSelectionIssue();
+        if (module.handleZipDirTreeSelect) {
+            module.handleZipDirTreeSelect(e);
+        }
     });
 }
 
@@ -2171,6 +2202,17 @@ async function handleSelectArchive() {
     try {
         showLoading(true);
         
+        // 为每个文件补充目录信息（source_dir），供后端打包时建立子目录
+        const filesWithDir = selectedFiles.map(file => {
+            // 优先使用 appState 中已存的 source_dir，DOM 只作备用
+            let sourceDir = file.source_dir;
+            if (sourceDir === undefined) {
+                const itemEl = document.querySelector(`#zipFilesList .zip-file-item[data-path="${CSS.escape(file.path)}"]`);
+                sourceDir = itemEl ? (itemEl.dataset.dir || '') : '';
+            }
+            return { ...file, source_dir: sourceDir || '' };
+        });
+        
         const response = await fetch('/api/documents/files/select', {
             method: 'POST',
             headers: {
@@ -2181,7 +2223,7 @@ async function handleSelectArchive() {
                 project_name: appState.projectConfig.name,
                 cycle: appState.currentCycle,
                 doc_name: appState.currentDocument,
-                files: selectedFiles
+                files: filesWithDir
             })
         });
         
@@ -2514,14 +2556,21 @@ function checkMissingRequirements(doc, requirement) {
     
     if (!requirement) return missingRequirements;
     
-    // 检查签字要求
-    if (requirement.includes('乙方签字') && !doc.signer && !doc.no_signature) {
-        missingRequirements.push('乙方签字');
-    }
-    if (requirement.includes('甲方签字') && !doc.signer && !doc.no_signature) {
+    // 检查签字要求（分别检查甲方签字和乙方签字）
+    const hasPartyASignReq = requirement.includes('甲方签字');
+    const hasPartyBSignReq = requirement.includes('乙方签字');
+    const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
+    
+    // 检查甲方签字
+    if (hasPartyASignReq && !doc.party_a_signer && !doc.no_signature) {
         missingRequirements.push('甲方签字');
     }
-    if (requirement.includes('签字') && !doc.signer && !doc.no_signature) {
+    // 检查乙方签字
+    if (hasPartyBSignReq && !doc.party_b_signer && !doc.no_signature) {
+        missingRequirements.push('乙方签字');
+    }
+    // 检查通用签字
+    if (hasGeneralSignReq && !doc.signer && !doc.no_signature) {
         missingRequirements.push('签字');
     }
     
@@ -4403,35 +4452,6 @@ function getSelectedDocsAttributeStatus(docIds) {
 }
 
 /**
- * 获取第一个选中文档的属性值（用于批量编辑时填充表单）
- */
-function getFirstDocAttributeValues(docIds) {
-    const values = {};
-    
-    // 从项目配置中获取文档数据
-    if (appState.projectConfig && appState.projectConfig.documents) {
-        for (const [cycleKey, cycleInfo] of Object.entries(appState.projectConfig.documents)) {
-            if (cycleInfo.uploaded_docs) {
-                for (const doc of cycleInfo.uploaded_docs) {
-                    const docId = doc.doc_id || doc.id || `${cycleKey}_${doc.doc_name || doc.name}_${doc.upload_time || Date.now()}`;
-                    if (docIds.includes(docId)) {
-                        // 找到第一个匹配的文档，获取其属性值
-                        const textAttributes = ['party_a_signer', 'party_b_signer', 'signer', 'doc_date', 'sign_date', 'other_seal'];
-                        textAttributes.forEach(key => {
-                            const camelKey = key.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
-                            values[camelKey] = doc[key] || doc[`_${key}`] || '';
-                        });
-                        return values;
-                    }
-                }
-            }
-        }
-    }
-    
-    return values;
-}
-
-/**
  * 处理批量编辑 - 复用编辑文档模态框
  */
 export function handleBatchEdit() {
@@ -4445,9 +4465,6 @@ export function handleBatchEdit() {
     
     // 获取选中文档的当前属性状态
     const attrStatus = getSelectedDocsAttributeStatus(selectedDocIds);
-    
-    // 获取第一个选中文档的详细属性值（用于填充文本输入框）
-    const firstDocValues = getFirstDocAttributeValues(selectedDocIds);
     
     // 从项目配置中获取文档要求
     let requirement = '';
@@ -4509,16 +4526,14 @@ export function handleBatchEdit() {
             const attr1LabelStyle = getLabelStyle(attr1Key);
             
             if (attr1.type === 'date') {
-                const attr1Value = firstDocValues[attr1.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value="${attr1Value}"></td>
+                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value=""></td>
                 `;
             } else if (attr1.type === 'text') {
-                const attr1Value = firstDocValues[attr1.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value="${attr1Value}"></td>
+                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value=""></td>
                 `;
             } else if (attr1.type === 'checkbox' && attr1.inline) {
                 rowHtml += `
@@ -4560,16 +4575,14 @@ export function handleBatchEdit() {
             const attr2LabelStyle = getLabelStyle(attr2Key);
             
             if (attr2.type === 'date') {
-                const attr2Value = firstDocValues[attr2.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value="${attr2Value}"></td>
+                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value=""></td>
                 `;
             } else if (attr2.type === 'text') {
-                const attr2Value = firstDocValues[attr2.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value="${attr2Value}"></td>
+                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value=""></td>
                 `;
             } else if (attr2.type === 'checkbox' && attr2.inline) {
                 rowHtml += `
@@ -4679,18 +4692,6 @@ export function handleBatchEdit() {
             }
             
             showNotification(`成功编辑 ${successCount} 个文档${errorCount > 0 ? '，' + errorCount + '个失败' : ''}`, errorCount > 0 ? 'warning' : 'success');
-            
-            // 刷新项目配置数据（确保获取最新的文档属性）
-            if (appState.currentProjectId) {
-                try {
-                    const projectResult = await loadProject(appState.currentProjectId);
-                    if (projectResult.status === 'success') {
-                        appState.projectConfig = projectResult.project;
-                    }
-                } catch (e) {
-                    console.error('刷新项目配置失败:', e);
-                }
-            }
             
             // 刷新文档列表
             if (appState.currentCycle) {

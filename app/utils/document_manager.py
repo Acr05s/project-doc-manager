@@ -327,6 +327,70 @@ class DocumentManager:
                                        party_a, party_b, supervisor, manager, duration)
         return {'status': 'error', 'message': '项目管理模块不可用'}
     
+    def import_project_json(self, project_config: Dict, new_name: str = None) -> Dict:
+        """从JSON配置导入项目
+        
+        Args:
+            project_config: 项目配置JSON
+            new_name: 可选的新项目名称（如果不指定则使用配置中的名称）
+            
+        Returns:
+            Dict: 导入结果
+        """
+        try:
+            if not self.projects:
+                return {'status': 'error', 'message': '项目管理模块不可用'}
+            
+            # 获取项目名称
+            project_name = new_name or project_config.get('name', '导入项目')
+            
+            # 生成新的项目ID
+            from datetime import datetime
+            new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            
+            # 检查项目名称是否已存在
+            existing_projects = self.projects.list_all()
+            for proj in existing_projects:
+                if proj.get('name') == project_name:
+                    # 如果项目名已存在，添加时间戳后缀
+                    project_name = f"{project_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    break
+            
+            # 更新配置
+            project_config['id'] = new_project_id
+            project_config['name'] = project_name
+            project_config['created_time'] = datetime.now().isoformat()
+            project_config['updated_time'] = datetime.now().isoformat()
+            
+            # 创建项目目录结构
+            self.data_manager.create_project_structure(project_name)
+            
+            # 保存项目配置
+            self.data_manager.save_full_config(project_name, project_config)
+            
+            # 添加到项目索引
+            self.projects.add_to_index(
+                project_id=new_project_id,
+                name=project_name,
+                description=project_config.get('description', ''),
+                created_time=project_config['created_time']
+            )
+            
+            logger.info(f"项目导入成功: {project_name} (ID: {new_project_id})")
+            
+            return {
+                'status': 'success',
+                'project_id': new_project_id,
+                'project_name': project_name,
+                'message': '项目导入成功'
+            }
+            
+        except Exception as e:
+            logger.error(f"导入项目失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {'status': 'error', 'message': str(e)}
+    
     def load_project(self, project_id: str) -> Dict:
         """加载项目"""
         if self.projects:
@@ -472,6 +536,79 @@ class DocumentManager:
             project_folder.mkdir(parents=True, exist_ok=True)
             
             logger.info(f"[DEBUG] 项目目录: {project_folder}, 是否存在: {project_folder.exists()}")
+
+            # 加载旧的requirements.json（如果存在）
+            old_req_file = project_folder / 'requirements.json'
+            old_required_docs = {}
+            if old_req_file.exists():
+                try:
+                    with open(old_req_file, 'r', encoding='utf-8') as f:
+                        old_config = json.load(f)
+                    old_documents = old_config.get('documents', {})
+                    for cycle, cycle_data in old_documents.items():
+                        old_required_docs[cycle] = cycle_data.get('required_docs', [])
+                except Exception as e:
+                    logger.warning(f"[DEBUG] 读取旧配置失败: {e}")
+
+            # 构建文档名称映射（旧名称 -> 新名称）
+            doc_name_mapping = {}
+            new_documents = req_config.get('documents', {})
+            for cycle, new_cycle_data in new_documents.items():
+                if cycle not in old_required_docs:
+                    continue
+                
+                old_docs = old_required_docs[cycle]
+                new_docs = new_cycle_data.get('required_docs', [])
+                
+                # 对比新旧文档列表，找出名称变更
+                for i, old_doc in enumerate(old_docs):
+                    if i < len(new_docs):
+                        old_name = old_doc.get('name') if isinstance(old_doc, dict) else str(old_doc)
+                        new_name = new_docs[i].get('name') if isinstance(new_docs[i], dict) else str(new_docs[i])
+                        if old_name and new_name and old_name != new_name:
+                            doc_name_mapping[(project_name, cycle, old_name)] = new_name
+
+            logger.info(f"[DEBUG] 文档名称映射: {doc_name_mapping}")
+
+            # 同步更新 documents_index.json 中的 doc_name
+            if doc_name_mapping:
+                data_dir = project_folder / 'data'
+                index_file = data_dir / 'documents_index.json'
+                
+                if index_file.exists():
+                    try:
+                        with open(index_file, 'r', encoding='utf-8') as f:
+                            doc_index = json.load(f)
+                        
+                        documents = doc_index.get('documents', {})
+                        updated_count = 0
+                        
+                        for doc_id, doc_info in documents.items():
+                            cycle = doc_info.get('cycle', '')
+                            doc_name = doc_info.get('doc_name', '')
+                            mapping_key = (project_name, cycle, doc_name)
+                            
+                            if mapping_key in doc_name_mapping:
+                                old_name = doc_info['doc_name']
+                                doc_info['doc_name'] = doc_name_mapping[mapping_key]
+                                updated_count += 1
+                                logger.info(f"[DEBUG] 更新文档名称: {old_name} -> {doc_info['doc_name']}")
+                        
+                        if updated_count > 0:
+                            # 备份原文件
+                            backup_file = data_dir / 'documents_index_backup.json'
+                            with open(backup_file, 'w', encoding='utf-8') as f:
+                                json.dump(doc_index, f, ensure_ascii=False, indent=2)
+                            
+                            # 保存更新后的文件
+                            with open(index_file, 'w', encoding='utf-8') as f:
+                                json.dump(doc_index, f, ensure_ascii=False, indent=2)
+                            
+                            logger.info(f"[DEBUG] 已更新 {updated_count} 个文档名称")
+                    except Exception as e:
+                        logger.error(f"[DEBUG] 更新文档索引失败: {e}")
+                        import traceback
+                        logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
 
             # 将需求配置复制到项目目录
             target_file = project_folder / 'requirements.json'

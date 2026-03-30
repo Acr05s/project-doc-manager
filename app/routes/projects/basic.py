@@ -60,12 +60,41 @@ def update_project(project_id):
         if project_result.get('status') == 'success':
             original_config = project_result.get('project')
             if original_config and 'documents' in original_config:
-                # 保留原有文档信息
+                # 构建旧文档名称到新文档名称的映射（基于索引位置）
+                doc_name_mapping = {}
+                for cycle, cycle_info in original_config['documents'].items():
+                    if cycle not in data.get('documents', {}):
+                        continue
+                    
+                    old_required = cycle_info.get('required_docs', [])
+                    new_required = data['documents'][cycle].get('required_docs', [])
+                    
+                    # 对比新旧required_docs，找出名称变更
+                    for i, old_doc in enumerate(old_required):
+                        if i < len(new_required):
+                            new_doc = new_required[i]
+                            old_name = old_doc.get('name') if isinstance(old_doc, dict) else old_doc
+                            new_name = new_doc.get('name') if isinstance(new_doc, dict) else new_doc
+                            if old_name and new_name and old_name != new_name:
+                                doc_name_mapping[(cycle, old_name)] = new_name
+                
+                # 保留原有文档信息，并同步更新doc_name
                 for cycle, cycle_info in original_config['documents'].items():
                     if 'uploaded_docs' in cycle_info:
                         if cycle not in data.get('documents', {}):
                             data.setdefault('documents', {})[cycle] = {}
-                        data['documents'][cycle]['uploaded_docs'] = cycle_info['uploaded_docs']
+                        
+                        # 复制uploaded_docs并更新doc_name
+                        updated_docs = []
+                        for doc in cycle_info['uploaded_docs']:
+                            doc_copy = doc.copy() if isinstance(doc, dict) else doc
+                            if isinstance(doc_copy, dict):
+                                old_doc_name = doc_copy.get('doc_name')
+                                if old_doc_name and (cycle, old_doc_name) in doc_name_mapping:
+                                    doc_copy['doc_name'] = doc_name_mapping[(cycle, old_doc_name)]
+                            updated_docs.append(doc_copy)
+                        
+                        data['documents'][cycle]['uploaded_docs'] = updated_docs
         
         # 保存项目配置
         result = doc_manager.save_project(data)

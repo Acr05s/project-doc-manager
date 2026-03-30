@@ -1002,6 +1002,16 @@ def search_files():
         if not project_id and not project_name:
             return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
         
+        # 加载项目的文档数据到 documents_db
+        if project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                project_name = project_result.get('project', {}).get('name', '')
+                if project_name and hasattr(doc_manager, 'data_manager'):
+                    doc_index = doc_manager.data_manager.load_documents_index(project_name)
+                    for doc_id, doc_data in doc_index.items():
+                        doc_manager.documents_db[doc_id] = doc_data
+        
         # 如果只有 project_id，查项目名
         if not project_name and project_id:
             project_result = doc_manager.load_project(project_id)
@@ -1037,12 +1047,17 @@ def search_files():
             if keyword and keyword not in file_path.name.lower():
                 continue
             
-            # 检查是否已被其他文档使用
-            is_used = any(
-                meta.get('file_path') == str(file_path) or 
-                meta.get('original_filename') == file_path.name
-                for meta in doc_manager.documents_db.values()
-            )
+            # 检查是否已被其他文档使用，并记录被哪些文档使用
+            used_by = []
+            for meta in doc_manager.documents_db.values():
+                if meta.get('file_path') == str(file_path) or meta.get('original_filename') == file_path.name:
+                    # 获取文档类型和名称
+                    cycle = meta.get('cycle', '')
+                    doc_name = meta.get('doc_name', '')
+                    if cycle or doc_name:
+                        used_by.append(f"{cycle} - {doc_name}" if cycle else doc_name)
+            
+            is_archived = len(used_by) > 0
             
             files.append({
                 'id': str(file_path),
@@ -1051,7 +1066,8 @@ def search_files():
                 'rel_path': file_path.name,
                 'size': file_path.stat().st_size,
                 'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                'used': is_used
+                'archived': is_archived,
+                'used_by': used_by
             })
         
         return jsonify({
@@ -1094,6 +1110,12 @@ def select_files():
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             doc_id = f"{cycle}_{doc_name}_{timestamp}_{len(results)}"
             
+            # 获取目录信息（来自前端的 source_dir 字段），用于打包时建立子目录
+            source_dir = file_info.get('source_dir', '') or ''
+            # 规范化：根目录统一用空字符串表示
+            if source_dir in ('/', ''):
+                source_dir = ''
+            
             doc_metadata = {
                 'cycle': cycle,
                 'doc_name': doc_name,
@@ -1104,7 +1126,8 @@ def select_files():
                 'upload_time': datetime.now().isoformat(),
                 'source': 'select',
                 'file_size': file_path.stat().st_size,
-                'doc_id': doc_id
+                'doc_id': doc_id,
+                'directory': source_dir   # 保存目录信息，供打包时建立子目录结构
             }
             
             # 添加到documents_db
@@ -1627,6 +1650,18 @@ def search_zip_files():
         keyword = request.args.get('keyword', '').strip().lower()
         package_path = request.args.get('package_path', '').strip()  # 指定ZIP包路径
         project_id = request.args.get('project_id', '').strip()
+        
+        # 如果有 project_id，先加载项目的文档数据到 documents_db
+        if project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                project_name = project_result.get('project', {}).get('name', '')
+                if project_name and hasattr(doc_manager, 'data_manager'):
+                    # 从索引文件加载文档数据
+                    doc_index = doc_manager.data_manager.load_documents_index(project_name)
+                    # 将文档数据加载到 documents_db
+                    for doc_id, doc_data in doc_index.items():
+                        doc_manager.documents_db[doc_id] = doc_data
 
         # 支持的文档格式
         ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
@@ -1666,29 +1701,47 @@ def search_zip_files():
                 continue
             if file_path.suffix.lower() not in ALLOWED_EXTS:
                 continue
-            # 关键词过滤（空关键词返回全部）
-            if keyword and keyword not in file_path.name.lower():
-                continue
 
             try:
                 rel_path = file_path.relative_to(rel_base)
             except ValueError:
-                rel_path = file_path.name
+                rel_path = Path(file_path.name)
 
-            # 检查该文件是否已被归档（通过 original_filename 匹配）
-            is_archived = any(
-                meta.get('original_filename') == file_path.name or
-                meta.get('source_path') == str(file_path)
-                for meta in doc_manager.documents_db.values()
-            )
+            # 关键词过滤（空关键词返回全部）
+            # 匹配文件名 或 路径中任意一级目录名
+            if keyword:
+                rel_str = str(rel_path).replace('\\', '/')
+                parts = rel_str.split('/')
+                # 文件名匹配 或 任意父目录名称匹配
+                if not any(keyword in part.lower() for part in parts):
+                    continue
+
+            # 检查该文件是否已被归档，并记录被哪些文档使用
+            used_by = []
+            for meta in doc_manager.documents_db.values():
+                if meta.get('original_filename') == file_path.name or meta.get('source_path') == str(file_path):
+                    # 获取文档类型和名称
+                    cycle = meta.get('cycle', '')
+                    doc_name = meta.get('doc_name', '')
+                    if cycle or doc_name:
+                        used_by.append(f"{cycle} - {doc_name}" if cycle else doc_name)
+            
+            is_archived = len(used_by) > 0
+
+            rel_str = str(rel_path).replace('\\', '/')
+            # 计算相对目录（去掉文件名部分）
+            rel_dir_parts = rel_str.split('/')[:-1]
+            rel_dir = '/'.join(rel_dir_parts) if rel_dir_parts else ''
 
             results.append({
                 'name': file_path.name,
                 'path': str(file_path),
-                'rel_path': str(rel_path),
+                'rel_path': rel_str,
+                'rel_dir': rel_dir,   # 文件所在的相对目录路径
                 'size': file_path.stat().st_size,
                 'ext': file_path.suffix.lower(),
-                'archived': is_archived
+                'archived': is_archived,
+                'used_by': used_by   # 被哪些文档使用
             })
 
             if len(results) >= 300:

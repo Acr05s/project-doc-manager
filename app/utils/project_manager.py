@@ -475,6 +475,56 @@ class ProjectManager:
             for project_id, info in self.deleted_projects.items()
         ]
     
+    def add_to_index(self, project_id: str, name: str, description: str = '', 
+                     created_time: str = None, **kwargs) -> Dict[str, Any]:
+        """直接添加项目到索引（不创建目录，用于导入项目）
+        
+        Args:
+            project_id: 项目ID
+            name: 项目名称
+            description: 项目描述
+            created_time: 创建时间（可选，默认为当前时间）
+            **kwargs: 其他要添加到索引的字段
+            
+        Returns:
+            Dict: 添加结果
+        """
+        try:
+            # 检查项目是否已在索引中
+            if project_id in self.projects_db:
+                # 更新现有项目信息
+                self.projects_db[project_id].update({
+                    'name': name,
+                    'description': description,
+                    'updated_time': datetime.now().isoformat(),
+                    **kwargs
+                })
+            else:
+                # 添加新项目到索引
+                self.projects_db[project_id] = {
+                    'id': project_id,
+                    'name': name,
+                    'description': description,
+                    'created_time': created_time or datetime.now().isoformat(),
+                    'updated_time': datetime.now().isoformat(),
+                    **kwargs
+                }
+            
+            # 保存索引
+            self._save_projects_index()
+            
+            logger.info(f"项目已添加到索引: {name} (ID: {project_id})")
+            
+            return {
+                'status': 'success',
+                'project_id': project_id,
+                'message': '项目已添加到索引'
+            }
+            
+        except Exception as e:
+            logger.error(f"添加项目到索引失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
     def list_all(self) -> List[Dict[str, Any]]:
         """列出所有项目
         

@@ -90,154 +90,336 @@ function formatPathDisplay(path) {
 }
 
 /**
- * 搜索ZIP文件
+ * 将文件列表构建为目录树结构
+ * @param {Array} files - 文件对象数组，每个含 rel_dir 字段
+ * @returns {Object} 树节点 { name, path, children: {dirName: treeNode}, files: [] }
+ */
+function buildDirTree(files) {
+    // root 代表虚拟根，children 是子目录 Map，files 是直属文件
+    const root = { name: '', path: '', children: {}, files: [] };
+
+    for (const file of files) {
+        const relDir = (file.rel_dir || '').replace(/\\/g, '/');
+        const parts = relDir ? relDir.split('/') : [];
+
+        let node = root;
+        let currentPath = '';
+        for (const part of parts) {
+            currentPath = currentPath ? `${currentPath}/${part}` : part;
+            if (!node.children[part]) {
+                node.children[part] = { name: part, path: currentPath, children: {}, files: [] };
+            }
+            node = node.children[part];
+        }
+        node.files.push(file);
+    }
+    return root;
+}
+
+/**
+ * 判断一个目录树节点是否和关键词匹配（目录名含关键词）
+ */
+function dirNameMatches(dirName, keyword) {
+    if (!keyword) return false;
+    return dirName.toLowerCase().includes(keyword.toLowerCase());
+}
+
+/**
+ * 渲染目录树为 HTML
+ * @param {Object} treeNode - 树节点
+ * @param {string} keyword - 搜索关键词（用于高亮）
+ * @param {number} depth - 当前层级（0 = 根）
+ * @param {string} parentDir - 父目录路径
+ * @returns {string} HTML 字符串
+ */
+function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
+    let html = '';
+    const indent = depth * 16; // 缩进 px
+
+    // 渲染子目录（自然排序：数字按数值大小排，如 1 < 2 < 10）
+    const childDirs = Object.values(treeNode.children).sort((a, b) =>
+        a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }));
+    for (const childDir of childDirs) {
+        const dirPath = childDir.path;
+        const escapedDirPath = dirPath.replace(/"/g, '&quot;');
+
+        // 计算该目录（含所有子目录）下的文件总数和已选数
+        const allFilesInDir = collectAllFiles(childDir);
+        const totalCount = allFilesInDir.length;
+        const selectedCount = allFilesInDir.filter(f => appState.zipSelectedFiles.some(sf => sf.path === f.path)).length;
+        const dirChecked = totalCount > 0 && selectedCount === totalCount;
+        const dirIndeterminate = selectedCount > 0 && selectedCount < totalCount;
+
+        // 目录名高亮
+        let dirNameHtml = escapeHtml(childDir.name);
+        if (keyword && childDir.name.toLowerCase().includes(keyword.toLowerCase())) {
+            const idx = childDir.name.toLowerCase().indexOf(keyword.toLowerCase());
+            dirNameHtml = escapeHtml(childDir.name.slice(0, idx))
+                + `<mark class="zip-highlight">${escapeHtml(childDir.name.slice(idx, idx + keyword.length))}</mark>`
+                + escapeHtml(childDir.name.slice(idx + keyword.length));
+        }
+
+        // 统计徽章：只在有选中时显示
+        const countBadge = totalCount > 0
+            ? `<span class="dir-count-badge" style="color:#5a7fa8;font-size:11px;font-weight:normal;">(${selectedCount}/${totalCount})</span>`
+            : '';
+
+        html += `
+            <div class="directory-group" data-dir-group="${escapedDirPath}" style="margin-left:${indent}px; margin-bottom:4px;">
+                <div class="directory-header zip-dir-row" data-dir="${escapedDirPath}"
+                     style="display:flex;align-items:center;gap:6px;padding:5px 10px;
+                            background:linear-gradient(135deg,#e8f0fe,#f0f5ff);
+                            border:1px solid #d0ddf5;border-radius:5px;
+                            cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;">
+                    <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;">▼</span>
+                    <input type="checkbox" class="zip-dir-checkbox" data-dir="${escapedDirPath}"
+                           ${dirChecked ? 'checked' : ''}
+                           style="cursor:pointer;flex-shrink:0;"
+                           onclick="event.stopPropagation();" />
+                    <span class="dir-name-label" style="flex:1;">📁 ${dirNameHtml}</span>
+                    ${countBadge}
+                </div>
+                <div class="directory-files zip-dir-children" data-dir-files="${escapedDirPath}" style="display:block;">
+                    ${renderDirTreeHtml(childDir, keyword, depth + 1, dirPath)}
+                </div>
+            </div>
+        `;
+    }
+
+    // 渲染当前目录下的直属文件（自然排序）
+    const sortedFiles = [...treeNode.files].sort((a, b) =>
+        a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }));
+    for (const file of sortedFiles) {
+        const isSelected = appState.zipSelectedFiles.some(f => f.path === file.path);
+        // 只要 archived 为 true 就显示"已被使用"，不受 isSelected 影响
+        const isUsed = !!file.archived;
+        const isDisabled = isUsed && !isSelected;  // 未被选中但已被使用才禁用
+        const escapedPath = file.path.replace(/"/g, '&quot;');
+        const escapedName = file.name.replace(/"/g, '&quot;');
+        const escapedRelDir = (file.rel_dir || '').replace(/"/g, '&quot;');
+        // 获取被哪些文档使用的信息
+        const usedByList = file.used_by || [];
+        const usedByTitle = usedByList.length > 0 ? usedByList.join('\n') : '';
+
+        // 文件名高亮
+        let nameHtml = escapeHtml(file.name);
+        if (keyword && file.name.toLowerCase().includes(keyword.toLowerCase())) {
+            const idx = file.name.toLowerCase().indexOf(keyword.toLowerCase());
+            nameHtml = escapeHtml(file.name.slice(0, idx))
+                + `<mark class="zip-highlight">${escapeHtml(file.name.slice(idx, idx + keyword.length))}</mark>`
+                + escapeHtml(file.name.slice(idx + keyword.length));
+        }
+
+        html += `
+            <div class="zip-file-item ${isSelected ? 'selected' : ''} ${isUsed ? 'used' : ''}"
+                 data-path="${escapedPath}" data-name="${escapedName}" data-dir="${escapedRelDir}"
+                 style="margin-left:${indent + 16}px;padding:4px 8px;margin-bottom:2px;border-radius:4px;
+                        display:flex;align-items:center;gap:8px;
+                        ${isSelected ? 'background:#e3f2fd;' : isUsed ? 'opacity:0.7;background:#f0f0f0;' : 'background:#fafafa;'}">
+                <input type="checkbox" class="zip-file-checkbox"
+                       ${isSelected ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}
+                       style="flex-shrink:0;" />
+                <span class="zip-file-name" title="${escapedName}"
+                      style="flex:1;word-break:break-all;font-size:13px;line-height:1.4;">📄 ${nameHtml}</span>
+                ${isUsed ? `<span style="background:#ff9800;color:white;padding:2px 5px;border-radius:3px;font-size:11px;flex-shrink:0;" title="${usedByTitle}">已被使用</span>` : ''}
+            </div>
+        `;
+    }
+
+    return html;
+}
+
+/**
+ * 递归收集目录节点下的所有文件
+ */
+function collectAllFiles(treeNode) {
+    let files = [...treeNode.files];
+    for (const child of Object.values(treeNode.children)) {
+        files = files.concat(collectAllFiles(child));
+    }
+    return files;
+}
+
+/**
+ * HTML 转义
+ */
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/**
+ * 绑定目录树的展开/折叠和复选框事件
+ */
+function bindDirTreeEvents(container, keyword) {
+    // 目录标题点击折叠/展开
+    container.querySelectorAll('.zip-dir-row').forEach(header => {
+        header.addEventListener('click', function(e) {
+            if (e.target.type === 'checkbox') return;
+            const dirPath = this.dataset.dir;
+            // 不使用 CSS.escape（中文/特殊符号会失效），直接遍历找匹配的子容器
+            const childContainer = Array.from(container.querySelectorAll('.zip-dir-children'))
+                .find(el => el.dataset.dirFiles === dirPath);
+            const toggleIcon = this.querySelector('.dir-toggle-icon');
+            if (childContainer) {
+                const isCollapsed = childContainer.style.display === 'none';
+                childContainer.style.display = isCollapsed ? 'block' : 'none';
+                if (toggleIcon) toggleIcon.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
+            }
+        });
+    });
+
+    // 目录复选框事件
+    container.querySelectorAll('.zip-dir-checkbox').forEach(cb => {
+        cb.addEventListener('change', handleZipDirTreeSelect);
+        // 设置 indeterminate 状态
+        const dirPath = cb.dataset.dir;
+        const fileItems = container.querySelectorAll(`.zip-file-item[data-dir^="${dirPath}"], .zip-file-item[data-dir="${dirPath}"]`);
+        const total = Array.from(container.querySelectorAll(`.zip-file-item`))
+            .filter(item => {
+                const d = item.dataset.dir || '';
+                return d === dirPath || d.startsWith(dirPath + '/');
+            });
+        const selCount = total.filter(item => item.querySelector('.zip-file-checkbox')?.checked).length;
+        cb.indeterminate = selCount > 0 && selCount < total.length;
+    });
+
+    // 文件复选框事件
+    container.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', handleZipFileSelect);
+    });
+}
+
+/**
+ * 处理目录复选框（选中目录下所有文件，包含子目录） - export 供外部模块调用
+ */
+export function handleZipDirTreeSelect(e) {
+    const checkbox = e.target;
+    const dirPath = checkbox.dataset.dir;
+    const isChecked = checkbox.checked;
+
+    // 选中/取消该目录下所有文件（data-dir 等于 dirPath 或以 dirPath/ 开头）
+    const allItems = document.querySelectorAll('#zipFilesList .zip-file-item');
+    allItems.forEach(item => {
+        const itemDir = item.dataset.dir || '';
+        const isInDir = itemDir === dirPath || itemDir.startsWith(dirPath + '/');
+        if (!isInDir) return;
+
+        const fileCheckbox = item.querySelector('.zip-file-checkbox');
+        if (!fileCheckbox || fileCheckbox.disabled) return;
+
+        const filePath = item.dataset.path;
+        const fileName = item.dataset.name;
+        const sourceDir = item.dataset.dir || '';
+
+        if (isChecked) {
+            if (!fileCheckbox.checked) {
+                fileCheckbox.checked = true;
+                item.classList.add('selected');
+                item.style.background = '#e3f2fd';
+                if (!appState.zipSelectedFiles.some(f => f.path === filePath)) {
+                    appState.zipSelectedFiles.push({ path: filePath, name: fileName, source_dir: sourceDir });
+                }
+            }
+        } else {
+            if (fileCheckbox.checked) {
+                fileCheckbox.checked = false;
+                item.classList.remove('selected');
+                item.style.background = '#fafafa';
+                appState.zipSelectedFiles = appState.zipSelectedFiles.filter(f => f.path !== filePath);
+            }
+        }
+    });
+
+    // 更新所有父级目录复选框状态
+    updateAllDirCheckboxStates();
+    updateZipSelectedInfo();
+    updateSelectAllButtonState();
+}
+
+/**
+ * 更新所有目录复选框状态（indeterminate / checked）
+ */
+function updateAllDirCheckboxStates() {
+    document.querySelectorAll('#zipFilesList .zip-dir-checkbox').forEach(cb => {
+        const dirPath = cb.dataset.dir;
+        const allFileItems = Array.from(document.querySelectorAll('#zipFilesList .zip-file-item')).filter(item => {
+            const d = item.dataset.dir || '';
+            return d === dirPath || d.startsWith(dirPath + '/');
+        });
+        const enabledItems = allFileItems.filter(item => !item.querySelector('.zip-file-checkbox')?.disabled);
+        const checkedItems = enabledItems.filter(item => item.querySelector('.zip-file-checkbox')?.checked);
+        cb.checked = enabledItems.length > 0 && checkedItems.length === enabledItems.length;
+        cb.indeterminate = checkedItems.length > 0 && checkedItems.length < enabledItems.length;
+    });
+}
+
+/**
+ * 搜索ZIP文件（真正的递归树状结构，无搜索显示全部，有搜索匹配文件名/目录名并高亮）
  */
 export async function searchZipFilesInPackage(keyword, packagePath) {
     showLoading(true);
     try {
-        // 有 packagePath 时用指定目录搜索，否则按项目ID搜索所有上传目录
         let files = await searchZipFiles(keyword || '', packagePath || '', appState.currentProjectId);
         
         const zipFilesList = document.getElementById('zipFilesList');
         if (!zipFilesList) return;
         
-        // 如果搜索无结果且有关键词，显示所有文件
-        if (files.length === 0 && keyword && keyword.trim()) {
-            showNotification('未找到匹配文件，显示所有文件', 'info');
+        let noMatchHint = '';
+        
+        // 如果搜索无结果但有关键词，则获取全部文件并提示
+        if (files.length === 0 && keyword) {
+            noMatchHint = '<p class="placeholder" style="color:#ff9800;background:#fff3e0;padding:8px 12px;border-radius:4px;margin-bottom:10px;">⚠️ 无匹配结果，已显示全部文档</p>';
             files = await searchZipFiles('', packagePath || '', appState.currentProjectId);
         }
         
         if (files.length === 0) {
-            zipFilesList.innerHTML = '<p class="placeholder">暂无文件</p>';
-        } else {
-            // 使用树状目录结构显示
-            const tree = buildZipFileTree(files);
-            const isSearchResult = !!(keyword && keyword.trim());
-            
-            let html = '';
-            if (isSearchResult) {
-                html += `<div class="search-result-info">搜索结果：找到 ${files.length} 个文件</div>`;
-            }
-            html += `<div class="zip-file-tree">`;
-            html += renderZipFileTree(tree);
-            html += `</div>`;
-            
-            zipFilesList.innerHTML = html;
-            
-            // 添加复选框事件
-            document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', handleZipFileSelect);
-            });
-            
-            // 初始化全选按钮状态
+            zipFilesList.innerHTML = '<p class="placeholder">未找到匹配的文件</p>';
             updateSelectAllButtonState();
+            return;
         }
+        
+        // 构建目录树
+        const tree = buildDirTree(files);
+        
+        // 生成 HTML
+        const treeHtml = renderDirTreeHtml(tree, keyword || '', 0, '');
+
+        zipFilesList.innerHTML = `${noMatchHint}<div class="files-tree">${treeHtml || '<p class="placeholder">暂无文件</p>'}</div>`;
+
+        // 高亮样式（如果不存在则注入）
+        if (!document.getElementById('zip-highlight-style')) {
+            const style = document.createElement('style');
+            style.id = 'zip-highlight-style';
+            style.textContent = `
+                mark.zip-highlight {
+                    background: #fff176;
+                    color: #333;
+                    padding: 0 1px;
+                    border-radius: 2px;
+                    font-style: normal;
+                }
+                .zip-file-item.selected { background: #e3f2fd !important; }
+                .zip-file-item:hover { filter: brightness(0.97); }
+                .zip-dir-row:hover { filter: brightness(0.97); }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // 绑定事件
+        bindDirTreeEvents(zipFilesList, keyword || '');
+        
+        // 初始化全选按钮状态
+        updateSelectAllButtonState();
     } catch (error) {
         console.error('搜索ZIP文件失败:', error);
         showNotification('搜索失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
-}
-
-/**
- * 将ZIP文件列表按目录结构组织成树状
- * @param {Array} files - 文件列表
- * @returns {Object} 目录树结构
- */
-function buildZipFileTree(files) {
-    const root = { name: '根目录', children: {}, files: [] };
-    
-    files.forEach(file => {
-        const path = file.rel_path || file.path || '';
-        const normalizedPath = path.replace(/\\/g, '/');
-        const lastSlashIndex = normalizedPath.lastIndexOf('/');
-        const dirPath = lastSlashIndex > 0 ? normalizedPath.substring(0, lastSlashIndex) : '';
-        const fileName = lastSlashIndex >= 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
-        
-        if (!dirPath) {
-            root.files.push({ ...file, displayName: fileName });
-            return;
-        }
-        
-        const parts = dirPath.split('/').filter(p => p);
-        let current = root;
-        
-        parts.forEach(part => {
-            if (!current.children[part]) {
-                current.children[part] = { name: part, children: {}, files: [] };
-            }
-            current = current.children[part];
-        });
-        
-        current.files.push({ ...file, displayName: fileName });
-    });
-    
-    return root;
-}
-
-/**
- * 渲染ZIP文件树
- * @param {Object} node - 目录节点
- * @param {number} level - 层级
- * @returns {string} HTML
- */
-function renderZipFileTree(node, level = 0) {
-    const indent = level * 20;
-    let html = '';
-    
-    // 渲染文件
-    node.files.forEach(file => {
-        const isSelected = appState.zipSelectedFiles.some(f => f.path === file.path);
-        const isUsedByOther = file.used && !isSelected;
-        const usedByList = file.used_by || [];
-        let usedByHtml = '';
-        if (usedByList.length > 0) {
-            const usedByText = usedByList.join('，');
-            usedByHtml = `<span class="file-used-by" title="${usedByText}">已被选择于: ${usedByText}</span>`;
-        }
-        
-        html += `
-            <div class="zip-file-item ${isSelected ? 'selected' : ''} ${isUsedByOther ? 'disabled' : ''}" 
-                 data-path="${file.path}" 
-                 data-name="${file.name}"
-                 style="padding-left: ${indent + 20}px;">
-                <input type="checkbox" class="zip-file-checkbox" 
-                       ${isSelected ? 'checked' : ''} 
-                       ${isUsedByOther ? 'disabled' : ''} />
-                <span class="zip-file-icon">📄</span>
-                <span class="zip-file-name" title="${file.name}">${file.displayName || file.name}</span>
-                ${usedByHtml}
-            </div>
-        `;
-    });
-    
-    // 渲染子目录
-    Object.values(node.children).forEach(child => {
-        const hasContent = child.files.length > 0 || Object.keys(child.children).length > 0;
-        if (hasContent) {
-            const childFileCount = child.files.length + Object.values(child.children).reduce(
-                (sum, c) => sum + c.files.length + Object.values(c.children || {}).reduce(
-                    (s, cc) => s + cc.files.length, 0
-                ), 0
-            );
-            
-            html += `
-                <div class="zip-folder-item" style="padding-left: ${indent}px;">
-                    <div class="zip-folder-header">
-                        <span class="zip-folder-icon">📁</span>
-                        <span class="zip-folder-name">${child.name}</span>
-                        <span class="zip-folder-count">(${childFileCount} 个文件)</span>
-                    </div>
-                    <div class="zip-folder-content">
-                        ${renderZipFileTree(child, level + 1)}
-                    </div>
-                </div>
-            `;
-        }
-    });
-    
-    return html;
 }
 
 /**
@@ -248,28 +430,123 @@ export function handleZipFileSelect(e) {
     const item = checkbox.closest('.zip-file-item');
     const filePath = item.dataset.path;
     const fileName = item.dataset.name;
+    const sourceDir = item.dataset.dir || '';
     
     // 检查是否禁用（已被其他文档使用）
     if (checkbox.disabled) {
         checkbox.checked = !checkbox.checked;
-        showNotification('该文件已被其他文档类型使用，无法选择', 'warning');
+        showNotification('该文件已被归档，无法重复选择', 'warning');
         return;
     }
     
     if (checkbox.checked) {
-        // 添加到选中列表
-        appState.zipSelectedFiles.push({ path: filePath, name: fileName });
+        // 添加到选中列表（带目录信息）
         item.classList.add('selected');
+        item.style.background = '#e3f2fd';
+        if (!appState.zipSelectedFiles.some(f => f.path === filePath)) {
+            appState.zipSelectedFiles.push({ path: filePath, name: fileName, source_dir: sourceDir });
+        }
     } else {
         // 从选中列表移除
-        appState.zipSelectedFiles = appState.zipSelectedFiles.filter(file => file.path !== filePath);
         item.classList.remove('selected');
+        item.style.background = '#fafafa';
+        appState.zipSelectedFiles = appState.zipSelectedFiles.filter(file => file.path !== filePath);
     }
+    
+    // 更新所有目录复选框状态
+    updateAllDirCheckboxStates();
+    // 更新选中信息
+    updateZipSelectedInfo();
+    // 更新全选按钮状态
+    updateSelectAllButtonState();
+}
+
+/**
+ * 处理ZIP目录选择（选择/取消选择整个目录）
+ */
+export function handleZipDirSelect(e) {
+    const checkbox = e.target;
+    const dir = checkbox.dataset.dir;
+    const isChecked = checkbox.checked;
+    
+    // 获取该目录下的所有文件项
+    const fileItems = document.querySelectorAll(`.zip-file-item[data-dir="${dir}"]`);
+    
+    fileItems.forEach(item => {
+        const fileCheckbox = item.querySelector('.zip-file-checkbox');
+        const filePath = item.dataset.path;
+        const fileName = item.dataset.name;
+        const sourceDir = item.dataset.dir || '/';
+        
+        // 跳过禁用的文件（已被其他文档使用）
+        if (fileCheckbox.disabled) return;
+        
+        if (isChecked) {
+            // 选中文件（带目录信息）
+            if (!fileCheckbox.checked) {
+                fileCheckbox.checked = true;
+                if (!appState.zipSelectedFiles.some(f => f.path === filePath)) {
+                    appState.zipSelectedFiles.push({ path: filePath, name: fileName, source_dir: sourceDir });
+                }
+                item.classList.add('selected');
+            }
+        } else {
+            // 取消选中文件
+            if (fileCheckbox.checked) {
+                fileCheckbox.checked = false;
+                appState.zipSelectedFiles = appState.zipSelectedFiles.filter(f => f.path !== filePath);
+                item.classList.remove('selected');
+            }
+        }
+    });
     
     // 更新选中信息
     updateZipSelectedInfo();
     // 更新全选按钮状态
     updateSelectAllButtonState();
+    // 更新目录标题中的选中计数
+    updateDirHeaderCount(dir);
+}
+
+/**
+ * 更新目录复选框状态
+ */
+function updateDirCheckboxState(dir) {
+    const dirCheckbox = document.querySelector(`.zip-dir-checkbox[data-dir="${dir}"]`);
+    if (!dirCheckbox) return;
+    
+    const fileItems = document.querySelectorAll(`.zip-file-item[data-dir="${dir}"]`);
+    const selectableCount = Array.from(fileItems).filter(item => {
+        const cb = item.querySelector('.zip-file-checkbox');
+        return !cb.disabled;
+    }).length;
+    const selectedCount = Array.from(fileItems).filter(item => {
+        const cb = item.querySelector('.zip-file-checkbox');
+        return cb.checked;
+    }).length;
+    
+    dirCheckbox.checked = selectedCount === selectableCount && selectableCount > 0;
+    dirCheckbox.indeterminate = selectedCount > 0 && selectedCount < selectableCount;
+}
+
+/**
+ * 更新目录标题中的选中计数
+ */
+function updateDirHeaderCount(dir) {
+    const dirGroup = document.querySelector(`.zip-dir-checkbox[data-dir="${dir}"]`)?.closest('.directory-group');
+    if (!dirGroup) return;
+    
+    const headerSpan = dirGroup.querySelector('.directory-header span');
+    if (!headerSpan) return;
+    
+    const fileItems = document.querySelectorAll(`.zip-file-item[data-dir="${dir}"]`);
+    const totalCount = fileItems.length;
+    const selectedCount = Array.from(fileItems).filter(item => {
+        const cb = item.querySelector('.zip-file-checkbox');
+        return cb.checked;
+    }).length;
+    
+    headerSpan.textContent = `(${selectedCount}/${totalCount}个文件)`;
 }
 
 /**
@@ -316,13 +593,16 @@ export function clearSelectedFiles() {
     appState.zipSelectedFiles = [];
     updateZipSelectedInfo();
     // 更新搜索结果列表中的显示状态
-    document.querySelectorAll('.zip-file-item').forEach(item => {
+    document.querySelectorAll('#zipFilesList .zip-file-item').forEach(item => {
         item.classList.remove('selected');
+        item.style.background = '#fafafa';
         const checkbox = item.querySelector('.zip-file-checkbox');
         if (checkbox && !checkbox.disabled) {
             checkbox.checked = false;
         }
     });
+    // 更新所有目录复选框
+    updateAllDirCheckboxStates();
     // 更新全选按钮状态
     updateSelectAllButtonState();
 }
@@ -331,22 +611,24 @@ export function clearSelectedFiles() {
  * 全选文件
  */
 export function selectAllFiles() {
-    const fileItems = document.querySelectorAll('.zip-file-item');
+    const fileItems = document.querySelectorAll('#zipFilesList .zip-file-item');
     let selectedCount = 0;
     
     fileItems.forEach(item => {
         const checkbox = item.querySelector('.zip-file-checkbox');
         const filePath = item.dataset.path;
         const fileName = item.dataset.name;
+        const sourceDir = item.dataset.dir || '';
         
         // 只选择未禁用且未选择的文件
         if (checkbox && !checkbox.disabled && !checkbox.checked) {
             checkbox.checked = true;
             item.classList.add('selected');
+            item.style.background = '#e3f2fd';
             
             // 检查是否已经在选中列表中
             if (!appState.zipSelectedFiles.some(f => f.path === filePath)) {
-                appState.zipSelectedFiles.push({ path: filePath, name: fileName });
+                appState.zipSelectedFiles.push({ path: filePath, name: fileName, source_dir: sourceDir });
             }
             selectedCount++;
         }
@@ -358,6 +640,8 @@ export function selectAllFiles() {
         showNotification('没有可选择的新文件', 'info');
     }
     
+    // 更新所有目录复选框状态
+    updateAllDirCheckboxStates();
     // 更新选中信息
     updateZipSelectedInfo();
     // 更新全选按钮状态
@@ -371,7 +655,7 @@ export function updateSelectAllButtonState() {
     const selectAllBtn = document.getElementById('selectAllBtn');
     if (!selectAllBtn) return;
     
-    const fileItems = document.querySelectorAll('.zip-file-item');
+    const fileItems = document.querySelectorAll('#zipFilesList .zip-file-item');
     const selectableItems = Array.from(fileItems).filter(item => {
         const checkbox = item.querySelector('.zip-file-checkbox');
         return checkbox && !checkbox.disabled;

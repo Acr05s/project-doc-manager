@@ -6,9 +6,9 @@
     <title>项目文档管理中心</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026033109">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026033127">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026033109"></script>
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026033127"></script>
     <style>
         /* 文件完整性检查模态框样式 */
         .file-check-content {
@@ -177,10 +177,8 @@
                         📄 文档需求
                     </button>
                     <div class="dropdown-menu" id="documentRequirementsDropdown">
-                        <a href="#" class="dropdown-item" id="loadProjectBtn">📥 导入文档需求</a>
                         <a href="#" class="dropdown-item" id="editRequirementsBtn">✏️ 编辑文档需求</a>
                         <a href="#" class="dropdown-item" id="manageVersionsBtn">🔄 切换配置版本</a>
-                        <a href="#" class="dropdown-item" id="exportJsonBtn">📤 导出需求清单</a>
                         <a href="#" class="dropdown-item" id="clearRequirementsBtn" style="color: #dc3545;">🗑️ 删除当前需求</a>
                     </div>
                 </div>
@@ -421,7 +419,7 @@
                     <!-- 选择文档 -->
                     <div id="selectUploadTab" class="method-tab-content" style="display:none;">
                         <!-- 简洁布局 -->
-                        <div style="display: flex; flex-direction: column; height: 400px;">
+                        <div style="display: flex; flex-direction: column; min-height: 500px;">
                             <!-- 选择文档包 -->
                             <div style="margin-bottom: 15px;">
                                 <label style="display: block; margin-bottom: 5px;">选择ZIP包:</label>
@@ -441,8 +439,8 @@
                                 </div>
                             </div>
                             
-                            <!-- 文件列表 -->
-                            <div style="flex: 1; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px;">
+                            <!-- 文件列表（可手动拖拽调整高度） -->
+                            <div id="zipFilesListWrapper" style="flex: 1; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; min-height: 300px; resize: vertical;">
                                 <div id="zipFilesList" class="zip-files-list">
                                     <p class="placeholder">请选择文档包并搜索文件</p>
                                 </div>
