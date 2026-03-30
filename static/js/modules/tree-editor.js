@@ -295,6 +295,25 @@ export async function openTreeEditor() {
         updateToolbarState();
     }
     
+    // 绑定展开全部和折叠全部按钮事件
+    const toolbarExpandAll = document.getElementById('toolbarExpandAll');
+    if (toolbarExpandAll) {
+        console.log('[TreeEditor] 绑定展开全部按钮事件');
+        toolbarExpandAll.onclick = function() {
+            console.log('[TreeEditor] 展开全部按钮被点击');
+            expandAll();
+        };
+    }
+    
+    const toolbarCollapseAll = document.getElementById('toolbarCollapseAll');
+    if (toolbarCollapseAll) {
+        console.log('[TreeEditor] 绑定折叠全部按钮事件');
+        toolbarCollapseAll.onclick = function() {
+            console.log('[TreeEditor] 折叠全部按钮被点击');
+            collapseAll();
+        };
+    }
+    
     startAutoSave();
 }
 

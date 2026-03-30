@@ -2067,7 +2067,7 @@ export function displaySelectedFiles(files, noMatchHint = '') {
             }
             // 当前目录的直属文件
             for (const file of [...node.files].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))) {
-                    const isUsed = !!file.archived;
+                const isUsed = !!file.used; // 修正：使用 file.used 字段判断文件是否被使用
                 const isSelected = appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === file.path);
                 const isDisabled = isUsed && !isSelected;  // 未被选中但已被使用才禁用
                 const ePath = file.path.replace(/"/g,'&quot;');
@@ -2076,6 +2076,7 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                 // 获取被哪些文档使用的信息
                 const usedByList = file.used_by || [];
                 const usedByTitle = usedByList.length > 0 ? usedByList.join('\n') : '';
+                const usedByText = usedByList.length > 0 ? usedByList.join('、') : '';
                 html += `
                 <div class="zip-file-item ${isSelected ? 'selected' : ''} ${isUsed ? 'used' : ''}"
                      data-path="${ePath}" data-name="${eName}" data-dir="${eDir}"
@@ -2084,7 +2085,8 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                             ${isSelected ? 'background:#e3f2fd;' : isUsed ? 'opacity:0.7;background:#f0f0f0;' : 'background:#fafafa;'}">
                     <input type="checkbox" class="zip-file-checkbox" ${isSelected?'checked':''} ${isDisabled?'disabled':''} style="flex-shrink:0;" />
                     <span style="flex:1;word-break:break-all;font-size:13px;line-height:1.4;" title="${eName}">📄 ${escHtml(file.name)}</span>
-                    ${isUsed ? `<span style="background:#ff9800;color:white;padding:2px 5px;border-radius:3px;font-size:11px;flex-shrink:0;" title="${usedByTitle}">已被使用</span>` : ''}
+                    ${isUsed ? `<span style="background:#ff9800;color:white;padding:2px 5px;border-radius:3px;font-size:11px;flex-shrink:0;" title="被使用于:\n${usedByTitle}">已被使用</span>` : ''}
+                    ${isUsed && usedByText ? `<span style="color:#666;font-size:11px;flex-shrink:0;" title="被使用于:\n${usedByTitle}">(${usedByText})</span>` : ''}
                 </div>`;
             }
             return html;
