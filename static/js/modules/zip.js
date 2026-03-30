@@ -199,7 +199,8 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
         const escapedRelDir = (file.rel_dir || '').replace(/"/g, '&quot;');
         // 获取被哪些文档使用的信息
         const usedByList = file.used_by || [];
-        const usedByTitle = usedByList.length > 0 ? usedByList.join('\n') : '';
+        // 将数组转换为文本，每个条目显示为"周期 - 文档"格式
+        const usedByTitle = usedByList.length > 0 ? usedByList.join('、') : '';
 
         // 文件名高亮
         let nameHtml = escapeHtml(file.name);

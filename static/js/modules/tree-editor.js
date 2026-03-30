@@ -353,7 +353,7 @@ function buildTreeData(config) {
                 id: docId,
                 name: docData.name || doc,
                 type: 'document',
-                expanded: true,
+                expanded: false,
                 children: [],
                 attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docData.attributes || {}) },
                 doc_note: docData.doc_note || '',
@@ -370,7 +370,7 @@ function buildTreeData(config) {
                             id: `folder_${index}_${docIndex}_${childIdx}`,
                             name: child.name || '新目录',
                             type: 'folder',
-                            expanded: true,
+                            expanded: false,
                             children: [],
                             attributes: child.attributes || {},
                             filename_template: child.filename_template || '',
@@ -398,7 +398,7 @@ function buildTreeData(config) {
             const docCategories = categories[docData.name || doc] || [];
             docCategories.forEach((categoryName, catIdx) => {
                 // 检查是否已经存在同名目录，避免重复
-                const existingFolder = docNode.children.find(child => 
+                const existingFolder = docNode.children.find(child =>
                     child.type === 'folder' && child.name === categoryName
                 );
                 if (!existingFolder) {
@@ -406,7 +406,7 @@ function buildTreeData(config) {
                         id: `folder_cat_${index}_${docIndex}_${catIdx}`,
                         name: categoryName,
                         type: 'folder',
-                        expanded: true,
+                        expanded: false,
                         children: [],
                         attributes: {},
                         filename_template: '',
