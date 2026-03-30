@@ -445,7 +445,7 @@ function renderTreeNode(node, level) {
     const hasChildren = node.children && node.children.length > 0;
     const icon = getNodeIcon(node.type);
     const expandIcon = hasChildren ?
-        (node.expanded ? '▼' : '▶') :
+        `<span class="tree-expand-icon" style="cursor:pointer;">${node.expanded ? '▼' : '▶'}</span>` :
         '<span style="width:14px;display:inline-block;"></span>';
 
     // 属性标签
@@ -462,7 +462,7 @@ function renderTreeNode(node, level) {
              style="padding-left:${indent}px;"
              draggable="true">
             <div class="tree-node-content">
-                <span class="tree-expand-icon">${expandIcon}</span>
+                ${expandIcon}
                 <span class="tree-icon">${icon}</span>
                 <span class="tree-name" contenteditable="false">${escapeHtml(node.name)}</span>
                 ${attrTags ? `<span class="tree-attr-tags">${attrTags}</span>` : ''}
