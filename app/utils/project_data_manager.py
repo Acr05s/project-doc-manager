@@ -492,13 +492,20 @@ class ProjectDataManager:
             # 加载文档索引并合并到 documents
             doc_index = self.load_documents_index(project_name)
             documents = doc_index.get('documents', {})
+            logger.info(f"[load_full_config] 从索引加载了 {len(documents)} 个文档")
+            
             # 获取所有已知的周期
             known_cycles = config.get('cycles', [])
+            logger.info(f"[load_full_config] 已知周期: {known_cycles}")
             
             # 按 cycle 和 doc_name 组织文档
+            loaded_count = 0
+            skipped_count = 0
             for doc_id, doc_info in documents.items():
                 cycle = doc_info.get('cycle')
                 doc_name = doc_info.get('doc_name')
+                
+                logger.debug(f"[load_full_config] 处理文档: {doc_id}, cycle={cycle}, doc_name={doc_name}")
                 
                 # 如果没有 cycle 或 doc_name，尝试从 doc_id 中提取
                 if not cycle or not doc_name:
@@ -576,10 +583,18 @@ class ProjectDataManager:
                             # 只更新文档索引中特有的属性，如文件路径、大小等
                             if key not in ['requirement', 'attributes']:
                                 existing[key] = value
+                        logger.debug(f"[load_full_config] 更新已有文档: {doc_id}")
                     else:
                         # 只有当文档在文档索引中存在时才添加到 uploaded_docs
                         # 这样可以避免已删除的文档被重新添加
                         config['documents'][cycle]['uploaded_docs'].append(doc_info)
+                        loaded_count += 1
+                        logger.debug(f"[load_full_config] 添加新文档: {doc_id} 到周期 {cycle}")
+                else:
+                    skipped_count += 1
+                    logger.warning(f"[load_full_config] 跳过文档 {doc_id}: cycle={cycle}, doc_name={doc_name}")
+            
+            logger.info(f"[load_full_config] 文档加载完成: 成功 {loaded_count} 个, 跳过 {skipped_count} 个")
             
             # 对每个周期的 uploaded_docs 进行去重清理
             # 基于 file_path 和 original_filename 去重，保留最新的
