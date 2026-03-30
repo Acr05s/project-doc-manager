@@ -2558,40 +2558,47 @@ function checkMissingRequirements(doc, requirement) {
     
     if (!requirement) return missingRequirements;
     
+    // 辅助函数：获取字段值（支持带下划线前缀）
+    const getDocValue = (fieldName) => {
+        if (doc[fieldName] !== undefined) return doc[fieldName];
+        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+        return null;
+    };
+    
     // 检查签字要求（分别检查甲方签字和乙方签字）
     const hasPartyASignReq = requirement.includes('甲方签字');
     const hasPartyBSignReq = requirement.includes('乙方签字');
     const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
     
     // 检查甲方签字
-    if (hasPartyASignReq && !doc.party_a_signer && !doc.no_signature) {
+    if (hasPartyASignReq && !getDocValue('party_a_signer') && !getDocValue('no_signature')) {
         missingRequirements.push('甲方签字');
     }
     // 检查乙方签字
-    if (hasPartyBSignReq && !doc.party_b_signer && !doc.no_signature) {
+    if (hasPartyBSignReq && !getDocValue('party_b_signer') && !getDocValue('no_signature')) {
         missingRequirements.push('乙方签字');
     }
     // 检查通用签字
-    if (hasGeneralSignReq && !doc.signer && !doc.no_signature) {
+    if (hasGeneralSignReq && !getDocValue('signer') && !getDocValue('no_signature')) {
         missingRequirements.push('签字');
     }
     
     // 检查盖章要求
-    if (requirement.includes('乙方盖章') && !doc.party_b_seal && !doc.no_seal) {
+    if (requirement.includes('乙方盖章') && !getDocValue('party_b_seal') && !getDocValue('no_seal')) {
         missingRequirements.push('乙方盖章');
     }
-    if (requirement.includes('甲方盖章') && !doc.party_a_seal && !doc.no_seal) {
+    if (requirement.includes('甲方盖章') && !getDocValue('party_a_seal') && !getDocValue('no_seal')) {
         missingRequirements.push('甲方盖章');
     }
-    if (requirement.includes('盖章') && !doc.has_seal_marked && !doc.has_seal && !doc.party_a_seal && !doc.party_b_seal && !doc.no_seal) {
+    if (requirement.includes('盖章') && !getDocValue('has_seal_marked') && !getDocValue('has_seal') && !getDocValue('party_a_seal') && !getDocValue('party_b_seal') && !getDocValue('no_seal')) {
         missingRequirements.push('盖章');
     }
     
     // 检查日期要求
-    if (requirement.includes('文档日期') && !doc.doc_date) {
+    if (requirement.includes('文档日期') && !getDocValue('doc_date')) {
         missingRequirements.push('文档日期');
     }
-    if (requirement.includes('签字日期') && !doc.sign_date) {
+    if (requirement.includes('签字日期') && !getDocValue('sign_date')) {
         missingRequirements.push('签字日期');
     }
     
