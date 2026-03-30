@@ -111,11 +111,26 @@ class DocumentUploader:
                 directory = category
             
             # 构建返回信息
+            # 保存相对路径，以便在不同环境中都能正确找到文件
+            if project_name:
+                # 相对路径：projects/{project_name}/uploads/temp/{cycle}/{doc_name}/{new_filename}
+                if category:
+                    relative_path = f"projects/{project_name}/uploads/temp/{cycle.replace('/', '_')}/{doc_name.replace('/', '_')}/{category.replace('/', '_')}/{new_filename}"
+                else:
+                    relative_path = f"projects/{project_name}/uploads/temp/{cycle.replace('/', '_')}/{doc_name.replace('/', '_')}/{new_filename}"
+            else:
+                # 兼容旧版，使用相对路径
+                try:
+                    relative_path = str(file_path.relative_to(self.config.base_dir))
+                except ValueError:
+                    # 如果file_path不在base_dir下，使用绝对路径
+                    relative_path = str(file_path)
+            
             result = {
                 'status': 'success',
                 'original_filename': original_filename,
                 'saved_filename': new_filename,
-                'path': str(file_path),
+                'path': relative_path,
                 'cycle': cycle,
                 'doc_name': doc_name,
                 'size': file_path.stat().st_size,

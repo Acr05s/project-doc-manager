@@ -114,7 +114,9 @@ def verify_project_files(project_id):
                 
                 # 处理相对路径
                 if not file_path_obj.is_absolute():
-                    if file_path.startswith('projects/'):
+                    # 使用 pathlib 处理跨平台路径（自动适配 Windows/Unix 分隔符）
+                    normalized_path = file_path_obj.as_posix()
+                    if normalized_path.startswith('projects/'):
                         # 完整相对路径
                         base_dir = doc_manager.config.projects_base_folder.parent
                         file_path_obj = base_dir / file_path

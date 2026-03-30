@@ -13,8 +13,8 @@ import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 export async function handleUploadDocument(e) {
     e.preventDefault();
     
-    const file = elements.fileInput.files[0];
-    if (!file) {
+    const files = elements.fileInput.files;
+    if (files.length === 0) {
         showNotification('请选择文件', 'error');
         return;
     }
@@ -32,26 +32,45 @@ export async function handleUploadDocument(e) {
     const partyBSeal = elements.partyBSeal.checked;
     const otherSeal = elements.otherSeal.value;
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('project_id', appState.currentProjectId);
-    formData.append('project_name', appState.projectConfig ? appState.projectConfig.name : '');
-    formData.append('cycle', appState.currentCycle);
-    formData.append('doc_date', docDate);
-    formData.append('sign_date', signDate);
-    formData.append('signer', signer);
-    formData.append('has_seal', hasSeal);
-    formData.append('party_a_seal', partyASeal);
-    formData.append('party_b_seal', partyBSeal);
-    formData.append('other_seal', otherSeal);
-    formData.append('doc_name', appState.currentDocument);
-    
     showLoading(true);
+    
     try {
-        const result = await uploadDocument(formData);
+        let successCount = 0;
+        let errorCount = 0;
         
-        if (result.status === 'success') {
-            showNotification('文档上传成功', 'success');
+        // 逐个上传文件
+        for (const file of files) {
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('project_id', appState.currentProjectId);
+                formData.append('project_name', appState.projectConfig ? appState.projectConfig.name : '');
+                formData.append('cycle', appState.currentCycle);
+                formData.append('doc_date', docDate);
+                formData.append('sign_date', signDate);
+                formData.append('signer', signer);
+                formData.append('has_seal', hasSeal);
+                formData.append('party_a_seal', partyASeal);
+                formData.append('party_b_seal', partyBSeal);
+                formData.append('other_seal', otherSeal);
+                formData.append('doc_name', appState.currentDocument);
+                
+                const result = await uploadDocument(formData);
+                
+                if (result.status === 'success') {
+                    successCount++;
+                } else {
+                    errorCount++;
+                    console.error(`上传文件失败 ${file.name}:`, result.message);
+                }
+            } catch (error) {
+                errorCount++;
+                console.error(`上传文件失败 ${file.name}:`, error);
+            }
+        }
+        
+        if (successCount > 0) {
+            showNotification(`成功上传 ${successCount} 个文件${errorCount > 0 ? `，${errorCount} 个失败` : ''}`, successCount === files.length ? 'success' : 'warning');
             elements.fileInput.value = '';
             elements.docDate.value = '';
             elements.signDate.value = '';
@@ -60,10 +79,19 @@ export async function handleUploadDocument(e) {
             elements.partyASeal.checked = false;
             elements.partyBSeal.checked = false;
             elements.otherSeal.value = '';
+            // 清空已上传文件列表
+            const uploadedFilesList = document.getElementById('uploadedFilesList');
+            if (uploadedFilesList) {
+                uploadedFilesList.innerHTML = '<p class="placeholder">暂无上传文件</p>';
+            }
+            // 上传成功后自动归档
+            if (appState.currentCycle && appState.currentDocument) {
+                await archiveDocument(appState.currentCycle, appState.currentDocument);
+            }
             // 刷新文档列表
             await renderCycleDocuments(appState.currentCycle);
         } else {
-            showNotification('上传失败: ' + result.message, 'error');
+            showNotification('上传失败: 所有文件上传失败', 'error');
         }
     } catch (error) {
         console.error('上传文档失败:', error);
@@ -77,11 +105,13 @@ export async function handleUploadDocument(e) {
  * 处理文件选择
  */
 export function handleFileSelect(e) {
-    const file = e.target.files[0];
-    if (file) {
+    const files = e.target.files;
+    if (files.length > 0) {
         // 显示文件信息
-        showUploadedFile(file);
-        console.log('选择的文件:', file.name);
+        for (const file of files) {
+            showUploadedFile(file);
+            console.log('选择的文件:', file.name);
+        }
     }
 }
 
@@ -396,6 +426,7 @@ function analyzeRequirementStatus(attributes, docsList) {
     return activeAttributes.map(attr => {
         let completedCount = 0;
         let totalCount = 0;
+        const signers = []; // 收集签字人姓名
         
         docsList.forEach(doc => {
             const getDocValue = (fieldName) => {
@@ -420,12 +451,18 @@ function analyzeRequirementStatus(attributes, docsList) {
                 const partyASigner = getDocValue('party_a_signer');
                 const noSignature = getDocValue('no_signature');
                 isCompleted = partyASigner || noSignature || signer;
+                // 收集签字人姓名
+                if (partyASigner) signers.push(`甲方:${partyASigner}`);
+                else if (signer) signers.push(signer);
             } else if (attr.key === 'party_b_sign') {
                 // 乙方签字
                 const signer = getDocValue('signer');
                 const partyBSigner = getDocValue('party_b_signer');
                 const noSignature = getDocValue('no_signature');
                 isCompleted = partyBSigner || noSignature || signer;
+                // 收集签字人姓名
+                if (partyBSigner) signers.push(`乙方:${partyBSigner}`);
+                else if (signer) signers.push(signer);
             } else if (attr.key === 'party_a_seal') {
                 // 甲方盖章
                 const partyASeal = getDocValue('party_a_seal');
@@ -461,10 +498,20 @@ function analyzeRequirementStatus(attributes, docsList) {
             status = 'partial'; // 部分完成
         }
         
+        // 生成描述：包含完成数量和签字人信息
+        let description = `${completedCount}/${totalDocs} 文件已完成`;
+        if (signers.length > 0) {
+            // 去重并限制显示数量
+            const uniqueSigners = [...new Set(signers)];
+            const signerText = uniqueSigners.slice(0, 3).join('、');
+            const moreCount = uniqueSigners.length - 3;
+            description += `\n签字人：${signerText}${moreCount > 0 ? ` 等${moreCount}人` : ''}`;
+        }
+        
         return {
             name: attr.name,
             status: status,
-            description: `${completedCount}/${totalDocs} 文件已完成`
+            description: description
         };
     });
 }
@@ -533,7 +580,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
         allDocTypes = allDocTypes.filter(doc => {
             const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
             const hasFiles = (docsByName[doc.name] || []).length > 0;
-            const isNotInvolved = (docsByName[doc.name] || []).some(d => d.not_involved || d._not_involved);
+            const isNotInvolvedFromDocs = (docsByName[doc.name] || []).some(d => d.not_involved || d._not_involved);
+            const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+            const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
             
             if (filterOptions.hideArchived && isArchived) {
                 return false;
@@ -651,6 +700,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     const noSignature = getField('no_signature');
                                     const partyASeal = getField('party_a_seal');
                                     const partyBSeal = getField('party_b_seal');
+                                    const partyASigner = getField('party_a_signer');
+                                    const partyBSigner = getField('party_b_signer');
                                     const hasSealMarked = getField('has_seal_marked') || getField('has_seal');
                                     const noSeal = getField('no_seal');
                                     const otherSeal = getField('other_seal');
@@ -659,8 +710,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     if (signer) attrParts.push(`✍️${signer}`);
                                     if (signDate) attrParts.push(`📆${formatDateToMonth(signDate)}`);
                                     if (noSignature) attrParts.push('❌不签字');
-                                    if (partyASeal) attrParts.push('🏢甲');
-                                    if (partyBSeal) attrParts.push('🏭乙');
+                                    if (partyASeal) attrParts.push(`<span title="甲方已盖章">🏢甲</span>`);
+                                    if (partyBSeal) attrParts.push(`<span title="乙方已盖章">🏭乙</span>`);
                                     if (hasSealMarked) attrParts.push('🔖');
                                     if (noSeal) attrParts.push('❌不盖章');
                                     if (otherSeal) attrParts.push(`📍${otherSeal}`);
@@ -680,6 +731,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     let missingRequirements = [];
                                     
                                     const hasSigner = getDocValue('signer');
+                                    const hasPartyASigner = getDocValue('party_a_signer');
+                                    const hasPartyBSigner = getDocValue('party_b_signer');
                                     const hasNoSignature = getDocValue('no_signature');
                                     const hasPartyASeal = getDocValue('party_a_seal');
                                     const hasPartyBSeal = getDocValue('party_b_seal');
@@ -690,7 +743,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     
                                     // 检查签字要求（避免重复）
                                     const hasSignatureRequirement = requirement.includes('乙方签字') || requirement.includes('甲方签字') || requirement.includes('签字');
-                                    if (hasSignatureRequirement && !hasSigner && !hasNoSignature) {
+                                    // 判断是否有任何签字信息（通用签字人、甲方签字人或乙方签字人）
+                                    const hasAnySigner = hasSigner || hasPartyASigner || hasPartyBSigner || hasNoSignature;
+                                    if (hasSignatureRequirement && !hasAnySigner) {
                                         if (requirement.includes('乙方签字') && requirement.includes('甲方签字')) {
                                             missingRequirements.push('甲乙方签字');
                                         } else if (requirement.includes('乙方签字')) {
@@ -731,6 +786,17 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         </span>
                                     ` : '';
                                     
+                                    // 生成已满足要求的提示（显示签字人信息）
+                                    const metRequirements = [];
+                                    if (partyASigner) metRequirements.push(`甲方签字人：${partyASigner}`);
+                                    if (partyBSigner) metRequirements.push(`乙方签字人：${partyBSigner}`);
+                                    if (!partyASigner && !partyBSigner && signer) metRequirements.push(`签字人：${signer}`);
+                                    const metHtml = metRequirements.length > 0 ? `
+                                        <span class="met-requirements" style="background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 5px;" title="${metRequirements.join('\n')}">
+                                            ✓ ${metRequirements.join(' | ')}
+                                        </span>
+                                    ` : '';
+                                    
                                     return `<div class="doc-file-row" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: 20px;">
                                         <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
                                               title="点击预览文件" 
@@ -738,6 +804,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                             ${d.original_filename || d.filename}
                                         </span>
                                         ${attrParts.length > 0 ? `<span class="doc-attrs">${attrParts.join(' ')}</span>` : ''}
+                                        ${metHtml}
                                         ${missingHtml}
                                     </div>`;
                                 }).join('');
@@ -755,8 +822,10 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         // 要求状态: 'none'-无文件或无要求, 'full'-全部完成, 'partial'-部分完成, 'empty'-全未完成
                         const requirementStatus = analyzeRequirementStatus(attributes, docsList);
                         
-                        // 检查是否标记为不涉及
-                        const isNotInvolved = docsList.some(d => d.not_involved || d._not_involved);
+                        // 检查是否标记为不涉及（从文档列表或项目配置中）
+                        const isNotInvolvedFromDocs = docsList.some(d => d.not_involved || d._not_involved);
+                        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+                        const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
                         
                         // 生成要求标签HTML
                         const requirementHtml = requirementStatus.length > 0 
@@ -779,23 +848,27 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
                         const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
                         
+                        // 确定显示的状态标签：优先显示"不涉及"，然后是"已归档"
+                        const statusTag = isNotInvolved 
+                            ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">🚫不涉及</div>`
+                            : (isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : '');
+                        
                         return `
-                        <tr class="doc-row ${isArchived ? 'archived' : ''}">
+                        <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}">
                             <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;">${docIndex}</td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
-                                        ${isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : ''}
+                                        ${statusTag}
                                         <div class="doc-type" style="text-align: center;">${doc.name}</div>
                                         <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">
                                             ${requirementHtml}
-                                            ${isNotInvolved ? `<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; margin: 2px; display: inline-block; font-size: 12px;">🚫不涉及</span>` : ''}
                                         </div>
                                     </div>
                                 </div>
                             </td>
                             <td class="col-files">
-                                ${isNotInvolved ? '<span style="color: #6c757d; font-style: italic; display: block; text-align: center; padding: 10px;">本次项目不涉及该文档</span>' : fileListHtml}
+                                ${isNotInvolved ? '<span style="color: #28a745; font-style: italic; display: block; text-align: center; padding: 10px; font-weight: 500;">✓ 本次项目不涉及该文档</span>' : fileListHtml}
                             </td>
                             <td class="col-action">
                                 <div class="action-buttons">
@@ -842,10 +915,12 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
  */
 export async function markDocumentNotInvolved(cycle, docName) {
     try {
-        // 检查文档当前状态
+        // 检查文档当前状态（从文档列表和项目配置中）
         const docsList = await getCycleDocuments(cycle);
         const doc = docsList.find(d => d.doc_name === docName);
-        const isCurrentlyNotInvolved = doc && (doc.not_involved || doc._not_involved);
+        const isNotInvolvedFromDocs = doc && (doc.not_involved || doc._not_involved);
+        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[docName];
+        const isCurrentlyNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
         
         // 根据当前状态显示不同的确认弹窗
         const title = isCurrentlyNotInvolved ? '撤销不涉及' : '标记为不涉及';
@@ -859,17 +934,38 @@ export async function markDocumentNotInvolved(cycle, docName) {
             async () => {
                 showLoading(true);
                 try {
-                    if (isCurrentlyNotInvolved && doc) {
+                    if (isCurrentlyNotInvolved) {
                         // 撤销不涉及标记
-                        const docData = { not_involved: false };
-                        const result = await editDocument(doc.id, docData);
+                        let success = true;
                         
-                        if (result.status === 'success') {
+                        // 如果有文档记录，更新文档
+                        if (doc) {
+                            const docData = { not_involved: false };
+                            const result = await editDocument(doc.id, docData);
+                            if (result.status !== 'success') {
+                                success = false;
+                                showNotification('操作失败: ' + result.message, 'error');
+                            }
+                        }
+                        
+                        // 清除项目配置中的标记
+                        if (appState.projectConfig.documents_not_involved?.[cycle]?.[docName]) {
+                            delete appState.projectConfig.documents_not_involved[cycle][docName];
+                            // 保存项目配置
+                            const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(appState.projectConfig)
+                            });
+                            if (!response.ok) {
+                                success = false;
+                            }
+                        }
+                        
+                        if (success) {
                             // 取消归档
                             await unarchiveDocument(cycle, docName);
                             showNotification('文档已撤销不涉及标记', 'success');
-                        } else {
-                            showNotification('操作失败: ' + result.message, 'error');
                         }
                     } else if (doc) {
                         // 标记为不涉及
@@ -888,13 +984,38 @@ export async function markDocumentNotInvolved(cycle, docName) {
                             showNotification('标记失败: ' + result.message, 'error');
                         }
                     } else {
-                        // 如果没有文档，直接归档并标记为不涉及
-                        // 先归档
-                        const archiveResult = await archiveDocument(cycle, docName);
-                        if (archiveResult.status === 'success') {
-                            showNotification('文档已标记为不涉及并归档', 'success');
-                        } else {
-                            showNotification('标记失败: ' + archiveResult.message, 'error');
+                        // 如果没有文档，将不涉及标记存储在项目配置中
+                        try {
+                            // 初始化不涉及标记存储
+                            if (!appState.projectConfig.documents_not_involved) {
+                                appState.projectConfig.documents_not_involved = {};
+                            }
+                            if (!appState.projectConfig.documents_not_involved[cycle]) {
+                                appState.projectConfig.documents_not_involved[cycle] = {};
+                            }
+                            appState.projectConfig.documents_not_involved[cycle][docName] = true;
+                            
+                            // 保存项目配置
+                            const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(appState.projectConfig)
+                            });
+                            
+                            if (response.ok) {
+                                // 再归档
+                                const archiveResult = await archiveDocument(cycle, docName);
+                                if (archiveResult.status === 'success') {
+                                    showNotification('文档已标记为不涉及并归档', 'success');
+                                } else {
+                                    showNotification('文档已标记为不涉及，但归档失败', 'warning');
+                                }
+                            } else {
+                                showNotification('保存标记失败', 'error');
+                            }
+                        } catch (e) {
+                            console.error('标记不涉及失败:', e);
+                            showNotification('标记失败', 'error');
                         }
                     }
                 } catch (error) {
@@ -1221,10 +1342,16 @@ export function displayImportedDocuments(documents) {
  * 初始化上传方式切换
  */
 export function initUploadMethodTabs() {
+    console.log('[initUploadMethodTabs] 开始初始化上传方式切换');
+    
     // 上传方式切换（用 onclick 避免重复绑定）
-    document.querySelectorAll('.method-tab-btn').forEach(btn => {
+    const methodTabBtns = document.querySelectorAll('.method-tab-btn');
+    console.log('[initUploadMethodTabs] 找到 method-tab-btn 数量:', methodTabBtns.length);
+    
+    methodTabBtns.forEach(btn => {
         btn.onclick = function() {
             const tab = this.dataset.tab;
+            console.log('[initUploadMethodTabs] 切换到标签页:', tab);
             
             // 更新按钮状态
             document.querySelectorAll('.method-tab-btn').forEach(b => b.classList.remove('active'));
@@ -1235,19 +1362,27 @@ export function initUploadMethodTabs() {
             const tabEl = document.getElementById(tab + 'UploadTab');
             if (tabEl) {
                 tabEl.style.display = 'block';
-                console.log('切换到标签页:', tab, '显示元素:', tabEl.id);
+                console.log('[initUploadMethodTabs] 显示标签页元素:', tabEl.id);
                 
                 // 当切换到选择文档标签时，重新填充当前文档名并搜索
                 if (tab === 'select') {
+                    console.log('[initUploadMethodTabs] 切换到选择文档标签');
                     const currentDoc = appState.currentDocument;
+                    console.log('[initUploadMethodTabs] 当前文档:', currentDoc);
+                    
                     const keywordInput = document.getElementById('selectFileKeyword');
+                    console.log('[initUploadMethodTabs] selectFileKeyword 元素:', keywordInput);
+                    
                     if (keywordInput) {
                         keywordInput.value = currentDoc || '';
                         // 自动加载目录并搜索
                         if (currentDoc) {
+                            console.log('[initUploadMethodTabs] 自动加载目录并搜索:', currentDoc);
                             loadDirectories().then(() => {
+                                console.log('[initUploadMethodTabs] 目录加载成功，开始搜索');
                                 searchFiles(currentDoc);
-                            }).catch(() => {
+                            }).catch((error) => {
+                                console.error('[initUploadMethodTabs] 目录加载失败，直接搜索:', error);
                                 searchFiles(currentDoc);
                             });
                         } else {
@@ -1267,12 +1402,14 @@ export function initUploadMethodTabs() {
 
     // 加载目录按钮（用 onclick 避免重复绑定）
     const loadDirectoriesBtn = document.getElementById('loadDirectoriesBtn');
+    console.log('[initUploadMethodTabs] loadDirectoriesBtn 元素:', loadDirectoriesBtn);
     if (loadDirectoriesBtn) {
         loadDirectoriesBtn.onclick = loadDirectories;
     }
     
     // 目录选择变化时自动刷新搜索结果
     const directorySelect = document.getElementById('directorySelect');
+    console.log('[initUploadMethodTabs] directorySelect 元素:', directorySelect);
     if (directorySelect) {
         directorySelect.onchange = function() {
             const keyword = document.getElementById('selectFileKeyword')?.value;
@@ -1284,6 +1421,7 @@ export function initUploadMethodTabs() {
     
     // 搜索文件按钮
     const searchFilesBtn = document.getElementById('searchFilesBtn');
+    console.log('[initUploadMethodTabs] searchFilesBtn 元素:', searchFilesBtn);
     if (searchFilesBtn) {
         searchFilesBtn.onclick = function() {
             const keyword = document.getElementById('selectFileKeyword').value;
@@ -1293,6 +1431,7 @@ export function initUploadMethodTabs() {
     
     // 自动搜索当前文档（先加载目录，再搜索）
     const currentDoc = appState.currentDocument;
+    console.log('[initUploadMethodTabs] 自动搜索当前文档:', currentDoc);
     if (currentDoc) {
         const keywordInput = document.getElementById('selectFileKeyword');
         if (keywordInput) {
@@ -1308,12 +1447,14 @@ export function initUploadMethodTabs() {
     
     // 确认选择文件按钮
     const selectArchiveBtn = document.getElementById('selectArchiveBtn');
+    console.log('[initUploadMethodTabs] selectArchiveBtn 元素:', selectArchiveBtn);
     if (selectArchiveBtn) {
         selectArchiveBtn.onclick = handleSelectArchive;
     }
     
     // 清空已选按钮
     const clearSelectedBtn = document.getElementById('clearSelectedBtn');
+    console.log('[initUploadMethodTabs] clearSelectedBtn 元素:', clearSelectedBtn);
     if (clearSelectedBtn) {
         clearSelectedBtn.onclick = function() {
             import('./zip.js').then(module => {
@@ -1337,6 +1478,17 @@ export function initUploadMethodTabs() {
     if (batchMoveBtn) {
         batchMoveBtn.addEventListener('click', handleBatchMove);
     }
+    
+    // 确认归档按钮
+    const uploadBtn = document.getElementById('uploadBtn');
+    if (uploadBtn) {
+        uploadBtn.onclick = function(e) {
+            e.preventDefault();
+            handleUploadDocument(e);
+        };
+    }
+    
+    console.log('[initUploadMethodTabs] 初始化完成');
 }
 
 /**
@@ -1649,51 +1801,51 @@ function generateDynamicForm(container, attributes) {
  * 加载目录
  */
 async function loadDirectories() {
+    console.log('[loadDirectories] 开始加载文档包目录');
     try {
         showLoading(true);
         
         if (!appState.currentProjectId || !appState.projectConfig) {
+            console.error('[loadDirectories] 缺少项目信息:', { currentProjectId: appState.currentProjectId, projectConfig: appState.projectConfig });
             showNotification('请先选择项目', 'error');
             return;
         }
         
-        // 尝试从API获取实际的上传目录
-        const response = await fetch(`/api/documents/directories?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}`);
-        const result = await response.json();
+        console.log('[loadDirectories] 项目信息:', { currentProjectId: appState.currentProjectId, projectName: appState.projectConfig.name });
         
-        // 调试日志
+        // 尝试从API获取实际的上传目录
+        const apiUrl = `/api/documents/directories?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}`;
+        console.log('[loadDirectories] API请求URL:', apiUrl);
+        
+        const response = await fetch(apiUrl);
+        console.log('[loadDirectories] API响应状态:', response.status);
+        
+        const result = await response.json();
         console.log('[loadDirectories] API响应:', result);
-        console.log('[loadDirectories] directories:', result.directories);
-        console.log('[loadDirectories] project_id:', appState.currentProjectId);
-        console.log('[loadDirectories] project_name:', appState.projectConfig.name);
         
         const directorySelect = document.getElementById('directorySelect');
         console.log('[loadDirectories] directorySelect元素:', directorySelect);
-        console.log('[loadDirectories] result.status:', result.status);
-        console.log('[loadDirectories] result.directories.length:', result.directories ? result.directories.length : 0);
         
         if (directorySelect) {
             directorySelect.innerHTML = '<option value="">-- 选择文档包 --</option>';
             
             if (result.status === 'success' && result.directories && result.directories.length > 0) {
-                console.log('[loadDirectories] 开始添加选项...');
+                console.log('[loadDirectories] 找到', result.directories.length, '个文档包');
                 result.directories.forEach((dir, index) => {
-                    console.log(`[loadDirectories] 添加选项 ${index}:`, dir);
+                    console.log(`[loadDirectories] 添加文档包 ${index}:`, dir);
                     const option = document.createElement('option');
                     option.value = dir.id;
                     option.textContent = dir.name;
                     directorySelect.appendChild(option);
-                    console.log(`[loadDirectories] 选项 ${index} 已添加，当前innerHTML:`, directorySelect.innerHTML.substring(0, 200));
                 });
-                console.log('[loadDirectories] 选项添加完成，当前选项数:', directorySelect.options.length);
-                console.log('[loadDirectories] 最终innerHTML:', directorySelect.innerHTML);
+                console.log('[loadDirectories] 文档包加载完成，共', directorySelect.options.length, '个选项');
                 // 强制刷新下拉框显示
                 directorySelect.style.display = 'none';
                 directorySelect.offsetHeight; // 触发重排
                 directorySelect.style.display = '';
                 showNotification('文档包加载成功', 'success');
             } else {
-                console.log('[loadDirectories] 没有可用文档包');
+                console.log('[loadDirectories] 没有可用文档包:', { status: result.status, directories: result.directories });
                 // 如果没有找到文档包，显示提示
                 const option = document.createElement('option');
                 option.value = '';
@@ -1702,6 +1854,8 @@ async function loadDirectories() {
                 directorySelect.appendChild(option);
                 showNotification('暂无可用文档包，请先上传ZIP文档包', 'info');
             }
+        } else {
+            console.error('[loadDirectories] directorySelect元素不存在');
         }
     } catch (error) {
         console.error('加载文档包失败:', error);
@@ -1718,6 +1872,7 @@ async function loadDirectories() {
         showNotification('加载文档包失败，请检查网络连接', 'error');
     } finally {
         showLoading(false);
+        console.log('[loadDirectories] 加载完成');
     }
 }
 
@@ -1738,10 +1893,12 @@ function autoSearchFiles() {
  * 搜索文件
  */
 async function searchFiles(keyword) {
+    console.log('[searchFiles] 开始搜索文件，关键字:', keyword);
     try {
         showLoading(true);
         
         if (!appState.currentProjectId || !appState.projectConfig) {
+            console.error('[searchFiles] 缺少项目信息');
             showNotification('请先选择项目', 'error');
             return;
         }
@@ -1749,15 +1906,24 @@ async function searchFiles(keyword) {
         // 获取选中的文档包（可为空，空时搜索所有目录）
         const directorySelect = document.getElementById('directorySelect');
         const selectedPackageId = directorySelect ? directorySelect.value : '';
+        console.log('[searchFiles] 选中的文档包:', selectedPackageId);
         
         // 从API搜索实际文件
-        const response = await fetch(`/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(selectedPackageId)}&keyword=${encodeURIComponent(keyword || '')}`);
+        const apiUrl = `/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(selectedPackageId)}&keyword=${encodeURIComponent(keyword || '')}`;
+        console.log('[searchFiles] API请求URL:', apiUrl);
+        
+        const response = await fetch(apiUrl);
+        console.log('[searchFiles] API响应状态:', response.status);
+        
         const result = await response.json();
+        console.log('[searchFiles] API响应:', result);
         
         if (result.status === 'success') {
             const files = result.files || [];
+            console.log('[searchFiles] 搜索到', files.length, '个文件');
             displaySelectedFiles(files);
         } else {
+            console.error('[searchFiles] 搜索失败:', result.message || '未知错误');
             showNotification('搜索失败: ' + (result.message || '未知错误'), 'error');
             displaySelectedFiles([]);
         }
@@ -1767,6 +1933,7 @@ async function searchFiles(keyword) {
         displaySelectedFiles([]);
     } finally {
         showLoading(false);
+        console.log('[searchFiles] 搜索完成');
     }
 }
 
@@ -1939,8 +2106,13 @@ async function handleSelectArchive() {
  * 打开上传模态框
  */
 export function openUploadModal(cycle, docName) {
+    console.log('[openUploadModal] 打开上传模态框:', { cycle, docName });
+    
     appState.currentCycle = cycle;
     appState.currentDocument = docName;
+    
+    console.log('[openUploadModal] 更新appState:', { currentCycle: appState.currentCycle, currentDocument: appState.currentDocument });
+    
     // 打开第一个标签页（上传/选择文档）
     document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');
@@ -1953,6 +2125,7 @@ export function openUploadModal(cycle, docName) {
     if (currentCycleElement) currentCycleElement.textContent = cycle;
     if (currentDocumentElement) currentDocumentElement.textContent = docName;
     
+    console.log('[openUploadModal] 初始化上传方式切换');
     // 初始化上传方式切换
     initUploadMethodTabs();
     
@@ -1960,10 +2133,14 @@ export function openUploadModal(cycle, docName) {
     initDragAndDrop();
     
     // 打开模态框
+    console.log('[openUploadModal] 打开模态框');
     openModal(elements.documentModal);
     
     // 显示文档附加属性要求（在模态框打开后调用）
+    console.log('[openUploadModal] 显示文档附加属性要求');
     displayDocumentRequirements();
+    
+    console.log('[openUploadModal] 模态框打开完成');
 }
 
 /**
@@ -2892,36 +3069,64 @@ export async function generateReport() {
                 });
                 
                 cycleData.uploadedDocs = docsWithStatus;
-                cycleData.statistics.uploadedDocs = docsWithStatus.length;
+                
+                // 统计文档类型数量
+                const uploadedDocNames = new Set(docsWithStatus.map(doc => doc.doc_name));
+                cycleData.statistics.uploadedDocs = uploadedDocNames.size;
                 
                 // 识别缺失的文档
-                const uploadedDocNames = new Set(docsWithStatus.map(doc => doc.doc_name));
                 cycleData.missingDocs = cycleData.requiredDocs.filter(doc => 
                     !uploadedDocNames.has(doc.name)
                 );
                 cycleData.statistics.missingDocs = cycleData.missingDocs.length;
                 
-                // 计算统计数据
-                if (docsWithStatus.length > 0) {
-                    // 归档文档数
-                    cycleData.statistics.archivedDocs = docsWithStatus.filter(doc => doc.archived).length;
+                // 计算统计数据（基于文档类型）
+                if (uploadedDocNames.size > 0) {
+                    // 按文档类型分组
+                    const docsByType = {};
+                    docsWithStatus.forEach(doc => {
+                        const docName = doc.doc_name || doc.name;
+                        if (!docsByType[docName]) {
+                            docsByType[docName] = [];
+                        }
+                        docsByType[docName].push(doc);
+                    });
                     
-                    // 签字率
-                    const signedDocs = docsWithStatus.filter(doc => doc.signer || doc.no_signature).length;
-                    cycleData.statistics.signedDocs = signedDocs;
-                    cycleData.statistics.signatureRate = (signedDocs / docsWithStatus.length * 100).toFixed(1);
+                    // 统计归档的文档类型数量
+                    let archivedTypeCount = 0;
+                    let signedTypeCount = 0;
+                    let sealedTypeCount = 0;
+                    let compliantTypeCount = 0;
                     
-                    // 盖章率
-                    const sealedDocs = docsWithStatus.filter(doc => 
-                        doc.has_seal_marked || doc.has_seal || doc.party_a_seal || doc.party_b_seal || doc.no_seal
-                    ).length;
-                    cycleData.statistics.sealedDocs = sealedDocs;
-                    cycleData.statistics.sealRate = (sealedDocs / docsWithStatus.length * 100).toFixed(1);
+                    Object.entries(docsByType).forEach(([docName, docs]) => {
+                        // 检查该文档类型是否有归档的文档
+                        const hasArchived = docs.some(doc => doc.archived);
+                        if (hasArchived) archivedTypeCount++;
+                        
+                        // 检查该文档类型是否有签字的文档
+                        const hasSigned = docs.some(doc => doc.signer || doc.no_signature);
+                        if (hasSigned) signedTypeCount++;
+                        
+                        // 检查该文档类型是否有盖章的文档
+                        const hasSealed = docs.some(doc => 
+                            doc.has_seal_marked || doc.has_seal || doc.party_a_seal || doc.party_b_seal || doc.no_seal
+                        );
+                        if (hasSealed) sealedTypeCount++;
+                        
+                        // 检查该文档类型是否有合规的文档
+                        const hasCompliant = docs.some(doc => doc.compliant);
+                        if (hasCompliant) compliantTypeCount++;
+                    });
                     
-                    // 合格率
-                    const compliantDocs = docsWithStatus.filter(doc => doc.compliant).length;
-                    cycleData.statistics.compliantDocs = compliantDocs;
-                    cycleData.statistics.complianceRate = (compliantDocs / docsWithStatus.length * 100).toFixed(1);
+                    cycleData.statistics.archivedDocs = archivedTypeCount;
+                    cycleData.statistics.signedDocs = signedTypeCount;
+                    cycleData.statistics.sealedDocs = sealedTypeCount;
+                    cycleData.statistics.compliantDocs = compliantTypeCount;
+                    
+                    // 计算比率
+                    cycleData.statistics.signatureRate = (signedTypeCount / uploadedDocNames.size * 100).toFixed(1);
+                    cycleData.statistics.sealRate = (sealedTypeCount / uploadedDocNames.size * 100).toFixed(1);
+                    cycleData.statistics.complianceRate = (compliantTypeCount / uploadedDocNames.size * 100).toFixed(1);
                 }
             }
             
@@ -3068,9 +3273,9 @@ function showReportModal(reportData) {
                         <h4 style="margin-top: 0; margin-bottom: 15px; color: #495057;">${index + 1}. ${cycle.name}</h4>
                         
                         <div class="cycle-summary" style="margin-bottom: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px;">
-                            <p>要求文档: ${cycle.requiredDocs.length} 个</p>
-                            <p>已上传文档: ${cycle.uploadedDocs.length} 个</p>
-                            <p>缺失文档: ${cycle.missingDocs.length} 个</p>
+                            <p>要求文档类型: ${cycle.requiredDocs.length} 个</p>
+                            <p>已上传文档类型: ${cycle.statistics.uploadedDocs} 个</p>
+                            <p>缺失文档类型: ${cycle.missingDocs.length} 个</p>
                             
                             <!-- 周期统计数据 -->
                             ${cycle.statistics ? `
@@ -3610,11 +3815,17 @@ export function initDragAndDrop() {
         fileInput.click();
     };
     
-    // 文件选择后自动上传（使用 onchange 赋值避免重复绑定）
+    // 文件选择后实时上传，以便后台识别信息
     fileInput.onchange = async (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            await handleAsyncUpload(file);
+        const files = e.target.files;
+        if (files.length > 0) {
+            // 显示文件信息
+            for (const file of files) {
+                showUploadedFile(file);
+                console.log('选择的文件:', file.name);
+            }
+            // 实时上传文件
+            await handleUploadDocument({ preventDefault: () => {} });
         }
     };
     
@@ -3638,7 +3849,7 @@ export function initDragAndDrop() {
         dropZone.classList.remove('drag-over');
     };
     
-    dropZone.ondrop = async (e) => {
+    dropZone.ondrop = (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         
@@ -3646,9 +3857,25 @@ export function initDragAndDrop() {
         if (files.length > 0) {
             // 检查是否是文件夹
             if (files[0].webkitRelativePath) {
-                await handleFolderUpload(files);
+                // 文件夹上传仍然使用原逻辑
+                handleFolderUpload(files);
             } else {
-                await handleAsyncUpload(files[0]);
+                // 将拖拽的文件设置到文件输入中
+                const fileInput = document.getElementById('fileInput');
+                if (fileInput) {
+                    // 使用 DataTransfer 来设置多个文件
+                    const dataTransfer = new DataTransfer();
+                    for (const file of files) {
+                        dataTransfer.items.add(file);
+                    }
+                    fileInput.files = dataTransfer.files;
+                    
+                    // 显示文件信息
+                    for (const file of files) {
+                        showUploadedFile(file);
+                        console.log('拖拽的文件:', file.name);
+                    }
+                }
             }
         }
     };
@@ -4064,6 +4291,35 @@ function getSelectedDocsAttributeStatus(docIds) {
 }
 
 /**
+ * 获取第一个选中文档的属性值（用于批量编辑时填充表单）
+ */
+function getFirstDocAttributeValues(docIds) {
+    const values = {};
+    
+    // 从项目配置中获取文档数据
+    if (appState.projectConfig && appState.projectConfig.documents) {
+        for (const [cycleKey, cycleInfo] of Object.entries(appState.projectConfig.documents)) {
+            if (cycleInfo.uploaded_docs) {
+                for (const doc of cycleInfo.uploaded_docs) {
+                    const docId = doc.doc_id || doc.id || `${cycleKey}_${doc.doc_name || doc.name}_${doc.upload_time || Date.now()}`;
+                    if (docIds.includes(docId)) {
+                        // 找到第一个匹配的文档，获取其属性值
+                        const textAttributes = ['party_a_signer', 'party_b_signer', 'signer', 'doc_date', 'sign_date', 'other_seal'];
+                        textAttributes.forEach(key => {
+                            const camelKey = key.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
+                            values[camelKey] = doc[key] || doc[`_${key}`] || '';
+                        });
+                        return values;
+                    }
+                }
+            }
+        }
+    }
+    
+    return values;
+}
+
+/**
  * 处理批量编辑 - 复用编辑文档模态框
  */
 export function handleBatchEdit() {
@@ -4077,6 +4333,9 @@ export function handleBatchEdit() {
     
     // 获取选中文档的当前属性状态
     const attrStatus = getSelectedDocsAttributeStatus(selectedDocIds);
+    
+    // 获取第一个选中文档的详细属性值（用于填充文本输入框）
+    const firstDocValues = getFirstDocAttributeValues(selectedDocIds);
     
     // 从项目配置中获取文档要求
     let requirement = '';
@@ -4138,14 +4397,16 @@ export function handleBatchEdit() {
             const attr1LabelStyle = getLabelStyle(attr1Key);
             
             if (attr1.type === 'date') {
+                const attr1Value = firstDocValues[attr1.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value=""></td>
+                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value="${attr1Value}"></td>
                 `;
             } else if (attr1.type === 'text') {
+                const attr1Value = firstDocValues[attr1.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value=""></td>
+                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value="${attr1Value}"></td>
                 `;
             } else if (attr1.type === 'checkbox' && attr1.inline) {
                 rowHtml += `
@@ -4187,14 +4448,16 @@ export function handleBatchEdit() {
             const attr2LabelStyle = getLabelStyle(attr2Key);
             
             if (attr2.type === 'date') {
+                const attr2Value = firstDocValues[attr2.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value=""></td>
+                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value="${attr2Value}"></td>
                 `;
             } else if (attr2.type === 'text') {
+                const attr2Value = firstDocValues[attr2.id] || '';
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value=""></td>
+                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value="${attr2Value}"></td>
                 `;
             } else if (attr2.type === 'checkbox' && attr2.inline) {
                 rowHtml += `
@@ -4304,6 +4567,18 @@ export function handleBatchEdit() {
             }
             
             showNotification(`成功编辑 ${successCount} 个文档${errorCount > 0 ? '，' + errorCount + '个失败' : ''}`, errorCount > 0 ? 'warning' : 'success');
+            
+            // 刷新项目配置数据（确保获取最新的文档属性）
+            if (appState.currentProjectId) {
+                try {
+                    const projectResult = await loadProject(appState.currentProjectId);
+                    if (projectResult.status === 'success') {
+                        appState.projectConfig = projectResult.project;
+                    }
+                } catch (e) {
+                    console.error('刷新项目配置失败:', e);
+                }
+            }
             
             // 刷新文档列表
             if (appState.currentCycle) {

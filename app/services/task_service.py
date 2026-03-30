@@ -214,7 +214,12 @@ class TaskService:
                 # 完成任务
                 self.tasks_store[task_id]['status'] = 'completed'
                 self.tasks_store[task_id]['progress'] = 100
-                self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
+                # 区分实际文件和不涉及占位文件
+                actual_files = processed_files - not_involved_count if not_involved_count > 0 else processed_files
+                if not_involved_count > 0:
+                    self.tasks_store[task_id]['message'] = f'打包完成！共 {actual_files} 个文件，{not_involved_count} 个不涉及占位文件'
+                else:
+                    self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
                 self.tasks_store[task_id]['result'] = {
                     'package_path': str(package_path),
                     'package_filename': package_filename,
@@ -361,8 +366,14 @@ class TaskService:
             'message': '异常检查任务已启动'
         }
 
-    def start_download_package_task(self, project_id: str, project_config: Dict[str, Any]) -> Dict[str, Any]:
-        """启动下载打包任务（按周期/文档类型组织）"""
+    def start_download_package_task(self, project_id: str, project_config: Dict[str, Any], scope: str = 'matched') -> Dict[str, Any]:
+        """启动下载打包任务（按周期/文档类型组织）
+        
+        Args:
+            project_id: 项目ID
+            project_config: 项目配置
+            scope: 打包范围，'archived' 只打包已归档文档，'matched' 打包所有已匹配文档
+        """
         import zipfile
         from pathlib import Path
         
@@ -384,19 +395,94 @@ class TaskService:
                 import os
                 import re
                 
-                # 获取项目数据
-                documents = project_config.get('documents', {})
+                # 从后端重新获取项目数据（包含实际的文件上传记录）
+                project = self.doc_manager.load_project(project_id)
+                if not project or project.get('status') != 'success':
+                    raise Exception('项目不存在')
+                
+                backend_project_config = project.get('project', {})
+                
+                # 获取项目数据（优先使用后端数据，包含 uploaded_docs）
+                documents = backend_project_config.get('documents', project_config.get('documents', {}))
                 # 获取周期的正确顺序（cycles 列表定义了顺序）
-                cycles_order = project_config.get('cycles', [])
+                cycles_order = backend_project_config.get('cycles', project_config.get('cycles', []))
+                # 获取不涉及标记
+                documents_not_involved = backend_project_config.get('documents_not_involved', project_config.get('documents_not_involved', {}))
+                # 获取归档状态
+                documents_archived = backend_project_config.get('documents_archived', project_config.get('documents_archived', {}))
                 
-                # 统计文件总数
-                total_files = sum(
-                    len(doc_data.get('uploaded_docs', []))
-                    for doc_data in documents.values()
-                    if isinstance(doc_data, dict)
-                )
+                logger.info(f"[打包] 使用后端数据: cycles={len(cycles_order)}, documents={len(documents)}")
+                logger.info(f"[打包] 归档状态键: {list(documents_archived.keys())[:5] if documents_archived else 'None'}")
+                logger.info(f"[打包] 不涉及状态键: {list(documents_not_involved.keys())[:5] if documents_not_involved else 'None'}")
                 
-                if total_files == 0:
+                # 检查特定周期
+                if '7、系统开发测试' in documents_archived:
+                    logger.info(f"[打包] 7、系统开发测试 归档状态: {documents_archived['7、系统开发测试']}")
+                
+                # 调试：检查特定周期的 uploaded_docs
+                test_cycle = '7、系统开发测试'
+                if test_cycle in documents:
+                    test_docs = documents[test_cycle]
+                    if isinstance(test_docs, dict):
+                        uploaded = test_docs.get('uploaded_docs', [])
+                        logger.info(f"[打包] '{test_cycle}' 有 {len(uploaded)} 个上传文件")
+                        for doc in uploaded[:3]:
+                            logger.info(f"[打包]   - {doc.get('doc_name')}: {doc.get('original_filename')}")
+                
+                # 检查归档状态的具体结构
+                if test_cycle in documents_archived:
+                    archived_docs = documents_archived[test_cycle]
+                    logger.info(f"[打包] '{test_cycle}' 归档文档: {list(archived_docs.keys())[:10]}")
+                
+                # 判断文档是否应该被打包（根据scope）
+                def should_include_doc(cycle, doc_name, has_uploaded_files):
+                    """判断文档是否应该被打包"""
+                    is_not_involved = documents_not_involved.get(cycle, {}).get(doc_name, False)
+                    is_archived = documents_archived.get(cycle, {}).get(doc_name, False)
+                    
+                    # 标记为不涉及的文档始终包含（视为已归档）
+                    if is_not_involved:
+                        logger.info(f"[打包过滤] {cycle}/{doc_name}: 不涉及，包含")
+                        return True
+                    
+                    if scope == 'archived':
+                        # 只打包已归档的文档
+                        result = is_archived
+                        logger.info(f"[打包过滤] {cycle}/{doc_name}: archived模式, is_archived={is_archived}, 结果={result}")
+                        return result
+                    else:
+                        # 打包所有有上传文件的文档
+                        result = has_uploaded_files
+                        logger.info(f"[打包过滤] {cycle}/{doc_name}: matched模式, has_files={has_uploaded_files}, 结果={result}")
+                        return result
+                
+                # 统计文件总数（根据scope过滤）
+                total_files = 0
+                for cycle in cycles_order:
+                    if cycle in documents:
+                        doc_data = documents[cycle]
+                        if isinstance(doc_data, dict):
+                            for doc in doc_data.get('uploaded_docs', []):
+                                if isinstance(doc, dict):
+                                    doc_name = doc.get('doc_name', '')
+                                    if should_include_doc(cycle, doc_name, True):
+                                        total_files += 1
+                
+                # 统计不涉及的文档数量（只统计没有上传文件的）
+                not_involved_count = 0
+                for cycle in cycles_order:
+                    if cycle in documents_not_involved and cycle in documents:
+                        doc_data = documents[cycle]
+                        if isinstance(doc_data, dict):
+                            uploaded_docs = doc_data.get('uploaded_docs', [])
+                            # 获取该周期下已上传的文档名称集合
+                            uploaded_doc_names = {doc.get('doc_name') for doc in uploaded_docs if isinstance(doc, dict)}
+                            # 只统计标记为不涉及且没有上传文件的
+                            for doc_name in documents_not_involved.get(cycle, {}):
+                                if doc_name not in uploaded_doc_names and should_include_doc(cycle, doc_name, False):
+                                    not_involved_count += 1
+                
+                if total_files == 0 and not_involved_count == 0:
                     raise Exception('没有可打包的文件')
                 
                 # 创建临时目录和ZIP文件
@@ -470,19 +556,43 @@ class TaskService:
                             doc_files_map[doc_name].append(doc_meta)
                         
                         # 按照 required_docs 的顺序处理文档类型
-                        doc_type_seq = 0
-                        
-                        for req_doc in required_docs:
+                        # 使用 enumerate 获取原始序号（从1开始），即使跳过某些文档也保持原始序号
+                        for doc_type_seq, req_doc in enumerate(required_docs, 1):
                             doc_name = req_doc.get('name', '未知')
+                            has_files = doc_name in doc_files_map and len(doc_files_map[doc_name]) > 0
                             
-                            # 如果该文档类型没有上传的文件，跳过
-                            if doc_name not in doc_files_map:
+                            logger.info(f"[打包文档] 处理: {doc_name}, has_files={has_files}, doc_type_seq={doc_type_seq}")
+                            
+                            # 检查是否应该包含此文档类型
+                            if not should_include_doc(cycle, doc_name, has_files):
+                                logger.info(f"[打包文档] 跳过: {doc_name} (should_include_doc=false)")
                                 continue
                             
-                            # 文档类型序号递增（1.1, 1.2, 1.3...）
-                            doc_type_seq += 1
+                            # 如果该文档类型没有上传的文件，检查是否标记为不涉及
+                            if not has_files:
+                                # 检查是否标记为不涉及
+                                is_not_involved = documents_not_involved.get(cycle, {}).get(doc_name, False)
+                                if is_not_involved:
+                                    # 创建TXT占位文件（使用原始序号）
+                                    clean_cycle = clean_name_prefix(cycle)
+                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}"
+                                    archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}"
+                                    # 文件名格式：X.Y 文档类型名（本项目不涉及）.txt
+                                    placeholder_filename = f"{file_index_prefix} {doc_name}（本项目不涉及）.txt"
+                                    archive_path = f"{archive_dir}/{placeholder_filename}"
+                                    # TXT文件内容
+                                    txt_content = f"文档类型：{doc_name}\n状态：本项目不涉及该文档\n\n该文档类型在本项目中不需要提交。"
+                                    zipf.writestr(archive_path, txt_content.encode('utf-8'))
+                                    processed_files += 1
+                                    # 更新进度
+                                    if total_files > 0:
+                                        progress = int(100 * processed_files / (total_files + not_involved_count))
+                                        self.tasks_store[task_id]['progress'] = min(progress, 95)
+                                    self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files + not_involved_count})'
+                                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                                continue
                             
-                            # 直接遍历该文档类型的所有文件
+                            # 直接遍历该文档类型的所有文件（已经通过should_include_doc过滤）
                             doc_files = doc_files_map[doc_name]
                             
                             # 按子目录排序（无子目录的在前），确保顺序一致
@@ -495,9 +605,17 @@ class TaskService:
                             
                             sorted_files = sorted(doc_files, key=get_sort_key)
                             
+                            # 调试：打印所有文件的 directory 字段
+                            for i, f in enumerate(sorted_files):
+                                logger.info(f"[打包目录] {doc_name} 文件{i}: directory='{f.get('directory', '')}', filename='{f.get('original_filename', '')}'")
+                            
                             # 先分组：无子目录的文件 和 有子目录的文件
                             files_no_subdir = [f for f in sorted_files if not (f.get('directory', '') or '').strip() or (f.get('directory', '') or '').strip() == '/']
                             files_with_subdir = [f for f in sorted_files if (f.get('directory', '') or '').strip() and (f.get('directory', '') or '').strip() != '/']
+                            
+                            logger.info(f"[打包目录] {doc_name}: 无子目录文件={len(files_no_subdir)}, 有子目录文件={len(files_with_subdir)}")
+                            logger.info(f"[打包目录] files_no_subdir={[f.get('original_filename') for f in files_no_subdir]}")
+                            logger.info(f"[打包目录] files_with_subdir={[f.get('original_filename') for f in files_with_subdir]}")
                             
                             # 为有子目录的文件按目录分组
                             subdir_groups = {}  # {directory: [files]}
@@ -556,19 +674,28 @@ class TaskService:
                             for _doc_meta, _item_seq_val, _subdir_name, _inner_seq in processing_list:
                                 file_path = _doc_meta.get('file_path')
                                 if not file_path:
+                                    logger.warning(f"[打包] 文件路径为空: {doc_name}")
                                     continue
                                 
                                 # 解析文件路径
                                 file_path_obj = Path(file_path)
                                 if not file_path_obj.is_absolute():
-                                    if file_path.startswith('projects/'):
+                                    # 使用 pathlib 处理跨平台路径（自动适配 Windows/Unix 分隔符）
+                                    normalized_path = file_path_obj.as_posix()
+                                    is_projects_path = normalized_path.startswith('projects/')
+                                    
+                                    if is_projects_path:
+                                        # file_path 已经是相对于项目根目录的完整路径（如 projects/项目名/uploads/...）
+                                        # 直接使用项目根目录拼接
                                         base_dir = self.doc_manager.config.projects_base_folder.parent
                                         file_path_obj = base_dir / file_path
                                     else:
+                                        # file_path 是相对 uploads 目录的路径
                                         project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
                                         file_path_obj = project_uploads_dir / file_path
                                 
                                 if not file_path_obj.exists():
+                                    logger.warning(f"[打包] 文件不存在: {file_path_obj}")
                                     continue
                                 
                                 # 优先使用原始文件名，其次是filename字段，最后是磁盘文件名
@@ -590,6 +717,7 @@ class TaskService:
                                         f"/{cycle_idx}.{doc_type_seq} {doc_name}"
                                         f"/{cycle_idx}.{doc_type_seq}.{_item_seq_val} {clean_dir}"
                                     )
+                                    logger.info(f"[打包子目录] {doc_name}: _subdir_name='{_subdir_name}', clean_dir='{clean_dir}', archive_dir='{archive_dir}'")
                                 else:
                                     # 无子目录：前缀 X.Y.N，放文档类型目录下
                                     file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{_item_seq_val}"
@@ -598,7 +726,9 @@ class TaskService:
                                 clean_name = clean_filename(filename, file_index_prefix)
                                 archive_path = f"{archive_dir}/{clean_name}"
                                 
+                                logger.info(f"[打包写入] {doc_name}: {filename} -> {archive_path}")
                                 zipf.write(file_path_obj, archive_path)
+                                logger.info(f"[打包成功] {doc_name}: {filename}")
                                 processed_files += 1
                                 
                                 # 更新进度
@@ -613,7 +743,12 @@ class TaskService:
                 # 完成任务
                 self.tasks_store[task_id]['status'] = 'completed'
                 self.tasks_store[task_id]['progress'] = 100
-                self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
+                # 区分实际文件和不涉及占位文件
+                actual_files = processed_files - not_involved_count if not_involved_count > 0 else processed_files
+                if not_involved_count > 0:
+                    self.tasks_store[task_id]['message'] = f'打包完成！共 {actual_files} 个文件，{not_involved_count} 个不涉及占位文件'
+                else:
+                    self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
                 self.tasks_store[task_id]['result'] = {
                     'package_path': str(package_path),
                     'package_filename': package_filename,

@@ -1285,13 +1285,13 @@ async function loadCycleProgresses(cycles, docsData) {
         }
     });
 
-    // 添加颜色说明方块作为最后一个周期项
+    // 添加颜色说明方块作为最后一个周期项（图例，不可点击）
     html += `
-        <div class="cycle-nav-item status-legend">
+        <div class="cycle-nav-item status-legend" style="cursor:default;pointer-events:none;">
             <span class="cycle-index" style="font-size:11px;opacity:0.8;"></span>
             <div class="status-legend-content">
                 <div class="status-item">
-                    <span class="status-dot" style="background:#28a745;"></span>
+                    <span class="status-dot" style="background:#17a2b8;"></span>
                     <span>完整无误</span>
                 </div>
                 <div class="status-item">
@@ -1308,8 +1308,8 @@ async function loadCycleProgresses(cycles, docsData) {
 
     elements.cycleNavList.innerHTML = html;
 
-    // 添加周期点击事件
-    document.querySelectorAll('.cycle-nav-item').forEach(item => {
+    // 添加周期点击事件（排除图例项）
+    document.querySelectorAll('.cycle-nav-item:not(.status-legend)').forEach(item => {
         item.addEventListener('click', () => {
             selectCycle(item.dataset.cycle);
         });
@@ -1744,24 +1744,30 @@ function switchUploadTab(tab) {
  * 切换主标签页
  */
 function switchMainTab(tabName) {
-    document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');
-    
-    document.querySelector(`.main-tab-btn[data-tab="${tabName}"]`).classList.add('active');
-    
-    // 处理标签页ID，将upload-select转换为uploadSelectTab
-    let tabId;
-    if (tabName === 'upload-select') {
-        tabId = 'uploadSelectTab';
-    } else {
-        tabId = `${tabName}Tab`;
-    }
-    
-    document.getElementById(tabId).style.display = 'block';
-    
-    // 如果切换到维护标签页，更新已选择文档列表
-    if (tabName === 'maintain') {
-        updateSelectedDocumentsList();
+    try {
+        document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');
+        
+        const tabBtn = document.querySelector(`.main-tab-btn[data-tab="${tabName}"]`);
+        if (tabBtn) tabBtn.classList.add('active');
+        
+        // 处理标签页ID，将upload-select转换为uploadSelectTab
+        let tabId;
+        if (tabName === 'upload-select') {
+            tabId = 'uploadSelectTab';
+        } else {
+            tabId = `${tabName}Tab`;
+        }
+        
+        const tabContent = document.getElementById(tabId);
+        if (tabContent) tabContent.style.display = 'block';
+        
+        // 如果切换到维护标签页，更新已选择文档列表
+        if (tabName === 'maintain') {
+            updateSelectedDocumentsList();
+        }
+    } catch (error) {
+        console.error('[switchMainTab] 切换标签页失败:', error);
     }
 }
 
@@ -1769,18 +1775,22 @@ function switchMainTab(tabName) {
  * 更新已选择文档列表
  */
 function updateSelectedDocumentsList() {
-    // 当切换到维护标签页时，加载实际的已归档文档
-    const cycle = appState.currentCycle;
-    const docName = appState.currentDocument;
-    if (cycle && docName) {
-        loadUploadedDocuments(cycle, docName);
-    }
-    
-    // 更新选择计数
-    const selectedCount = document.getElementById('selectedCount');
-    if (selectedCount) {
-        // 这里可以根据实际选择的文档数量更新
-        selectedCount.textContent = '已选择 0 个文档';
+    try {
+        // 当切换到维护标签页时，加载实际的已归档文档
+        const cycle = appState.currentCycle;
+        const docName = appState.currentDocument;
+        if (cycle && docName) {
+            loadUploadedDocuments(cycle, docName);
+        }
+        
+        // 更新选择计数
+        const selectedCount = document.getElementById('selectedCount');
+        if (selectedCount) {
+            // 这里可以根据实际选择的文档数量更新
+            selectedCount.textContent = '已选择 0 个文档';
+        }
+    } catch (error) {
+        console.error('[updateSelectedDocumentsList] 更新失败:', error);
     }
 }
 
@@ -2246,12 +2256,20 @@ function handleReplaceArchive() {
  */
 async function loadUploadedDocuments(cycle, docName) {
     try {
+        // 检查必要元素是否存在
+        if (!elements.documentsList) {
+            console.error('[loadUploadedDocuments] documentsList 元素不存在');
+            return;
+        }
+        
         const response = await fetch(`/api/documents/list?cycle=${encodeURIComponent(cycle)}&doc_name=${encodeURIComponent(docName)}`);
         const result = await response.json();
 
         if (result.status === 'success') {
             const docs = result.data || [];
-            elements.docCount.textContent = docs.length;
+            if (elements.docCount) {
+                elements.docCount.textContent = docs.length;
+            }
 
             if (docs.length === 0) {
                 elements.documentsList.innerHTML = '<p class="placeholder">暂无已上传的文档</p>';
@@ -2323,7 +2341,9 @@ async function loadUploadedDocuments(cycle, docName) {
         }
     } catch (error) {
         console.error('加载文档列表错误:', error);
-        elements.documentsList.innerHTML = '<p class="placeholder">加载文档列表失败</p>';
+        if (elements.documentsList) {
+            elements.documentsList.innerHTML = '<p class="placeholder">加载文档列表失败</p>';
+        }
     }
 }
 

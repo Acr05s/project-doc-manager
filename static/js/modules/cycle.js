@@ -65,6 +65,16 @@ export async function calculateCycleStatus(cycle) {
         // 检查是否已归档
         const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
         
+        // 检查是否标记为不涉及（从文档列表和项目配置中）
+        const isNotInvolvedFromDocs = docsList.some(d => d.not_involved || d._not_involved);
+        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+        const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
+        
+        // 如果标记为不涉及，视为文件完整、属性完整、已归档
+        if (isNotInvolved) {
+            continue; // 跳过此文档的检查，视为已完成
+        }
+        
         // 检查文件数量
         if (docsList.length === 0) {
             allFilesComplete = false;
@@ -176,13 +186,13 @@ export async function loadCycleProgresses(cycles, docsData) {
         }
     });
 
-    // 添加颜色说明方块作为最后一个周期项
+    // 添加颜色说明方块作为最后一个周期项（图例，不可点击）
     html += `
-        <div class="cycle-nav-item status-legend">
+        <div class="cycle-nav-item status-legend" style="cursor:default;pointer-events:none;">
             <span class="cycle-index" style="font-size:11px;opacity:0.8;"></span>
             <div class="status-legend-content">
                 <div class="status-item">
-                    <span class="status-dot" style="background:#28a745;"></span>
+                    <span class="status-dot" style="background:#17a2b8;"></span>
                     <span>完整无误</span>
                 </div>
                 <div class="status-item">
@@ -201,8 +211,8 @@ export async function loadCycleProgresses(cycles, docsData) {
         elements.cycleNavList.innerHTML = html;
     }
 
-    // 添加周期点击事件
-    document.querySelectorAll('.cycle-nav-item').forEach(item => {
+    // 添加周期点击事件（排除图例项）
+    document.querySelectorAll('.cycle-nav-item:not(.status-legend)').forEach(item => {
         item.addEventListener('click', () => {
             selectCycle(item.dataset.cycle);
         });

@@ -3,12 +3,11 @@
  */
 
 import { initApp } from './modules/index.js';
-import { unlockCurrentProject, stopHeartbeat, appState } from './modules/app-state.js';
+import { unlockCurrentProject, appState } from './modules/app-state.js';
 
 // 页面关闭或刷新时解锁项目
 window.addEventListener('beforeunload', async () => {
     if (appState.currentProjectId) {
-        stopHeartbeat();
         // 使用 navigator.sendBeacon 异步发送解锁请求
         const data = JSON.stringify({
             project_id: appState.currentProjectId,
@@ -224,9 +223,19 @@ window.unarchiveDocument = function(cycle, docName) {
 };
 
 window.loadMaintainDocuments = function() {
-    import('./modules/document.js').then(module => {
-        module.loadMaintainDocuments();
-    });
+    try {
+        import('./modules/document.js').then(module => {
+            if (module.loadMaintainDocuments) {
+                module.loadMaintainDocuments();
+            } else {
+                console.error('[loadMaintainDocuments] 模块函数不存在');
+            }
+        }).catch(err => {
+            console.error('[loadMaintainDocuments] 加载模块失败:', err);
+        });
+    } catch (error) {
+        console.error('[loadMaintainDocuments] 调用失败:', error);
+    }
 };
 
 window.loadZipPackages = function() {

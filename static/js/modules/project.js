@@ -2,7 +2,7 @@
  * 项目模块 - 处理项目相关功能
  */
 
-import { appState, elements, initSession, startHeartbeat, stopHeartbeat, unlockCurrentProject } from './app-state.js';
+import { appState, elements, initSession, unlockCurrentProject } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
 import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, previewImportPackage, importFromPreview } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
@@ -120,7 +120,7 @@ export async function selectProject(projectId) {
                 })
             });
             // 启动心跳
-            startHeartbeat(projectId);
+
         } catch (error) {
             console.error('锁定项目失败:', error);
         }

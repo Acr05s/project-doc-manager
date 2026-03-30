@@ -126,40 +126,6 @@ def lock_project():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@task_bp.route('/api/tasks/heartbeat', methods=['POST'])
-def project_heartbeat():
-    """项目会话心跳（保持锁定）"""
-    try:
-        data = request.get_json()
-        project_id = data.get('project_id')
-        session_id = data.get('session_id')
-        
-        if not project_id or not session_id:
-            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
-        
-        doc_manager = get_doc_manager()
-        
-        # 检查是否是当前会话锁定
-        status = doc_manager.projects.get_project_status(project_id)
-        if not status['locked'] or status['session_id'] != session_id:
-            return jsonify({'status': 'error', 'message': '项目未被当前会话锁定'}), 400
-        
-        # 更新过期时间
-        from datetime import datetime, timedelta
-        expire_time = (datetime.now() + timedelta(minutes=5)).isoformat()
-        
-        success = doc_manager.projects.update_project_status(
-            project_id, 
-            session_expire=expire_time
-        )
-        
-        if success:
-            return jsonify({'status': 'success', 'session_expire': expire_time})
-        else:
-            return jsonify({'status': 'error', 'message': '项目不存在'}), 404
-            
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @task_bp.route('/api/tasks/unlock-project', methods=['POST'])
@@ -303,11 +269,12 @@ def start_download_package_task():
         data = request.get_json()
         project_id = data.get('project_id')
         project_config = data.get('project_config')
+        scope = data.get('scope', 'matched')  # 'archived' 或 'matched'
         
         if not project_id or not project_config:
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
-        result = task_service.start_download_package_task(project_id, project_config)
+        result = task_service.start_download_package_task(project_id, project_config, scope)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

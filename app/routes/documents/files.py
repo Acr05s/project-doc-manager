@@ -144,10 +144,13 @@ def search_files():
         
         if directory:
             # 处理完整相对路径（如 projects/{项目名}/uploads/xxx）
-            if directory.startswith('projects/') and project_name:
+            # 使用 pathlib 处理跨平台路径（自动适配 Windows/Unix 分隔符）
+            dir_path = Path(directory)
+            normalized_dir = dir_path.as_posix()
+            if normalized_dir.startswith('projects/') and project_name:
                 # 从 projects_base_folder 拼接完整路径
                 directory_path = doc_manager.config.projects_base_folder.parent / directory
-            elif directory.startswith('uploads/') and project_name:
+            elif normalized_dir.startswith('uploads/') and project_name:
                 # 兼容旧格式
                 directory_path = doc_manager.config.projects_base_folder / project_name / directory
             else:
