@@ -465,6 +465,11 @@ body {
     background: #f8f9fa;
     border: 1px solid #e9ecef;
     cursor: default;
+    width: 140px;
+    min-width: 140px;
+    max-width: 140px;
+    padding: 10px 8px;
+    box-sizing: border-box;
 }
 
 /* 操作进度容器 - 固定在右下角 */
@@ -570,6 +575,7 @@ body {
     position: relative;
     border: 2px solid transparent;
     border-radius: 12px;
+    box-sizing: border-box;
 }
 
 .archive-tip {
@@ -611,7 +617,7 @@ body {
 
 .cycle-nav-item.active {
     border-color: #0066cc;
-    border-width: 3px;
+    border-width: 2px;
     box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
     transform: translateY(-2px);
     z-index: 10;
