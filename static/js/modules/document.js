@@ -1919,9 +1919,24 @@ async function searchFiles(keyword) {
         console.log('[searchFiles] API响应:', result);
         
         if (result.status === 'success') {
-            const files = result.files || [];
+            let files = result.files || [];
             console.log('[searchFiles] 搜索到', files.length, '个文件');
-            displaySelectedFiles(files);
+            
+            // 如果搜索无结果且有关键词，显示所有文件
+            if (files.length === 0 && keyword && keyword.trim()) {
+                console.log('[searchFiles] 搜索无结果，显示所有文件');
+                showNotification('未找到匹配文件，显示所有文件', 'info');
+                // 重新请求所有文件（不传关键词）
+                const allFilesUrl = `/api/documents/files/search?project_id=${encodeURIComponent(appState.currentProjectId)}&project_name=${encodeURIComponent(appState.projectConfig.name)}&directory=${encodeURIComponent(selectedPackageId)}&keyword=`;
+                const allFilesResponse = await fetch(allFilesUrl);
+                const allFilesResult = await allFilesResponse.json();
+                if (allFilesResult.status === 'success') {
+                    files = allFilesResult.files || [];
+                }
+                displaySelectedFiles(files, false);
+            } else {
+                displaySelectedFiles(files, !!(keyword && keyword.trim()));
+            }
         } else {
             console.error('[searchFiles] 搜索失败:', result.message || '未知错误');
             showNotification('搜索失败: ' + (result.message || '未知错误'), 'error');
@@ -1987,46 +2002,143 @@ function formatPathDisplay(path) {
 }
 
 /**
- * 显示选择的文件列表
+ * 将文件列表按目录结构组织成树状
+ * @param {Array} files - 文件列表
+ * @returns {Object} 目录树结构
  */
-export function displaySelectedFiles(files) {
+function buildFileTree(files) {
+    const root = { name: '根目录', children: {}, files: [] };
+    
+    files.forEach(file => {
+        const path = file.rel_path || file.path || '';
+        // 统一使用正斜杠
+        const normalizedPath = path.replace(/\\/g, '/');
+        // 移除文件名，保留目录路径
+        const lastSlashIndex = normalizedPath.lastIndexOf('/');
+        const dirPath = lastSlashIndex > 0 ? normalizedPath.substring(0, lastSlashIndex) : '';
+        const fileName = lastSlashIndex >= 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
+        
+        // 如果没有目录，放到根目录
+        if (!dirPath) {
+            root.files.push({ ...file, displayName: fileName });
+            return;
+        }
+        
+        // 按目录层级遍历
+        const parts = dirPath.split('/').filter(p => p);
+        let current = root;
+        
+        parts.forEach(part => {
+            if (!current.children[part]) {
+                current.children[part] = { name: part, children: {}, files: [] };
+            }
+            current = current.children[part];
+        });
+        
+        current.files.push({ ...file, displayName: fileName });
+    });
+    
+    return root;
+}
+
+/**
+ * 渲染文件树
+ * @param {Object} node - 目录节点
+ * @param {string} path - 当前路径
+ * @param {number} level - 层级
+ * @returns {string} HTML
+ */
+function renderFileTree(node, path = '', level = 0) {
+    const indent = level * 20;
+    let html = '';
+    
+    // 渲染当前目录下的文件
+    node.files.forEach(file => {
+        const isUsed = file.used || false;
+        const usedByList = file.used_by || [];
+        const usedByText = usedByList.length > 0 ? usedByList.join('，') : '已被其他文档使用';
+        
+        html += `
+            <div class="zip-file-item ${isUsed ? 'used' : ''}" 
+                 data-path="${file.path}" 
+                 data-name="${file.name}"
+                 style="padding-left: ${indent + 20}px;">
+                <input type="checkbox" class="zip-file-checkbox" ${isUsed ? 'disabled' : ''} />
+                <span class="zip-file-icon">📄</span>
+                <span class="zip-file-name" title="${file.name}">${file.displayName || file.name}</span>
+                ${isUsed ? `<span class="file-used-badge" title="${usedByText}">已被使用</span>` : ''}
+            </div>
+        `;
+    });
+    
+    // 渲染子目录
+    Object.values(node.children).forEach(child => {
+        const childPath = path ? `${path}/${child.name}` : child.name;
+        const hasContent = child.files.length > 0 || Object.keys(child.children).length > 0;
+        
+        if (hasContent) {
+            html += `
+                <div class="zip-folder-item" style="padding-left: ${indent}px;">
+                    <div class="zip-folder-header">
+                        <span class="zip-folder-icon">📁</span>
+                        <span class="zip-folder-name">${child.name}</span>
+                        <span class="zip-folder-count">(${child.files.length + Object.values(child.children).reduce((sum, c) => sum + c.files.length, 0)} 个文件)</span>
+                    </div>
+                    <div class="zip-folder-content">
+                        ${renderFileTree(child, childPath, level + 1)}
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    return html;
+}
+
+/**
+ * 显示选择的文件列表（树状目录结构）
+ * @param {Array} files - 文件列表
+ * @param {boolean} isSearchResult - 是否为搜索结果
+ */
+export function displaySelectedFiles(files, isSearchResult = false) {
     const zipFilesList = document.getElementById('zipFilesList');
     if (!zipFilesList) return;
     
     if (files.length === 0) {
         zipFilesList.innerHTML = '<p class="placeholder">未找到匹配的文件</p>';
-    } else {
-        zipFilesList.innerHTML = files.map(file => {
-            const isUsed = file.used || false;
-            const usedByList = file.used_by || [];
-            // 生成tooltip文本，显示被哪些文档类型使用
-            const usedByText = usedByList.length > 0 ? usedByList.join('，') : '已被其他文档使用';
-            // 格式化路径显示
-            const displayPath = formatPathDisplay(file.rel_path || file.path);
-            return `
-                <div class="zip-file-item ${isUsed ? 'used' : ''}" data-path="${file.path}" data-name="${file.name}">
-                    <input type="checkbox" class="zip-file-checkbox" ${isUsed ? 'disabled' : ''} />
-                    <span class="zip-file-name">${file.name}</span>
-                    <span class="zip-file-path" title="${file.rel_path || file.path}">${displayPath}</span>
-                    ${isUsed ? `<span class="file-used-badge" title="${usedByText}">已被使用</span>` : ''}
-                </div>
-            `;
-        }).join('');
-        
-        // 添加复选框事件
-        document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
-            checkbox.addEventListener('change', function(e) {
-                import('./zip.js').then(module => {
-                    module.handleZipFileSelect(e);
-                });
+        return;
+    }
+    
+    // 建立目录树
+    const tree = buildFileTree(files);
+    
+    // 渲染树状结构
+    let html = '';
+    
+    // 如果有搜索结果提示
+    if (isSearchResult) {
+        html += `<div class="search-result-info">搜索结果：找到 ${files.length} 个文件</div>`;
+    }
+    
+    html += `<div class="zip-file-tree">`;
+    html += renderFileTree(tree);
+    html += `</div>`;
+    
+    zipFilesList.innerHTML = html;
+    
+    // 添加复选框事件
+    document.querySelectorAll('.zip-file-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', function(e) {
+            import('./zip.js').then(module => {
+                module.handleZipFileSelect(e);
             });
         });
-        
-        // 恢复已选中状态
-        import('./zip.js').then(module => {
-            module.fixZipSelectionIssue();
-        });
-    }
+    });
+    
+    // 恢复已选中状态
+    import('./zip.js').then(module => {
+        module.fixZipSelectionIssue();
+    });
 }
 
 /**
