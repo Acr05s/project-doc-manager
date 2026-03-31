@@ -55,6 +55,20 @@ export async function handleUploadDocument(e) {
                 formData.append('other_seal', otherSeal);
                 formData.append('doc_name', appState.currentDocument);
                 
+                // 收集动态生成的自定义属性字段
+                const dynamicDocInfo = document.getElementById('dynamicDocInfo');
+                if (dynamicDocInfo) {
+                    const predefinedIds = ['docDate', 'signDate', 'signer', 'hasSeal', 'partyASeal', 'partyBSeal', 'otherSeal'];
+                    dynamicDocInfo.querySelectorAll('input').forEach(input => {
+                        if (!predefinedIds.includes(input.id) && input.name) {
+                            const value = input.type === 'checkbox' ? input.checked : input.value;
+                            if (value !== '' && value !== false) {
+                                formData.append(input.name, value);
+                            }
+                        }
+                    });
+                }
+                
                 const result = await uploadDocument(formData);
                 
                 if (result.status === 'success') {
@@ -242,8 +256,8 @@ export async function handleEditDocument(e) {
             if (fieldNameMap[input.id]) {
                 docData[fieldNameMap[input.id]] = input.value;
             } else {
-                // 处理自定义属性
-                const fieldName = input.id.replace('edit', '');
+                // 处理自定义属性，优先使用 data-field-name
+                const fieldName = input.dataset.fieldName || input.id.replace('edit', '');
                 docData[fieldName] = input.value;
             }
         }
@@ -255,8 +269,8 @@ export async function handleEditDocument(e) {
             if (fieldNameMap[checkbox.id]) {
                 docData[fieldNameMap[checkbox.id]] = checkbox.checked;
             } else {
-                // 处理自定义属性
-                const fieldName = checkbox.id.replace('edit', '');
+                // 处理自定义属性，优先使用 data-field-name
+                const fieldName = checkbox.dataset.fieldName || checkbox.id.replace('edit', '');
                 docData[fieldName] = checkbox.checked;
             }
         }
@@ -434,12 +448,35 @@ function analyzeRequirementStatus(attributes, docsList) {
     
     // 处理自定义属性（除了预定义的键之外的属性）
     const predefinedKeys = new Set(attrMap.map(attr => attr.key));
+    const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+    
+    console.log('[analyzeRequirementStatus] appState.projectConfig:', appState.projectConfig);
+    console.log('[analyzeRequirementStatus] appState.projectConfig?.custom_attribute_definitions:', appState.projectConfig?.custom_attribute_definitions);
+    console.log('[analyzeRequirementStatus] customDefs:', customDefs);
+    console.log('[analyzeRequirementStatus] attributes:', attributes);
+    
     for (const [key, value] of Object.entries(attributes)) {
         if (value === true && !predefinedKeys.has(key)) {
-            // 为自定义属性生成显示名称（将下划线转换为空格，首字母大写）
-            const displayName = key
-                .replace(/_/g, ' ')
-                .replace(/\b\w/g, char => char.toUpperCase());
+            // 优先从自定义属性定义中获取显示名称
+            const customDef = customDefs.find(def => def.id === key);
+            let displayName;
+            if (customDef) {
+                displayName = customDef.name;
+                console.log('[analyzeRequirementStatus] 从 customDefs 找到显示名称:', key, '->', displayName);
+            } else {
+                // 尝试从 custom_xxx_name 格式中提取名称
+                // ID 格式: custom_1234567890123_abc123def
+                const match = key.match(/^custom_\d+_(.+)$/);
+                if (match) {
+                    // 提取后缀部分并格式化
+                    displayName = match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                    console.log('[analyzeRequirementStatus] 从 ID 提取显示名称:', key, '->', displayName);
+                } else {
+                    // 对于其他格式，直接使用key并格式化
+                    displayName = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                    console.log('[analyzeRequirementStatus] 使用 key 作为显示名称:', key, '->', displayName);
+                }
+            }
             activeAttributes.push({ key, name: displayName });
         }
     }
@@ -741,27 +778,65 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     // 显示本次项目不涉及状态
                                     if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
                                     
-                                    // 显示自定义属性
+                                    // 显示自定义属性 - 同时显示已完成和未完成的
                                     const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id']);
                                     
-                                    // 遍历文档对象的所有字段，找出自定义属性
+                                    // 获取文档要求中的自定义属性（用于对比）
+                                    const cycleDocs = appState.projectConfig?.documents?.[cycle];
+                                    const docInfo = cycleDocs?.required_docs?.find(rd => rd.name === doc.name);
+                                    const requiredCustomAttrs = docInfo?.attributes || {};
+                                    
+                                    // 优先使用 custom_attribute_definitions 显示自定义属性
+                                    const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+                                    customDefs.forEach(attrDef => {
+                                        // 检查是否是要求的属性
+                                        const isRequired = requiredCustomAttrs[attrDef.id] === true;
+                                        const value = getDocValue(attrDef.id);
+                                        const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
+                                        
+                                        if (isRequired) {
+                                            if (isCompleted) {
+                                                // 已完成 - 绿色标记
+                                                if (attrDef.type === 'checkbox') {
+                                                    attrParts.push(`<span style="color: #28a745;">✓${attrDef.name}</span>`);
+                                                } else {
+                                                    attrParts.push(`<span style="color: #28a745;">✓${attrDef.name}: ${value}</span>`);
+                                                }
+                                            } else {
+                                                // 未完成 - 红色标记
+                                                attrParts.push(`<span style="color: #dc3545;">✗${attrDef.name}</span>`);
+                                            }
+                                        } else if (isCompleted) {
+                                            // 非要求但已完成
+                                            if (attrDef.type === 'checkbox') {
+                                                attrParts.push(`📌${attrDef.name}`);
+                                            } else {
+                                                attrParts.push(`📌${attrDef.name}: ${value}`);
+                                            }
+                                        }
+                                    });
+                                    
+                                    // 辅助函数：生成友好的显示名称
+                                    const getFriendlyDisplayName = (key) => {
+                                        const match = key.match(/^custom_\d+_(.+)$/);
+                                        if (match) {
+                                            return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                                        }
+                                        return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                                    };
+                                    
+                                    // 遍历文档对象的所有字段，找出不在 custom_attribute_definitions 中的自定义属性
                                     for (const [key, value] of Object.entries(d)) {
-                                        // 跳过预定义字段和带下划线前缀的字段
-                                        // 跳过以 'custom_' 或 'Custom ' 开头的字段，这些是系统生成的随机值
-                                        // 跳过值以 'Custom ' 开头的，这些是系统生成的随机值
+                                        const isKnownCustom = customDefs.some(def => def.id === key);
                                         if (!predefinedFields.has(key) && 
                                             !key.startsWith('_') && 
-                                            !key.toLowerCase().startsWith('custom') && 
-                                            !key.startsWith('Custom ') &&
+                                            !isKnownCustom &&
                                             value !== undefined && 
                                             value !== null && 
                                             value !== '' &&
-                                            typeof value === 'string' &&
-                                            !value.startsWith('Custom ')) {
+                                            typeof value === 'string') {
                                             // 为自定义属性生成显示名称
-                                            const displayName = key
-                                                .replace(/_/g, ' ')
-                                                .replace(/\b\w/g, char => char.toUpperCase());
+                                            const displayName = getFriendlyDisplayName(key);
                                             attrParts.push(`📌${displayName}: ${value}`);
                                         }
                                     }
@@ -769,18 +844,15 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     // 检查带下划线前缀的自定义属性
                                     for (const [key, value] of Object.entries(d)) {
                                         const actualKey = key.substring(1);
+                                        const isKnownCustom = customDefs.some(def => def.id === actualKey);
                                         if (key.startsWith('_') && 
                                             !predefinedFields.has(actualKey) && 
-                                            !actualKey.toLowerCase().startsWith('custom') && 
-                                            !actualKey.startsWith('Custom ') &&
+                                            !isKnownCustom &&
                                             value !== undefined && 
                                             value !== null && 
                                             value !== '' &&
-                                            typeof value === 'string' &&
-                                            !value.startsWith('Custom ')) {
-                                            const displayName = actualKey
-                                                .replace(/_/g, ' ')
-                                                .replace(/\b\w/g, char => char.toUpperCase());
+                                            typeof value === 'string') {
+                                            const displayName = getFriendlyDisplayName(actualKey);
                                             attrParts.push(`📌${displayName}: ${value}`);
                                         }
                                     }
@@ -903,9 +975,30 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">🚫不涉及</div>`
                             : (isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : '');
                         
+                        // 序号列状态图标
+                        let indexStatusIcon = '';
+                        if (isNotInvolved) {
+                            indexStatusIcon = '<span title="不涉及">🚫</span>';
+                        } else if (isArchived) {
+                            indexStatusIcon = '<span title="已归档">🗄️</span>';
+                        } else if (docsList.length === 0) {
+                            indexStatusIcon = '<span title="无文件" style="color: #dc3545;">❌</span>';
+                        } else {
+                            // 检查属性完成状态
+                            const hasPartial = requirementStatus.some(r => r.status === 'partial');
+                            const hasPending = requirementStatus.some(r => r.status === 'pending');
+                            if (hasPending) {
+                                indexStatusIcon = '<span title="属性待补" style="color: #ffc107;">⚠️</span>';
+                            } else if (hasPartial) {
+                                indexStatusIcon = '<span title="部分完成" style="color: #ffc107;">◐</span>';
+                            } else {
+                                indexStatusIcon = '<span title="完整" style="color: #28a745;">✓</span>';
+                            }
+                        }
+                        
                         return `
                         <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}">
-                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;">${docIndex}</td>
+                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
@@ -1570,6 +1663,53 @@ function displayDocumentRequirements() {
                 console.log('requirement:', requirement);
                 // 解析附加属性
                 attributes = parseRequirementAttributes(requirement);
+                
+                // 辅助函数：生成友好的显示名称
+                const getFriendlyDisplayName = (key) => {
+                    const match = key.match(/^custom_\d+_(.+)$/);
+                    if (match) {
+                        return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                    }
+                    return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                };
+                
+                // 获取自定义属性定义（优先使用配置中的，如果没有则从attributes推断）
+                let customAttrDefs = appState.projectConfig?.custom_attribute_definitions || [];
+                
+                // 如果配置中没有自定义属性定义，但从docInfo.attributes中有自定义属性，动态构建定义
+                if (customAttrDefs.length === 0 && docInfo.attributes) {
+                    const predefinedAttrKeys = ['party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal', 
+                        'need_doc_number', 'need_doc_date', 'need_sign_date'];
+                    
+                    Object.keys(docInfo.attributes).forEach(attrKey => {
+                        if (!predefinedAttrKeys.includes(attrKey) && docInfo.attributes[attrKey] === true) {
+                            const displayName = getFriendlyDisplayName(attrKey);
+                            
+                            customAttrDefs.push({
+                                id: attrKey,
+                                name: displayName,
+                                type: 'checkbox'
+                            });
+                        }
+                    });
+                    
+                    console.log('[displayDocumentRequirements] 动态构建的自定义属性定义:', customAttrDefs);
+                }
+                
+                // 添加自定义属性到表单
+                customAttrDefs.forEach(attrDef => {
+                    if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
+                        attributes.push({
+                            type: attrDef.type === 'checkbox' ? 'checkbox' : 'text',
+                            id: attrDef.id,
+                            name: attrDef.id,
+                            label: attrDef.name,
+                            placeholder: `输入${attrDef.name}`,
+                            isCustom: true
+                        });
+                    }
+                });
+                
                 console.log('attributes:', attributes);
             } else {
                 console.log('docInfo not found for document:', appState.currentDocument);
@@ -2479,24 +2619,68 @@ function generateDynamicEditForm(doc, cycle, docName) {
                 // 添加自定义属性
                 console.log('[generateDynamicEditForm] custom_attribute_definitions:', appState.projectConfig.custom_attribute_definitions);
                 
-                if (appState.projectConfig.custom_attribute_definitions) {
-                    appState.projectConfig.custom_attribute_definitions.forEach(attrDef => {
-                        console.log('[generateDynamicEditForm] attrDef:', attrDef);
-                        console.log('[generateDynamicEditForm] docInfo.attributes:', docInfo.attributes);
-                        console.log('[generateDynamicEditForm] docInfo.attributes[attrDef.id]:', docInfo.attributes && docInfo.attributes[attrDef.id]);
-                        
-                        // 检查文档是否有这个自定义属性的要求
-                        if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
-                            attributes.push({
-                                type: attrDef.type === 'checkbox' ? 'checkbox' : 'text',
-                                id: attrDef.id.replace(/[^a-zA-Z0-9]/g, ''),
-                                name: attrDef.id,
-                                label: attrDef.name,
-                                placeholder: `输入${attrDef.name}`
+                // 获取自定义属性定义（优先使用配置中的，如果没有则从attributes推断）
+                let customAttrDefs = appState.projectConfig.custom_attribute_definitions || [];
+                
+                // 辅助函数：生成友好的显示名称
+                const getFriendlyDisplayName = (key) => {
+                    const match = key.match(/^custom_\d+_(.+)$/);
+                    if (match) {
+                        return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                    }
+                    return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                };
+                
+                // 如果配置中没有自定义属性定义，但从docInfo.attributes中有自定义属性，动态构建定义
+                if (customAttrDefs.length === 0 && docInfo.attributes) {
+                    const predefinedAttrKeys = ['party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal', 
+                        'need_doc_number', 'need_doc_date', 'need_sign_date'];
+                    
+                    Object.keys(docInfo.attributes).forEach(attrKey => {
+                        if (!predefinedAttrKeys.includes(attrKey) && docInfo.attributes[attrKey] === true) {
+                            // 使用辅助函数生成显示名称
+                            const displayName = getFriendlyDisplayName(attrKey);
+                            
+                            customAttrDefs.push({
+                                id: attrKey,
+                                name: displayName,
+                                type: 'checkbox' // 默认为checkbox类型
                             });
                         }
                     });
+                    
+                    console.log('[generateDynamicEditForm] 动态构建的自定义属性定义:', customAttrDefs);
                 }
+                
+                customAttrDefs.forEach(attrDef => {
+                    console.log('[generateDynamicEditForm] attrDef:', attrDef);
+                    console.log('[generateDynamicEditForm] docInfo.attributes:', docInfo.attributes);
+                    console.log('[generateDynamicEditForm] docInfo.attributes[attrDef.id]:', docInfo.attributes && docInfo.attributes[attrDef.id]);
+                    
+                    // 检查文档是否有这个自定义属性的要求
+                    if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
+                        // 根据类型创建属性配置
+                        if (attrDef.type === 'checkbox') {
+                            attributes.push({
+                                type: 'checkbox',
+                                id: attrDef.id,
+                                name: attrDef.id,
+                                label: attrDef.name,
+                                inline: true,  // 设置为内联显示
+                                isCustom: true
+                            });
+                        } else {
+                            attributes.push({
+                                type: 'text',
+                                id: attrDef.id,
+                                name: attrDef.id,
+                                label: attrDef.name,
+                                placeholder: `输入${attrDef.name}`,
+                                isCustom: true
+                            });
+                        }
+                    }
+                });
             }
         }
     }
@@ -2538,19 +2722,19 @@ function generateDynamicEditForm(doc, cycle, docName) {
             if (attr1.type === 'date') {
                 rowHtml += `
                     <td class="label-cell"><label>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value="${actualValue || ''}"></td>
+                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} value="${actualValue || ''}"></td>
                 `;
             } else if (attr1.type === 'text') {
                 rowHtml += `
                     <td class="label-cell"><label>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value="${actualValue || ''}"></td>
+                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} placeholder="${attr1.placeholder || ''}" value="${actualValue || ''}"></td>
                 `;
             } else if (attr1.type === 'checkbox' && attr1.inline) {
                 rowHtml += `
                     <td class="label-cell"><label>${attr1.label}</label></td>
                     <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${actualValue ? 'checked' : ''}>
+                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} ${actualValue ? 'checked' : ''}>
                             <span>${attr1.label}</span>
                         </label>
                     </td>
@@ -2584,19 +2768,19 @@ function generateDynamicEditForm(doc, cycle, docName) {
             if (attr2.type === 'date') {
                 rowHtml += `
                     <td class="label-cell"><label>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value="${actualValue || ''}"></td>
+                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} value="${actualValue || ''}"></td>
                 `;
             } else if (attr2.type === 'text') {
                 rowHtml += `
                     <td class="label-cell"><label>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value="${actualValue || ''}"></td>
+                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} placeholder="${attr2.placeholder || ''}" value="${actualValue || ''}"></td>
                 `;
             } else if (attr2.type === 'checkbox' && attr2.inline) {
                 rowHtml += `
                     <td class="label-cell"><label>${attr2.label}</label></td>
                     <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${actualValue ? 'checked' : ''}>
+                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} ${actualValue ? 'checked' : ''}>
                             <span>${attr2.label}</span>
                         </label>
                     </td>
@@ -4656,6 +4840,62 @@ function getSelectedDocsAttributeStatus(docIds) {
         status[attr.camelKey] = state;
     });
     
+    // 辅助函数：生成友好的显示名称
+    const getFriendlyDisplayName = (key) => {
+        const match = key.match(/^custom_\d+_(.+)$/);
+        if (match) {
+            return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+        }
+        return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+    };
+    
+    // 获取自定义属性定义（优先使用配置中的）
+    let customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+    
+    // 如果配置中没有，从文档中收集所有自定义属性字段
+    if (customDefs.length === 0) {
+        const predefinedKeys = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id']);
+        const foundCustomKeys = new Set();
+        
+        docs.forEach(doc => {
+            Object.keys(doc).forEach(key => {
+                if (!predefinedKeys.has(key) && !key.startsWith('_')) {
+                    foundCustomKeys.add(key);
+                }
+            });
+        });
+        
+        foundCustomKeys.forEach(key => {
+            customDefs.push({
+                id: key,
+                name: getFriendlyDisplayName(key),
+                type: 'checkbox'
+            });
+        });
+    }
+    
+    // 统计自定义属性的完成状态
+    customDefs.forEach(attrDef => {
+        let completedCount = 0;
+        
+        docs.forEach(doc => {
+            const value = doc[attrDef.id] || doc[`_${attrDef.id}`];
+            if (value !== undefined && value !== null && value !== '' && value !== false && value !== 'false') {
+                completedCount++;
+            }
+        });
+        
+        let state = 'empty';
+        if (completedCount === docs.length && docs.length > 0) {
+            state = 'full';
+        } else if (completedCount > 0) {
+            state = 'partial';
+        }
+        
+        // 使用原始id作为key（与generateDynamicEditForm中一致）
+        status[attrDef.id] = state;
+    });
+    
     return status;
 }
 
@@ -4686,6 +4926,52 @@ export function handleBatchEdit() {
                 requirement = docInfo.requirement || '无特殊要求';
                 // 解析附加属性
                 attributes = parseRequirementAttributes(requirement);
+                
+                // 辅助函数：生成友好的显示名称
+                const getFriendlyDisplayName = (key) => {
+                    const match = key.match(/^custom_\d+_(.+)$/);
+                    if (match) {
+                        return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                    }
+                    return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                };
+                
+                // 获取自定义属性定义（优先使用配置中的，如果没有则从attributes推断）
+                let customAttrDefs = appState.projectConfig?.custom_attribute_definitions || [];
+                
+                // 如果配置中没有自定义属性定义，但从docInfo.attributes中有自定义属性，动态构建定义
+                if (customAttrDefs.length === 0 && docInfo.attributes) {
+                    const predefinedAttrKeys = ['party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal', 
+                        'need_doc_number', 'need_doc_date', 'need_sign_date'];
+                    
+                    Object.keys(docInfo.attributes).forEach(attrKey => {
+                        if (!predefinedAttrKeys.includes(attrKey) && docInfo.attributes[attrKey] === true) {
+                            const displayName = getFriendlyDisplayName(attrKey);
+                            
+                            customAttrDefs.push({
+                                id: attrKey,
+                                name: displayName,
+                                type: 'checkbox'
+                            });
+                        }
+                    });
+                    
+                    console.log('[handleBatchEdit] 动态构建的自定义属性定义:', customAttrDefs);
+                }
+                
+                // 添加自定义属性
+                customAttrDefs.forEach(attrDef => {
+                    if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
+                        attributes.push({
+                            type: attrDef.type === 'checkbox' ? 'checkbox' : 'text',
+                            id: attrDef.id,
+                            name: attrDef.id,
+                            label: attrDef.name,
+                            placeholder: `输入${attrDef.name}`,
+                            isCustom: true
+                        });
+                    }
+                });
             }
         }
     }
@@ -4736,19 +5022,19 @@ export function handleBatchEdit() {
             if (attr1.type === 'date') {
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" value=""></td>
+                    <td class="input-cell"><input type="date" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} value=""></td>
                 `;
             } else if (attr1.type === 'text') {
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" placeholder="${attr1.placeholder || ''}" value=""></td>
+                    <td class="input-cell"><input type="text" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} placeholder="${attr1.placeholder || ''}" value=""></td>
                 `;
             } else if (attr1.type === 'checkbox' && attr1.inline) {
                 rowHtml += `
                     <td class="label-cell"><label ${attr1LabelStyle}>${attr1.label}</label></td>
                     <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1Checked}>
+                            <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} ${attr1Checked}>
                             <span>${attr1.label}</span>
                         </label>
                     </td>
@@ -4785,19 +5071,19 @@ export function handleBatchEdit() {
             if (attr2.type === 'date') {
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" value=""></td>
+                    <td class="input-cell"><input type="date" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} value=""></td>
                 `;
             } else if (attr2.type === 'text') {
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
-                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" placeholder="${attr2.placeholder || ''}" value=""></td>
+                    <td class="input-cell"><input type="text" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} placeholder="${attr2.placeholder || ''}" value=""></td>
                 `;
             } else if (attr2.type === 'checkbox' && attr2.inline) {
                 rowHtml += `
                     <td class="label-cell"><label ${attr2LabelStyle}>${attr2.label}</label></td>
                     <td class="input-cell">
                         <label class="checkbox-item">
-                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2Checked}>
+                            <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} ${attr2Checked}>
                             <span>${attr2.label}</span>
                         </label>
                     </td>

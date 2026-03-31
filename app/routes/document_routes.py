@@ -51,6 +51,24 @@ def upload_document():
         if not all([file, cycle, doc_name]):
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
+        # 提取自定义属性字段
+        known_fields = {
+            'file', 'cycle', 'doc_name', 'doc_date', 'sign_date', 'signer',
+            'no_signature', 'has_seal', 'party_a_seal', 'party_b_seal',
+            'no_seal', 'other_seal', 'project_id', 'project_name',
+            'chunkIndex', 'totalChunks', 'fileName', 'file_id', 'chunk', 'filename', 'fileId'
+        }
+        custom_attributes = {}
+        for key in request.form:
+            if key not in known_fields:
+                value = request.form.get(key)
+                if value and value.lower() == 'true':
+                    custom_attributes[key] = True
+                elif value and value.lower() == 'false':
+                    custom_attributes[key] = False
+                else:
+                    custom_attributes[key] = value
+        
         result = doc_manager.upload_document(
             file, cycle, doc_name,
             doc_date=doc_date, 
@@ -93,6 +111,9 @@ def upload_document():
                 'file_size': result.get('size'),
                 'doc_id': doc_id
             }
+            
+            # 合并自定义属性
+            doc_metadata.update(custom_attributes)
             
             # 添加到documents_db
             doc_manager.documents_db[doc_id] = doc_metadata

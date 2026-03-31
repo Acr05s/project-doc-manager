@@ -42,6 +42,7 @@ export async function loadProject(projectId) {
         
         if (oldResult.status === 'success') {
             // 确保返回的项目数据包含 custom_attribute_definitions 字段
+            console.log('[loadProject] oldResult.project.custom_attribute_definitions:', oldResult.project.custom_attribute_definitions);
             if (!oldResult.project.custom_attribute_definitions) {
                 oldResult.project.custom_attribute_definitions = [];
             }

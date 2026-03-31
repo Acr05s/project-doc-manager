@@ -455,8 +455,11 @@ class ProjectDataManager:
             
             # 加载需求配置
             requirements = self.load_requirements(project_name)
+            logger.info(f"[load_full_config] requirements: {requirements is not None}")
             if requirements:
                 config['cycles'] = requirements.get('cycles', [])
+                config['custom_attribute_definitions'] = requirements.get('custom_attribute_definitions', [])
+                logger.info(f"[load_full_config] custom_attribute_definitions: {config['custom_attribute_definitions']}")
                 # 合并文档配置，保留原有的 uploaded_docs
                 if 'documents' in config:
                     # 合并文档配置，保留原有的 uploaded_docs
@@ -681,7 +684,8 @@ class ProjectDataManager:
             # 而是单独保存到 documents_index.json，避免重复数据
             requirements = {
                 'cycles': config.get('cycles', []),
-                'documents': {}
+                'documents': {},
+                'custom_attribute_definitions': config.get('custom_attribute_definitions', [])
             }
             for cycle, cycle_info in config.get('documents', {}).items():
                 if isinstance(cycle_info, dict):

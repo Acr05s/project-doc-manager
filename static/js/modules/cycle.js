@@ -97,6 +97,28 @@ export async function calculateCycleStatus(cycle) {
             if (requireSeal && !docsList.some(d => d.has_seal_marked || d.has_seal || d.party_a_seal || d.party_b_seal)) {
                 allAttributesComplete = false;
             }
+            
+            // 检查自定义属性
+            const customAttrDefs = appState.projectConfig?.custom_attribute_definitions || [];
+            const getDocValue = (doc, fieldName) => {
+                if (doc[fieldName] !== undefined) return doc[fieldName];
+                if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                return null;
+            };
+            
+            for (const attrDef of customAttrDefs) {
+                // 检查文档是否有这个自定义属性的要求
+                if (doc.attributes && doc.attributes[attrDef.id] === true) {
+                    // 检查是否有任何文档完成了该属性
+                    const isCompleted = docsList.some(d => {
+                        const value = getDocValue(d, attrDef.id);
+                        return value === true || (value !== undefined && value !== null && value !== '' && value !== false);
+                    });
+                    if (!isCompleted) {
+                        allAttributesComplete = false;
+                    }
+                }
+            }
         }
     }
 

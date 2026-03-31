@@ -358,11 +358,13 @@ function buildTreeData(config) {
     };
 
     // 加载自定义属性定义
+    console.log('[buildTreeData] config.custom_attribute_definitions:', config.custom_attribute_definitions);
     if (config.custom_attribute_definitions && Array.isArray(config.custom_attribute_definitions)) {
         customAttributeDefinitions = config.custom_attribute_definitions;
     } else {
         customAttributeDefinitions = [];
     }
+    console.log('[buildTreeData] customAttributeDefinitions:', customAttributeDefinitions);
 
     const cycles = config.cycles || [];
     const documents = config.documents || {};
@@ -2035,6 +2037,9 @@ function treeToConfig() {
 export async function saveTreeConfig() {
     const newConfig = treeToConfig();
     
+    console.log('[saveTreeConfig] newConfig.custom_attribute_definitions:', newConfig.custom_attribute_definitions);
+    console.log('[saveTreeConfig] customAttributeDefinitions:', customAttributeDefinitions);
+    
     // 合并现有配置，保留 uploaded_docs 等重要数据
     const existingConfig = appState.projectConfig || {};
     if (existingConfig.documents) {
@@ -2082,7 +2087,14 @@ export async function saveTreeConfig() {
                     updateAutoSaveStatus('saved', new Date().toISOString());
                     closeTreeEditor();
                     renderCycles(newConfig.cycles || []);
-                    renderInitialContent();
+                    
+                    // 如果当前正在查看某个周期，刷新文档列表
+                    if (appState.currentCycle) {
+                        const { renderCycleDocuments } = await import('./document.js');
+                        await renderCycleDocuments(appState.currentCycle);
+                    } else {
+                        renderInitialContent();
+                    }
                 } else {
                     showNotification('保存失败: ' + result.message, 'error');
                 }
@@ -2572,6 +2584,8 @@ export function confirmAddCustomAttr() {
         name,
         type
     });
+    
+    console.log('[confirmAddCustomAttr] 添加后 customAttributeDefinitions:', customAttributeDefinitions);
     
     // 刷新属性面板
     const panel = document.getElementById('attributePanel');

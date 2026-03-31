@@ -54,8 +54,6 @@ def update_project(project_id):
     try:
         doc_manager = get_doc_manager()
         data = request.get_json()
-        
-        # 加载原有项目配置，保留uploaded_docs信息
         project_result = doc_manager.load_project(project_id)
         if project_result.get('status') == 'success':
             original_config = project_result.get('project')
