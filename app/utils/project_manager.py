@@ -9,10 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+import threading
 from .base import DocumentConfig, setup_logging
 from .folder_manager import FolderManager
 from .requirements_loader import RequirementsLoader
-from .json_file_manager import json_file_manager
+from .json_file_manager import json_file_manager, get_file_lock
 from .project_data_manager import ProjectDataManager
 
 logger = setup_logging(__name__)
@@ -55,33 +56,35 @@ class ProjectManager:
                 self.deleted_projects = {}
                 return
             
-            data = json_file_manager.read_json(str(index_file))
-            logger.info(f"[DEBUG] 读取到的数据: {data}")
-            
-            if data:
-                # 新格式：{"projects": {...}}
-                if 'projects' in data:
-                    self.projects_db = data.get('projects', {})
-                # 旧格式：直接用项目ID作为键
-                else:
-                    # 过滤掉非项目键（如updated_time, deleted_projects）
-                    self.projects_db = {
-                        k: v for k, v in data.items() 
-                        if isinstance(v, dict) and 'id' in v and k != 'deleted_projects'
-                    }
+            # 获取文件锁
+            with get_file_lock(str(index_file)):
+                data = json_file_manager.read_json(str(index_file))
+                logger.info(f"[DEBUG] 读取到的数据: {data}")
                 
-                # 加载已删除项目
-                if 'deleted_projects' in data:
-                    self.deleted_projects = data.get('deleted_projects', {})
+                if data:
+                    # 新格式：{"projects": {...}}
+                    if 'projects' in data:
+                        self.projects_db = data.get('projects', {})
+                    # 旧格式：直接用项目ID作为键
+                    else:
+                        # 过滤掉非项目键（如updated_time, deleted_projects）
+                        self.projects_db = {
+                            k: v for k, v in data.items() 
+                            if isinstance(v, dict) and 'id' in v and k != 'deleted_projects'
+                        }
+                    
+                    # 加载已删除项目
+                    if 'deleted_projects' in data:
+                        self.deleted_projects = data.get('deleted_projects', {})
+                    else:
+                        self.deleted_projects = {}
+                    
+                    logger.info(f"已加载 {len(self.projects_db)} 个项目, {len(self.deleted_projects)} 个已删除项目")
+                    logger.info(f"[DEBUG] 项目列表: {list(self.projects_db.keys())}")
                 else:
+                    logger.error(f"项目索引文件为空或读取失败: {index_file}")
+                    self.projects_db = {}
                     self.deleted_projects = {}
-                
-                logger.info(f"已加载 {len(self.projects_db)} 个项目, {len(self.deleted_projects)} 个已删除项目")
-                logger.info(f"[DEBUG] 项目列表: {list(self.projects_db.keys())}")
-            else:
-                logger.error(f"项目索引文件为空或读取失败: {index_file}")
-                self.projects_db = {}
-                self.deleted_projects = {}
         except Exception as e:
             logger.error(f"加载项目索引失败: {e}")
             import traceback
@@ -94,18 +97,20 @@ class ProjectManager:
         try:
             index_file = self.config.projects_folder / 'projects_index.json'
             
-            # 保持旧格式：直接用项目ID作为键
-            data = {
-                'updated_time': datetime.now().isoformat()
-            }
-            # 添加所有项目
-            data.update(self.projects_db)
-            
-            # 添加已删除项目
-            data['deleted_projects'] = self.deleted_projects
-            
-            json_file_manager.write_json(str(index_file), data)
+            # 获取文件锁
+            with get_file_lock(str(index_file)):
+                # 保持旧格式：直接用项目ID作为键
+                data = {
+                    'updated_time': datetime.now().isoformat()
+                }
+                # 添加所有项目
+                data.update(self.projects_db)
                 
+                # 添加已删除项目
+                data['deleted_projects'] = self.deleted_projects
+                
+                json_file_manager.write_json(str(index_file), data)
+                    
         except Exception as e:
             logger.error(f"保存项目索引失败: {e}")
     
