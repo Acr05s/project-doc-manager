@@ -19,4 +19,4 @@ flasgger==0.9.7.1
 Flask-CORS==4.0.0
 # WSGI服务器依赖
 gunicorn==21.2.0  # Linux/Mac
-waitress==2.1.2    # Windows
+waitress==3.0.1    # Windows
