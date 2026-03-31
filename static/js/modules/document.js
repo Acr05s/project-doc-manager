@@ -3907,29 +3907,50 @@ function showReportModal(reportData) {
                                                                 ${dirDocs.map((doc, fileIndex) => `
                                                                     <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}</td>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''} ${doc.note ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.note + ')</span>' : ''} ${doc.remarks ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.remarks + ')</span>' : ''}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
                                                                             ${(() => {
-                                                                                if (!hasSignRequirement) return '';
                                                                                 const getDocValue = (fieldName) => {
+                                                                                    // 检查多个可能的属性来源
                                                                                     if (doc[fieldName] !== undefined) return doc[fieldName];
                                                                                     if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                    if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
+                                                                                    if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
                                                                                     return null;
                                                                                 };
-                                                                                return getDocValue('no_signature') ? '✓ 无签字' : (getDocValue('signer') ? '✓ 有签字' : '⚠ 无签字');
+                                                                                
+                                                                                const statusParts = [];
+                                                                                
+                                                                                // 签字状态
+                                                                                if (hasSignRequirement) {
+                                                                                    if (getDocValue('no_signature')) {
+                                                                                        statusParts.push('✓ 无签字');
+                                                                                    } else if (getDocValue('signer')) {
+                                                                                        statusParts.push('✓ 有签字');
+                                                                                    } else {
+                                                                                        statusParts.push('⚠ 无签字');
+                                                                                    }
+                                                                                }
+                                                                                
+                                                                                // 盖章状态
+                                                                                if (hasSealRequirement) {
+                                                                                    if (getDocValue('no_seal')) {
+                                                                                        statusParts.push('✓ 无盖章');
+                                                                                    } else if (getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal')) {
+                                                                                        statusParts.push('✓ 有盖章');
+                                                                                    } else {
+                                                                                        statusParts.push('⚠ 无盖章');
+                                                                                    }
+                                                                                }
+                                                                                
+                                                                                // 归档状态
+                                                                                if (doc.archived) {
+                                                                                    statusParts.push('<span style="color: #1890ff;">✓ 已归档</span>');
+                                                                                }
+                                                                                
+                                                                                return statusParts.join(' | ');
                                                                             })()}
-                                                                            ${(() => {
-                                                                                if (!hasSealRequirement) return '';
-                                                                                const getDocValue = (fieldName) => {
-                                                                                    if (doc[fieldName] !== undefined) return doc[fieldName];
-                                                                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
-                                                                                    return null;
-                                                                                };
-                                                                                const signStatus = hasSignRequirement ? (getDocValue('no_signature') ? '✓ 无签字' : (getDocValue('signer') ? '✓ 有签字' : '⚠ 无签字')) : '';
-                                                                                return signStatus ? ' | ' : '' + (getDocValue('no_seal') ? '✓ 无盖章' : (getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal') ? '✓ 有盖章' : '⚠ 无盖章'));
-                                                                            })()}
-                                                                            ${doc.archived ? (hasSignRequirement || hasSealRequirement ? ' | ' : '') + '<span style="color: #1890ff;">✓ 已归档</span>' : ''}
                                                                         </td>
                                                                     </tr>
                                                                 `).join('')}
