@@ -20,8 +20,9 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-GITHUB_REPO = "your-username/project-doc-manager"
+GITHUB_REPO = "Acr05s/project-doc-manager"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+GITHUB_GIT_URL = "https://github.com/Acr05s/project-doc-manager.git"
 
 def get_current_version():
     """Get current version"""
@@ -66,7 +67,7 @@ def download_update(download_url, save_path):
         return False
 
 def apply_update(zip_path, app_dir):
-    """Apply update"""
+    """Apply update using zip package"""
     try:
         print("Extracting update...")
         temp_dir = app_dir / 'update_temp'
@@ -112,6 +113,51 @@ def apply_update(zip_path, app_dir):
         print(f"[ERROR] Failed to apply update: {e}")
         return False
 
+def update_via_git(app_dir):
+    """Update via git pull"""
+    try:
+        print("Updating via git...")
+        
+        # Check if git is available
+        result = subprocess.run(['git', '--version'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print("[ERROR] Git is not installed or not in PATH")
+            return False
+        
+        # Pull latest changes
+        result = subprocess.run(
+            ['git', 'pull', 'origin', 'main'],
+            cwd=app_dir,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            print("[OK] Git pull successful")
+            
+            # Check if requirements.txt changed
+            if 'requirements.txt' in result.stdout or 'requirements.txt' in result.stderr:
+                print("\nUpdating dependencies...")
+                result = subprocess.run(
+                    ['pip', 'install', '-r', 'requirements.txt'],
+                    cwd=app_dir,
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    print("[OK] Dependencies updated")
+                else:
+                    print(f"[WARNING] Failed to update dependencies: {result.stderr}")
+            
+            return True
+        else:
+            print(f"[ERROR] Git pull failed: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"[ERROR] Git update failed: {e}")
+        return False
+
 def main():
     """Main function"""
     print("=" * 50)
@@ -124,6 +170,16 @@ def main():
     print(f"Current version: {current_version}")
     print("Checking for updates...\n")
     
+    # Try git update first
+    print("Trying git update...")
+    if update_via_git(app_dir):
+        print("\n[OK] Git update completed successfully!")
+        input("\nPress Enter to exit...")
+        return
+    
+    print("\nGit update failed, trying release update...")
+    
+    # Fallback to release update
     latest = get_latest_version()
     if not latest:
         print("[ERROR] Unable to get latest version info")
