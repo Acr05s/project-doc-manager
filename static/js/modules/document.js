@@ -2810,11 +2810,13 @@ function generateDynamicEditForm(doc, cycle, docName) {
     }
     
     // 备注行
+    // 备注字段可能存储在不同名称的字段中（大小写不敏感）
+    const noteValue = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || doc.Remark || doc.Note || doc.NOTES || doc.REMARK || doc.REMARKS || '';
     formHtml += `
         <tr>
             <td class="label-cell"><label>备注</label></td>
             <td class="input-cell" colspan="3">
-                <textarea id="editRemark" placeholder="输入备注信息" rows="3">${doc.remark || ''}</textarea>
+                <textarea id="editRemark" placeholder="输入备注信息" rows="3">${noteValue}</textarea>
             </td>
         </tr>
     `;
@@ -3907,7 +3909,14 @@ function showReportModal(reportData) {
                                                                 ${dirDocs.map((doc, fileIndex) => `
                                                                     <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}</td>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
+                                                                            ${doc.original_filename || doc.filename} 
+                                                                            ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}
+                                                                            ${(() => {
+                                                                                const note = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || doc.Remark || doc.Note || doc.NOTES || doc.REMARK || doc.REMARKS || '';
+                                                                                return note ? `<span style="color: #ff6600; font-size: 12px; margin-left: 8px; font-weight: 600; background: #fff7e6; padding: 2px 6px; border-radius: 4px; border: 1px solid #ffd591;">💬 ${note}</span>` : '';
+                                                                            })()}
+                                                                        </td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
                                                                             ${(() => {
@@ -3917,7 +3926,11 @@ function showReportModal(reportData) {
                                                                                     if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
                                                                                     return null;
                                                                                 };
-                                                                                return getDocValue('no_signature') ? '✓ 无签字' : (getDocValue('signer') ? '✓ 有签字' : '⚠ 无签字');
+                                                                                const hasNoSign = getDocValue('no_signature');
+                                                                                const hasSigner = getDocValue('signer');
+                                                                                if (hasNoSign) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无签字</span>';
+                                                                                if (hasSigner) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有签字</span>';
+                                                                                return '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无签字</span>';
                                                                             })()}
                                                                             ${(() => {
                                                                                 if (!hasSealRequirement) return '';
@@ -3926,10 +3939,13 @@ function showReportModal(reportData) {
                                                                                     if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
                                                                                     return null;
                                                                                 };
-                                                                                const signStatus = hasSignRequirement ? (getDocValue('no_signature') ? '✓ 无签字' : (getDocValue('signer') ? '✓ 有签字' : '⚠ 无签字')) : '';
-                                                                                return signStatus ? ' | ' : '' + (getDocValue('no_seal') ? '✓ 无盖章' : (getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal') ? '✓ 有盖章' : '⚠ 无盖章'));
+                                                                                const hasNoSeal = getDocValue('no_seal');
+                                                                                const hasSeal = getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal');
+                                                                                if (hasNoSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无盖章</span>';
+                                                                                if (hasSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有盖章</span>';
+                                                                                return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无盖章</span>';
                                                                             })()}
-                                                                            ${doc.archived ? (hasSignRequirement || hasSealRequirement ? ' | ' : '') + '<span style="color: #1890ff;">✓ 已归档</span>' : ''}
+                                                                            ${doc.archived ? ((hasSignRequirement || hasSealRequirement) ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #1890ff; font-size: 12px; font-weight: 500;">✓ 已归档</span>' : ''}
                                                                         </td>
                                                                     </tr>
                                                                 `).join('')}
