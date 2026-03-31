@@ -2392,6 +2392,8 @@ class DocumentManager:
                         # 检查其他可能存储备注的字段
                         if 'note' in doc and doc['note']:
                             notes.append(doc['note'])
+                        if 'doc_note' in doc and doc['doc_note']:
+                            notes.append(doc['doc_note'])
                         if 'comment' in doc and doc['comment']:
                             notes.append(doc['comment'])
                     

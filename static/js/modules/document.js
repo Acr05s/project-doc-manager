@@ -244,7 +244,8 @@ export async function handleEditDocument(e) {
         'editPartyBSeal': 'party_b_seal',
         'editNoSeal': 'no_seal',
         'editOtherSeal': 'other_seal',
-        'editNotInvolved': 'not_involved'  // 本次项目不涉及
+        'editNotInvolved': 'not_involved',  // 本次项目不涉及
+        'editRemark': 'notes'  // 备注
     };
     
     // 动态收集表单数据
@@ -2810,11 +2811,12 @@ function generateDynamicEditForm(doc, cycle, docName) {
     }
     
     // 备注行
+    const noteValue = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || '';
     formHtml += `
         <tr>
             <td class="label-cell"><label>备注</label></td>
             <td class="input-cell" colspan="3">
-                <textarea id="editRemark" placeholder="输入备注信息" rows="3">${doc.remark || ''}</textarea>
+                <textarea id="editRemark" placeholder="输入备注信息" rows="3">${noteValue}</textarea>
             </td>
         </tr>
     `;
@@ -3907,7 +3909,7 @@ function showReportModal(reportData) {
                                                                 ${dirDocs.map((doc, fileIndex) => `
                                                                     <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''} ${doc.note ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.note + ')</span>' : ''} ${doc.remarks ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.remarks + ')</span>' : ''}</td>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''} ${doc.notes ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.notes + ')</span>' : ''} ${doc.note ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.note + ')</span>' : ''} ${doc.doc_note ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.doc_note + ')</span>' : ''} ${doc.remarks ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.remarks + ')</span>' : ''}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
                                                                             ${(() => {
