@@ -365,6 +365,196 @@ class TaskService:
             'task_id': task_id,
             'message': '异常检查任务已启动'
         }
+    
+    def start_pdf_conversion_task(self, file_path: str, doc_id: str) -> Dict[str, Any]:
+        """启动PDF转换任务
+        
+        Args:
+            file_path: 源文件路径
+            doc_id: 文档ID
+            
+        Returns:
+            Dict: 任务信息
+        """
+        from src.services.pdf_conversion_service import PDFConversionService
+        from pathlib import Path
+        import os
+        
+        # 创建任务
+        task_id = str(uuid.uuid4())
+        self.tasks_store[task_id] = {
+            'id': task_id,
+            'type': 'pdf_conversion',
+            'name': 'PDF转换',
+            'status': 'running',
+            'progress': 0,
+            'message': '开始PDF转换...',
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat(),
+            'file_path': file_path,
+            'doc_id': doc_id
+        }
+        self._save_tasks()
+        
+        # 启动后台线程执行任务
+        def pdf_conversion_task():
+            try:
+                # 创建预览文件临时目录
+                preview_temp_dir = Path('uploads/temp/preview')
+                preview_temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 初始化PDF转换服务
+                pdf_service = PDFConversionService()
+                pdf_service.set_preview_temp_dir(str(preview_temp_dir))
+                
+                # 更新进度
+                self.tasks_store[task_id]['progress'] = 25
+                self.tasks_store[task_id]['message'] = '正在转换PDF...'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                
+                # 执行转换
+                pdf_path = pdf_service.convert_to_pdf(file_path, doc_id)
+                
+                # 更新进度
+                self.tasks_store[task_id]['progress'] = 75
+                self.tasks_store[task_id]['message'] = '转换完成，保存结果...'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                
+                # 完成任务
+                self.tasks_store[task_id]['status'] = 'completed'
+                self.tasks_store[task_id]['progress'] = 100
+                self.tasks_store[task_id]['message'] = 'PDF转换完成'
+                self.tasks_store[task_id]['result'] = {
+                    'pdf_path': pdf_path,
+                    'doc_id': doc_id
+                }
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()
+                
+            except Exception as e:
+                self.tasks_store[task_id]['status'] = 'error'
+                self.tasks_store[task_id]['message'] = f'PDF转换失败: {str(e)}'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()
+        
+        threading.Thread(target=pdf_conversion_task).start()
+        
+        return {
+            'status': 'success',
+            'task_id': task_id,
+            'message': 'PDF转换任务已启动'
+        }
+    
+    def start_batch_pdf_conversion(self, project_id: str) -> Dict[str, Any]:
+        """启动批量PDF转换任务
+        
+        Args:
+            project_id: 项目ID
+            
+        Returns:
+            Dict: 任务信息
+        """
+        import json
+        from pathlib import Path
+        
+        # 创建任务
+        task_id = str(uuid.uuid4())
+        self.tasks_store[task_id] = {
+            'id': task_id,
+            'type': 'batch_pdf_conversion',
+            'name': '批量PDF转换',
+            'status': 'running',
+            'progress': 0,
+            'message': '开始批量PDF转换...',
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat(),
+            'project_id': project_id
+        }
+        self._save_tasks()
+        
+        # 启动后台线程执行任务
+        def batch_conversion_task():
+            try:
+                if not self.doc_manager:
+                    raise Exception('文档管理器未初始化')
+                
+                # 加载项目
+                project = self.doc_manager.load_project(project_id)
+                if not project or project.get('status') != 'success':
+                    raise Exception('项目不存在')
+                
+                project_data = project.get('project', {})
+                documents = project_data.get('documents', {})
+                
+                # 收集所有被匹配使用的文档
+                files_to_convert = []
+                for cycle, cycle_info in documents.items():
+                    if 'uploaded_docs' in cycle_info:
+                        for doc in cycle_info['uploaded_docs']:
+                            # 检查文档是否被匹配（有doc_name字段）
+                            doc_name = doc.get('doc_name')
+                            file_path = doc.get('file_path')
+                            doc_id = doc.get('doc_id')
+                            if doc_name and file_path and doc_id:
+                                ext = Path(file_path).suffix.lower()
+                                if ext in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+                                    files_to_convert.append((file_path, doc_id))
+                
+                total_files = len(files_to_convert)
+                if total_files == 0:
+                    self.tasks_store[task_id]['status'] = 'completed'
+                    self.tasks_store[task_id]['progress'] = 100
+                    self.tasks_store[task_id]['message'] = '没有需要转换的文档'
+                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                    self._save_tasks()
+                    return
+                
+                # 执行转换
+                converted_count = 0
+                for i, (file_path, doc_id) in enumerate(files_to_convert):
+                    if self.tasks_store[task_id]['status'] == 'cancelled':
+                        break
+                    
+                    try:
+                        # 启动单个转换任务
+                        self.start_pdf_conversion_task(file_path, doc_id)
+                        converted_count += 1
+                    except Exception as e:
+                        print(f'转换文件失败 {file_path}: {e}')
+                    
+                    # 更新进度
+                    progress = int(100 * (i + 1) / total_files)
+                    self.tasks_store[task_id]['progress'] = progress
+                    self.tasks_store[task_id]['message'] = f'正在转换... ({i + 1}/{total_files})'
+                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                    if (i + 1) % 5 == 0:
+                        self._save_tasks()
+                
+                # 完成任务
+                if self.tasks_store[task_id]['status'] != 'cancelled':
+                    self.tasks_store[task_id]['status'] = 'completed'
+                    self.tasks_store[task_id]['progress'] = 100
+                    self.tasks_store[task_id]['message'] = f'批量转换完成，成功转换 {converted_count} 个文件'
+                    self.tasks_store[task_id]['result'] = {
+                        'total_files': total_files,
+                        'converted_files': converted_count
+                    }
+                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                    self._save_tasks()
+                    
+            except Exception as e:
+                self.tasks_store[task_id]['status'] = 'error'
+                self.tasks_store[task_id]['message'] = f'批量转换失败: {str(e)}'
+                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self._save_tasks()
+        
+        threading.Thread(target=batch_conversion_task).start()
+        
+        return {
+            'status': 'success',
+            'task_id': task_id,
+            'message': '批量PDF转换任务已启动'
+        }
 
     def start_download_package_task(self, project_id: str, project_config: Dict[str, Any], scope: str = 'matched') -> Dict[str, Any]:
         """启动下载打包任务（按周期/文档类型组织）

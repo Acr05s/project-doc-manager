@@ -5,6 +5,7 @@ from pathlib import Path
 from .utils import get_doc_manager
 from src.services.preview_service import PreviewService
 from src.services.pdf_conversion_service import PDFConversionService
+from app.services.task_service import task_service
 
 
 
@@ -150,34 +151,68 @@ def view_document(doc_id):
         
         print(f"[view_document] 处理文件: {file_path}, 扩展名: {file_ext}")
         
-        # 检查是否为Office文档，转换为PDF
+        # 检查是否为PDF文件，直接返回
+        if file_ext == '.pdf':
+            return send_file(file_path, mimetype='application/pdf', 
+                           as_attachment=False, 
+                           download_name=f"{file_path_obj.stem}.pdf")
+        
+        # 检查是否为图片文件，直接返回
+        image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
+        if file_ext in image_extensions:
+            mime_types = {
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp',
+                '.bmp': 'image/bmp'
+            }
+            content_type = mime_types.get(file_ext, 'application/octet-stream')
+            return send_file(file_path, mimetype=content_type)
+        
+        # 检查是否为Office文档，使用后台任务转换为PDF
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
         if file_ext in office_extensions:
-            try:
-                pdf_service = PDFConversionService()
-                pdf_path = pdf_service.convert_to_pdf(file_path)
-                print(f"[view_document] PDF转换成功: {pdf_path}")
-                return send_file(pdf_path, mimetype='application/pdf', 
-                               as_attachment=False, 
-                               download_name=f"{file_path_obj.stem}.pdf")
-            except Exception as e:
-                print(f"[view_document] PDF转换失败: {e}")
-                # 转换失败，返回本地预览
+            # 检查文档是否被匹配使用（有doc_name字段）
+            doc_name = metadata.get('doc_name')
+            if doc_name:
+                # 检查是否已经有转换任务
+                task_id = request.args.get('task_id')
+                if task_id:
+                    # 检查任务状态
+                    task_status = task_service.get_task_status(task_id)
+                    if task_status:
+                        if task_status['status'] == 'completed':
+                            # 转换完成，返回PDF
+                            pdf_path = task_status['result']['pdf_path']
+                            print(f"[view_document] 使用后台转换结果: {pdf_path}")
+                            return send_file(pdf_path, mimetype='application/pdf', 
+                                           as_attachment=False, 
+                                           download_name=f"{file_path_obj.stem}.pdf")
+                        elif task_status['status'] == 'error':
+                            # 转换失败，返回本地预览
+                            print(f"[view_document] 后台转换失败: {task_status['message']}")
+                            return preview_document_local(doc_id)
+                        else:
+                            # 转换中，返回等待页面
+                            return f"<html><body><h1>PDF转换中...</h1><p>请稍候，正在转换文档为PDF格式。</p><script>setTimeout(() => window.location.reload(), 2000);</script></body></html>", 200
+                
+                # 启动后台转换任务
+                task_result = task_service.start_pdf_conversion_task(file_path, doc_id)
+                task_id = task_result['task_id']
+                print(f"[view_document] 启动后台转换任务: {task_id}")
+                
+                # 重定向到带有task_id的URL
+                from flask import redirect, url_for
+                return redirect(f"{url_for('document_bp.view_document', doc_id=doc_id)}?task_id={task_id}")
+            else:
+                # 未被匹配的文档，使用本地预览
+                print(f"[view_document] 文档未被匹配，使用本地预览")
                 return preview_document_local(doc_id)
         
-        # 直接返回文件
-        mime_types = {
-            '.pdf': 'application/pdf',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.bmp': 'image/bmp'
-        }
-        
-        content_type = mime_types.get(file_ext, 'application/octet-stream')
-        return send_file(file_path, mimetype=content_type)
+        # 其他文件类型，返回本地预览
+        return preview_document_local(doc_id)
         
     except Exception as e:
         import traceback
@@ -299,3 +334,41 @@ def preview_page(file_hash, page):
             return jsonify({'status': 'error', 'message': '页面尚未准备好'}), 404
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def start_batch_pdf_conversion():
+    """启动批量PDF转换任务"""
+    try:
+        project_id = request.json.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': '缺少项目ID'}), 400
+        
+        # 启动批量转换任务
+        task_result = task_service.start_batch_pdf_conversion(project_id)
+        return jsonify(task_result)
+        
+    except Exception as e:
+        import traceback
+        print(f"[start_batch_pdf_conversion] 错误: {e}")
+        print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': f'启动批量转换失败: {str(e)}'}), 500
+
+
+def delete_pdf_conversion():
+    """删除PDF转换记录"""
+    try:
+        doc_id = request.json.get('doc_id')
+        if not doc_id:
+            return jsonify({'status': 'error', 'message': '缺少文档ID'}), 400
+        
+        from src.services.pdf_conversion_record import pdf_conversion_record
+        # 删除转换记录和PDF文件
+        pdf_conversion_record.delete_record(doc_id)
+        
+        return jsonify({'status': 'success', 'message': 'PDF转换记录已删除'})
+        
+    except Exception as e:
+        import traceback
+        print(f"[delete_pdf_conversion] 错误: {e}")
+        print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': f'删除PDF转换记录失败: {str(e)}'}), 500
