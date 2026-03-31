@@ -70,6 +70,7 @@ function saveDraftToLocal() {
     const key = `treeEditor_draft_${appState.currentProjectId}`;
     const draft = {
         treeData: currentTreeData,
+        customAttributeDefinitions: customAttributeDefinitions,
         savedTime: new Date().toISOString(),
         selectedNode: selectedNode
     };
@@ -96,7 +97,10 @@ async function saveDraftToServer() {
         const response = await fetch(`/api/projects/${appState.currentProjectId}/draft`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tree_data: currentTreeData })
+            body: JSON.stringify({ 
+                tree_data: currentTreeData,
+                custom_attribute_definitions: customAttributeDefinitions
+            })
         });
         const result = await response.json();
         if (result.status === 'success') {
@@ -239,11 +243,17 @@ async function checkForDraft() {
                 // 恢复草稿
                 if (bestDraft.treeData) {
                     currentTreeData = bestDraft.treeData;
+                    if (bestDraft.customAttributeDefinitions) {
+                        customAttributeDefinitions = bestDraft.customAttributeDefinitions;
+                    }
                     if (bestDraft.selectedNode) {
                         selectedNode = bestDraft.selectedNode;
                     }
                 } else if (bestDraft.tree_data) {
                     currentTreeData = bestDraft.tree_data;
+                    if (bestDraft.custom_attribute_definitions) {
+                        customAttributeDefinitions = bestDraft.custom_attribute_definitions;
+                    }
                 }
                 renderTree();
                 if (selectedNode) selectNode(selectedNode);
@@ -346,6 +356,13 @@ function buildTreeData(config) {
         expanded: true,
         children: []
     };
+
+    // 加载自定义属性定义
+    if (config.custom_attribute_definitions && Array.isArray(config.custom_attribute_definitions)) {
+        customAttributeDefinitions = config.custom_attribute_definitions;
+    } else {
+        customAttributeDefinitions = [];
+    }
 
     const cycles = config.cycles || [];
     const documents = config.documents || {};
@@ -1144,9 +1161,24 @@ function updateAttributePreview(nodeId) {
     if (!previewEl) return;
 
     const attrs = node.attributes || {};
-    const activeAttrs = Object.entries(attrs)
+    const activeAttrs = [];
+
+    // 显示内置属性
+    Object.entries(attrs)
         .filter(([k, v]) => v)
-        .map(([k]) => ATTRIBUTE_LABELS[k]);
+        .forEach(([k, v]) => {
+            if (ATTRIBUTE_LABELS[k]) {
+                activeAttrs.push(ATTRIBUTE_LABELS[k]);
+            }
+        });
+
+    // 显示自定义属性
+    customAttributeDefinitions.forEach(attrDef => {
+        const value = attrs[attrDef.id];
+        if (value !== undefined && value !== false && value !== '') {
+            activeAttrs.push(attrDef.name);
+        }
+    });
 
     if (activeAttrs.length === 0) {
         previewEl.textContent = '未设置附加要求';
@@ -1913,7 +1945,8 @@ function attributesToRequirement(attributes) {
 function treeToConfig() {
     const config = {
         cycles: [],
-        documents: {}
+        documents: {},
+        custom_attribute_definitions: customAttributeDefinitions
     };
 
     if (!currentTreeData.children) return config;

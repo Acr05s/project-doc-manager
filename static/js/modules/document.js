@@ -238,15 +238,27 @@ export async function handleEditDocument(e) {
     
     // 收集文本、日期和文本域输入
     form.querySelectorAll('input[type="text"], input[type="date"], textarea').forEach(input => {
-        if (input.id.startsWith('edit') && fieldNameMap[input.id]) {
-            docData[fieldNameMap[input.id]] = input.value;
+        if (input.id.startsWith('edit')) {
+            if (fieldNameMap[input.id]) {
+                docData[fieldNameMap[input.id]] = input.value;
+            } else {
+                // 处理自定义属性
+                const fieldName = input.id.replace('edit', '');
+                docData[fieldName] = input.value;
+            }
         }
     });
     
     // 收集复选框
     form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-        if (checkbox.id.startsWith('edit') && fieldNameMap[checkbox.id]) {
-            docData[fieldNameMap[checkbox.id]] = checkbox.checked;
+        if (checkbox.id.startsWith('edit')) {
+            if (fieldNameMap[checkbox.id]) {
+                docData[fieldNameMap[checkbox.id]] = checkbox.checked;
+            } else {
+                // 处理自定义属性
+                const fieldName = checkbox.id.replace('edit', '');
+                docData[fieldName] = checkbox.checked;
+            }
         }
     });
     
@@ -412,9 +424,23 @@ function analyzeRequirementStatus(attributes, docsList) {
     
     // 根据 attributes 确定需要检查哪些属性（只检查值为true的）
     const activeAttributes = [];
+    
+    // 处理预定义属性
     for (const attr of attrMap) {
         if (attributes[attr.key] === true) {
             activeAttributes.push(attr);
+        }
+    }
+    
+    // 处理自定义属性（除了预定义的键之外的属性）
+    const predefinedKeys = new Set(attrMap.map(attr => attr.key));
+    for (const [key, value] of Object.entries(attributes)) {
+        if (value === true && !predefinedKeys.has(key)) {
+            // 为自定义属性生成显示名称（将下划线转换为空格，首字母大写）
+            const displayName = key
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, char => char.toUpperCase());
+            activeAttributes.push({ key, name: displayName });
         }
     }
     
@@ -477,6 +503,10 @@ function analyzeRequirementStatus(attributes, docsList) {
             } else if (attr.key === 'need_doc_number') {
                 // 发文号
                 isCompleted = getDocValue('doc_number');
+            } else {
+                // 处理自定义属性
+                // 尝试直接获取属性值，或者使用带下划线前缀的版本
+                isCompleted = getDocValue(attr.key) !== null && getDocValue(attr.key) !== undefined && getDocValue(attr.key) !== '';
             }
             
             if (isCompleted) completedCount++;
@@ -548,7 +578,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
         ? Math.max(...requiredDocs.map(d => d._originalIndex || 0)) 
         : 0;
     uploadedDocTypes.forEach(docType => {
-        if (!requiredDocs.some(reqDoc => reqDoc.name === docType)) {
+        // 过滤掉系统生成的随机值（以 "Custom " 开头的文档类型）
+        if (!docType.startsWith('Custom ') && !requiredDocs.some(reqDoc => reqDoc.name === docType)) {
             maxIndex++;
             allDocTypes.push({
                 name: docType,
@@ -709,6 +740,50 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     
                                     // 显示本次项目不涉及状态
                                     if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
+                                    
+                                    // 显示自定义属性
+                                    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id']);
+                                    
+                                    // 遍历文档对象的所有字段，找出自定义属性
+                                    for (const [key, value] of Object.entries(d)) {
+                                        // 跳过预定义字段和带下划线前缀的字段
+                                        // 跳过以 'custom_' 或 'Custom ' 开头的字段，这些是系统生成的随机值
+                                        // 跳过值以 'Custom ' 开头的，这些是系统生成的随机值
+                                        if (!predefinedFields.has(key) && 
+                                            !key.startsWith('_') && 
+                                            !key.toLowerCase().startsWith('custom') && 
+                                            !key.startsWith('Custom ') &&
+                                            value !== undefined && 
+                                            value !== null && 
+                                            value !== '' &&
+                                            typeof value === 'string' &&
+                                            !value.startsWith('Custom ')) {
+                                            // 为自定义属性生成显示名称
+                                            const displayName = key
+                                                .replace(/_/g, ' ')
+                                                .replace(/\b\w/g, char => char.toUpperCase());
+                                            attrParts.push(`📌${displayName}: ${value}`);
+                                        }
+                                    }
+                                    
+                                    // 检查带下划线前缀的自定义属性
+                                    for (const [key, value] of Object.entries(d)) {
+                                        const actualKey = key.substring(1);
+                                        if (key.startsWith('_') && 
+                                            !predefinedFields.has(actualKey) && 
+                                            !actualKey.toLowerCase().startsWith('custom') && 
+                                            !actualKey.startsWith('Custom ') &&
+                                            value !== undefined && 
+                                            value !== null && 
+                                            value !== '' &&
+                                            typeof value === 'string' &&
+                                            !value.startsWith('Custom ')) {
+                                            const displayName = actualKey
+                                                .replace(/_/g, ' ')
+                                                .replace(/\b\w/g, char => char.toUpperCase());
+                                            attrParts.push(`📌${displayName}: ${value}`);
+                                        }
+                                    }
 
                                     
                                     // 检查文件是否满足要求（支持带下划线前缀的字段名）
@@ -777,9 +852,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
                                               title="点击预览文件" 
                                               style="cursor: pointer; text-decoration: underline;">
-                                            ${d.original_filename || d.filename}
+                                            ${d.original_filename || d.filename || '未知文件名'}
                                         </span>
-                                        ${attrParts.length > 0 ? `<span class="doc-attrs">${attrParts.join(' ')}</span>` : ''}
+                                        ${attrParts.length > 0 ? `<span class="doc-attrs" style="margin-left: 8px;">${attrParts.join(' ')}</span>` : ''}
                                         ${missingHtml}
                                     </div>`;
                                 }).join('');
@@ -2386,17 +2461,48 @@ function generateDynamicEditForm(doc, cycle, docName) {
     let requirement = '';
     let attributes = [];
     
+    console.log('[generateDynamicEditForm] appState.projectConfig:', appState.projectConfig);
+    
     if (appState.projectConfig && cycle && docName) {
         const cycleDocs = appState.projectConfig.documents[cycle];
+        console.log('[generateDynamicEditForm] cycleDocs:', cycleDocs);
+        
         if (cycleDocs && cycleDocs.required_docs) {
             const docInfo = cycleDocs.required_docs.find(d => d.name === docName);
+            console.log('[generateDynamicEditForm] docInfo:', docInfo);
+            
             if (docInfo) {
                 requirement = docInfo.requirement || '无特殊要求';
                 // 解析附加属性
                 attributes = parseRequirementAttributes(requirement);
+                
+                // 添加自定义属性
+                console.log('[generateDynamicEditForm] custom_attribute_definitions:', appState.projectConfig.custom_attribute_definitions);
+                
+                if (appState.projectConfig.custom_attribute_definitions) {
+                    appState.projectConfig.custom_attribute_definitions.forEach(attrDef => {
+                        console.log('[generateDynamicEditForm] attrDef:', attrDef);
+                        console.log('[generateDynamicEditForm] docInfo.attributes:', docInfo.attributes);
+                        console.log('[generateDynamicEditForm] docInfo.attributes[attrDef.id]:', docInfo.attributes && docInfo.attributes[attrDef.id]);
+                        
+                        // 检查文档是否有这个自定义属性的要求
+                        if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
+                            attributes.push({
+                                type: attrDef.type === 'checkbox' ? 'checkbox' : 'text',
+                                id: attrDef.id.replace(/[^a-zA-Z0-9]/g, ''),
+                                name: attrDef.id,
+                                label: attrDef.name,
+                                placeholder: `输入${attrDef.name}`
+                            });
+                        }
+                    });
+                }
             }
         }
     }
+    
+    // 调试日志：查看属性列表
+    console.log('[generateDynamicEditForm] 属性列表:', attributes);
     
     // 调试日志：查看属性列表
     console.log('[generateDynamicEditForm] 属性列表:', attributes);
@@ -2551,12 +2657,11 @@ function generateDynamicEditForm(doc, cycle, docName) {
  * 检查文档是否满足附加要求
  * @param {Object} doc - 已上传的文档对象
  * @param {string} requirement - 文档要求字符串
+ * @param {Object} attributes - 文档属性要求对象
  * @returns {Array} - 缺失的要求列表
  */
-function checkMissingRequirements(doc, requirement) {
+function checkMissingRequirements(doc, requirement, attributes) {
     const missingRequirements = [];
-    
-    if (!requirement) return missingRequirements;
     
     // 辅助函数：获取字段值（支持带下划线前缀）
     const getDocValue = (fieldName) => {
@@ -2565,41 +2670,85 @@ function checkMissingRequirements(doc, requirement) {
         return null;
     };
     
-    // 检查签字要求（分别检查甲方签字和乙方签字）
-    const hasPartyASignReq = requirement.includes('甲方签字');
-    const hasPartyBSignReq = requirement.includes('乙方签字');
-    const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
+    // 检查基于字符串的要求
+    if (requirement) {
+        // 检查签字要求（分别检查甲方签字和乙方签字）
+        const hasPartyASignReq = requirement.includes('甲方签字');
+        const hasPartyBSignReq = requirement.includes('乙方签字');
+        const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
+        
+        // 检查甲方签字
+        if (hasPartyASignReq && !getDocValue('party_a_signer') && !getDocValue('no_signature')) {
+            missingRequirements.push('甲方签字');
+        }
+        // 检查乙方签字
+        if (hasPartyBSignReq && !getDocValue('party_b_signer') && !getDocValue('no_signature')) {
+            missingRequirements.push('乙方签字');
+        }
+        // 检查通用签字
+        if (hasGeneralSignReq && !getDocValue('signer') && !getDocValue('no_signature')) {
+            missingRequirements.push('签字');
+        }
+        
+        // 检查盖章要求
+        if (requirement.includes('乙方盖章') && !getDocValue('party_b_seal') && !getDocValue('no_seal')) {
+            missingRequirements.push('乙方盖章');
+        }
+        if (requirement.includes('甲方盖章') && !getDocValue('party_a_seal') && !getDocValue('no_seal')) {
+            missingRequirements.push('甲方盖章');
+        }
+        if (requirement.includes('盖章') && !getDocValue('has_seal_marked') && !getDocValue('has_seal') && !getDocValue('party_a_seal') && !getDocValue('party_b_seal') && !getDocValue('no_seal')) {
+            missingRequirements.push('盖章');
+        }
+        
+        // 检查日期要求
+        if (requirement.includes('文档日期') && !getDocValue('doc_date')) {
+            missingRequirements.push('文档日期');
+        }
+        if (requirement.includes('签字日期') && !getDocValue('sign_date')) {
+            missingRequirements.push('签字日期');
+        }
+    }
     
-    // 检查甲方签字
-    if (hasPartyASignReq && !getDocValue('party_a_signer') && !getDocValue('no_signature')) {
-        missingRequirements.push('甲方签字');
-    }
-    // 检查乙方签字
-    if (hasPartyBSignReq && !getDocValue('party_b_signer') && !getDocValue('no_signature')) {
-        missingRequirements.push('乙方签字');
-    }
-    // 检查通用签字
-    if (hasGeneralSignReq && !getDocValue('signer') && !getDocValue('no_signature')) {
-        missingRequirements.push('签字');
-    }
-    
-    // 检查盖章要求
-    if (requirement.includes('乙方盖章') && !getDocValue('party_b_seal') && !getDocValue('no_seal')) {
-        missingRequirements.push('乙方盖章');
-    }
-    if (requirement.includes('甲方盖章') && !getDocValue('party_a_seal') && !getDocValue('no_seal')) {
-        missingRequirements.push('甲方盖章');
-    }
-    if (requirement.includes('盖章') && !getDocValue('has_seal_marked') && !getDocValue('has_seal') && !getDocValue('party_a_seal') && !getDocValue('party_b_seal') && !getDocValue('no_seal')) {
-        missingRequirements.push('盖章');
-    }
-    
-    // 检查日期要求
-    if (requirement.includes('文档日期') && !getDocValue('doc_date')) {
-        missingRequirements.push('文档日期');
-    }
-    if (requirement.includes('签字日期') && !getDocValue('sign_date')) {
-        missingRequirements.push('签字日期');
+    // 检查基于attributes对象的要求（包括自定义属性）
+    if (attributes) {
+        // 定义预定义属性的检查逻辑
+        const predefinedAttrs = [
+            { key: 'party_a_sign', name: '甲方签字', check: () => getDocValue('party_a_signer') || getDocValue('no_signature') || getDocValue('signer') },
+            { key: 'party_b_sign', name: '乙方签字', check: () => getDocValue('party_b_signer') || getDocValue('no_signature') || getDocValue('signer') },
+            { key: 'party_a_seal', name: '甲方盖章', check: () => getDocValue('party_a_seal') || getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('no_seal') },
+            { key: 'party_b_seal', name: '乙方盖章', check: () => getDocValue('party_b_seal') || getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('no_seal') },
+            { key: 'need_doc_date', name: '文档日期', check: () => getDocValue('doc_date') },
+            { key: 'need_sign_date', name: '签字日期', check: () => getDocValue('sign_date') || getDocValue('no_signature') },
+            { key: 'need_doc_number', name: '发文号', check: () => getDocValue('doc_number') }
+        ];
+        
+        // 检查预定义属性
+        for (const attr of predefinedAttrs) {
+            if (attributes[attr.key] === true && !attr.check()) {
+                // 只有当要求存在且未在基于字符串的检查中添加时，才添加到缺失列表
+                if (!missingRequirements.includes(attr.name)) {
+                    missingRequirements.push(attr.name);
+                }
+            }
+        }
+        
+        // 检查自定义属性
+        const predefinedKeys = new Set(predefinedAttrs.map(attr => attr.key));
+        for (const [key, value] of Object.entries(attributes)) {
+            if (value === true && !predefinedKeys.has(key)) {
+                // 为自定义属性生成显示名称
+                const displayName = key
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, char => char.toUpperCase());
+                
+                // 检查自定义属性是否满足
+                const isCompleted = getDocValue(key) !== null && getDocValue(key) !== undefined && getDocValue(key) !== '';
+                if (!isCompleted) {
+                    missingRequirements.push(displayName);
+                }
+            }
+        }
     }
     
     return missingRequirements;
@@ -3227,7 +3376,8 @@ export async function generateReport() {
                     // 检查文档是否合规
                     const docConfig = cycleData.requiredDocs.find(d => d.name === docName);
                     const requirement = docConfig?.requirement || '';
-                    const missing = checkMissingRequirements(doc, requirement);
+                    const attributes = docConfig?.attributes || {};
+                    const missing = checkMissingRequirements(doc, requirement, attributes);
                     const isCompliant = missing.length === 0;
                     
                     return {
@@ -3267,21 +3417,47 @@ export async function generateReport() {
                     let signedTypeCount = 0;
                     let sealedTypeCount = 0;
                     let compliantTypeCount = 0;
+                    let signRequirementCount = 0;
+                    let sealRequirementCount = 0;
                     
                     Object.entries(docsByType).forEach(([docName, docs]) => {
+                        // 获取该文档类型的要求
+                        const docConfig = cycleData.requiredDocs.find(d => d.name === docName);
+                        const requirement = docConfig?.requirement || '';
+                        const hasSignRequirement = requirement.includes('签字') || requirement.includes('签名');
+                        const hasSealRequirement = requirement.includes('盖章') || requirement.includes('章');
+                        
                         // 检查该文档类型是否有归档的文档
                         const hasArchived = docs.some(doc => doc.archived);
                         if (hasArchived) archivedTypeCount++;
                         
-                        // 检查该文档类型是否有签字的文档
-                        const hasSigned = docs.some(doc => doc.signer || doc.no_signature);
-                        if (hasSigned) signedTypeCount++;
+                        // 检查该文档类型是否有签字的文档（只对有签字要求的文档类型进行统计）
+                        if (hasSignRequirement) {
+                            signRequirementCount++;
+                            const hasSigned = docs.some(doc => {
+                                const getDocValue = (fieldName) => {
+                                    if (doc[fieldName] !== undefined) return doc[fieldName];
+                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                    return null;
+                                };
+                                return getDocValue('signer') || getDocValue('no_signature');
+                            });
+                            if (hasSigned) signedTypeCount++;
+                        }
                         
-                        // 检查该文档类型是否有盖章的文档
-                        const hasSealed = docs.some(doc => 
-                            doc.has_seal_marked || doc.has_seal || doc.party_a_seal || doc.party_b_seal || doc.no_seal
-                        );
-                        if (hasSealed) sealedTypeCount++;
+                        // 检查该文档类型是否有盖章的文档（只对有盖章要求的文档类型进行统计）
+                        if (hasSealRequirement) {
+                            sealRequirementCount++;
+                            const hasSealed = docs.some(doc => {
+                                const getDocValue = (fieldName) => {
+                                    if (doc[fieldName] !== undefined) return doc[fieldName];
+                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                    return null;
+                                };
+                                return getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal') || getDocValue('no_seal');
+                            });
+                            if (hasSealed) sealedTypeCount++;
+                        }
                         
                         // 检查该文档类型是否有合规的文档
                         const hasCompliant = docs.some(doc => doc.compliant);
@@ -3293,9 +3469,9 @@ export async function generateReport() {
                     cycleData.statistics.sealedDocs = sealedTypeCount;
                     cycleData.statistics.compliantDocs = compliantTypeCount;
                     
-                    // 计算比率
-                    cycleData.statistics.signatureRate = (signedTypeCount / uploadedDocNames.size * 100).toFixed(1);
-                    cycleData.statistics.sealRate = (sealedTypeCount / uploadedDocNames.size * 100).toFixed(1);
+                    // 计算比率（只对有相应要求的文档类型进行计算）
+                    cycleData.statistics.signatureRate = signRequirementCount > 0 ? (signedTypeCount / signRequirementCount * 100).toFixed(1) : '0.0';
+                    cycleData.statistics.sealRate = sealRequirementCount > 0 ? (sealedTypeCount / sealRequirementCount * 100).toFixed(1) : '0.0';
                     cycleData.statistics.complianceRate = (compliantTypeCount / uploadedDocNames.size * 100).toFixed(1);
                 }
             }
@@ -3501,6 +3677,12 @@ function showReportModal(reportData) {
                                         docsByDirectory[directory].push(doc);
                                     });
                                     
+                                    // 获取该文档类型的要求
+                                    const docConfig = cycle.requiredDocs.find(d => d.name === typeName);
+                                    const requirement = docConfig?.requirement || '';
+                                    const hasSignRequirement = requirement.includes('签字') || requirement.includes('签名');
+                                    const hasSealRequirement = requirement.includes('盖章') || requirement.includes('章');
+                                    
                                     return `
                                         <div style="margin-bottom: 20px;">
                                             <h6 style="margin: 10px 0 8px; color: #495057; font-size: 14px; font-weight: 600; background: #e9ecef; padding: 6px 10px; border-radius: 4px;">
@@ -3527,9 +3709,26 @@ function showReportModal(reportData) {
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
-                                                                            ${doc.no_signature ? '✓ 无签字' : (doc.signer ? '✓ 有签字' : '⚠ 无签字')}
-                                                                            ${doc.no_seal ? ' | ✓ 无盖章' : (doc.has_seal_marked ? ' | ✓ 有盖章' : ' | ⚠ 无盖章')}
-                                                                            ${doc.archived ? ' | <span style="color: #1890ff;">✓ 已归档</span>' : ''}
+                                                                            ${(() => {
+                                                                                if (!hasSignRequirement) return '';
+                                                                                const getDocValue = (fieldName) => {
+                                                                                    if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                    return null;
+                                                                                };
+                                                                                return getDocValue('no_signature') ? '✓ 无签字' : (getDocValue('signer') ? '✓ 有签字' : '⚠ 无签字');
+                                                                            })()}
+                                                                            ${(() => {
+                                                                                if (!hasSealRequirement) return '';
+                                                                                const getDocValue = (fieldName) => {
+                                                                                    if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                    return null;
+                                                                                };
+                                                                                const signStatus = hasSignRequirement ? (getDocValue('no_signature') ? '✓ 无签字' : (getDocValue('signer') ? '✓ 有签字' : '⚠ 无签字')) : '';
+                                                                                return signStatus ? ' | ' : '' + (getDocValue('no_seal') ? '✓ 无盖章' : (getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal') ? '✓ 有盖章' : '⚠ 无盖章'));
+                                                                            })()}
+                                                                            ${doc.archived ? (hasSignRequirement || hasSealRequirement ? ' | ' : '') + '<span style="color: #1890ff;">✓ 已归档</span>' : ''}
                                                                         </td>
                                                                     </tr>
                                                                 `).join('')}

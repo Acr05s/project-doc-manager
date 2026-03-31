@@ -41,6 +41,10 @@ export async function loadProject(projectId) {
         const oldResult = await oldResponse.json();
         
         if (oldResult.status === 'success') {
+            // 确保返回的项目数据包含 custom_attribute_definitions 字段
+            if (!oldResult.project.custom_attribute_definitions) {
+                oldResult.project.custom_attribute_definitions = [];
+            }
             return oldResult.project;
         }
         
@@ -57,7 +61,8 @@ export async function loadProject(projectId) {
                     id: projectId,
                     name: result.project_info?.name || projectId,
                     cycles: result.cycles.map(cycle => cycle.name),
-                    documents: {}
+                    documents: {},
+                    custom_attribute_definitions: result.custom_attribute_definitions || []
                 };
                 
                 // 转换文档数据
