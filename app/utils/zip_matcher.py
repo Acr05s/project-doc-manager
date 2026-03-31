@@ -313,16 +313,17 @@ class ZipMatcher:
                 
                 # 检查是否有排除关键词
                 exclude_keywords = doc.get('exclude_keywords', [])
+                # 从文档类型名中移除排除关键词
+                doc_name_for_match = doc_name
                 if exclude_keywords:
-                    # 检查文件名是否包含任何排除关键词
-                    filename_lower = filename.lower()
                     for exclude_keyword in exclude_keywords:
-                        if exclude_keyword.lower() in filename_lower:
-                            # 包含排除关键词，跳过此文档
-                            continue
+                        doc_name_for_match = doc_name_for_match.replace(exclude_keyword, '')
+                # 确保移除后还有内容
+                if not doc_name_for_match.strip():
+                    continue
                 
                 # 计算匹配度
-                confidence = self._calculate_match_confidence(name_clean, doc_name)
+                confidence = self._calculate_match_confidence(name_clean, doc_name_for_match)
                 
                 if confidence > best_match['confidence']:
                     best_match = {
