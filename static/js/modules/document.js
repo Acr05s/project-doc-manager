@@ -3545,8 +3545,12 @@ export async function generateReport() {
             // 获取该周期的文档要求
             const cycleDocs = appState.projectConfig.documents[cycle];
             if (cycleDocs) {
-                // 收集要求的文档
-                cycleData.requiredDocs = cycleDocs.required_docs || [];
+                // 收集要求的文档并按前端显示顺序排序
+                const requiredDocsRaw = cycleDocs.required_docs || [];
+                cycleData.requiredDocs = requiredDocsRaw.map((doc, idx) => ({
+                    ...doc,
+                    _originalIndex: doc.index !== undefined && doc.index !== null ? doc.index : (idx + 1)
+                })).sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
                 cycleData.statistics.totalDocs = cycleData.requiredDocs.length;
                 
                 // 获取已上传的文档
@@ -3836,7 +3840,7 @@ function showReportModal(reportData) {
                             <div class="missing-docs" style="margin-bottom: 15px;">
                                 <h5 style="margin-bottom: 10px; color: #dc3545;">缺失文档:</h5>
                                 <ul style="margin: 0; padding-left: 20px;">
-                                    ${cycle.missingDocs.map(doc => `<li>${doc.name}</li>`).join('')}
+                                    ${cycle.missingDocs.map((doc, index) => `<li>${doc._originalIndex || (index + 1)}. ${doc.name}</li>`).join('')}
                                 </ul>
                             </div>
                         ` : `<p style="color: #28a745;">✓ 所有文档已上传</p>`}
@@ -3851,8 +3855,18 @@ function showReportModal(reportData) {
                                     if (!docsByType[typeName]) docsByType[typeName] = [];
                                     docsByType[typeName].push(doc);
                                 });
+                                
+                                // 按前端显示顺序排序文档类型
+                                const sortedDocTypes = cycle.requiredDocs
+                                    .map(doc => doc.name)
+                                    .filter(name => docsByType[name])
+                                    .concat(Object.keys(docsByType).filter(name => !cycle.requiredDocs.some(doc => doc.name === name)));
+                                
                                 // 生成按类型分组的表格HTML
-                                return Object.entries(docsByType).map(([typeName, docs]) => {
+                                return sortedDocTypes.map((typeName, typeIndex) => {
+                                    const docs = docsByType[typeName];
+                                    if (!docs) return '';
+                                    
                                     // 按目录分组文档
                                     const docsByDirectory = {};
                                     docs.forEach(doc => {
@@ -3866,11 +3880,12 @@ function showReportModal(reportData) {
                                     const requirement = docConfig?.requirement || '';
                                     const hasSignRequirement = requirement.includes('签字') || requirement.includes('签名');
                                     const hasSealRequirement = requirement.includes('盖章') || requirement.includes('章');
+                                    const docIndex = docConfig?._originalIndex || (typeIndex + 1);
                                     
                                     return `
                                         <div style="margin-bottom: 20px;">
                                             <h6 style="margin: 10px 0 8px; color: #495057; font-size: 14px; font-weight: 600; background: #e9ecef; padding: 6px 10px; border-radius: 4px;">
-                                                📄 ${typeName} (${docs.length}个文件)
+                                                ${docIndex}. 📄 ${typeName} (${docs.length}个文件)
                                             </h6>
                                             ${Object.entries(docsByDirectory).map(([directory, dirDocs]) => {
                                                 const dirName = directory === '/' ? '根目录' : directory;
@@ -3882,14 +3897,16 @@ function showReportModal(reportData) {
                                                         <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                                                             <thead>
                                                                 <tr style="background: #f8f9fa;">
+                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left; width: 50px;">序号</th>
                                                                     <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
                                                                     <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
                                                                     <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                ${dirDocs.map(doc => `
+                                                                ${dirDocs.map((doc, fileIndex) => `
                                                                     <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
