@@ -375,6 +375,9 @@ def import_project_merge():
         else:
             project_source_dir = extract_dir
         
+        logger.info(f"[导入] 源目录: {project_source_dir}")
+        logger.info(f"[导入] 目标目录: {target_project_dir}")
+        
         # 检查项目是否已存在
         project_exists = target_project_dir.exists()
         is_renamed = False
@@ -479,10 +482,14 @@ def import_project_merge():
                 requirements_file = config_dir / 'requirements.json'
         
         # 生成新的项目ID
-        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
         project_config['id'] = new_project_id
+        project_config['name'] = project_name
         project_config['created_time'] = datetime.now().isoformat()
         project_config['updated_time'] = datetime.now().isoformat()
+        
+        # 确保项目配置中的名称与实际目录名称一致
+        logger.info(f"[导入] 项目配置已更新: ID={new_project_id}, 名称={project_name}")
         
         # 如果存在requirements.json，加载需求
         if requirements_file.exists():

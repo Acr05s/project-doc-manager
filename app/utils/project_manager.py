@@ -92,10 +92,17 @@ class ProjectManager:
             self.projects_db = {}
             self.deleted_projects = {}
     
-    def _save_projects_index(self):
-        """保存项目索引（保持旧格式兼容）"""
+    def _save_projects_index(self) -> bool:
+        """保存项目索引（保持旧格式兼容）
+        
+        Returns:
+            bool: 是否保存成功
+        """
         try:
             index_file = self.config.projects_folder / 'projects_index.json'
+            logger.info(f"[DEBUG] 保存项目索引到: {index_file}")
+            logger.info(f"[DEBUG] 项目数量: {len(self.projects_db)}")
+            logger.info(f"[DEBUG] 已删除项目数量: {len(self.deleted_projects)}")
             
             # 获取文件锁
             with get_file_lock(str(index_file)):
@@ -103,16 +110,34 @@ class ProjectManager:
                 data = {
                     'updated_time': datetime.now().isoformat()
                 }
-                # 添加所有项目
-                data.update(self.projects_db)
+                
+                # 检查projects_db的格式
+                if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
+                    # 新格式：projects_db包含'projects'字段，只保存项目数据
+                    data.update(self.projects_db['projects'])
+                    logger.info(f"[DEBUG] 使用新格式保存，项目数量: {len(self.projects_db['projects'])}")
+                else:
+                    # 旧格式：直接保存projects_db
+                    data.update(self.projects_db)
+                    logger.info(f"[DEBUG] 使用旧格式保存，项目数量: {len(self.projects_db)}")
                 
                 # 添加已删除项目
                 data['deleted_projects'] = self.deleted_projects
+                logger.info(f"[DEBUG] 保存已删除项目数量: {len(self.deleted_projects)}")
                 
-                json_file_manager.write_json(str(index_file), data)
+                # 写入文件并检查返回值
+                success = json_file_manager.write_json(str(index_file), data)
+                if success:
+                    logger.info(f"项目索引保存成功: {index_file}")
+                else:
+                    logger.error(f"项目索引保存失败: {index_file}")
+                return success
                     
         except Exception as e:
             logger.error(f"保存项目索引失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
+            return False
     
     def update_project_status(self, project_id: str, **kwargs) -> bool:
         """更新项目索引状态字段（如 packaging, locked, session_id）
@@ -427,7 +452,10 @@ class ProjectManager:
                 logger.info(f"项目已软删除: {project_id}")
             
             # 保存索引
-            self._save_projects_index()
+            save_success = self._save_projects_index()
+            if not save_success:
+                logger.error(f"删除项目后保存索引失败: {project_id}")
+                return {'status': 'error', 'message': '删除项目成功，但保存索引失败'}
             
             return {'status': 'success', 'message': '项目已删除' if not permanent else '项目已永久删除'}
             
@@ -504,10 +532,16 @@ class ProjectManager:
             Dict: 添加结果
         """
         try:
+            # 确定项目存储的位置
+            projects_dict = self.projects_db
+            # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
+            if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
+                projects_dict = self.projects_db['projects']
+            
             # 检查项目是否已在索引中
-            if project_id in self.projects_db:
+            if project_id in projects_dict:
                 # 更新现有项目信息
-                self.projects_db[project_id].update({
+                projects_dict[project_id].update({
                     'name': name,
                     'description': description,
                     'updated_time': datetime.now().isoformat(),
@@ -515,7 +549,7 @@ class ProjectManager:
                 })
             else:
                 # 添加新项目到索引
-                self.projects_db[project_id] = {
+                projects_dict[project_id] = {
                     'id': project_id,
                     'name': name,
                     'description': description,
@@ -545,6 +579,12 @@ class ProjectManager:
         Returns:
             List[Dict]: 项目列表
         """
+        # 确定项目存储的位置
+        projects_dict = self.projects_db
+        # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
+        if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
+            projects_dict = self.projects_db['projects']
+        
         return [
             {
                 'id': project_id,
@@ -553,7 +593,7 @@ class ProjectManager:
                 'created_time': info.get('created_time', ''),
                 'updated_time': info.get('updated_time', '')
             }
-            for project_id, info in self.projects_db.items()
+            for project_id, info in projects_dict.items()
         ]
     
     def get_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
@@ -565,7 +605,13 @@ class ProjectManager:
         Returns:
             Optional[Dict]: 项目信息
         """
-        return self.projects_db.get(project_id)
+        # 确定项目存储的位置
+        projects_dict = self.projects_db
+        # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
+        if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
+            projects_dict = self.projects_db['projects']
+        
+        return projects_dict.get(project_id)
     
     def search(self, keyword: str) -> List[Dict[str, Any]]:
         """搜索项目
@@ -579,7 +625,13 @@ class ProjectManager:
         results = []
         keyword_lower = keyword.lower()
         
-        for project_id, info in self.projects_db.items():
+        # 确定项目存储的位置
+        projects_dict = self.projects_db
+        # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
+        if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
+            projects_dict = self.projects_db['projects']
+        
+        for project_id, info in projects_dict.items():
             name = info.get('name', '').lower()
             desc = info.get('description', '').lower()
             
@@ -616,10 +668,16 @@ class ProjectManager:
             self.save(project_id, config)
             
             # 更新索引
-            if project_id in self.projects_db:
+            # 确定项目存储的位置
+            projects_dict = self.projects_db
+            # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
+            if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
+                projects_dict = self.projects_db['projects']
+            
+            if project_id in projects_dict:
                 for key in ['name', 'description']:
                     if key in updates:
-                        self.projects_db[project_id][key] = updates[key]
+                        projects_dict[project_id][key] = updates[key]
                 self._save_projects_index()
             
             return {'status': 'success', 'config': config}
