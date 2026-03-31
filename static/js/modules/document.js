@@ -3924,9 +3924,27 @@ function showReportModal(reportData) {
                                                                                 
                                                                                 // 签字状态
                                                                                 if (hasSignRequirement) {
+                                                                                    const getDocValue = (fieldName) => {
+                                                                                        // 检查多个可能的属性来源
+                                                                                        if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                                        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                        if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
+                                                                                        if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
+                                                                                        return null;
+                                                                                    };
+                                                                                    
+                                                                                    // 检查是否有签字信息
+                                                                                    const hasSignature = 
+                                                                                        getDocValue('no_signature') ||
+                                                                                        getDocValue('signer') ||
+                                                                                        getDocValue('party_a_signer') ||
+                                                                                        getDocValue('party_b_signer') ||
+                                                                                        getDocValue('party_a_sign') ||
+                                                                                        getDocValue('party_b_sign');
+                                                                                    
                                                                                     if (getDocValue('no_signature')) {
                                                                                         statusParts.push('✓ 无签字');
-                                                                                    } else if (getDocValue('signer')) {
+                                                                                    } else if (hasSignature) {
                                                                                         statusParts.push('✓ 有签字');
                                                                                     } else {
                                                                                         statusParts.push('⚠ 无签字');
@@ -3935,9 +3953,27 @@ function showReportModal(reportData) {
                                                                                 
                                                                                 // 盖章状态
                                                                                 if (hasSealRequirement) {
+                                                                                    const getDocValue = (fieldName) => {
+                                                                                        // 检查多个可能的属性来源
+                                                                                        if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                                        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                        if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
+                                                                                        if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
+                                                                                        return null;
+                                                                                    };
+                                                                                    
+                                                                                    // 检查是否有盖章信息
+                                                                                    const hasSeal = 
+                                                                                        getDocValue('no_seal') ||
+                                                                                        getDocValue('has_seal_marked') ||
+                                                                                        getDocValue('has_seal') ||
+                                                                                        getDocValue('party_a_seal') ||
+                                                                                        getDocValue('party_b_seal') ||
+                                                                                        getDocValue('other_seal');
+                                                                                    
                                                                                     if (getDocValue('no_seal')) {
                                                                                         statusParts.push('✓ 无盖章');
-                                                                                    } else if (getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal')) {
+                                                                                    } else if (hasSeal) {
                                                                                         statusParts.push('✓ 有盖章');
                                                                                     } else {
                                                                                         statusParts.push('⚠ 无盖章');
