@@ -311,6 +311,16 @@ class ZipMatcher:
                     if doc_name in cycle_archived:
                         continue
                 
+                # 检查是否有排除关键词
+                exclude_keywords = doc.get('exclude_keywords', [])
+                if exclude_keywords:
+                    # 检查文件名是否包含任何排除关键词
+                    filename_lower = filename.lower()
+                    for exclude_keyword in exclude_keywords:
+                        if exclude_keyword.lower() in filename_lower:
+                            # 包含排除关键词，跳过此文档
+                            continue
+                
                 # 计算匹配度
                 confidence = self._calculate_match_confidence(name_clean, doc_name)
                 

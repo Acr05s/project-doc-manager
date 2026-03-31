@@ -388,17 +388,18 @@ function buildTreeData(config) {
             const docId = `doc_${index}_${docIndex}`;
 
             const docNode = {
-                id: docId,
-                name: docData.name || doc,
-                type: 'document',
-                expanded: false,
-                children: [],
-                attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docData.attributes || {}) },
-                doc_note: docData.doc_note || '',
-                // 新增：文件名模板和匹配关键词
-                filename_template: docData.filename_template || '',
-                match_keywords: docData.match_keywords || []
-            };
+            id: docId,
+            name: docData.name || doc,
+            type: 'document',
+            expanded: false,
+            children: [],
+            attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docData.attributes || {}) },
+            doc_note: docData.doc_note || '',
+            // 新增：文件名模板和匹配关键词
+            filename_template: docData.filename_template || '',
+            match_keywords: docData.match_keywords || [],
+            exclude_keywords: docData.exclude_keywords || []
+        };
 
             // 支持目录子节点（从 children 中读取）
             if (docData.children && Array.isArray(docData.children)) {
@@ -412,7 +413,8 @@ function buildTreeData(config) {
                             children: [],
                             attributes: child.attributes || {},
                             filename_template: child.filename_template || '',
-                            match_keywords: child.match_keywords || []
+                            match_keywords: child.match_keywords || [],
+                            exclude_keywords: child.exclude_keywords || []
                         };
                         // 文件夹的子文件
                         if (child.files && Array.isArray(child.files)) {
@@ -423,7 +425,8 @@ function buildTreeData(config) {
                                     name: fileData.name || file,
                                     type: 'file',
                                     children: [],
-                                    match_keywords: fileData.match_keywords || []
+                                    match_keywords: fileData.match_keywords || [],
+                                    exclude_keywords: fileData.exclude_keywords || []
                                 });
                             });
                         }
@@ -937,12 +940,14 @@ window.addTreeNode = function(type) {
         newNode.doc_note = '';
         newNode.filename_template = '';
         newNode.match_keywords = [];
+        newNode.exclude_keywords = [];
     }
 
     // 目录和文件节点也支持匹配关键词
     if (type === 'folder' || type === 'file') {
         newNode.filename_template = '';
         newNode.match_keywords = [];
+        newNode.exclude_keywords = [];
     }
 
     if (!parent.children) parent.children = [];
@@ -1214,6 +1219,12 @@ window.openMatchSettings = function(nodeId) {
         keywordsEl.value = (node.match_keywords || []).join('、');
     }
 
+    // 填充排除关键词
+    const excludeKeywordsEl = document.getElementById('excludeKeywords');
+    if (excludeKeywordsEl) {
+        excludeKeywordsEl.value = (node.exclude_keywords || []).join('、');
+    }
+
     // 显示模板变量提示
     updateTemplateHint(node.type);
 
@@ -1278,6 +1289,18 @@ window.saveMatchSettings = function() {
             node.match_keywords = kwStr.split(/[、,;\s]+/).filter(k => k.trim());
         } else {
             node.match_keywords = [];
+        }
+    }
+
+    // 排除关键词
+    const excludeKeywordsEl = document.getElementById('excludeKeywords');
+    if (excludeKeywordsEl) {
+        const kwStr = excludeKeywordsEl.value.trim();
+        if (kwStr) {
+            // 支持中文顿号、英文逗号、分号、空格分隔
+            node.exclude_keywords = kwStr.split(/[、,;\s]+/).filter(k => k.trim());
+        } else {
+            node.exclude_keywords = [];
         }
     }
 
@@ -1968,7 +1991,8 @@ function treeToConfig() {
                             attributes: child.attributes || {},
                             doc_note: child.doc_note || '',
                             filename_template: child.filename_template || '',
-                            match_keywords: child.match_keywords || []
+                            match_keywords: child.match_keywords || [],
+                            exclude_keywords: child.exclude_keywords || []
                         };
                         
                         // 将 attributes 转换为 requirement 字符串，供主页显示
@@ -1988,11 +2012,13 @@ function treeToConfig() {
                                         attributes: folder.attributes || {},
                                         filename_template: folder.filename_template || '',
                                         match_keywords: folder.match_keywords || [],
+                                        exclude_keywords: folder.exclude_keywords || [],
                                         files: (folder.children || [])
                                             .filter(f => f.type === 'file')
                                             .map(f => ({
                                                 name: f.name,
-                                                match_keywords: f.match_keywords || []
+                                                match_keywords: f.match_keywords || [],
+                                                exclude_keywords: f.exclude_keywords || []
                                             }))
                                     };
                                 });
@@ -2012,9 +2038,11 @@ function treeToConfig() {
                             attributes: child.attributes || {},
                             filename_template: child.filename_template || '',
                             match_keywords: child.match_keywords || [],
+                            exclude_keywords: child.exclude_keywords || [],
                             files: (child.children || []).map(f => ({
                                 name: typeof f === 'object' ? f.name : f,
-                                match_keywords: f.match_keywords || []
+                                match_keywords: f.match_keywords || [],
+                                exclude_keywords: f.exclude_keywords || []
                             }))
                         });
                     }
