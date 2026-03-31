@@ -2228,12 +2228,36 @@ export async function confirmImportModule() {
     const mode = modeSelect ? modeSelect.value : 'merge';
     
     try {
-        const content = await file.text();
-        const importedData = JSON.parse(content);
+        let importedData;
         
-        // 验证数据结构
-        if (!importedData.cycles || !Array.isArray(importedData.cycles)) {
-            showNotification('无效的文档需求配置文件：缺少周期数据', 'error');
+        if (file.name.endsWith('.json')) {
+            // 处理JSON文件
+            const content = await file.text();
+            importedData = JSON.parse(content);
+            
+            // 验证数据结构
+            if (!importedData.cycles || !Array.isArray(importedData.cycles)) {
+                showNotification('无效的文档需求配置文件：缺少周期数据', 'error');
+                return;
+            }
+        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            // 处理Excel文件
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch('/api/projects/load', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            if (result.status !== 'success') {
+                throw new Error(result.message || 'Excel文件解析失败');
+            }
+            
+            importedData = result.config;
+        } else {
+            showNotification('不支持的文件格式，仅支持JSON和Excel文件', 'error');
             return;
         }
         
