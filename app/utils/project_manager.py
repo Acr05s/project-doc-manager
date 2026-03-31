@@ -263,7 +263,16 @@ class ProjectManager:
             logger.info(f"[DEBUG] 开始加载项目: {project_id}")
             
             # 首先尝试从项目索引中获取项目名称
-            project_info = self.projects_db.get(project_id)
+            project_info = None
+            # 检查 projects_db 的结构
+            if isinstance(self.projects_db, dict):
+                # 新格式：projects_db 是直接的项目字典
+                if project_id in self.projects_db:
+                    project_info = self.projects_db[project_id]
+                # 兼容旧格式：projects_db 包含 'projects' 字段
+                elif 'projects' in self.projects_db:
+                    project_info = self.projects_db['projects'].get(project_id)
+            
             logger.info(f"[DEBUG] 项目索引信息: {project_info}")
             
             if not project_info:
