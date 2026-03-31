@@ -776,9 +776,9 @@ def import_full_package():
         project_config['created_time'] = datetime.now().isoformat()
         project_config['updated_time'] = datetime.now().isoformat()
 
-        # 创建项目目录
+        # 创建项目目录（使用项目名称而不是项目ID）
         projects_base = doc_manager.config.projects_base_folder
-        new_project_dir = projects_base / new_project_id
+        new_project_dir = projects_base / final_name
         new_project_dir.mkdir(parents=True, exist_ok=True)
 
         # 复制所有文件到新项目目录

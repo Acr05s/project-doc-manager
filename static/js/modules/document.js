@@ -2811,7 +2811,8 @@ function generateDynamicEditForm(doc, cycle, docName) {
     }
     
     // 备注行
-    const noteValue = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || '';
+    // 备注字段可能存储在不同名称的字段中（大小写不敏感）
+    const noteValue = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || doc.Remark || doc.Note || doc.NOTES || doc.REMARK || doc.REMARKS || '';
     formHtml += `
         <tr>
             <td class="label-cell"><label>备注</label></td>
@@ -3909,7 +3910,14 @@ function showReportModal(reportData) {
                                                                 ${dirDocs.map((doc, fileIndex) => `
                                                                     <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.original_filename || doc.filename} ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''} ${doc.notes ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.notes + ')</span>' : ''} ${doc.note ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.note + ')</span>' : ''} ${doc.doc_note ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.doc_note + ')</span>' : ''} ${doc.remarks ? '<span style="color: #6c757d; font-size: 11px; margin-left: 8px;">(' + doc.remarks + ')</span>' : ''}</td>
+                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
+                                                                            ${doc.original_filename || doc.filename} 
+                                                                            ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}
+                                                                            ${(() => {
+                                                                                const note = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || doc.Remark || doc.Note || doc.NOTES || doc.REMARK || doc.REMARKS || '';
+                                                                                return note ? `<span style="color: #ff6600; font-size: 12px; margin-left: 8px; font-weight: 600; background: #fff7e6; padding: 2px 6px; border-radius: 4px; border: 1px solid #ffd591;">💬 ${note}</span>` : '';
+                                                                            })()}
+                                                                        </td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
                                                                             ${(() => {
@@ -3921,74 +3929,26 @@ function showReportModal(reportData) {
                                                                                     if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
                                                                                     return null;
                                                                                 };
-                                                                                
-                                                                                const statusParts = [];
-                                                                                
-                                                                                // 签字状态
-                                                                                if (hasSignRequirement) {
-                                                                                    const getDocValue = (fieldName) => {
-                                                                                        // 检查多个可能的属性来源
-                                                                                        if (doc[fieldName] !== undefined) return doc[fieldName];
-                                                                                        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
-                                                                                        if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
-                                                                                        if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
-                                                                                        return null;
-                                                                                    };
-                                                                                    
-                                                                                    // 检查是否有签字信息
-                                                                                    const hasSignature = 
-                                                                                        getDocValue('no_signature') ||
-                                                                                        getDocValue('signer') ||
-                                                                                        getDocValue('party_a_signer') ||
-                                                                                        getDocValue('party_b_signer') ||
-                                                                                        getDocValue('party_a_sign') ||
-                                                                                        getDocValue('party_b_sign');
-                                                                                    
-                                                                                    if (getDocValue('no_signature')) {
-                                                                                        statusParts.push('✓ 无签字');
-                                                                                    } else if (hasSignature) {
-                                                                                        statusParts.push('✓ 有签字');
-                                                                                    } else {
-                                                                                        statusParts.push('⚠ 无签字');
-                                                                                    }
-                                                                                }
-                                                                                
-                                                                                // 盖章状态
-                                                                                if (hasSealRequirement) {
-                                                                                    const getDocValue = (fieldName) => {
-                                                                                        // 检查多个可能的属性来源
-                                                                                        if (doc[fieldName] !== undefined) return doc[fieldName];
-                                                                                        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
-                                                                                        if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
-                                                                                        if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
-                                                                                        return null;
-                                                                                    };
-                                                                                    
-                                                                                    // 检查是否有盖章信息
-                                                                                    const hasSeal = 
-                                                                                        getDocValue('no_seal') ||
-                                                                                        getDocValue('has_seal_marked') ||
-                                                                                        getDocValue('has_seal') ||
-                                                                                        getDocValue('party_a_seal') ||
-                                                                                        getDocValue('party_b_seal') ||
-                                                                                        getDocValue('other_seal');
-                                                                                    
-                                                                                    if (getDocValue('no_seal')) {
-                                                                                        statusParts.push('✓ 无盖章');
-                                                                                    } else if (hasSeal) {
-                                                                                        statusParts.push('✓ 有盖章');
-                                                                                    } else {
-                                                                                        statusParts.push('⚠ 无盖章');
-                                                                                    }
-                                                                                }
-                                                                                
-                                                                                // 归档状态
-                                                                                if (doc.archived) {
-                                                                                    statusParts.push('<span style="color: #1890ff;">✓ 已归档</span>');
-                                                                                }
-                                                                                
-                                                                                return statusParts.join(' | ');
+                                                                                const hasNoSign = getDocValue('no_signature');
+                                                                                const hasSigner = getDocValue('signer');
+                                                                                if (hasNoSign) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无签字</span>';
+                                                                                if (hasSigner) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有签字</span>';
+                                                                                return '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无签字</span>';
                                                                             })()}
+                                                                            ${(() => {
+                                                                                if (!hasSealRequirement) return '';
+                                                                                const getDocValue = (fieldName) => {
+                                                                                    if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                    return null;
+                                                                                };
+                                                                                const hasNoSeal = getDocValue('no_seal');
+                                                                                const hasSeal = getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal');
+                                                                                if (hasNoSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无盖章</span>';
+                                                                                if (hasSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有盖章</span>';
+                                                                                return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无盖章</span>';
+                                                                            })()}
+                                                                            ${doc.archived ? ((hasSignRequirement || hasSealRequirement) ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #1890ff; font-size: 12px; font-weight: 500;">✓ 已归档</span>' : ''}
                                                                         </td>
                                                                     </tr>
                                                                 `).join('')}

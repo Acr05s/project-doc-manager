@@ -1,13 +1,33 @@
 """JSON文件管理模块
 
 专门用于处理JSON文件的读写操作。
-注意：Flask开发模式是单线程的，不需要额外的线程锁。
+添加了文件锁和线程锁机制，支持多线程并发访问。
 """
 
 import json
 import os
+import threading
 from typing import Dict, Any, Optional
 from pathlib import Path
+
+# 文件锁字典，用于存储每个文件的锁
+_file_locks = {}
+_file_locks_lock = threading.RLock()  # 保护_file_locks字典的锁
+
+
+def get_file_lock(file_path):
+    """获取文件锁
+    
+    Args:
+        file_path: 文件路径
+        
+    Returns:
+        threading.RLock: 文件锁
+    """
+    with _file_locks_lock:
+        if file_path not in _file_locks:
+            _file_locks[file_path] = threading.RLock()
+        return _file_locks[file_path]
 
 
 class JSONFileManager:
@@ -31,27 +51,29 @@ class JSONFileManager:
         if not os.path.exists(file_path):
             return None
         
-        # 尝试多种编码读取
-        encodings = ['utf-8', 'gbk', 'utf-8-sig', 'latin-1']
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    content = f.read()
-                    # 尝试解析JSON
-                    return json.loads(content)
-            except UnicodeDecodeError:
-                continue
-            except json.JSONDecodeError as e:
-                # JSON解析错误，可能是文件格式问题
-                print(f"JSON解析错误 ({encoding}): {e}")
-                continue
-            except Exception as e:
-                print(f"读取文件错误 ({encoding}): {e}")
-                continue
-        
-        # 所有编码都失败，返回None
-        print(f"无法读取文件: {file_path}")
-        return None
+        # 获取文件锁
+        with get_file_lock(file_path):
+            # 尝试多种编码读取
+            encodings = ['utf-8', 'gbk', 'utf-8-sig', 'latin-1']
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        # 尝试解析JSON
+                        return json.loads(content)
+                except UnicodeDecodeError:
+                    continue
+                except json.JSONDecodeError as e:
+                    # JSON解析错误，可能是文件格式问题
+                    print(f"JSON解析错误 ({encoding}): {e}")
+                    continue
+                except Exception as e:
+                    print(f"读取文件错误 ({encoding}): {e}")
+                    continue
+            
+            # 所有编码都失败，返回None
+            print(f"无法读取文件: {file_path}")
+            return None
     
     def write_json(self, file_path: str, data: Dict[str, Any]) -> bool:
         """写入JSON文件
@@ -65,16 +87,18 @@ class JSONFileManager:
         """
         file_path = os.path.abspath(file_path)
         
-        try:
-            # 确保目录存在
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            return True
-        except Exception as e:
-            print(f"写入文件失败: {file_path}, 错误: {e}")
-            return False
+        # 获取文件锁
+        with get_file_lock(file_path):
+            try:
+                # 确保目录存在
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                return True
+            except Exception as e:
+                print(f"写入文件失败: {file_path}, 错误: {e}")
+                return False
     
     def update_json(self, file_path: str, update_func) -> bool:
         """更新JSON文件
@@ -88,19 +112,21 @@ class JSONFileManager:
         """
         file_path = os.path.abspath(file_path)
         
-        # 读取当前数据
-        current_data = self.read_json(file_path)
-        if current_data is None:
-            current_data = {}
-        
-        # 应用更新
-        try:
-            new_data = update_func(current_data)
-            # 写入更新后的数据
-            return self.write_json(file_path, new_data)
-        except Exception as e:
-            print(f"更新文件失败: {file_path}, 错误: {e}")
-            return False
+        # 获取文件锁，确保整个读取-更新-写入过程是原子的
+        with get_file_lock(file_path):
+            # 读取当前数据
+            current_data = self.read_json(file_path)
+            if current_data is None:
+                current_data = {}
+            
+            # 应用更新
+            try:
+                new_data = update_func(current_data)
+                # 写入更新后的数据
+                return self.write_json(file_path, new_data)
+            except Exception as e:
+                print(f"更新文件失败: {file_path}, 错误: {e}")
+                return False
     
     def get_project_file_path(self, projects_base_folder: str, project_id: str) -> str:
         """获取项目文件路径
