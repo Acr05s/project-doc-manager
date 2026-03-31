@@ -348,7 +348,17 @@ cmd_upgrade() {
     # 执行git pull
     echo -e "${YELLOW}Pulling latest code from git...${NC}"
     cd "$APP_DIR"
-    if git pull origin main; then
+    
+    # 获取当前分支
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [ -z "$CURRENT_BRANCH" ]; then
+        echo -e "${YELLOW}[WARN] Could not determine current branch, using 'main'${NC}"
+        CURRENT_BRANCH="main"
+    fi
+    
+    echo -e "${BLUE}Current branch: $CURRENT_BRANCH${NC}"
+    
+    if git pull origin "$CURRENT_BRANCH"; then
         echo -e "${GREEN}[OK] Code updated successfully!${NC}"
     else
         echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
