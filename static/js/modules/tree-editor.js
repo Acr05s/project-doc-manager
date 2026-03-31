@@ -2255,7 +2255,7 @@ export async function confirmImportModule() {
                 throw new Error(result.message || 'Excel文件解析失败');
             }
             
-            importedData = result.config;
+            importedData = result.data;
         } else {
             showNotification('不支持的文件格式，仅支持JSON和Excel文件', 'error');
             return;
