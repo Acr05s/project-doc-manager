@@ -137,15 +137,44 @@ def import_package():
 
         # 保存上传的ZIP到临时文件
         temp_zip_path = doc_manager.config.upload_folder / 'temp' / f'{uuid.uuid4()}.zip'
-        temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
-        file.save(str(temp_zip_path))
-
-        # 解压ZIP
-        extract_dir = doc_manager.config.upload_folder / 'temp' / f'import_{uuid.uuid4()}'
-        extract_dir.mkdir(parents=True, exist_ok=True)
-
-        with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
-            zip_ref.extractall(str(extract_dir))
+        
+        try:
+            # 确保临时目录存在
+            temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[导入] 保存ZIP文件到: {temp_zip_path}")
+            
+            # 保存上传的文件
+            file.save(str(temp_zip_path))
+            logger.info(f"[导入] ZIP文件保存成功，大小: {temp_zip_path.stat().st_size} bytes")
+            
+            # 解压ZIP
+            extract_dir = doc_manager.config.upload_folder / 'temp' / f'import_{uuid.uuid4()}'
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[导入] 解压到目录: {extract_dir}")
+            
+            try:
+                with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(str(extract_dir))
+                logger.info(f"[导入] ZIP文件解压成功")
+            except zipfile.BadZipFile:
+                logger.error(f"[导入] 无效的ZIP文件: {temp_zip_path}")
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                temp_zip_path.unlink(missing_ok=True)
+                return jsonify({'status': 'error', 'message': '无效的ZIP文件'}), 400
+            except Exception as e:
+                logger.error(f"[导入] 解压ZIP文件失败: {e}")
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                temp_zip_path.unlink(missing_ok=True)
+                return jsonify({'status': 'error', 'message': f'解压ZIP文件失败: {str(e)}'}), 400
+        except Exception as e:
+            logger.error(f"[导入] 保存ZIP文件失败: {e}")
+            # 清理可能创建的文件
+            if temp_zip_path.exists():
+                try:
+                    temp_zip_path.unlink()
+                except:
+                    pass
+            return jsonify({'status': 'error', 'message': f'保存ZIP文件失败: {str(e)}'}), 500
 
         # 读取项目配置
         config_file = extract_dir / 'project_config.json'
@@ -1020,20 +1049,44 @@ def preview_import_package():
         # 使用 config.upload_folder 而不是 folders.upload_folder，确保使用绝对路径
         upload_folder = doc_manager.config.upload_folder
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
-        temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
-        file.save(str(temp_zip_path))
-        
-        # 解压ZIP到临时目录
-        extract_dir = upload_folder / 'temp' / f'preview_{temp_id}'
-        extract_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            with zipfile.ZipFile(temp_zip_path, 'r') as zip_file:
-                zip_file.extractall(extract_dir)
-        except zipfile.BadZipFile:
-            shutil.rmtree(extract_dir, ignore_errors=True)
-            temp_zip_path.unlink(missing_ok=True)
-            return jsonify({'status': 'error', 'message': '无效的ZIP文件'}), 400
+            # 确保临时目录存在
+            temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[预览] 保存ZIP文件到: {temp_zip_path}")
+            
+            # 保存上传的文件
+            file.save(str(temp_zip_path))
+            logger.info(f"[预览] ZIP文件保存成功，大小: {temp_zip_path.stat().st_size} bytes")
+            
+            # 解压ZIP到临时目录
+            extract_dir = upload_folder / 'temp' / f'preview_{temp_id}'
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[预览] 解压到目录: {extract_dir}")
+            
+            try:
+                with zipfile.ZipFile(temp_zip_path, 'r') as zip_file:
+                    zip_file.extractall(extract_dir)
+                logger.info(f"[预览] ZIP文件解压成功")
+            except zipfile.BadZipFile:
+                logger.error(f"[预览] 无效的ZIP文件: {temp_zip_path}")
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                temp_zip_path.unlink(missing_ok=True)
+                return jsonify({'status': 'error', 'message': '无效的ZIP文件'}), 400
+            except Exception as e:
+                logger.error(f"[预览] 解压ZIP文件失败: {e}")
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                temp_zip_path.unlink(missing_ok=True)
+                return jsonify({'status': 'error', 'message': f'解压ZIP文件失败: {str(e)}'}), 400
+        except Exception as e:
+            logger.error(f"[预览] 保存ZIP文件失败: {e}")
+            # 清理可能创建的文件
+            if temp_zip_path.exists():
+                try:
+                    temp_zip_path.unlink()
+                except:
+                    pass
+            return jsonify({'status': 'error', 'message': f'保存ZIP文件失败: {str(e)}'}), 500
         
         # 查找项目配置文件
         project_config_file = None
@@ -1149,8 +1202,15 @@ def import_from_preview():
         extract_dir = upload_folder / 'temp' / f'preview_{temp_id}'
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
         
-        if not extract_dir.exists():
-            return jsonify({'status': 'error', 'message': '临时文件已过期'}), 400
+        try:
+            if not extract_dir.exists():
+                logger.error(f"[导入] 临时文件已过期或不存在: {extract_dir}")
+                return jsonify({'status': 'error', 'message': '临时文件已过期'}), 400
+            
+            logger.info(f"[导入] 找到临时目录: {extract_dir}")
+        except Exception as e:
+            logger.error(f"[导入] 检查临时文件失败: {e}")
+            return jsonify({'status': 'error', 'message': f'检查临时文件失败: {str(e)}'}), 500
         
         try:
             # 1. 找到项目配置文件
