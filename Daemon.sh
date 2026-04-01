@@ -261,14 +261,35 @@ cmd_stop() {
         fi
     else
         echo -e "${YELLOW}[WARN] PID file not found${NC}"
-        # 尝试查找并结束Python进程
-        PIDS=$(pgrep -f "main.py" || true)
-        if [ -n "$PIDS" ]; then
-            echo -e "${YELLOW}Killing processes: $PIDS${NC}"
-            echo "$PIDS" | xargs kill -9 2>/dev/null || true
-            echo -e "${GREEN}[OK] Server stopped${NC}"
-        fi
     fi
+    
+    # 停止所有相关进程（main.py 和 gunicorn）
+    echo -e "${YELLOW}Stopping all related processes...${NC}"
+    
+    # 停止 main.py
+    PIDS=$(pgrep -f "main.py --mode=prod" || true)
+    if [ -n "$PIDS" ]; then
+        echo -e "${YELLOW}Stopping main.py: $PIDS${NC}"
+        echo "$PIDS" | xargs kill -9 2>/dev/null || true
+    fi
+    
+    # 停止 gunicorn
+    PIDS=$(pgrep -f "gunicorn.*main:app" || true)
+    if [ -n "$PIDS" ]; then
+        echo -e "${YELLOW}Stopping gunicorn: $PIDS${NC}"
+        echo "$PIDS" | xargs kill -9 2>/dev/null || true
+    fi
+    
+    # 确保端口 5000 被释放
+    sleep 2
+    PORT_PIDS=$(lsof -t -i:5000 2>/dev/null || true)
+    if [ -n "$PORT_PIDS" ]; then
+        echo -e "${YELLOW}Force releasing port 5000: $PORT_PIDS${NC}"
+        echo "$PORT_PIDS" | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+    
+    echo -e "${GREEN}[OK] All servers stopped${NC}"
 }
 
 # 重启服务器
