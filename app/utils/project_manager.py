@@ -111,15 +111,9 @@ class ProjectManager:
                     'updated_time': datetime.now().isoformat()
                 }
                 
-                # 检查projects_db的格式
-                if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
-                    # 新格式：projects_db包含'projects'字段，只保存项目数据
-                    data.update(self.projects_db['projects'])
-                    logger.info(f"[DEBUG] 使用新格式保存，项目数量: {len(self.projects_db['projects'])}")
-                else:
-                    # 旧格式：直接保存projects_db
-                    data.update(self.projects_db)
-                    logger.info(f"[DEBUG] 使用旧格式保存，项目数量: {len(self.projects_db)}")
+                # 直接保存projects_db（确保与_load_projects_index保持一致）
+                data.update(self.projects_db)
+                logger.info(f"[DEBUG] 使用旧格式保存，项目数量: {len(self.projects_db)}")
                 
                 # 添加已删除项目
                 data['deleted_projects'] = self.deleted_projects
@@ -461,6 +455,8 @@ class ProjectManager:
             
         except Exception as e:
             logger.error(f"删除项目失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             return {'status': 'error', 'message': str(e)}
     
     def restore(self, project_id: str) -> Dict[str, Any]:
@@ -532,16 +528,11 @@ class ProjectManager:
             Dict: 添加结果
         """
         try:
-            # 确定项目存储的位置
-            projects_dict = self.projects_db
-            # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
-            if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
-                projects_dict = self.projects_db['projects']
-            
+            # 直接使用 self.projects_db 作为项目字典（确保与 _load_projects_index 保持一致）
             # 检查项目是否已在索引中
-            if project_id in projects_dict:
+            if project_id in self.projects_db:
                 # 更新现有项目信息
-                projects_dict[project_id].update({
+                self.projects_db[project_id].update({
                     'name': name,
                     'description': description,
                     'updated_time': datetime.now().isoformat(),
@@ -549,7 +540,7 @@ class ProjectManager:
                 })
             else:
                 # 添加新项目到索引
-                projects_dict[project_id] = {
+                self.projects_db[project_id] = {
                     'id': project_id,
                     'name': name,
                     'description': description,
@@ -571,6 +562,8 @@ class ProjectManager:
             
         except Exception as e:
             logger.error(f"添加项目到索引失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             return {'status': 'error', 'message': str(e)}
     
     def list_all(self) -> List[Dict[str, Any]]:
