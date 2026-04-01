@@ -358,16 +358,22 @@ cmd_upgrade() {
     
     echo -e "${BLUE}Current branch: $CURRENT_BRANCH${NC}"
     
-    if git pull origin "$CURRENT_BRANCH"; then
+    if git pull --rebase origin "$CURRENT_BRANCH"; then
         echo -e "${GREEN}[OK] Code updated successfully!${NC}"
     else
-        echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
-        # 如果之前正在运行，尝试重新启动
-        if [ "$WAS_RUNNING" = true ]; then
-            echo -e "${YELLOW}Attempting to restart server...${NC}"
-            cmd_start
+        # 如果 rebase 失败，尝试使用 merge
+        echo -e "${YELLOW}[WARN] Rebase failed, trying merge...${NC}"
+        if git pull --no-rebase origin "$CURRENT_BRANCH"; then
+            echo -e "${GREEN}[OK] Code updated successfully (merged)!${NC}"
+        else
+            echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
+            # 如果之前正在运行，尝试重新启动
+            if [ "$WAS_RUNNING" = true ]; then
+                echo -e "${YELLOW}Attempting to restart server...${NC}"
+                cmd_start
+            fi
+            exit 1
         fi
-        exit 1
     fi
     
     # 清除Python缓存
