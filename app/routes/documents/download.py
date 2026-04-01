@@ -1,8 +1,30 @@
 """文档下载相关路由"""
 
+import os
 from flask import request, jsonify, send_file
 from pathlib import Path
 from .utils import get_doc_manager
+
+
+def normalize_path(path_str):
+    """统一路径分隔符，支持Windows和Linux"""
+    if not path_str:
+        return path_str
+    return path_str.replace('\\', '/')
+
+
+def safe_join(*parts):
+    """安全的路径拼接，自动处理不同平台的路径分隔符"""
+    if not parts:
+        return ''
+    # 过滤空值并规范化每个部分
+    normalized_parts = [normalize_path(p) for p in parts if p]
+    if not normalized_parts:
+        return ''
+    # 使用 os.path.join，它会自动处理平台相关的分隔符
+    result = os.path.join(*normalized_parts)
+    # 规范化结果中的分隔符
+    return normalize_path(result)
 
 
 def download_document(doc_id):
@@ -63,25 +85,35 @@ def download_document(doc_id):
         file_path = metadata.get('file_path')
         filename = metadata.get('filename', 'document')
         
-        # 处理相对路径
-        file_path_obj = Path(file_path)
+        # 使用通用工具函数规范化路径
+        normalized_path = normalize_path(file_path)
+        file_path_obj = Path(normalized_path)
+        
         if not file_path_obj.is_absolute():
-            # 相对路径，相对于项目的uploads目录
-            project_name = metadata.get('project_name')
-            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                project_name = doc_manager.current_project.get('name')
-            
-            if project_name:
-                project_uploads_dir = doc_manager.get_documents_folder(project_name)
-                file_path_obj = project_uploads_dir / file_path
+            # 处理新的完整相对路径格式：projects/{项目名}/uploads/...
+            if normalized_path.startswith('projects/'):
+                # 从 projects_base_folder 的父目录开始拼接
+                base_dir = doc_manager.config.projects_base_folder.parent
+                # 使用safe_join构建路径，自动处理跨平台分隔符
+                path_parts = normalized_path.split('/')
+                file_path_obj = Path(safe_join(str(base_dir), *path_parts))
             else:
-                # 如果没有项目名称，尝试使用绝对路径
-                # 检查文件是否存在于uploads目录中
-                if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
-                    upload_folder = doc_manager.config.upload_folder
+                # 相对路径，相对于项目的uploads目录
+                project_name = metadata.get('project_name')
+                if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                    project_name = doc_manager.current_project.get('name')
+                
+                if project_name:
+                    project_uploads_dir = doc_manager.get_documents_folder(project_name)
+                    file_path_obj = Path(safe_join(str(project_uploads_dir), normalized_path))
                 else:
-                    upload_folder = Path('uploads')
-                file_path_obj = upload_folder / file_path
+                    # 如果没有项目名称，尝试使用绝对路径
+                    # 检查文件是否存在于uploads目录中
+                    if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+                        upload_folder = doc_manager.config.upload_folder
+                    else:
+                        upload_folder = Path('uploads')
+                    file_path_obj = Path(safe_join(str(upload_folder), normalized_path))
         
         if not file_path or not file_path_obj.exists():
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
