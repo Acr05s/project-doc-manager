@@ -135,8 +135,18 @@ def import_package():
         if not file:
             return jsonify({'status': 'error', 'message': '未选择文件'}), 400
 
+        # 确保 upload_folder 存在
+        if hasattr(doc_manager, 'config') and doc_manager.config and hasattr(doc_manager.config, 'upload_folder'):
+            upload_folder = doc_manager.config.upload_folder
+        elif hasattr(doc_manager, 'folders') and doc_manager.folders and hasattr(doc_manager.folders, 'upload_folder'):
+            upload_folder = doc_manager.folders.upload_folder
+        else:
+            # 使用默认路径
+            from pathlib import Path
+            upload_folder = Path('uploads')
+        
         # 保存上传的ZIP到临时文件
-        temp_zip_path = doc_manager.config.upload_folder / 'temp' / f'{uuid.uuid4()}.zip'
+        temp_zip_path = upload_folder / 'temp' / f'{uuid.uuid4()}.zip'
         
         try:
             # 确保临时目录存在
@@ -148,7 +158,7 @@ def import_package():
             logger.info(f"[导入] ZIP文件保存成功，大小: {temp_zip_path.stat().st_size} bytes")
             
             # 解压ZIP
-            extract_dir = doc_manager.config.upload_folder / 'temp' / f'import_{uuid.uuid4()}'
+            extract_dir = upload_folder / 'temp' / f'import_{uuid.uuid4()}'
             extract_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"[导入] 解压到目录: {extract_dir}")
             
@@ -1046,8 +1056,15 @@ def preview_import_package():
         
         # 保存上传的ZIP到临时文件
         temp_id = str(uuid.uuid4())
-        # 使用 config.upload_folder 而不是 folders.upload_folder，确保使用绝对路径
-        upload_folder = doc_manager.config.upload_folder
+        # 确保 upload_folder 存在
+        if hasattr(doc_manager, 'config') and doc_manager.config and hasattr(doc_manager.config, 'upload_folder'):
+            upload_folder = doc_manager.config.upload_folder
+        elif hasattr(doc_manager, 'folders') and doc_manager.folders and hasattr(doc_manager.folders, 'upload_folder'):
+            upload_folder = doc_manager.folders.upload_folder
+        else:
+            # 使用默认路径
+            from pathlib import Path
+            upload_folder = Path('uploads')
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
         
         try:
@@ -1197,8 +1214,15 @@ def import_from_preview():
             return jsonify({'status': 'error', 'message': '缺少临时文件ID'}), 400
         
         # 检查临时文件
-        # 使用 config.upload_folder 而不是 folders.upload_folder，确保使用绝对路径
-        upload_folder = doc_manager.config.upload_folder
+        # 确保 upload_folder 存在
+        if hasattr(doc_manager, 'config') and doc_manager.config and hasattr(doc_manager.config, 'upload_folder'):
+            upload_folder = doc_manager.config.upload_folder
+        elif hasattr(doc_manager, 'folders') and doc_manager.folders and hasattr(doc_manager.folders, 'upload_folder'):
+            upload_folder = doc_manager.folders.upload_folder
+        else:
+            # 使用默认路径
+            from pathlib import Path
+            upload_folder = Path('uploads')
         extract_dir = upload_folder / 'temp' / f'preview_{temp_id}'
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
         
