@@ -1125,7 +1125,7 @@ def preview_import_package():
         
         # 读取项目配置
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(str(config_file), 'r', encoding='utf-8') as f:
                 project_config = json.load(f)
         except Exception as e:
             shutil.rmtree(extract_dir, ignore_errors=True)

@@ -572,12 +572,7 @@ class ProjectManager:
         Returns:
             List[Dict]: 项目列表
         """
-        # 确定项目存储的位置
-        projects_dict = self.projects_db
-        # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
-        if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
-            projects_dict = self.projects_db['projects']
-        
+        # 直接使用 self.projects_db 作为项目字典（确保与 _load_projects_index 保持一致）
         return [
             {
                 'id': project_id,
@@ -586,7 +581,7 @@ class ProjectManager:
                 'created_time': info.get('created_time', ''),
                 'updated_time': info.get('updated_time', '')
             }
-            for project_id, info in projects_dict.items()
+            for project_id, info in self.projects_db.items()
         ]
     
     def get_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
@@ -598,13 +593,8 @@ class ProjectManager:
         Returns:
             Optional[Dict]: 项目信息
         """
-        # 确定项目存储的位置
-        projects_dict = self.projects_db
-        # 如果是新格式（包含 'projects' 字段），使用 projects 子字典
-        if isinstance(self.projects_db, dict) and 'projects' in self.projects_db:
-            projects_dict = self.projects_db['projects']
-        
-        return projects_dict.get(project_id)
+        # 直接使用 self.projects_db 作为项目字典（确保与 _load_projects_index 保持一致）
+        return self.projects_db.get(project_id)
     
     def search(self, keyword: str) -> List[Dict[str, Any]]:
         """搜索项目
