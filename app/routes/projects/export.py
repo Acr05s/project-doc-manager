@@ -186,10 +186,25 @@ def import_package():
                     pass
             return jsonify({'status': 'error', 'message': f'保存ZIP文件失败: {str(e)}'}), 500
 
-        # 读取项目配置
-        config_file = extract_dir / 'project_config.json'
-        if not config_file.exists():
-            return jsonify({'status': 'error', 'message': 'ZIP包中缺少project_config.json文件'}), 400
+        # 读取项目配置（支持单用户版备份格式：配置文件在子目录中）
+        config_file = None
+        # 先查找根目录
+        if (extract_dir / 'project_config.json').exists():
+            config_file = extract_dir / 'project_config.json'
+        elif (extract_dir / 'project_info.json').exists():
+            config_file = extract_dir / 'project_info.json'
+        else:
+            # 再使用rglob在子目录中查找（单用户版备份格式：{项目名}/project_config.json）
+            for candidate_name in ('project_config.json', 'project_info.json'):
+                found = list(extract_dir.rglob(candidate_name))
+                if found:
+                    config_file = found[0]
+                    break
+        
+        if not config_file:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            temp_zip_path.unlink(missing_ok=True)
+            return jsonify({'status': 'error', 'message': 'ZIP包中缺少project_config.json或project_info.json文件'}), 400
 
         with open(config_file, 'r', encoding='utf-8') as f:
             project_config = json.load(f)

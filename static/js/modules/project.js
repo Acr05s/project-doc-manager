@@ -3000,8 +3000,16 @@ export async function handlePackageFileSelectInModal(e) {
                     } catch (e) {
                         reject(new Error('解析响应失败'));
                     }
+                } else if (xhr.status === 502 || xhr.status === 504) {
+                    reject(new Error('服务器处理超时，ZIP包可能过大，请联系管理员或尝试分批导入'));
                 } else {
-                    reject(new Error('上传失败: ' + xhr.statusText));
+                    // 尝试解析错误响应体
+                    try {
+                        const errResult = JSON.parse(xhr.responseText);
+                        reject(new Error(errResult.message || `上传失败 (${xhr.status})`));
+                    } catch (e) {
+                        reject(new Error(`上传失败: ${xhr.status} ${xhr.statusText}`));
+                    }
                 }
             });
             

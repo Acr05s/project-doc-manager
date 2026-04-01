@@ -68,9 +68,12 @@ class ProjectManager:
                     # 旧格式：直接用项目ID作为键
                     else:
                         # 过滤掉非项目键（如updated_time, deleted_projects）
+                        # 兼容性：有些项目可能没有'id'字段，只要是dict且有'name'字段也视为项目
                         self.projects_db = {
                             k: v for k, v in data.items() 
-                            if isinstance(v, dict) and 'id' in v and k != 'deleted_projects'
+                            if isinstance(v, dict) 
+                            and k not in ('deleted_projects', 'updated_time', 'meta')
+                            and ('id' in v or 'name' in v)
                         }
                     
                     # 加载已删除项目
@@ -401,6 +404,11 @@ class ProjectManager:
             Dict: 删除结果
         """
         try:
+            # 如果内存中找不到项目，先重新从文件加载索引（防止内存未同步）
+            if project_id not in self.projects_db and project_id not in self.deleted_projects:
+                logger.warning(f"项目 {project_id} 不在内存索引中，尝试重新加载索引文件")
+                self._load_projects_index()
+            
             # 检查项目是否存在
             if permanent:
                 # 永久删除：先检查活动项目列表，再检查已删除列表
@@ -409,11 +417,23 @@ class ProjectManager:
                 elif project_id in self.deleted_projects:
                     project_info = self.deleted_projects[project_id].copy()
                 else:
-                    return {'status': 'error', 'message': '项目不存在'}
+                    # 最后尝试：扫描项目数据目录查找项目
+                    logger.warning(f"项目 {project_id} 在索引中不存在，尝试从文件系统恢复")
+                    project_info = self._try_recover_project_info(project_id)
+                    if not project_info:
+                        return {'status': 'error', 'message': '项目不存在'}
+                    logger.info(f"从文件系统恢复了项目信息: {project_info.get('name')}")
             else:
                 # 软删除：从正常项目列表中查找
                 if project_id not in self.projects_db:
-                    return {'status': 'error', 'message': '项目不存在'}
+                    # 最后尝试：扫描项目数据目录查找项目
+                    logger.warning(f"项目 {project_id} 在活动索引中不存在，尝试从文件系统恢复")
+                    project_info = self._try_recover_project_info(project_id)
+                    if not project_info:
+                        return {'status': 'error', 'message': '项目不存在'}
+                    # 临时写回内存，以便后续软删除逻辑正常运行
+                    self.projects_db[project_id] = project_info
+                    logger.info(f"从文件系统恢复了项目信息并写回内存: {project_info.get('name')}")
                 project_info = self.projects_db[project_id].copy()
             
             if permanent:
@@ -459,6 +479,42 @@ class ProjectManager:
             logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             return {'status': 'error', 'message': str(e)}
     
+    def _try_recover_project_info(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """尝试通过扫描项目目录找到项目信息（用于索引不存在时的兜底）
+        
+        Args:
+            project_id: 项目ID
+            
+        Returns:
+            Optional[Dict]: 项目信息，找不到返回None
+        """
+        try:
+            projects_dir = self.config.projects_base_folder
+            for project_dir in projects_dir.iterdir():
+                if not project_dir.is_dir():
+                    continue
+                # 尝试读取 project_info.json 或 project_config.json
+                for config_file_name in ('project_info.json', 'project_config.json'):
+                    config_path = project_dir / config_file_name
+                    if config_path.exists():
+                        try:
+                            with open(str(config_path), 'r', encoding='utf-8') as f:
+                                info = json.load(f)
+                            if info.get('id') == project_id:
+                                return {
+                                    'id': info['id'],
+                                    'name': info.get('name', project_dir.name),
+                                    'description': info.get('description', ''),
+                                    'created_time': info.get('created_time', ''),
+                                    'updated_time': info.get('updated_time', '')
+                                }
+                        except Exception:
+                            pass
+            return None
+        except Exception as e:
+            logger.error(f"扫描项目目录失败: {e}")
+            return None
+
     def restore(self, project_id: str) -> Dict[str, Any]:
         """恢复已删除的项目
         
@@ -469,6 +525,11 @@ class ProjectManager:
             Dict: 恢复结果
         """
         try:
+            # 如果内存中找不到已删除项目，先尝试重新加载索引
+            if project_id not in self.deleted_projects:
+                logger.warning(f"项目 {project_id} 不在内存回收站中，尝试重新加载索引文件")
+                self._load_projects_index()
+            
             # 检查项目是否在已删除列表中
             if project_id not in self.deleted_projects:
                 return {'status': 'error', 'message': '项目不在回收站中'}

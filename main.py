@@ -175,7 +175,8 @@ def run_production_server(app, port=5000, threads=10):
                 'workers': threads,
                 'worker_class': 'sync',
                 'worker_connections': 1000,
-                'timeout': 120,
+                'timeout': 600,       # 增大到600秒，支持大型ZIP包上传和解压
+                'graceful_timeout': 60,
                 'keepalive': 5,
                 'errorlog': '-',
                 'accesslog': '-',
