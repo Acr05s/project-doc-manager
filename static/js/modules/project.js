@@ -2975,52 +2975,61 @@ export async function handlePackageFileSelectInModal(e) {
     const progress = showOperationProgress('upload-' + Date.now(), '正在上传ZIP文件...');
     
     try {
-        // 使用 XMLHttpRequest 来获取上传进度
-        const uploadPromise = new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            // 进度监听
-            xhr.upload.addEventListener('progress', (event) => {
-                if (event.lengthComputable) {
-                    const percentComplete = Math.round((event.loaded / event.total) * 100);
-                    if (progressBar) progressBar.style.width = percentComplete + '%';
-                    if (progressText) progressText.textContent = '正在上传... ' + percentComplete + '%';
-                    if (progressPercent) progressPercent.textContent = percentComplete + '%';
-                    progress.update(percentComplete, `正在上传... ${percentComplete}%`);
-                }
-            });
-            
-            xhr.addEventListener('load', () => {
-                if (xhr.status === 200) {
-                    try {
-                        const result = JSON.parse(xhr.responseText);
-                        resolve(result);
-                    } catch (e) {
-                        reject(new Error('解析响应失败'));
-                    }
-                } else if (xhr.status === 502 || xhr.status === 504) {
-                    reject(new Error('服务器处理超时，ZIP包可能过大，请联系管理员或尝试分批导入'));
-                } else {
-                    // 尝试解析错误响应体
-                    try {
-                        const errResult = JSON.parse(xhr.responseText);
-                        reject(new Error(errResult.message || `上传失败 (${xhr.status})`));
-                    } catch (e) {
-                        reject(new Error(`上传失败: ${xhr.status} ${xhr.statusText}`));
-                    }
-                }
-            });
-            
-            xhr.addEventListener('error', () => reject(new Error('上传出错')));
-            xhr.addEventListener('abort', () => reject(new Error('上传已取消')));
-            
-            xhr.open('POST', '/api/projects/package/preview');
-            xhr.send(formData);
-        });
+        // 分片上传，绕过 nginx client_max_body_size 限制
+        const CHUNK_SIZE_IMPORT = 5 * 1024 * 1024; // 5MB 每片
+        const fileId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE_IMPORT);
         
-        const result = await uploadPromise;
+        // 逐片上传
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE_IMPORT;
+            const end = Math.min(start + CHUNK_SIZE_IMPORT, file.size);
+            const chunk = file.slice(start, end);
+            
+            const formData = new FormData();
+            formData.append('chunk', chunk);
+            formData.append('filename', file.name);
+            formData.append('chunkIndex', i);
+            formData.append('totalChunks', totalChunks);
+            formData.append('fileId', fileId);
+            
+            const pct = Math.round((i / totalChunks) * 90);
+            if (progressBar) progressBar.style.width = pct + '%';
+            if (progressText) progressText.textContent = `正在上传分片 ${i + 1}/${totalChunks}...`;
+            if (progressPercent) progressPercent.textContent = pct + '%';
+            progress.update(pct, `上传中 ${i + 1}/${totalChunks} 片`);
+            
+            const resp = await fetch('/api/projects/package/preview-chunk', {
+                method: 'POST',
+                body: formData
+            });
+            if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error(`分片 ${i + 1} 上传失败 (${resp.status}): ${errText}`);
+            }
+            const chunkResult = await resp.json();
+            if (chunkResult.status !== 'success') {
+                throw new Error(`分片 ${i + 1} 上传失败: ${chunkResult.message}`);
+            }
+        }
+        
+        // 所有分片上传完成，通知服务器合并并预览
+        if (progressBar) progressBar.style.width = '92%';
+        if (progressText) progressText.textContent = '正在合并并解析ZIP...';
+        if (progressPercent) progressPercent.textContent = '92%';
+        progress.update(92, '正在合并解析...');
+        
+        const mergeResp = await fetch('/api/projects/package/preview-merge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name, fileId })
+        });
+        if (!mergeResp.ok) {
+            let errMsg = `合并失败 (${mergeResp.status})`;
+            try { const e = await mergeResp.json(); errMsg = e.message || errMsg; } catch(_) {}
+            throw new Error(errMsg);
+        }
+        const result = await mergeResp.json();
         
         if (result.status !== 'success') {
             progress.error(result.message || '解析ZIP文件失败');

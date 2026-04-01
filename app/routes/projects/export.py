@@ -1513,3 +1513,167 @@ def ensure_project_index(doc_manager, project_id, project_name, project_config):
         logger.error(f"[索引] 更新项目索引失败: {e}")
         import traceback
         logger.error(traceback.format_exc())
+
+
+# ======================== 预览导入包 - 分片上传支持 ========================
+
+# 分片临时目录
+PREVIEW_CHUNK_TEMP = Path('uploads/temp_chunks')
+
+
+def preview_package_chunk():
+    """
+    接收预览导入ZIP包的分片
+    每个分片单独保存，最后由 preview_package_merge 合并并解压预览
+    """
+    try:
+        file = request.files.get('chunk')
+        chunk_index = request.form.get('chunkIndex', type=int)
+        total_chunks = request.form.get('totalChunks', type=int)
+        file_name = request.form.get('filename')
+        file_id = request.form.get('fileId')
+
+        if file is None or chunk_index is None or total_chunks is None or not file_name or not file_id:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+
+        temp_dir = PREVIEW_CHUNK_TEMP / f'preview_{file_id}'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        chunk_path = temp_dir / f'chunk_{chunk_index}'
+        file.save(str(chunk_path))
+
+        logger.info(f"[预览分片] 保存分片 {chunk_index + 1}/{total_chunks}: {chunk_path}")
+        return jsonify({
+            'status': 'success',
+            'message': f'分片 {chunk_index + 1}/{total_chunks} 上传成功'
+        })
+
+    except Exception as e:
+        logger.error(f"[预览分片] 接收分片失败: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def preview_package_merge():
+    """
+    合并预览导入ZIP包的所有分片，然后执行解压预览
+    相当于原来的 preview_import_package，但输入来自已上传的分片而非一次性上传
+    """
+    try:
+        data = request.get_json()
+        file_name = data.get('filename')
+        file_id = data.get('fileId')
+
+        if not file_name or not file_id:
+            return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
+
+        # 合并分片
+        temp_dir = PREVIEW_CHUNK_TEMP / f'preview_{file_id}'
+        if not temp_dir.exists():
+            return jsonify({'status': 'error', 'message': '分片目录不存在，请重新上传'}), 400
+
+        chunk_files = sorted(
+            [(int(f.name.split('_')[1]), f) for f in temp_dir.iterdir() if f.name.startswith('chunk_')],
+            key=lambda x: x[0]
+        )
+        if not chunk_files:
+            return jsonify({'status': 'error', 'message': '找不到已上传的分片'}), 400
+
+        # 获取 upload_folder
+        doc_manager = get_doc_manager()
+        if hasattr(doc_manager, 'config') and doc_manager.config and hasattr(doc_manager.config, 'upload_folder'):
+            upload_folder = doc_manager.config.upload_folder
+        elif hasattr(doc_manager, 'folders') and doc_manager.folders and hasattr(doc_manager.folders, 'upload_folder'):
+            upload_folder = doc_manager.folders.upload_folder
+        else:
+            upload_folder = Path('uploads')
+
+        # 保存合并后的 ZIP
+        temp_zip_path = upload_folder / 'temp' / f'preview_{file_id}.zip'
+        temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"[预览合并] 合并 {len(chunk_files)} 个分片到: {temp_zip_path}")
+        with open(str(temp_zip_path), 'wb') as out_f:
+            for _, chunk_file in chunk_files:
+                with open(str(chunk_file), 'rb') as in_f:
+                    while True:
+                        buf = in_f.read(8192)
+                        if not buf:
+                            break
+                        out_f.write(buf)
+
+        # 清理分片临时目录
+        shutil.rmtree(str(temp_dir), ignore_errors=True)
+        logger.info(f"[预览合并] 合并完成，大小: {temp_zip_path.stat().st_size} bytes")
+
+        # ---- 以下逻辑与 preview_import_package 一致 ----
+        extract_dir = upload_folder / 'temp' / f'preview_{file_id}'
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[预览合并] 解压到: {extract_dir}")
+
+        try:
+            with zipfile.ZipFile(str(temp_zip_path), 'r') as zf:
+                zf.extractall(str(extract_dir))
+            logger.info(f"[预览合并] 解压成功")
+        except zipfile.BadZipFile:
+            shutil.rmtree(str(extract_dir), ignore_errors=True)
+            temp_zip_path.unlink(missing_ok=True)
+            return jsonify({'status': 'error', 'message': '无效的ZIP文件，请检查备份包是否完整'}), 400
+        except Exception as e:
+            shutil.rmtree(str(extract_dir), ignore_errors=True)
+            temp_zip_path.unlink(missing_ok=True)
+            return jsonify({'status': 'error', 'message': f'解压ZIP文件失败: {str(e)}'}), 400
+
+        # 查找项目配置文件（支持单用户版备份格式：配置在子目录中）
+        project_config_file = None
+        project_info_file = None
+        for json_file in extract_dir.rglob('*.json'):
+            if json_file.name == 'project_config.json':
+                project_config_file = json_file
+                break
+            elif json_file.name == 'project_info.json' and project_info_file is None:
+                project_info_file = json_file
+
+        config_file = project_config_file or project_info_file
+        if not config_file:
+            shutil.rmtree(str(extract_dir), ignore_errors=True)
+            temp_zip_path.unlink(missing_ok=True)
+            return jsonify({'status': 'error', 'message': 'ZIP包中找不到项目配置文件，请确认备份包格式'}), 400
+
+        with open(str(config_file), 'r', encoding='utf-8') as f:
+            project_config = json.load(f)
+
+        project_name = project_config.get('name', '未知项目')
+        project_id = project_config.get('id', '')
+        doc_count = len(project_config.get('documents', {}))
+        cycle_count = len(project_config.get('cycles', []))
+
+        existing_project = None
+        if project_name:
+            projects = doc_manager.list_projects().get('projects', [])
+            for p in projects:
+                if p.get('name') == project_name:
+                    existing_project = p
+                    break
+
+        temp_zip_path.unlink(missing_ok=True)  # 清理 ZIP，保留解压目录
+
+        result = {
+            'status': 'success',
+            'temp_id': file_id,
+            'project_info': {
+                'name': project_name,
+                'id': project_id,
+                'doc_count': doc_count,
+                'cycle_count': cycle_count
+            },
+            'conflict': {
+                'exists': existing_project is not None,
+                'message': f'项目"{project_name}"已存在' if existing_project else None
+            }
+        }
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        logger.error(f"[预览合并] 合并预览失败: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': str(e)}), 500

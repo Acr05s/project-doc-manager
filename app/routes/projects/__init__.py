@@ -6,7 +6,7 @@ from .basic import list_projects, create_project, get_project, update_project, d
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
-from .export import export_project, import_project, import_project_file, package_project, import_package, download_package, import_project_chunk, import_project_merge, package_full_project, preview_import_package, import_from_preview
+from .export import export_project, import_project, import_project_file, package_project, import_package, download_package, import_project_chunk, import_project_merge, package_full_project, preview_import_package, import_from_preview, preview_package_chunk, preview_package_merge
 from .acceptance import confirm_cycle_acceptance, download_project_package, verify_project_files
 from .logs import get_operation_logs, get_external_logs
 from .versions import list_config_versions, save_config_version, load_config_version, switch_config_version, delete_config_version, export_config_version
@@ -40,6 +40,8 @@ project_bp.route('/<project_id>/download/<task_id>', methods=['GET'])(download_p
 project_bp.route('/package/import', methods=['POST'])(import_package)
 project_bp.route('/package/preview', methods=['POST'])(preview_import_package)
 project_bp.route('/package/import-from-preview', methods=['POST'])(import_from_preview)
+project_bp.route('/package/preview-chunk', methods=['POST'])(preview_package_chunk)
+project_bp.route('/package/preview-merge', methods=['POST'])(preview_package_merge)
 
 # 验收相关路由
 project_bp.route('/<project_id>/confirm-acceptance', methods=['POST'])(confirm_cycle_acceptance)
