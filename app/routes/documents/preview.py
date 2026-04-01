@@ -83,16 +83,27 @@ def preview_document_local(doc_id):
         file_path = metadata.get('file_path')
         print(f"[preview] file_path from metadata: {file_path}")
         
-        # 处理相对路径
+        # 处理相对路径（支持Windows和Ubuntu）
         file_path_obj = Path(file_path)
         print(f"[preview] is_absolute: {file_path_obj.is_absolute()}")
+        print(f"[preview] original file_path: {file_path}")
         
         if not file_path_obj.is_absolute():
-            # 处理新的完整相对路径格式：projects/{项目名}/uploads/...（支持正斜杠和反斜杠）
-            if file_path.startswith('projects/') or file_path.startswith('projects\\'):
+            # 统一路径分隔符
+            normalized_path = file_path.replace('\\', '/')
+            print(f"[preview] normalized_path: {normalized_path}")
+            
+            # 处理新的完整相对路径格式：projects/{项目名}/uploads/...
+            if normalized_path.startswith('projects/'):
                 # 从 projects_base_folder 的父目录开始拼接
                 base_dir = doc_manager.config.projects_base_folder.parent
-                file_path_obj = base_dir / file_path
+                # 使用split和循环来正确构建路径
+                path_parts = normalized_path.split('/')
+                file_path_obj = base_dir
+                for part in path_parts:
+                    if part:
+                        file_path_obj = file_path_obj / part
+                print(f"[preview] projects format path: {file_path_obj}")
             else:
                 # 旧格式：相对于项目的uploads目录
                 project_name = metadata.get('project_name')
@@ -102,6 +113,7 @@ def preview_document_local(doc_id):
                 if project_name:
                     project_uploads_dir = doc_manager.get_documents_folder(project_name)
                     file_path_obj = project_uploads_dir / file_path
+                    print(f"[preview] project uploads path: {file_path_obj}")
                 else:
                     # 如果没有项目名称，尝试使用绝对路径
                     if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
@@ -109,6 +121,7 @@ def preview_document_local(doc_id):
                     else:
                         upload_folder = Path('uploads')
                     file_path_obj = upload_folder / file_path
+                    print(f"[preview] uploads path: {file_path_obj}")
         
         print(f"[preview] final file_path_obj: {file_path_obj}")
         print(f"[preview] file exists: {file_path_obj.exists()}")
@@ -224,10 +237,13 @@ def _get_document_metadata(doc_manager, doc_id):
 
 
 def _resolve_file_path(doc_manager, metadata):
-    """解析文件路径，处理相对路径和绝对路径"""
+    """解析文件路径，处理相对路径和绝对路径（支持Windows和Ubuntu）"""
     file_path = metadata.get('file_path')
     if not file_path:
         return None
+    
+    # 统一路径分隔符为正斜杠（Unix风格）
+    normalized_path = file_path.replace('\\', '/')
     
     file_path_obj = Path(file_path)
     
@@ -246,38 +262,56 @@ def _resolve_file_path(doc_manager, metadata):
                 project_name = parts[0]
     
     # 优先：处理新的完整相对路径格式：projects/{项目名}/uploads/...
-    if file_path.startswith('projects/') or file_path.startswith('projects\\'):
+    # 使用统一后的路径进行检查
+    if normalized_path.startswith('projects/'):
         base_dir = doc_manager.config.projects_base_folder.parent
-        full_path = base_dir / file_path
+        # 使用Path的/操作符，它会自动处理不同平台的分隔符
+        path_parts = normalized_path.split('/')
+        full_path = base_dir
+        for part in path_parts:
+            if part:
+                full_path = full_path / part
+        print(f"[_resolve_file_path] 尝试路径: {full_path}")
         if full_path.exists():
+            print(f"[_resolve_file_path] 找到文件: {full_path}")
             return full_path
     
     # 处理 uploads/ 相对路径（不带项目名前缀）
-    if file_path.startswith('uploads/') or file_path.startswith('uploads\\'):
+    if normalized_path.startswith('uploads/'):
         if project_name:
             base_dir = doc_manager.config.projects_base_folder.parent
-            full_path = base_dir / 'projects' / project_name / file_path
+            full_path = base_dir / 'projects' / project_name / normalized_path.replace('/', Path.sep)
+            print(f"[_resolve_file_path] 尝试uploads路径: {full_path}")
             if full_path.exists():
+                print(f"[_resolve_file_path] 找到文件: {full_path}")
                 return full_path
         # 尝试从当前项目查找
         if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
             project_name = doc_manager.current_project.get('name', project_name)
             if project_name:
                 base_dir = doc_manager.config.projects_base_folder.parent
-                full_path = base_dir / 'projects' / project_name / file_path
+                full_path = base_dir / 'projects' / project_name / normalized_path.replace('/', Path.sep)
+                print(f"[_resolve_file_path] 尝试当前项目路径: {full_path}")
                 if full_path.exists():
+                    print(f"[_resolve_file_path] 找到文件: {full_path}")
                     return full_path
     
     if project_name:
         project_uploads_dir = doc_manager.get_documents_folder(project_name)
-        return project_uploads_dir / file_path
+        full_path = project_uploads_dir / file_path
+        print(f"[_resolve_file_path] 尝试项目目录: {full_path}")
+        if full_path.exists():
+            print(f"[_resolve_file_path] 找到文件: {full_path}")
+            return full_path
     
     # 最后尝试uploads目录
     if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
         upload_folder = doc_manager.config.upload_folder
     else:
         upload_folder = Path('uploads')
-    return upload_folder / file_path
+    full_path = upload_folder / file_path
+    print(f"[_resolve_file_path] 尝试uploads目录: {full_path}")
+    return full_path
 
 
 def preview_status(file_hash):
