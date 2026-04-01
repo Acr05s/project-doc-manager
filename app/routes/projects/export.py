@@ -1648,7 +1648,7 @@ def preview_package_merge():
 
         existing_project = None
         if project_name:
-            projects = doc_manager.get_projects_list().get('projects', [])
+            projects = doc_manager.get_projects_list()
             for p in projects:
                 if p.get('name') == project_name:
                     existing_project = p
