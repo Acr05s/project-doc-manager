@@ -19,7 +19,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+#Next.js
+node_modules/
 # Virtual Environment
 venv/
 ENV/
