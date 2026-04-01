@@ -633,7 +633,8 @@ class ProjectManager:
         Returns:
             List[Dict]: 项目列表
         """
-        # 直接使用 self.projects_db 作为项目字典（确保与 _load_projects_index 保持一致）
+        # 每次都从文件重新读取索引，确保多 worker 之间数据一致
+        self._load_projects_index()
         return [
             {
                 'id': project_id,
@@ -654,7 +655,8 @@ class ProjectManager:
         Returns:
             Optional[Dict]: 项目信息
         """
-        # 直接使用 self.projects_db 作为项目字典（确保与 _load_projects_index 保持一致）
+        # 每次都从文件重新读取索引，确保多 worker 之间数据一致
+        self._load_projects_index()
         return self.projects_db.get(project_id)
     
     def search(self, keyword: str) -> List[Dict[str, Any]]:
