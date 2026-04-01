@@ -136,12 +136,12 @@ def import_package():
             return jsonify({'status': 'error', 'message': '未选择文件'}), 400
 
         # 保存上传的ZIP到临时文件
-        temp_zip_path = doc_manager.upload_folder / 'temp' / f'{uuid.uuid4()}.zip'
+        temp_zip_path = doc_manager.config.upload_folder / 'temp' / f'{uuid.uuid4()}.zip'
         temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
         file.save(str(temp_zip_path))
 
         # 解压ZIP
-        extract_dir = doc_manager.upload_folder / 'temp' / f'import_{uuid.uuid4()}'
+        extract_dir = doc_manager.config.upload_folder / 'temp' / f'import_{uuid.uuid4()}'
         extract_dir.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
@@ -1017,7 +1017,8 @@ def preview_import_package():
         
         # 保存上传的ZIP到临时文件
         temp_id = str(uuid.uuid4())
-        upload_folder = doc_manager.folders.upload_folder if doc_manager.folders else Path('uploads')
+        # 使用 config.upload_folder 而不是 folders.upload_folder，确保使用绝对路径
+        upload_folder = doc_manager.config.upload_folder
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
         temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
         file.save(str(temp_zip_path))
@@ -1143,7 +1144,8 @@ def import_from_preview():
             return jsonify({'status': 'error', 'message': '缺少临时文件ID'}), 400
         
         # 检查临时文件
-        upload_folder = doc_manager.folders.upload_folder if doc_manager.folders else Path('uploads')
+        # 使用 config.upload_folder 而不是 folders.upload_folder，确保使用绝对路径
+        upload_folder = doc_manager.config.upload_folder
         extract_dir = upload_folder / 'temp' / f'preview_{temp_id}'
         temp_zip_path = upload_folder / 'temp' / f'preview_{temp_id}.zip'
         
