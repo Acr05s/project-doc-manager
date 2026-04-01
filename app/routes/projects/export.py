@@ -1270,6 +1270,7 @@ def import_from_preview():
             # 11. 刷新索引缓存
             if hasattr(doc_manager, 'projects') and doc_manager.projects:
                 doc_manager.projects._load_projects_index()
+                logger.info(f"[导入] 索引缓存已刷新，当前项目数量: {len(doc_manager.projects.list_all())}")
             
             logger.info(f"[导入] 项目导入成功: {project_name}")
             
@@ -1335,9 +1336,10 @@ def update_imported_project_info(project_dir, project_config):
 
 
 def ensure_project_index(doc_manager, project_id, project_name, project_config):
-    """确保项目在索引中存在（兼容 ProjectManager 的旧格式）"""
+    """确保项目在索引中存在（与 ProjectManager 保持一致）"""
     try:
         import json
+        from app.utils.json_file_manager import json_file_manager, get_file_lock
         
         index_file = doc_manager.config.projects_base_folder / 'projects_index.json'
         logger.info(f"[索引] 更新项目索引: {index_file}")
@@ -1345,41 +1347,66 @@ def ensure_project_index(doc_manager, project_id, project_name, project_config):
         # 确保目录存在
         index_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # 使用与 ProjectManager._save_projects_index 兼容的旧格式
-        # 格式: {project_id: project_info, ..., 'deleted_projects': {...}, 'updated_time': ...}
-        index_data = {}
-        
-        if index_file.exists():
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
-            logger.info(f"[索引] 读取现有索引，包含 {len([k for k in index_data.keys() if k not in ['deleted_projects', 'updated_time']])} 个项目")
-        else:
-            logger.info(f"[索引] 索引文件不存在，创建新索引")
-        
-        # 移除旧的同ID项目（如果有）
-        if project_id in index_data and project_id != 'deleted_projects' and project_id != 'updated_time':
-            del index_data[project_id]
-            logger.info(f"[索引] 移除旧项目条目: {project_id}")
-        
-        # 添加/更新项目条目（以项目ID为键）
-        index_data[project_id] = {
-            'id': project_id,
-            'name': project_name,
-            'description': project_config.get('description', ''),
-            'created_time': project_config.get('created_time', ''),
-            'updated_time': project_config.get('updated_time', '')
-        }
-        logger.info(f"[索引] 添加项目条目: {project_id} -> {project_name}")
-        
-        # 确保有 deleted_projects  and updated_time 字段
-        if 'deleted_projects' not in index_data:
-            index_data['deleted_projects'] = {}
-        index_data['updated_time'] = datetime.now().isoformat()
-        
-        with open(index_file, 'w', encoding='utf-8') as f:
-            json.dump(index_data, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"[索引] 索引文件已更新: {index_file}")
+        # 获取文件锁
+        with get_file_lock(str(index_file)):
+            # 读取现有索引数据
+            index_data = json_file_manager.read_json(str(index_file)) or {}
+            
+            # 准备保存数据（与 ProjectManager._save_projects_index 完全一致）
+            save_data = {
+                'updated_time': datetime.now().isoformat()
+            }
+            
+            # 确定项目存储的位置
+            projects_dict = {}
+            
+            if index_data:
+                # 检查是否为新格式
+                if isinstance(index_data, dict) and 'projects' in index_data:
+                    # 新格式：使用 projects 子字典
+                    projects_dict = index_data.get('projects', {})
+                    logger.info(f"[索引] 读取新格式索引，包含 {len(projects_dict)} 个项目")
+                else:
+                    # 旧格式：过滤掉非项目键
+                    projects_dict = {
+                        k: v for k, v in index_data.items() 
+                        if isinstance(v, dict) and 'id' in v and k != 'deleted_projects'
+                    }
+                    logger.info(f"[索引] 读取旧格式索引，包含 {len(projects_dict)} 个项目")
+            else:
+                logger.info(f"[索引] 索引文件不存在或为空，创建新索引")
+            
+            # 移除旧的同ID项目（如果有）
+            if project_id in projects_dict:
+                del projects_dict[project_id]
+                logger.info(f"[索引] 移除旧项目条目: {project_id}")
+            
+            # 添加/更新项目条目（以项目ID为键）
+            projects_dict[project_id] = {
+                'id': project_id,
+                'name': project_name,
+                'description': project_config.get('description', ''),
+                'created_time': project_config.get('created_time', ''),
+                'updated_time': project_config.get('updated_time', '')
+            }
+            logger.info(f"[索引] 添加项目条目: {project_id} -> {project_name}")
+            
+            # 添加项目数据到保存数据
+            save_data.update(projects_dict)
+            
+            # 确保有 deleted_projects 字段
+            if 'deleted_projects' in index_data:
+                save_data['deleted_projects'] = index_data.get('deleted_projects', {})
+            else:
+                save_data['deleted_projects'] = {}
+            
+            # 使用 json_file_manager 写入文件，确保路径和编码处理一致
+            success = json_file_manager.write_json(str(index_file), save_data)
+            if success:
+                logger.info(f"[索引] 索引文件已更新: {index_file}")
+                logger.info(f"[索引] 保存的项目数量: {len(projects_dict)}")
+            else:
+                logger.error(f"[索引] 索引文件更新失败: {index_file}")
             
     except Exception as e:
         logger.error(f"[索引] 更新项目索引失败: {e}")
