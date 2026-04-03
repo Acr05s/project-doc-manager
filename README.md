@@ -1,4 +1,4 @@
-# 项目文档管理中心 v2.1.1B 📁
+# 项目文档管理中心 v2.3.3 📁
 
 一个功能完整的项目全生命周期文档管理系统，支持文档收集、版本管理、自动签字/盖章识别、ZIP批量导入、项目打包导出等功能。
 
@@ -328,6 +328,14 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 
 ## 📝 更新日志
 
+### v2.3.3
+- 添加文档模板导入导出功能
+- 支持从 JSON 文件导入文档需求模板
+- 支持导出项目模板为 JSON 文件
+- 修复文档预览 HTML 转义问题（escapeHtml 函数）
+- 优化报告生成功能，按显示顺序排序
+- 合并多用户版本代码
+
 ### v2.1.1B
 - 添加 Ubuntu 系统服务支持（开机自启）
 - 修复 Windows 控制台编码问题
@@ -343,7 +351,7 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 
 ---
 
-**版本**: v2.1.1B  
-**最后更新**: 2026年3月  
+**版本**: v2.3.3  
+**最后更新**: 2026年4月  
 **Python**: 3.8+  
 **支持**: Windows 10/11, Ubuntu, macOS
