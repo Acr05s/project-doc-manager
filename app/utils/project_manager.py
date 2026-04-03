@@ -298,8 +298,15 @@ class ProjectManager:
             logger.info(f"[DEBUG] 项目索引信息: {project_info}")
             
             if not project_info:
-                logger.error(f"[DEBUG] 项目索引中不存在: {project_id}")
-                return None
+                # 内存中没有，尝试重新从文件加载索引（多进程/多线程可能导致内存不同步）
+                logger.warning(f"[DEBUG] 项目 {project_id} 内存中不存在，重新加载索引文件...")
+                self._load_projects_index()
+                project_info = self.projects_db.get(project_id)
+                if project_info:
+                    logger.info(f"[DEBUG] 重新加载索引后找到项目: {project_id}")
+                else:
+                    logger.error(f"[DEBUG] 重新加载索引后仍不存在: {project_id}")
+                    return None
             
             project_name = project_info['name'] if project_info and 'name' in project_info else project_id
             logger.info(f"[DEBUG] 项目名称: {project_name}, 项目ID: {project_id}")
