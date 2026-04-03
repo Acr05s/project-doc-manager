@@ -7,6 +7,14 @@ import { showNotification, showLoading, showOperationProgress, showConfirmModal,
 import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 
+// 辅助函数：转义HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 /**
  * 处理文档上传
  */
