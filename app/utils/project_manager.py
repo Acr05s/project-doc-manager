@@ -21,10 +21,13 @@ logger = setup_logging(__name__)
 
 class ProjectManager:
     """项目管理器"""
-    
+
+    # 数据库实例（类级别缓存）
+    _projects_index_db = None
+
     def __init__(self, config: DocumentConfig, folder_manager: FolderManager):
         """初始化项目管理器
-        
+
         Args:
             config: 文档配置实例
             folder_manager: 文件夹管理器实例
@@ -33,34 +36,93 @@ class ProjectManager:
         self.folder_manager = folder_manager
         self.requirements_loader = RequirementsLoader(config)
         self.data_manager = ProjectDataManager(config)
-        
+
         # 项目索引（内存缓存）
         self.projects_db: Dict[str, Dict[str, Any]] = {}
-        
+
         # 已删除项目索引（软删除）
         self.deleted_projects: Dict[str, Dict[str, Any]] = {}
-        
+
+        # 初始化数据库（延迟加载）
+        self._init_database()
+
         # 加载项目索引
         self._load_projects_index()
+
+    def _init_database(self):
+        """初始化数据库连接"""
+        try:
+            from .db_manager import get_projects_index_db
+            if ProjectManager._projects_index_db is None:
+                ProjectManager._projects_index_db = get_projects_index_db()
+            self._db = ProjectManager._projects_index_db
+            logger.info("项目数据库初始化成功")
+        except Exception as e:
+            logger.warning(f"项目数据库初始化失败，将使用JSON文件: {e}")
+            self._db = None
     
     def _load_projects_index(self):
-        """加载项目索引（兼容新旧格式）"""
+        """加载项目索引（数据库优先，兼容JSON文件）"""
+        try:
+            # 优先从数据库加载
+            if self._db is not None:
+                try:
+                    # 从数据库加载活动项目
+                    db_projects = self._db.list_projects(include_deleted=False)
+                    for proj in db_projects:
+                        self.projects_db[proj['id']] = {
+                            'id': proj['id'],
+                            'name': proj['name'],
+                            'description': proj.get('description', ''),
+                            'created_time': proj.get('created_time', ''),
+                            'deleted': proj.get('deleted', 0)
+                        }
+
+                    # 从数据库加载已删除项目
+                    deleted_projects = self._db.list_projects(include_deleted=True)
+                    for proj in deleted_projects:
+                        if proj.get('deleted', 0):
+                            self.deleted_projects[proj['id']] = {
+                                'id': proj['id'],
+                                'name': proj['name'],
+                                'description': proj.get('description', ''),
+                                'deleted_time': proj.get('deleted_time', ''),
+                                'created_time': proj.get('created_time', '')
+                            }
+
+                    if self.projects_db or self.deleted_projects:
+                        logger.info(f"从数据库加载了 {len(self.projects_db)} 个活动项目, {len(self.deleted_projects)} 个已删除项目")
+                        return
+                except Exception as db_err:
+                    logger.warning(f"从数据库加载失败，回退到JSON文件: {db_err}")
+
+            # 回退到JSON文件加载
+            self._load_from_json_file()
+        except Exception as e:
+            logger.error(f"加载项目索引失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
+            self.projects_db = {}
+            self.deleted_projects = {}
+
+    def _load_from_json_file(self):
+        """从JSON文件加载项目索引（兼容性方法）"""
         try:
             index_file = self.config.projects_folder / 'projects_index.json'
             logger.info(f"[DEBUG] 尝试加载项目索引文件: {index_file}")
             logger.info(f"[DEBUG] 文件是否存在: {index_file.exists()}")
-            
+
             if not index_file.exists():
                 logger.error(f"项目索引文件不存在: {index_file}")
                 self.projects_db = {}
                 self.deleted_projects = {}
                 return
-            
+
             # 获取文件锁
             with get_file_lock(str(index_file)):
                 data = json_file_manager.read_json(str(index_file))
                 logger.info(f"[DEBUG] 读取到的数据: {data}")
-                
+
                 if data:
                     # 新格式：{"projects": {...}}
                     if 'projects' in data:
@@ -70,66 +132,95 @@ class ProjectManager:
                         # 过滤掉非项目键（如updated_time, deleted_projects）
                         # 兼容性：有些项目可能没有'id'字段，只要是dict且有'name'字段也视为项目
                         self.projects_db = {
-                            k: v for k, v in data.items() 
-                            if isinstance(v, dict) 
+                            k: v for k, v in data.items()
+                            if isinstance(v, dict)
                             and k not in ('deleted_projects', 'updated_time', 'meta')
                             and ('id' in v or 'name' in v)
                         }
-                    
+
                     # 加载已删除项目
                     if 'deleted_projects' in data:
                         self.deleted_projects = data.get('deleted_projects', {})
                     else:
                         self.deleted_projects = {}
-                    
-                    logger.info(f"已加载 {len(self.projects_db)} 个项目, {len(self.deleted_projects)} 个已删除项目")
+
+                    logger.info(f"从JSON文件加载了 {len(self.projects_db)} 个活动项目, {len(self.deleted_projects)} 个已删除项目")
                     logger.info(f"[DEBUG] 项目列表: {list(self.projects_db.keys())}")
                 else:
                     logger.error(f"项目索引文件为空或读取失败: {index_file}")
                     self.projects_db = {}
                     self.deleted_projects = {}
         except Exception as e:
-            logger.error(f"加载项目索引失败: {e}")
-            import traceback
-            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
+            logger.error(f"从JSON文件加载项目索引失败: {e}")
             self.projects_db = {}
             self.deleted_projects = {}
     
     def _save_projects_index(self) -> bool:
-        """保存项目索引（保持旧格式兼容）
-        
+        """保存项目索引（同时保存到数据库和JSON文件）
+
         Returns:
             bool: 是否保存成功
         """
         try:
+            # 1. 保存到数据库（如果可用）
+            db_success = True
+            if self._db is not None:
+                try:
+                    # 保存活动项目
+                    for project_id, info in self.projects_db.items():
+                        self._db.create_project(
+                            project_id=project_id,
+                            name=info.get('name', ''),
+                            created_time=info.get('created_time'),
+                            description=info.get('description', '')
+                        )
+                    # 更新已删除项目状态
+                    for project_id, info in self.deleted_projects.items():
+                        self._db.update_project(
+                            project_id,
+                            deleted=1,
+                            deleted_time=info.get('deleted_time', datetime.now().isoformat())
+                        )
+                    # 清理已删除列表中不在其中的项目的deleted状态
+                    all_project_ids = set(self.projects_db.keys()) | set(self.deleted_projects.keys())
+                    for project_id in all_project_ids:
+                        if project_id not in self.deleted_projects:
+                            self._db.update_project(project_id, deleted=0, deleted_time=None)
+                    logger.info(f"项目索引已保存到数据库")
+                except Exception as db_err:
+                    logger.warning(f"保存到数据库失败: {db_err}")
+                    db_success = False
+
+            # 2. 保存到JSON文件（保持向后兼容）
             index_file = self.config.projects_folder / 'projects_index.json'
             logger.info(f"[DEBUG] 保存项目索引到: {index_file}")
             logger.info(f"[DEBUG] 项目数量: {len(self.projects_db)}")
             logger.info(f"[DEBUG] 已删除项目数量: {len(self.deleted_projects)}")
-            
+
             # 获取文件锁
             with get_file_lock(str(index_file)):
                 # 保持旧格式：直接用项目ID作为键
                 data = {
                     'updated_time': datetime.now().isoformat()
                 }
-                
+
                 # 直接保存projects_db（确保与_load_projects_index保持一致）
                 data.update(self.projects_db)
                 logger.info(f"[DEBUG] 使用旧格式保存，项目数量: {len(self.projects_db)}")
-                
+
                 # 添加已删除项目
                 data['deleted_projects'] = self.deleted_projects
                 logger.info(f"[DEBUG] 保存已删除项目数量: {len(self.deleted_projects)}")
-                
+
                 # 写入文件并检查返回值
-                success = json_file_manager.write_json(str(index_file), data)
-                if success:
+                json_success = json_file_manager.write_json(str(index_file), data)
+                if json_success:
                     logger.info(f"项目索引保存成功: {index_file}")
                 else:
                     logger.error(f"项目索引保存失败: {index_file}")
-                return success
-                    
+
+                return json_success and db_success
+
         except Exception as e:
             logger.error(f"保存项目索引失败: {e}")
             import traceback
@@ -449,18 +540,26 @@ class ProjectManager:
                 if project_name:
                     # 使用新的数据管理器删除项目
                     self.data_manager.delete_project(project_name)
-                
+
                 # 向后兼容：删除旧位置的配置文件
                 old_config_file = self.config.projects_folder / f"{project_id}.json"
                 if old_config_file.exists():
                     old_config_file.unlink()
-                
+
+                # 从数据库删除项目（如果可用）
+                if self._db is not None:
+                    try:
+                        self._db.delete_project(project_id, hard=True)
+                        logger.info(f"项目已从数据库永久删除: {project_id}")
+                    except Exception as db_err:
+                        logger.warning(f"从数据库删除失败: {db_err}")
+
                 # 从相应的列表中移除
                 if project_id in self.projects_db:
                     del self.projects_db[project_id]
                 elif project_id in self.deleted_projects:
                     del self.deleted_projects[project_id]
-                
+
                 logger.info(f"项目已永久删除: {project_id}")
             else:
                 # 软删除：移到已删除列表

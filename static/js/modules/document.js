@@ -1178,7 +1178,7 @@ export async function markDocumentNotInvolved(cycle, docName) {
 }
 
 /**
- * 预览文档
+ * 预览文档（渐进式预览）
  */
 export async function previewDocument(docId) {
     try {
@@ -1205,15 +1205,18 @@ export async function previewDocument(docId) {
         const filename = docInfo.original_filename || docInfo.filename;
         const fileExt = filename.split('.').pop().toLowerCase();
         
-        // 创建预览模态框
+        // 创建预览模态框（带加载状态）
         const modalContent = `
             <div class="preview-modal-content">
                 <div class="preview-header">
-                    <h3>${filename}</h3>
+                    <h3>${escapeHtml(filename)}</h3>
                     <button class="close-btn" onclick="document.getElementById('previewModal').style.display='none'">×</button>
                 </div>
-                <div class="preview-body">
-                    ${getPreviewContent(docId, fileExt)}
+                <div class="preview-body" id="previewBody">
+                    <div class="preview-loading">
+                        <div class="loading-spinner"></div>
+                        <p>正在启动预览...</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -1237,6 +1240,9 @@ export async function previewDocument(docId) {
             }
         };
         
+        // 调用渐进式预览API
+        await loadProgressivePreview(docId, fileExt);
+        
     } catch (error) {
         console.error('预览文档失败:', error);
         showNotification('预览失败: ' + error.message, 'error');
@@ -1244,9 +1250,58 @@ export async function previewDocument(docId) {
 }
 
 /**
- * 根据文件类型生成预览内容
+ * 加载渐进式预览
  */
-function getPreviewContent(docId, fileExt) {
+async function loadProgressivePreview(docId, fileExt) {
+    const previewBody = document.getElementById('previewBody');
+    if (!previewBody) return;
+    
+    try {
+        // 调用渐进式预览启动API
+        const response = await fetch(`/api/documents/preview/start/${encodeURIComponent(docId)}`);
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            if (result.mode === 'progressive') {
+                // 渐进式预览：直接显示后端返回的HTML
+                previewBody.innerHTML = result.preview_html;
+            } else if (result.mode === 'direct') {
+                // 直接预览（图片等）
+                const viewUrl = result.file_url;
+                if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
+                    previewBody.innerHTML = `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
+                } else {
+                    previewBody.innerHTML = `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
+                }
+            }
+        } else {
+            // API返回错误，显示错误信息
+            const viewUrl = `/api/documents/view/${docId}`;
+            if (result.message && result.message.includes('不支持')) {
+                // 不支持的文件类型
+                previewBody.innerHTML = `
+                    <div class="preview-other">
+                        <div class="file-icon">📄</div>
+                        <p>${escapeHtml(result.message)}</p>
+                        <a href="${viewUrl}" class="btn btn-primary" target="_blank">下载文件</a>
+                    </div>
+                `;
+            } else {
+                // 其他错误，显示原始预览（降级方案）
+                previewBody.innerHTML = getFallbackPreviewContent(docId, fileExt);
+            }
+        }
+    } catch (error) {
+        console.error('渐进式预览加载失败:', error);
+        // 降级到原始预览方式
+        previewBody.innerHTML = getFallbackPreviewContent(docId, fileExt);
+    }
+}
+
+/**
+ * 获取降级预览内容（原始方式）
+ */
+function getFallbackPreviewContent(docId, fileExt) {
     const viewUrl = `/api/documents/view/${docId}`;
     
     // 图片预览
@@ -1256,22 +1311,29 @@ function getPreviewContent(docId, fileExt) {
     
     // PDF预览
     if (fileExt === 'pdf') {
-        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onload="handleIframeLoad(this)" onerror="handlePreviewError(this)"></iframe>`;
+        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
     }
     
     // Office文档预览（转换为PDF后预览）
     if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(fileExt)) {
-        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onload="handleIframeLoad(this)" onerror="handlePreviewError(this)"></iframe>`;
+        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
     }
     
-    // 其他文件类型，提供下载链接
+    // 其他文件类型
     return `
         <div class="preview-other">
             <div class="file-icon">📄</div>
             <p>该文件类型不支持在线预览</p>
-            <a href="${viewUrl}" class="btn btn-primary" target="_blank" onclick="handleDownloadClick(event, this)">下载文件</a>
+            <a href="${viewUrl}" class="btn btn-primary" target="_blank">下载文件</a>
         </div>
     `;
+}
+
+/**
+ * 根据文件类型生成预览内容（保留旧方法兼容性）
+ */
+function getPreviewContent(docId, fileExt) {
+    return getFallbackPreviewContent(docId, fileExt);
 }
 
 /**

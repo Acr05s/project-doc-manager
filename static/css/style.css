@@ -1608,6 +1608,14 @@ body {
     margin-bottom: 4px;
 }
 
+.project-index {
+    color: #0066cc;
+    font-weight: 600;
+    margin-right: 4px;
+    min-width: 28px;
+    display: inline-block;
+}
+
 .project-meta {
     font-size: 12px;
     color: #888;
@@ -2611,6 +2619,82 @@ body {
 .preview-other p {
     margin-bottom: 20px;
     color: #666;
+}
+
+/* 预览加载状态 */
+.preview-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: #666;
+}
+
+.preview-loading .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #e0e0e0;
+    border-top-color: #1890ff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+.preview-loading p {
+    margin: 0;
+    color: #999;
+}
+
+/* 渐进式预览页面列表 */
+.page-list {
+    margin: 0;
+    padding: 0;
+    max-width: 100%;
+}
+
+.page-container {
+    background: white;
+    margin: 10px 0;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.page-container.loading {
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.page-number {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.page-image {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+.page-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    color: #999;
+}
+
+.page-loading .loading-spinner {
+    width: 30px;
+    height: 30px;
 }
 
 /* 响应式设计 */

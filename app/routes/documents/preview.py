@@ -344,3 +344,79 @@ def preview_page(file_hash, page):
             return jsonify({'status': 'error', 'message': '页面尚未准备好'}), 404
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def start_progressive_preview(doc_id):
+    """
+    启动渐进式文档预览
+    1. 获取文档文件路径
+    2. 启动后台转换
+    3. 返回预览页面HTML
+    """
+    try:
+        import urllib.parse
+        doc_id = urllib.parse.unquote(doc_id)
+        
+        doc_manager = get_doc_manager()
+        
+        # 获取文档元数据
+        metadata = _get_document_metadata(doc_manager, doc_id)
+        if not metadata:
+            return jsonify({'status': 'error', 'message': '文档不存在'}), 404
+        
+        # 解析文件路径
+        file_path_obj = _resolve_file_path(doc_manager, metadata)
+        if not file_path_obj or not file_path_obj.exists():
+            print(f"[start_progressive_preview] 文件不存在: {file_path_obj}")
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        file_ext = file_path_obj.suffix.lower()
+        file_path = str(file_path_obj)
+        
+        # 检查是否为支持的Office文档类型
+        office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        pdf_extensions = ['.pdf']
+        
+        if file_ext not in (office_extensions + pdf_extensions + ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']):
+            # 不支持的文件类型，返回错误
+            return jsonify({
+                'status': 'error', 
+                'message': f'该文件类型 ({file_ext}) 不支持渐进式预览',
+                'fallback': 'download'
+            }), 400
+        
+        # 启动渐进式转换（Office文档）或直接返回PDF信息
+        if file_ext in office_extensions or file_ext == '.pdf':
+            # 启动后台转换
+            source_type = 'pdf' if file_ext == '.pdf' else 'office'
+            file_hash = progressive_pdf_service.start_conversion(file_path, source_type)
+            
+            # 获取初始状态
+            status = progressive_pdf_service.get_status(file_hash)
+            total_pages = status.get('total_pages', 1)
+            
+            # 生成预览HTML
+            preview_html = progressive_pdf_service.get_preview_html(file_hash, total_pages)
+            
+            return jsonify({
+                'status': 'success',
+                'file_hash': file_hash,
+                'mode': 'progressive',
+                'total_pages': total_pages,
+                'preview_html': preview_html,
+                'file_ext': file_ext
+            })
+        else:
+            # 图片直接返回
+            return jsonify({
+                'status': 'success',
+                'mode': 'direct',
+                'file_url': f'/api/documents/view/{doc_id}',
+                'file_ext': file_ext
+            })
+        
+    except Exception as e:
+        import traceback
+        print(f"[start_progressive_preview] 错误: {e}")
+        print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': f'启动预览失败: {str(e)}'}), 500

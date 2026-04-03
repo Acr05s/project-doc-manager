@@ -2,6 +2,7 @@
 
 提供项目数据的分类存储和管理功能。
 数据按照功能分类存放在不同的JSON文件中，避免单个文件过大。
+支持 SQLite 数据库存储（可选）。
 """
 
 import json
@@ -23,13 +24,20 @@ class ProjectDataManager:
     管理项目的数据文件，按照功能分类存储：
     - project_info.json: 项目基本信息
     - config/requirements.json: 文档需求配置
-    - data/documents_index.json: 文档索引
+    - data/documents_index.json: 文档索引（JSON备份）
+    - data/documents.db: 文档索引（SQLite数据库）
     - data/matching_result.json: 文档匹配结果
     - uploads/: 上传的文件
     - versions/: 配置版本历史
     - logs/: 操作日志
+    
+    支持 SQLite 数据库存储，自动双写（数据库 + JSON），
+    优先从数据库读取，数据库不可用时回退到 JSON。
     """
     
+    # 项目数据库实例缓存（类级别）
+    _project_doc_dbs: Dict[str, 'ProjectDocumentsDB'] = {}
+
     def __init__(self, config: DocumentConfig):
         """初始化项目数据管理器
         
@@ -37,6 +45,7 @@ class ProjectDataManager:
             config: 文档配置实例
         """
         self.config = config
+        self._db = None  # 当前项目的数据库实例
     
     def _get_project_folder(self, project_name: str) -> Path:
         """获取项目文件夹"""
@@ -65,6 +74,27 @@ class ProjectDataManager:
     def _get_categories_path(self, project_name: str) -> Path:
         """获取目录分类文件路径"""
         return self.config.get_project_config_folder(project_name) / 'categories.json'
+    
+    def _get_project_db(self, project_name: str) -> Optional[Any]:
+        """获取项目文档数据库实例（延迟加载）"""
+        if project_name in ProjectDataManager._project_doc_dbs:
+            return ProjectDataManager._project_doc_dbs[project_name]
+        
+        try:
+            from .db_manager import get_project_documents_db
+            db = get_project_documents_db(project_name)
+            ProjectDataManager._project_doc_dbs[project_name] = db
+            return db
+        except Exception as e:
+            logger.warning(f"无法初始化项目数据库 {project_name}: {e}")
+            return None
+    
+    def _ensure_db_dir(self, project_name: str):
+        """确保项目数据库目录存在"""
+        data_folder = self.config.get_project_data_folder(project_name)
+        db_dir = data_folder / 'db'
+        db_dir.mkdir(parents=True, exist_ok=True)
+        return db_dir
     
     # ========== 项目基本信息 ==========
     
@@ -151,7 +181,7 @@ class ProjectDataManager:
     # ========== 文档索引 ==========
     
     def save_documents_index(self, project_name: str, documents: Dict[str, Any]) -> bool:
-        """保存文档索引
+        """保存文档索引（同时保存到数据库和JSON文件）
         
         Args:
             project_name: 项目名称
@@ -162,18 +192,57 @@ class ProjectDataManager:
         """
         try:
             documents['updated_time'] = datetime.now().isoformat()
+            json_success = True
+            db_success = True
+            
+            # 1. 保存到数据库（如果可用）
+            db = self._get_project_db(project_name)
+            if db is not None:
+                try:
+                    # 清空旧数据，重新导入
+                    # 注意：数据库会保留已归档等状态
+                    docs_list = documents.get('documents', {})
+                    for doc_id, doc_info in docs_list.items():
+                        project_id = doc_info.get('project_id', '')
+                        cycle = doc_info.get('cycle', '')
+                        doc_name = doc_info.get('doc_name', '')
+                        file_path = doc_info.get('file_path', '')
+                        file_size = doc_info.get('file_size', 0)
+                        file_type = doc_info.get('file_type')
+                        original_filename = doc_info.get('original_filename')
+                        status = doc_info.get('status', 'uploaded')
+                        
+                        db.add_document(
+                            doc_id=doc_id,
+                            project_id=project_id,
+                            project_name=project_name,
+                            cycle=cycle,
+                            doc_name=doc_name,
+                            file_path=file_path,
+                            file_size=file_size,
+                            file_type=file_type,
+                            original_filename=original_filename,
+                            status=status
+                        )
+                    logger.info(f"文档索引已保存到数据库: {project_name}, {len(docs_list)} 个文档")
+                except Exception as db_err:
+                    logger.warning(f"保存到数据库失败，回退到JSON: {db_err}")
+                    db_success = False
+            
+            # 2. 保存到JSON文件（保持向后兼容）
             json_file_manager.write_json(
                 str(self._get_documents_index_path(project_name)),
                 documents
             )
-            logger.info(f"文档索引已保存: {project_name}")
-            return True
+            logger.info(f"文档索引已保存到JSON: {project_name}")
+            
+            return json_success and db_success
         except Exception as e:
             logger.error(f"保存文档索引失败: {e}")
             return False
     
     def load_documents_index(self, project_name: str) -> Dict[str, Any]:
-        """加载文档索引
+        """加载文档索引（优先从数据库读取）
         
         Args:
             project_name: 项目名称
@@ -181,6 +250,22 @@ class ProjectDataManager:
         Returns:
             Dict: 文档索引数据
         """
+        # 1. 尝试从数据库加载
+        db = self._get_project_db(project_name)
+        if db is not None:
+            try:
+                docs = db.get_documents(project_id='')
+                if docs:
+                    documents_dict = {doc['doc_id']: doc for doc in docs}
+                    logger.info(f"从数据库加载了 {len(documents_dict)} 个文档: {project_name}")
+                    return {
+                        'documents': documents_dict,
+                        'updated_time': datetime.now().isoformat()
+                    }
+            except Exception as db_err:
+                logger.warning(f"从数据库加载失败，回退到JSON: {db_err}")
+        
+        # 2. 回退到JSON文件
         try:
             data = json_file_manager.read_json(
                 str(self._get_documents_index_path(project_name))

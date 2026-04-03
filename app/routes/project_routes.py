@@ -508,23 +508,94 @@ def import_package():
         with zipfile.ZipFile(temp_zip_path, 'r') as zip_file:
             zip_file.extractall(extract_dir)
 
-        # 读取项目配置
-        config_path = extract_dir / 'project_config.json'
-        if not config_path.exists():
-            # 清理临时文件
+        # 读取项目配置（支持单用户版和多用户版备份格式）
+        config_file = None
+        project_root = extract_dir  # 默认根目录
+        
+        # 1. 先查找 project_config.json（多用户版）
+        if (extract_dir / 'project_config.json').exists():
+            config_file = extract_dir / 'project_config.json'
+        else:
+            # 2. 使用 rglob 查找 project_info.json（单用户版备份格式）
+            for candidate in extract_dir.rglob('project_info.json'):
+                config_file = candidate
+                project_root = candidate.parent  # 项目根目录是配置文件所在目录
+                break
+        
+        if not config_file or not config_file.exists():
             shutil.rmtree(extract_dir, ignore_errors=True)
             temp_zip_path.unlink(missing_ok=True)
             return jsonify({'status': 'error', 'message': 'ZIP包中缺少项目配置文件'}), 400
 
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_file, 'r', encoding='utf-8') as f:
             project_config = json.load(f)
 
-        # 读取文档元数据
-        docs_path = extract_dir / 'documents_metadata.json'
+        # 读取文档元数据（支持多用户版和单用户版备份格式）
         documents_metadata = []
+        
+        # 1. 先查找 documents_metadata.json（多用户版）
+        docs_path = project_root / 'documents_metadata.json'
         if docs_path.exists():
             with open(docs_path, 'r', encoding='utf-8') as f:
                 documents_metadata = json.load(f)
+        else:
+            # 2. 在项目根目录查找 documents_index.json（单用户版备份格式）
+            docs_index_path = project_root / 'data' / 'documents_index.json'
+            if docs_index_path.exists():
+                try:
+                    with open(docs_index_path, 'r', encoding='utf-8') as f:
+                        doc_index = json.load(f)
+                        if 'documents' in doc_index:
+                            documents_metadata = list(doc_index['documents'].values())
+                        else:
+                            documents_metadata = list(doc_index.values()) if isinstance(doc_index, dict) else []
+                    logger.info(f"从 documents_index.json 读取到 {len(documents_metadata)} 个文档")
+                except Exception as e:
+                    print(f"读取文档索引失败: {e}")
+        
+        # 预处理文档路径（将旧路径映射到解压后的项目根目录）
+        uploads_base = project_root / 'uploads'
+        for doc_meta in documents_metadata:
+            old_path = doc_meta.get('file_path', '')
+            if old_path:
+                # 路径可能是：
+                # 1. uploads/{uuid_zipname}/.../file.pdf（标准格式）
+                # 2. {uuid_zipname}/.../file.pdf（不带uploads前缀）
+                # 3. 直接是 .../file.pdf（相对于uploads目录）
+                possible_paths = [
+                    project_root / old_path,                    # 原样
+                    uploads_base / old_path,                    # 加上uploads前缀
+                ]
+                
+                # 清理可能的 projects/项目名 前缀
+                if 'projects' in old_path:
+                    parts = Path(old_path).parts
+                    for i, part in enumerate(parts):
+                        if part == 'projects':
+                            new_relative = str(Path(*parts[i+2:]))
+                            possible_paths.append(project_root / new_relative)
+                            possible_paths.append(uploads_base / new_relative)
+                            break
+                
+                # 如果路径以UUID开头（zip包文件夹），尝试在uploads下查找
+                if not any(Path(p).exists() for p in possible_paths):
+                    # 去掉开头的UUID部分，在uploads下搜索文件
+                    path_parts = Path(old_path).parts
+                    filename = path_parts[-1] if path_parts else ''
+                    if filename:
+                        # 在uploads目录下递归搜索同名文件
+                        for found in uploads_base.rglob(filename):
+                            # 排除同名不同路径的情况，检查目录层级
+                            if len(list(found.parents)) > 2:  # 确保不是直接在uploads下
+                                possible_paths.append(str(found))
+                                break
+                
+                for new_path in possible_paths:
+                    if Path(new_path).exists():
+                        doc_meta['_resolved_path'] = str(new_path)
+                        break
+                else:
+                    doc_meta['_resolved_path'] = None
 
         # 获取冲突处理选项
         conflict_action = request.form.get('conflict_action', 'rename')
@@ -604,8 +675,10 @@ def import_package():
         imported_files = {}  # key: original_filename, value: doc_meta
         
         for doc_meta in documents_metadata:
-            old_path = doc_meta.get('file_path')
-            if old_path and Path(old_path).exists():
+            # 使用预处理解析的路径
+            old_path = doc_meta.get('_resolved_path') or doc_meta.get('file_path')
+            if not old_path or not Path(old_path).exists():
+                continue
                 try:
                     # 计算新的存储路径
                     cycle = doc_meta.get('cycle', 'unknown').replace('/', '_')
@@ -642,10 +715,28 @@ def import_package():
                     doc_meta['project_id'] = new_project_id
                     doc_meta['project_name'] = final_name
 
-                    # 保存到数据库
+                    # 保存到内存
                     doc_manager.documents_db[doc_meta['doc_id']] = doc_meta
                     
-                    # 直接添加到 documents_index.json
+                    # 保存到数据库（SQLite）
+                    try:
+                        db = doc_manager.data_manager._get_project_db(final_name)
+                        if db:
+                            db.add_document(
+                                doc_id=doc_meta['doc_id'],
+                                project_id=new_project_id,
+                                project_name=final_name,
+                                cycle=cycle,
+                                doc_name=doc_name,
+                                file_path=str(new_file_path),
+                                file_size=Path(new_file_path).stat().st_size if Path(new_file_path).exists() else 0,
+                                original_filename=original_filename,
+                                status='uploaded'
+                            )
+                    except Exception as db_err:
+                        print(f"保存到数据库失败（继续使用JSON）: {db_err}")
+                    
+                    # 直接添加到 documents_index.json（保持向后兼容）
                     doc_manager.data_manager.add_document_to_index(final_name, doc_meta['doc_id'], doc_meta)
                     
                     # 记录已导入的文件

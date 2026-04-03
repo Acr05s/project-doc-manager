@@ -3,7 +3,7 @@
 from flask import Blueprint
 from .upload import upload_document, upload_chunk, merge_chunks, get_upload_progress, upload_zip_chunk, merge_zip_chunks
 from .list import list_documents, get_document
-from .preview import preview_document, preview_document_local, view_document, preview_status, preview_page
+from .preview import preview_document, preview_document_local, view_document, preview_status, preview_page, start_progressive_preview
 from .download import download_document
 from .progress import get_cycle_progress
 from .delete import delete_document, batch_delete_documents
@@ -27,6 +27,9 @@ document_bp.route('/list', methods=['GET'])(list_documents)
 document_bp.route('/<doc_id>', methods=['GET'])(get_document)
 document_bp.route('/preview/<doc_id>', methods=['GET'])(preview_document)
 document_bp.route('/preview-local/<doc_id>', methods=['GET'])(preview_document_local)
+document_bp.route('/preview/start/<doc_id>', methods=['GET'])(start_progressive_preview)
+document_bp.route('/preview/status/<file_hash>', methods=['GET'])(preview_status)
+document_bp.route('/preview/page/<file_hash>/<int:page>', methods=['GET'])(preview_page)
 document_bp.route('/view/<doc_id>', methods=['GET'])(view_document)
 document_bp.route('/download/<doc_id>', methods=['GET'])(download_document)
 document_bp.route('/progress', methods=['GET'])(get_cycle_progress)

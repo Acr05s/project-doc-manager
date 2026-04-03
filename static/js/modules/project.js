@@ -3324,7 +3324,7 @@ async function loadProjectSelectList() {
         
         container.innerHTML = '';
         
-        for (const project of projects) {
+        projects.forEach((project, index) => {
             const item = document.createElement('div');
             item.className = 'project-item';
             
@@ -3348,7 +3348,7 @@ async function loadProjectSelectList() {
             
             item.innerHTML = `
                 <div class="project-info">
-                    <div class="project-name">${escapeHtml(project.name)} ${status.packaging ? '<span style="color: orange; font-size: 12px; margin-left: 8px;">(打包中)</span>' : ''}</div>
+                    <div class="project-name"><span class="project-index">${index + 1}.</span> ${escapeHtml(project.name)} ${status.packaging ? '<span style="color: orange; font-size: 12px; margin-left: 8px;">(打包中)</span>' : ''}</div>
                     <div class="project-meta">创建时间: ${formatDateTime(project.created_time)}</div>
                 </div>
                 ${actionsHtml}
