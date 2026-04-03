@@ -3324,7 +3324,8 @@ async function loadProjectSelectList() {
         
         container.innerHTML = '';
         
-        projects.forEach((project, index) => {
+        // 使用 for...of 循环支持 await
+        for (const project of projects) {
             const item = document.createElement('div');
             item.className = 'project-item';
             
@@ -3346,6 +3347,7 @@ async function loadProjectSelectList() {
             
             actionsHtml += `</div>`;
             
+            const index = projects.indexOf(project);
             item.innerHTML = `
                 <div class="project-info">
                     <div class="project-name"><span class="project-index">${index + 1}.</span> ${escapeHtml(project.name)} ${status.packaging ? '<span style="color: orange; font-size: 12px; margin-left: 8px;">(打包中)</span>' : ''}</div>
