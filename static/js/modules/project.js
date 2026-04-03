@@ -3310,12 +3310,18 @@ export function closeProjectSelectModal() {
  */
 async function loadProjectSelectList() {
     const container = document.getElementById('projectListContainer');
+    const countTitle = document.getElementById('projectCountTitle');
     if (!container) return;
     
     container.innerHTML = '<div class="loading">加载中...</div>';
     
     try {
         const projects = await loadProjectsList();
+        
+        // 更新标题显示项目数量
+        if (countTitle) {
+            countTitle.textContent = `已有项目 (${projects?.length || 0})`;
+        }
         
         if (!projects || projects.length === 0) {
             container.innerHTML = '<div class="empty-tip">暂无项目，请创建新项目</div>';
