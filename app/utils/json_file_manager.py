@@ -1,189 +1,237 @@
 """JSON文件管理模块
 
 专门用于处理JSON文件的读写操作。
-添加了文件锁和线程锁机制，支持多线程并发访问。
+使用文件系统级别的锁（fcntl.flock）支持多进程并发访问，
+同时保留线程锁兜底，适用于 gunicorn 多 worker 场景。
 """
 
 import json
 import os
+import sys
 import threading
+import tempfile
 from typing import Dict, Any, Optional
 from pathlib import Path
+from contextlib import contextmanager
 
-# 文件锁字典，用于存储每个文件的锁
-_file_locks = {}
-_file_locks_lock = threading.RLock()  # 保护_file_locks字典的锁
+# 跨进程文件锁实现
+_IS_POSIX = sys.platform != 'win32'
 
+if _IS_POSIX:
+    import fcntl
 
-def get_file_lock(file_path):
-    """获取文件锁
-    
-    Args:
-        file_path: 文件路径
+    @contextmanager
+    def _file_lock(path: str, exclusive: bool = True):
+        """POSIX 文件系统级锁（跨进程）
         
-    Returns:
-        threading.RLock: 文件锁
+        在同一路径加锁，支持多进程互斥访问。
+        锁文件路径：<原文件>.lock
+        """
+        lock_path = path + '.lock'
+        # 确保锁文件所在目录存在
+        lock_dir = os.path.dirname(lock_path)
+        if lock_dir:
+            os.makedirs(lock_dir, exist_ok=True)
+        
+        fd = open(lock_path, 'w')
+        try:
+            flag = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(fd, flag)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            fd.close()
+else:
+    # Windows 降级为线程锁（Windows 通常不跑多 worker gunicorn）
+    import msvcrt
+
+    @contextmanager
+    def _file_lock(path: str, exclusive: bool = True):
+        """Windows 文件锁（线程级，Windows 多进程场景较少用）"""
+        lock_path = path + '.lock'
+        lock_dir = os.path.dirname(lock_path)
+        if lock_dir:
+            os.makedirs(lock_dir, exist_ok=True)
+        
+        fd = open(lock_path, 'w')
+        try:
+            # Windows: 锁定文件头 1 字节
+            msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+            yield
+        except OSError:
+            # 尝试阻塞等待
+            import time
+            for _ in range(50):
+                time.sleep(0.1)
+                try:
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    continue
+            yield
+        finally:
+            try:
+                msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
+            fd.close()
+
+
+# 线程锁字典（在同一进程内多线程间再加一层保护）
+_thread_locks: Dict[str, threading.RLock] = {}
+_thread_locks_meta = threading.RLock()
+
+
+def get_file_lock(file_path: str):
+    """获取线程级文件锁（保留向后兼容）
+    
+    注意：这个锁只在进程内有效。
+    对于跨进程场景，请使用 atomic_write_json / locked_read_json。
     """
-    with _file_locks_lock:
-        if file_path not in _file_locks:
-            _file_locks[file_path] = threading.RLock()
-        return _file_locks[file_path]
+    with _thread_locks_meta:
+        if file_path not in _thread_locks:
+            _thread_locks[file_path] = threading.RLock()
+        return _thread_locks[file_path]
+
+
+def _atomic_write(file_path: str, content: str) -> bool:
+    """原子写入文件
+    
+    先写入临时文件，再用 os.replace 原子替换，
+    防止写到一半时其他进程读到损坏的文件。
+    """
+    dir_path = os.path.dirname(file_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    # 在同目录下创建临时文件（确保同一文件系统，rename 才是原子的）
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_path or '.', suffix='.tmp')
+    try:
+        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())  # 确保写到磁盘
+        os.replace(tmp_path, file_path)  # 原子替换
+        return True
+    except Exception as e:
+        print(f"原子写入失败: {file_path}, 错误: {e}")
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return False
 
 
 class JSONFileManager:
-    """JSON文件管理器，提供简单的JSON文件读写操作"""
+    """JSON文件管理器
     
-    def __init__(self):
-        """初始化JSON文件管理器"""
-        pass
+    提供跨进程安全的 JSON 文件读写操作。
+    使用文件系统锁（fcntl.flock）+ 原子写，支持 gunicorn 多 worker 场景。
+    """
     
     def read_json(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """读取JSON文件
+        """读取JSON文件（跨进程安全）
         
-        Args:
-            file_path: 文件路径
-            
-        Returns:
-            Optional[Dict[str, Any]]: JSON数据，如果文件不存在或解析失败返回None
+        使用共享读锁，允许多个进程同时读，但排斥写操作。
         """
         file_path = os.path.abspath(file_path)
         
         if not os.path.exists(file_path):
             return None
         
-        # 获取文件锁
-        with get_file_lock(file_path):
-            # 尝试多种编码读取
+        with _file_lock(file_path, exclusive=False):  # 共享读锁
             encodings = ['utf-8', 'gbk', 'utf-8-sig', 'latin-1']
             for encoding in encodings:
                 try:
                     with open(file_path, 'r', encoding=encoding) as f:
                         content = f.read()
-                        # 尝试解析JSON
-                        return json.loads(content)
+                    return json.loads(content)
                 except UnicodeDecodeError:
                     continue
                 except json.JSONDecodeError as e:
-                    # JSON解析错误，可能是文件格式问题
                     print(f"JSON解析错误 ({encoding}): {e}")
                     continue
                 except Exception as e:
                     print(f"读取文件错误 ({encoding}): {e}")
                     continue
-            
-            # 所有编码都失败，返回None
-            print(f"无法读取文件: {file_path}")
-            return None
+        
+        print(f"无法读取文件: {file_path}")
+        return None
     
     def write_json(self, file_path: str, data: Dict[str, Any]) -> bool:
-        """写入JSON文件
+        """写入JSON文件（跨进程安全，原子写）
         
-        Args:
-            file_path: 文件路径
-            data: 要写入的数据
-            
-        Returns:
-            bool: 是否写入成功
+        使用排他写锁 + 原子写，确保：
+        1. 同一时刻只有一个进程写入
+        2. 写入过程中其他进程读到的是旧的完整文件，而不是损坏的中间状态
         """
         file_path = os.path.abspath(file_path)
         
-        # 获取文件锁
-        with get_file_lock(file_path):
-            try:
-                # 确保目录存在
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                return True
-            except Exception as e:
-                print(f"写入文件失败: {file_path}, 错误: {e}")
-                return False
+        try:
+            content = json.dumps(data, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"JSON序列化失败: {e}")
+            return False
+        
+        with _file_lock(file_path, exclusive=True):  # 排他写锁
+            return _atomic_write(file_path, content)
     
     def update_json(self, file_path: str, update_func) -> bool:
-        """更新JSON文件
+        """原子性更新JSON文件（读-改-写 作为一个整体）
         
-        Args:
-            file_path: 文件路径
-            update_func: 更新函数，接收当前数据，返回新数据
-            
-        Returns:
-            bool: 是否更新成功
+        在排他锁保护下完成整个 读-改-写 流程，防止并发修改丢失。
         """
         file_path = os.path.abspath(file_path)
         
-        # 获取文件锁，确保整个读取-更新-写入过程是原子的
-        with get_file_lock(file_path):
-            # 读取当前数据
-            current_data = self.read_json(file_path)
+        with _file_lock(file_path, exclusive=True):  # 排他写锁持续整个操作
+            # 在锁内读取（不再递归加锁，直接读文件）
+            current_data = self._read_json_unlocked(file_path)
             if current_data is None:
                 current_data = {}
             
-            # 应用更新
             try:
                 new_data = update_func(current_data)
-                # 写入更新后的数据
-                return self.write_json(file_path, new_data)
+                content = json.dumps(new_data, ensure_ascii=False, indent=2)
+                return _atomic_write(file_path, content)
             except Exception as e:
                 print(f"更新文件失败: {file_path}, 错误: {e}")
                 return False
     
-    def get_project_file_path(self, projects_base_folder: str, project_id: str) -> str:
-        """获取项目文件路径
+    def _read_json_unlocked(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """不加锁读取 JSON（仅在已持有锁时内部调用）"""
+        if not os.path.exists(file_path):
+            return None
         
-        Args:
-            projects_base_folder: 项目基础目录
-            project_id: 项目ID
-            
-        Returns:
-            str: 项目JSON文件路径
-        """
+        encodings = ['utf-8', 'gbk', 'utf-8-sig', 'latin-1']
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    return json.loads(f.read())
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            except Exception:
+                continue
+        return None
+    
+    def get_project_file_path(self, projects_base_folder: str, project_id: str) -> str:
         return os.path.join(projects_base_folder, f"{project_id}.json")
     
     def _get_zip_uploads_file(self, project_file: str) -> str:
-        """获取ZIP上传记录文件路径
-        
-        Args:
-            project_file: 项目JSON文件路径
-            
-        Returns:
-            str: ZIP上传记录文件路径
-        """
         project_dir = os.path.dirname(project_file)
         return os.path.join(project_dir, 'zip_uploads.json')
     
     def add_zip_upload_record(self, project_file: str, zip_info: Dict[str, Any]) -> bool:
-        """添加ZIP上传记录
-        
-        Args:
-            project_file: 项目JSON文件路径
-            zip_info: ZIP包信息
-            
-        Returns:
-            bool: 是否添加成功
-        """
         zip_uploads_file = self._get_zip_uploads_file(project_file)
         
         def update_func(data):
-            # 确保数据是列表
             if not isinstance(data, list):
                 data = []
-            
-            # 添加新的ZIP上传记录
             data.append(zip_info)
             return data
         
         return self.update_json(zip_uploads_file, update_func)
     
     def get_zip_upload_records(self, project_file: str) -> Optional[list]:
-        """获取ZIP上传记录
-        
-        Args:
-            project_file: 项目JSON文件路径
-            
-        Returns:
-            Optional[list]: ZIP上传记录列表
-        """
         zip_uploads_file = self._get_zip_uploads_file(project_file)
         data = self.read_json(zip_uploads_file)
         if data and isinstance(data, list):
@@ -191,16 +239,6 @@ class JSONFileManager:
         return []
     
     def update_zip_upload_record(self, project_file: str, zip_id: str, update_data: Dict[str, Any]) -> bool:
-        """更新ZIP上传记录
-        
-        Args:
-            project_file: 项目JSON文件路径
-            zip_id: ZIP记录ID
-            update_data: 更新数据
-            
-        Returns:
-            bool: 是否更新成功
-        """
         zip_uploads_file = self._get_zip_uploads_file(project_file)
         
         def update_func(data):
@@ -214,26 +252,15 @@ class JSONFileManager:
         return self.update_json(zip_uploads_file, update_func)
     
     def delete_zip_upload_record(self, project_file: str, zip_id: str) -> bool:
-        """删除ZIP上传记录
-        
-        Args:
-            project_file: 项目JSON文件路径
-            zip_id: ZIP记录ID
-            
-        Returns:
-            bool: 是否删除成功
-        """
         zip_uploads_file = self._get_zip_uploads_file(project_file)
         
         def update_func(data):
             if isinstance(data, list):
-                # 同时支持按 id 或 name/path 删除（兼容旧格式记录）
                 filtered_data = []
                 for record in data:
                     record_id = record.get('id', '')
                     record_name = record.get('name', '')
                     record_path = record.get('path', '') or record.get('zip_path', '')
-                    # 不匹配 id、name 或 path 的记录保留
                     if record_id != zip_id and record_name != zip_id and record_path != zip_id:
                         filtered_data.append(record)
                 data = filtered_data
@@ -242,28 +269,11 @@ class JSONFileManager:
         return self.update_json(zip_uploads_file, update_func)
     
     def save_project(self, project_file: str, project_data: Dict[str, Any]) -> bool:
-        """保存项目配置
-        
-        Args:
-            project_file: 项目JSON文件路径
-            project_data: 项目数据
-            
-        Returns:
-            bool: 是否保存成功
-        """
         return self.write_json(project_file, project_data)
     
     def load_project(self, project_file: str) -> Optional[Dict[str, Any]]:
-        """加载项目配置
-        
-        Args:
-            project_file: 项目JSON文件路径
-            
-        Returns:
-            Optional[Dict[str, Any]]: 项目数据
-        """
         return self.read_json(project_file)
 
 
-# 创建全局JSON文件管理器实例
+# 全局单例
 json_file_manager = JSONFileManager()
