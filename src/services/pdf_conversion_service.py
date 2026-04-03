@@ -6,6 +6,7 @@ from pathlib import Path
 from docx2pdf import convert as docx_to_pdf
 import tempfile
 import subprocess
+from .pdf_conversion_record import pdf_conversion_record
 
 class PDFConversionService:
     """PDF转换服务类"""
@@ -13,12 +14,22 @@ class PDFConversionService:
     def __init__(self):
         """初始化PDF转换服务"""
         self.platform = platform.system()
+        self.preview_temp_dir = None
     
-    def convert_to_pdf(self, input_path):
+    def set_preview_temp_dir(self, temp_dir):
+        """设置预览临时目录
+        
+        Args:
+            temp_dir: 临时目录路径
+        """
+        self.preview_temp_dir = temp_dir
+    
+    def convert_to_pdf(self, input_path, doc_id=None):
         """将Office文档转换为PDF
         
         Args:
             input_path: 输入文件路径
+            doc_id: 文档ID（可选）
             
         Returns:
             str: 转换后的PDF文件路径
@@ -27,36 +38,59 @@ class PDFConversionService:
             input_path = str(input_path)
             ext = os.path.splitext(input_path)[1].lower()
             
-            # 创建临时PDF文件路径
-            temp_pdf_path = tempfile.mktemp(suffix='.pdf')
+            # 检查是否已有转换记录
+            if doc_id:
+                record = pdf_conversion_record.get_record(doc_id)
+                if record:
+                    pdf_path = record['pdf_path']
+                    if os.path.exists(pdf_path):
+                        # 更新访问时间
+                        pdf_conversion_record.update_access_time(doc_id)
+                        print(f"[PDFConversionService] 使用现有PDF文件: {pdf_path}")
+                        return pdf_path
             
-            if self.platform == 'Windows':
-                # Windows平台使用原有方法
-                if ext in ['.docx']:
-                    try:
-                        docx_to_pdf(input_path, temp_pdf_path)
-                    except Exception as e:
-                        # docx2pdf失败，回退到libreoffice
-                        self._convert_with_libreoffice(input_path, temp_pdf_path)
-                elif ext in ['.doc', '.xls', '.xlsx', '.ppt', '.pptx']:
-                    # Windows平台使用COM对象
-                    try:
-                        import comtypes.client
-                        self._convert_with_com(input_path, temp_pdf_path, ext)
-                    except ImportError:
-                        # COM不可用，回退到libreoffice
-                        self._convert_with_libreoffice(input_path, temp_pdf_path)
-                    except Exception as e:
-                        # COM转换失败，回退到libreoffice
-                        self._convert_with_libreoffice(input_path, temp_pdf_path)
-                else:
-                    raise ValueError(f"不支持的文件类型: {ext}")
-            elif self.platform == 'Darwin':
-                # macOS平台使用libreoffice
-                self._convert_with_libreoffice(input_path, temp_pdf_path)
+            # 创建临时PDF文件路径
+            if self.preview_temp_dir:
+                import uuid
+                temp_pdf_path = os.path.join(self.preview_temp_dir, f"{uuid.uuid4()}.pdf")
             else:
-                # Linux平台使用libreoffice
+                temp_pdf_path = tempfile.mktemp(suffix='.pdf')
+            
+            # 首先尝试使用libreoffice转换，这是最可靠的方法
+            try:
                 self._convert_with_libreoffice(input_path, temp_pdf_path)
+                return temp_pdf_path
+            except Exception as e:
+                # LibreOffice转换失败，尝试平台特定的方法
+                if self.platform == 'Windows':
+                    # Windows平台使用原有方法
+                    if ext in ['.docx']:
+                        try:
+                            docx_to_pdf(input_path, temp_pdf_path)
+                        except Exception as e:
+                            # docx2pdf失败，抛出异常
+                            raise Exception(f"PDF转换失败: {str(e)}")
+                    elif ext in ['.doc', '.xls', '.xlsx', '.ppt', '.pptx']:
+                        # Windows平台使用COM对象
+                        try:
+                            import comtypes.client
+                            self._convert_with_com(input_path, temp_pdf_path, ext)
+                        except ImportError:
+                            # COM不可用，抛出异常
+                            raise Exception(f"PDF转换失败: COM对象不可用")
+                        except Exception as e:
+                            # COM转换失败，抛出异常
+                            raise Exception(f"PDF转换失败: {str(e)}")
+                    else:
+                        raise ValueError(f"不支持的文件类型: {ext}")
+                else:
+                    # 非Windows平台，LibreOffice转换失败，抛出异常
+                    raise Exception(f"PDF转换失败: {str(e)}")
+            
+            # 添加转换记录
+            if doc_id:
+                pdf_conversion_record.add_record(doc_id, temp_pdf_path, input_path)
+                print(f"[PDFConversionService] 添加转换记录: {doc_id} -> {temp_pdf_path}")
             
             return temp_pdf_path
         except Exception as e:

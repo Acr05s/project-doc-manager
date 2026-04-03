@@ -244,7 +244,8 @@ export async function handleEditDocument(e) {
         'editPartyBSeal': 'party_b_seal',
         'editNoSeal': 'no_seal',
         'editOtherSeal': 'other_seal',
-        'editNotInvolved': 'not_involved'  // 本次项目不涉及
+        'editNotInvolved': 'not_involved',  // 本次项目不涉及
+        'editRemark': 'notes'  // 备注
     };
     
     // 动态收集表单数据
@@ -3982,10 +3983,12 @@ function showReportModal(reportData) {
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
                                                                         <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
                                                                             ${(() => {
-                                                                                if (!hasSignRequirement) return '';
                                                                                 const getDocValue = (fieldName) => {
+                                                                                    // 检查多个可能的属性来源
                                                                                     if (doc[fieldName] !== undefined) return doc[fieldName];
                                                                                     if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                                    if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
+                                                                                    if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
                                                                                     return null;
                                                                                 };
                                                                                 const hasNoSign = getDocValue('no_signature');

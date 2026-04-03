@@ -2326,6 +2326,131 @@ class DocumentManager:
             logger.warning(f"文本识别失败: {e}")
         
         return result
+    
+    def generate_report(self, project_config: Dict) -> Dict:
+        """生成报告
+        
+        Args:
+            project_config: 项目配置
+            
+        Returns:
+            Dict: 报告数据
+        """
+        try:
+            from datetime import datetime
+            
+            report = {
+                'project_name': project_config.get('name', '未知项目'),
+                'report_date': datetime.now().isoformat(),
+                'cycles': [],
+                'summary': {
+                    'total_docs': 0,
+                    'completed_docs': 0,
+                    'pending_docs': 0
+                }
+            }
+            
+            # 统计信息
+            total_docs = 0
+            completed_docs = 0
+            
+            # 处理每个周期
+            cycles = project_config.get('cycles', [])
+            documents = project_config.get('documents', {})
+            
+            for cycle in cycles:
+                cycle_info = documents.get(cycle, {})
+                required_docs = cycle_info.get('required_docs', [])
+                uploaded_docs = cycle_info.get('uploaded_docs', [])
+                
+                # 创建文档映射
+                doc_map = {}
+                for doc in uploaded_docs:
+                    doc_name = doc.get('doc_name')
+                    if doc_name not in doc_map:
+                        doc_map[doc_name] = []
+                    doc_map[doc_name].append(doc)
+                
+                cycle_report = {
+                    'name': cycle,
+                    'total_docs': len(required_docs),
+                    'completed_docs': 0,
+                    'documents': []
+                }
+                
+                # 处理每个文档
+                for req_doc in required_docs:
+                    doc_name = req_doc.get('name')
+                    requirement = req_doc.get('requirement', '')
+                    
+                    # 检查是否有上传的文档
+                    uploaded = doc_map.get(doc_name, [])
+                    has_uploaded = len(uploaded) > 0
+                    
+                    # 检查签名和盖章状态
+                    has_signature = any(doc.get('signer') or doc.get('no_signature') for doc in uploaded)
+                    has_seal = any(doc.get('has_seal') or doc.get('has_seal_marked') or doc.get('party_a_seal') or doc.get('party_b_seal') or doc.get('no_seal') for doc in uploaded)
+                    
+                    # 检查是否满足要求
+                    is_completed = has_uploaded
+                    if requirement:
+                        if '签名' in requirement and not has_signature:
+                            is_completed = False
+                        if '盖章' in requirement and not has_seal:
+                            is_completed = False
+                    
+                    # 收集文档的备注信息
+                    notes = []
+                    for doc in uploaded:
+                        if 'notes' in doc and doc['notes']:
+                            notes.append(doc['notes'])
+                        # 检查其他可能存储备注的字段
+                        if 'note' in doc and doc['note']:
+                            notes.append(doc['note'])
+                        if 'doc_note' in doc and doc['doc_note']:
+                            notes.append(doc['doc_note'])
+                        if 'comment' in doc and doc['comment']:
+                            notes.append(doc['comment'])
+                    
+                    doc_report = {
+                        'name': doc_name,
+                        'requirement': requirement,
+                        'status': 'completed' if is_completed else 'pending',
+                        'has_uploaded': has_uploaded,
+                        'has_signature': has_signature,
+                        'has_seal': has_seal,
+                        'uploaded_count': len(uploaded),
+                        'notes': notes  # 添加备注信息
+                    }
+                    
+                    cycle_report['documents'].append(doc_report)
+                    if is_completed:
+                        cycle_report['completed_docs'] += 1
+                        completed_docs += 1
+                    total_docs += 1
+                
+                report['cycles'].append(cycle_report)
+            
+            # 更新汇总信息
+            report['summary']['total_docs'] = total_docs
+            report['summary']['completed_docs'] = completed_docs
+            report['summary']['pending_docs'] = total_docs - completed_docs
+            
+            return report
+            
+        except Exception as e:
+            logger.error(f"生成报告失败: {e}")
+            return {
+                'project_name': '未知项目',
+                'report_date': datetime.now().isoformat(),
+                'cycles': [],
+                'summary': {
+                    'total_docs': 0,
+                    'completed_docs': 0,
+                    'pending_docs': 0
+                },
+                'error': str(e)
+            }
 
 
 # 全局单例

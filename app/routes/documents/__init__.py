@@ -3,7 +3,7 @@
 from flask import Blueprint
 from .upload import upload_document, upload_chunk, merge_chunks, get_upload_progress, upload_zip_chunk, merge_zip_chunks
 from .list import list_documents, get_document
-from .preview import preview_document, preview_document_local, view_document, preview_status, preview_page, start_progressive_preview
+from .preview import preview_document, preview_document_local, view_document, preview_status, preview_page, start_progressive_preview, start_batch_pdf_conversion, delete_pdf_conversion
 from .download import download_document
 from .progress import get_cycle_progress
 from .delete import delete_document, batch_delete_documents
@@ -54,6 +54,8 @@ document_bp.route('/zip-check-chunk', methods=['GET'])(check_zip_chunk)
 document_bp.route('/zip-match-start', methods=['POST'])(start_zip_match)
 document_bp.route('/zip-match-status', methods=['GET'])(get_zip_match_status)
 document_bp.route('/cleanup-duplicates', methods=['POST'])(cleanup_duplicates)
+document_bp.route('/batch-pdf-conversion', methods=['POST'])(start_batch_pdf_conversion)
+document_bp.route('/delete-pdf-conversion', methods=['POST'])(delete_pdf_conversion)
 
 # 导出
 __all__ = ['document_bp', 'init_doc_manager']

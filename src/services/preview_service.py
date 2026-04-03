@@ -292,9 +292,46 @@ class PreviewService:
         """根据文件类型获取预览HTML，支持分页预览"""
         ext = os.path.splitext(file_path)[1].lower()
         
-        if ext in ['.docx']:
-            content, total_pages = self.docx_to_html(file_path, page_number)
-            return content, total_pages
+        if ext in ['.docx', '.doc']:
+            # 尝试使用docx库打开，如果是doc文件会失败，失败后使用libreoffice转换
+            try:
+                content, total_pages = self.docx_to_html(file_path, page_number)
+                return content, total_pages
+            except Exception as e:
+                # doc文件或其他错误，尝试使用libreoffice转换为docx
+                import tempfile
+                import subprocess
+                import os
+                
+                temp_docx_path = tempfile.mktemp(suffix='.docx')
+                try:
+                    # 使用libreoffice转换为docx
+                    subprocess.run(
+                        ['libreoffice', '--headless', '--convert-to', 'docx', '--outdir', 
+                         os.path.dirname(temp_docx_path), file_path],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    # 重命名输出文件到指定路径
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    generated_docx = os.path.join(os.path.dirname(temp_docx_path), f"{base_name}.docx")
+                    if os.path.exists(generated_docx):
+                        os.rename(generated_docx, temp_docx_path)
+                        # 再次尝试使用docx库打开转换后的文件
+                        content, total_pages = self.docx_to_html(temp_docx_path, page_number)
+                        return content, total_pages
+                    else:
+                        return f'<p>文档转换失败: 无法转换为可预览格式</p>', 1
+                except Exception as e:
+                    return f'<p>预览失败: {str(e)}</p>', 1
+                finally:
+                    # 清理临时文件
+                    if os.path.exists(temp_docx_path):
+                        try:
+                            os.remove(temp_docx_path)
+                        except:
+                            pass
         elif ext in ['.xlsx', '.xls']:
             return self.excel_to_html(file_path), 1
         elif ext in ['.pptx', '.ppt']:
