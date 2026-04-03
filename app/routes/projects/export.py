@@ -503,7 +503,28 @@ def import_project_merge():
                 
                 logger.info(f"读取到 {len(index_data.get('documents', {}))} 个文档")
                 
-                # 更新文档路径中的项目目录名（旧目录名 → 新项目名目录名）
+                # ★ 提前构建 doc_name → cycle 映射（从 requirements.json）
+                doc_name_to_cycle = {}
+                requirements_file = target_project_dir / 'requirements.json'
+                if not requirements_file.exists():
+                    config_dir = target_project_dir / 'config'
+                    if config_dir.exists():
+                        requirements_file = config_dir / 'requirements.json'
+                
+                if requirements_file.exists():
+                    try:
+                        with open(requirements_file, 'r', encoding='utf-8') as f:
+                            requirements = json.load(f)
+                        for cycle, cycle_data in requirements.get('documents', {}).items():
+                            for doc in cycle_data.get('required_docs', []):
+                                doc_name = doc.get('name', '')
+                                if doc_name and doc_name not in doc_name_to_cycle:
+                                    doc_name_to_cycle[doc_name] = cycle
+                        logger.info(f"[导入] 从 requirements.json 构建了 {len(doc_name_to_cycle)} 个文档名→周期映射")
+                    except Exception as e:
+                        logger.warning(f"读取 requirements.json 失败，跳过 cycle 推断: {e}")
+                
+                # 更新文档路径中的项目目录名（旧目录名 → 新项目名目录名）并推断 cycle
                 documents = index_data.get('documents', {})
                 for doc_id, doc_info in documents.items():
                     # 更新file_path中的目录名（旧备份目录名 → 新项目名）
@@ -514,6 +535,12 @@ def import_project_merge():
                             doc_info['file_path'] = doc_info['file_path'].replace(old_dir_name, new_dir_name)
                     # 更新project_name字段
                     doc_info['project_name'] = project_name
+                    # ★ 根据 doc_name 推断 cycle（documents_index.json 中的文档 cycle 通常为 None）
+                    if not doc_info.get('cycle'):
+                        doc_name = doc_info.get('doc_name', '')
+                        if doc_name in doc_name_to_cycle:
+                            doc_info['cycle'] = doc_name_to_cycle[doc_name]
+                            logger.info(f"[导入] 推断文档 {doc_id} 的周期: {doc_name} → {doc_info['cycle']}")
                 
                 # 保存更新后的索引
                 with open(target_index_path, 'w', encoding='utf-8') as f:
@@ -528,14 +555,6 @@ def import_project_merge():
         else:
             logger.warning(f"源文档索引文件不存在: {source_index_path}")
         
-        # 检查是否存在requirements.json文件
-        requirements_file = target_project_dir / 'requirements.json'
-        if not requirements_file.exists():
-            # 检查config目录中的requirements.json
-            config_dir = target_project_dir / 'config'
-            if config_dir.exists():
-                requirements_file = config_dir / 'requirements.json'
-        
         # ★ 使用已提前生成的项目ID（不再重复生成）
         project_config['id'] = new_project_id
         project_config['name'] = project_name
@@ -546,6 +565,13 @@ def import_project_merge():
         logger.info(f"[导入] 项目配置已更新: ID={new_project_id}, 名称={project_name}, 目录={target_project_dir.name}")
         
         # 如果存在requirements.json，加载需求
+        # 重新检查（前面可能在复制目标目录后查找）
+        requirements_file = target_project_dir / 'requirements.json'
+        if not requirements_file.exists():
+            config_dir = target_project_dir / 'config'
+            if config_dir.exists():
+                requirements_file = config_dir / 'requirements.json'
+        
         if requirements_file.exists():
             try:
                 with open(requirements_file, 'r', encoding='utf-8') as f:

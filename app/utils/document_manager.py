@@ -1321,20 +1321,24 @@ class DocumentManager:
             if doc_id in self.documents_db:
                 doc = self.documents_db[doc_id]
             else:
-                # 从项目配置中查找
+                # 从所有项目的完整配置中查找 uploaded_docs
+                # 注意：projects.projects_db 只是项目索引，不包含 uploaded_docs
+                # 需要用 load_project 获取完整配置
                 if hasattr(self, 'projects') and self.projects:
-                    for project_id, project_data in self.projects.projects_db.items():
-                        if 'documents' in project_data:
-                            for cycle, cycle_info in project_data['documents'].items():
+                    for project_id in list(self.projects.projects_db.keys()):
+                        project_result = self.projects.load(project_id)
+                        if project_result and 'documents' in project_result:
+                            for cycle, cycle_info in project_result['documents'].items():
                                 if 'uploaded_docs' in cycle_info:
                                     for d in cycle_info['uploaded_docs']:
                                         if d.get('doc_id') == doc_id:
-                                            doc = d
+                                            doc = d.copy()
+                                            doc['cycle'] = cycle  # 确保 cycle 字段存在
                                             break
-                                    if doc:
-                                        break
-                            if doc:
-                                break
+                                if doc:
+                                    break
+                        if doc:
+                            break
             
             if doc:
                 file_path = doc.get('file_path')
@@ -1350,10 +1354,20 @@ class DocumentManager:
                         
                         if project_name:
                             project_uploads_dir = self.get_documents_folder(project_name)
-                            file_path_obj = project_uploads_dir / file_path
+                            # 剥离可能存在的 "projects/{project_name}/" 前缀，避免路径重复
+                            # file_path 格式可能是 "projects/{name}/uploads/..." 或直接 "uploads/..."
+                            rel_path = file_path.replace('\\', '/')
+                            prefix1 = f"projects/{project_name}/uploads/"
+                            prefix2 = f"projects\\{project_name}\\uploads\\"
+                            prefix3 = f"{project_name}/uploads/"
+                            prefix4 = f"{project_name}\\uploads\\"
+                            for p in [prefix1, prefix2, prefix3, prefix4]:
+                                if rel_path.startswith(p):
+                                    rel_path = rel_path[len(p):]
+                                    break
+                            file_path_obj = project_uploads_dir / rel_path
                         else:
                             # 如果没有项目名称，尝试使用绝对路径
-                            # 检查文件是否存在于uploads目录中
                             if hasattr(self, 'config') and hasattr(self.config, 'upload_folder'):
                                 upload_folder = self.config.upload_folder
                             else:
@@ -1363,7 +1377,8 @@ class DocumentManager:
                     if not file_path_obj.exists():
                         return {'status': 'error', 'message': '文件不存在'}
                     from src.services.preview_service import PreviewService
-                    return PreviewService.get_document_preview(str(file_path_obj))
+                    preview_svc = PreviewService()
+                    return preview_svc.get_full_preview(str(file_path_obj))
                 else:
                     return {'status': 'error', 'message': '文件路径不存在'}
             else:
