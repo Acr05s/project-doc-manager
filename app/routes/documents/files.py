@@ -399,7 +399,8 @@ def select_files():
                 'source': 'select',
                 'file_size': file_path.stat().st_size,
                 'doc_id': doc_id,
-                'directory': directory
+                'directory': directory if directory else '/',  # 目录：默认根目录
+                'custom_attrs': {}  # 自定义属性（选择归档时不携带）
             }
             
             # 添加到documents_db

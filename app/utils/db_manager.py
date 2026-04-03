@@ -493,9 +493,45 @@ class ProjectDocumentsDB(DatabaseManager):
                         status TEXT DEFAULT 'uploaded',
                         matched_file TEXT,
                         matched_time TEXT,
-                        archived INTEGER DEFAULT 0
+                        archived INTEGER DEFAULT 0,
+                        -- 盖章和签字字段
+                        has_seal INTEGER DEFAULT 0,
+                        party_a_seal INTEGER DEFAULT 0,
+                        party_b_seal INTEGER DEFAULT 0,
+                        no_seal INTEGER DEFAULT 0,
+                        no_signature INTEGER DEFAULT 0,
+                        party_a_signer TEXT,
+                        party_b_signer TEXT,
+                        doc_date TEXT,
+                        sign_date TEXT,
+                        directory TEXT,
+                        source TEXT
                     )
                 ''')
+
+                # 检查并添加缺失的列（用于已存在的数据库升级）
+                existing_columns = [row[1] for row in conn.execute("PRAGMA table_info(documents)")]
+                new_columns = {
+                    'has_seal': 'INTEGER DEFAULT 0',
+                    'party_a_seal': 'INTEGER DEFAULT 0',
+                    'party_b_seal': 'INTEGER DEFAULT 0',
+                    'no_seal': 'INTEGER DEFAULT 0',
+                    'no_signature': 'INTEGER DEFAULT 0',
+                    'party_a_signer': 'TEXT',
+                    'party_b_signer': 'TEXT',
+                    'doc_date': 'TEXT',
+                    'sign_date': 'TEXT',
+                    'directory': 'TEXT DEFAULT "/"',
+                    'source': 'TEXT',
+                    'custom_attrs': 'TEXT'  # JSON格式存储自定义属性
+                }
+                for col_name, col_type in new_columns.items():
+                    if col_name not in existing_columns:
+                        try:
+                            conn.execute(f'ALTER TABLE documents ADD COLUMN {col_name} {col_type}')
+                            print(f"[DB] 添加列 {col_name} 成功")
+                        except Exception as e:
+                            print(f"[DB] 添加列 {col_name} 失败: {e}")
 
                 # 索引
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_project ON documents(project_id)')
@@ -511,29 +547,56 @@ class ProjectDocumentsDB(DatabaseManager):
     def add_document(self, doc_id: str, project_id: str, project_name: str,
                       cycle: str, doc_name: str, file_path: str,
                       file_size: int = 0, file_type: str = None,
-                      original_filename: str = None, status: str = 'uploaded') -> bool:
+                      original_filename: str = None, status: str = 'uploaded',
+                      # 新增字段：盖章和签字
+                      has_seal: int = 0, party_a_seal: int = 0, party_b_seal: int = 0,
+                      no_seal: int = 0, no_signature: int = 0,
+                      party_a_signer: str = None, party_b_signer: str = None,
+                      doc_date: str = None, sign_date: str = None,
+                      directory: str = '/', source: str = None,
+                      custom_attrs: Dict = None) -> bool:
         """添加文档"""
+        import json
+        
         upload_time = datetime.now().isoformat()
         if original_filename is None:
             original_filename = os.path.basename(file_path)
         if file_type is None:
             file_type = os.path.splitext(file_path)[1].lower()
+        if custom_attrs is None:
+            custom_attrs = {}
 
         sql = '''
             INSERT INTO documents (doc_id, project_id, project_name, cycle, doc_name,
                                    file_path, file_size, file_type, original_filename,
-                                   upload_time, status, archived)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                                   upload_time, status, archived,
+                                   has_seal, party_a_seal, party_b_seal, no_seal,
+                                   no_signature, party_a_signer, party_b_signer,
+                                   doc_date, sign_date, directory, source, custom_attrs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         try:
             self.execute_insert(sql, (doc_id, project_id, project_name, cycle, doc_name,
                                        file_path, file_size, file_type, original_filename,
-                                       upload_time, status))
+                                       upload_time, status,
+                                       has_seal, party_a_seal, party_b_seal, no_seal,
+                                       no_signature, party_a_signer or '', party_b_signer or '',
+                                       doc_date or '', sign_date or '',
+                                       directory or '/', source or '', json.dumps(custom_attrs, ensure_ascii=False)))
             return True
         except sqlite3.IntegrityError:
             # 文档已存在，更新
-            return self.update_document(doc_id, file_path=file_path, file_size=file_size,
-                                         original_filename=original_filename)
+            return self.update_document(doc_id,
+                                       file_path=file_path, file_size=file_size,
+                                       original_filename=original_filename,
+                                       has_seal=has_seal, party_a_seal=party_a_seal,
+                                       party_b_seal=party_b_seal, no_seal=no_seal,
+                                       no_signature=no_signature,
+                                       party_a_signer=party_a_signer,
+                                       party_b_signer=party_b_signer,
+                                       doc_date=doc_date, sign_date=sign_date,
+                                       directory=directory, source=source,
+                                       custom_attrs=custom_attrs)
         except Exception as e:
             print(f"添加文档失败: {e}")
             return False
@@ -542,7 +605,22 @@ class ProjectDocumentsDB(DatabaseManager):
         """获取单个文档"""
         sql = 'SELECT * FROM documents WHERE doc_id = ?'
         results = self.execute(sql, (doc_id,))
-        return results[0] if results else None
+        if results:
+            doc = results[0]
+            # 反序列化 custom_attrs JSON字段
+            import json
+            if 'custom_attrs' in doc and doc['custom_attrs']:
+                try:
+                    doc['custom_attrs'] = json.loads(doc['custom_attrs'])
+                except:
+                    doc['custom_attrs'] = {}
+            else:
+                doc['custom_attrs'] = {}
+            # 确保 directory 有默认值
+            if not doc.get('directory'):
+                doc['directory'] = '/'
+            return doc
+        return None
 
     def get_documents(self, project_id: str = None, cycle: str = None,
                        doc_name: str = None, archived: bool = None) -> List[Dict]:
@@ -566,13 +644,40 @@ class ProjectDocumentsDB(DatabaseManager):
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
         sql = f'SELECT * FROM documents WHERE {where_clause} ORDER BY upload_time DESC'
 
-        return self.execute(sql, tuple(params))
+        results = self.execute(sql, tuple(params))
+        
+        # 反序列化 custom_attrs JSON字段
+        import json
+        for doc in results:
+            if 'custom_attrs' in doc and doc['custom_attrs']:
+                try:
+                    doc['custom_attrs'] = json.loads(doc['custom_attrs'])
+                except:
+                    doc['custom_attrs'] = {}
+            else:
+                doc['custom_attrs'] = {}
+            # 确保 directory 有默认值
+            if not doc.get('directory'):
+                doc['directory'] = '/'
+        
+        return results
 
     def update_document(self, doc_id: str, **kwargs) -> bool:
         """更新文档信息"""
-        allowed_fields = ['cycle', 'doc_name', 'file_path', 'file_size', 'file_type',
-                           'original_filename', 'status', 'matched_file', 'matched_time', 'archived']
+        allowed_fields = [
+            'cycle', 'doc_name', 'file_path', 'file_size', 'file_type',
+            'original_filename', 'status', 'matched_file', 'matched_time', 'archived',
+            # 盖章和签字字段
+            'has_seal', 'party_a_seal', 'party_b_seal', 'no_seal',
+            'no_signature', 'party_a_signer', 'party_b_signer',
+            'doc_date', 'sign_date', 'directory', 'source'
+        ]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
+        
+        # 特殊处理 custom_attrs（需要序列化为JSON）
+        if 'custom_attrs' in kwargs:
+            import json
+            updates['custom_attrs'] = json.dumps(kwargs['custom_attrs'] or {}, ensure_ascii=False)
 
         if not updates:
             return True

@@ -6,9 +6,9 @@
     <title>项目文档管理中心</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026040302">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026040501">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026040302"></script>
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026040501"></script>
     <style>
         /* 文件完整性检查模态框样式 */
         .file-check-content {
@@ -1206,9 +1206,44 @@
             <span class="close">&times;</span>
             <h2>模板库</h2>
             
+            <div class="template-library-header" style="margin-bottom: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-primary" id="importTemplateBtn" onclick="openImportTemplateModal()">
+                    📥 导入模板
+                </button>
+            </div>
+            
             <div id="templateListContainer" class="template-list">
                 <div class="loading">加载中...</div>
             </div>
+        </div>
+    </div>
+
+    <!-- 导入模板模态框 -->
+    <div id="importTemplateModal" class="modal">
+        <div class="modal-content modal-sm">
+            <span class="close" onclick="closeImportTemplateModal()">&times;</span>
+            <h2>导入模板</h2>
+            
+            <form id="importTemplateForm">
+                <div class="form-group">
+                    <label>模板名称 *</label>
+                    <input type="text" id="importTemplateName" required placeholder="请输入模板名称" style="width: 100%;">
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <textarea id="importTemplateDescription" placeholder="可选的模板说明" rows="3" style="width: 100%;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>选择JSON文件 *</label>
+                    <input type="file" id="importTemplateFile" accept=".json" required style="width: 100%;">
+                </div>
+                <div id="importTemplatePreview" class="import-template-preview" style="display: none; margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+                </div>
+                <div class="modal-actions" style="margin-top: 15px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeImportTemplateModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">确认导入</button>
+                </div>
+            </form>
         </div>
     </div>
 

@@ -452,6 +452,7 @@ async function loadTemplateList() {
                 <div class="template-actions">
                     <button class="btn btn-sm btn-primary" onclick="applyTemplate('${template.id}')">应用模板</button>
                     <button class="btn btn-sm btn-secondary" onclick="previewTemplate('${template.id}')">预览</button>
+                    <button class="btn btn-sm btn-info" onclick="exportTemplate('${template.id}')">导出</button>
                     <button class="btn btn-sm btn-danger" onclick="deleteTemplate('${template.id}')">删除</button>
                 </div>
             </div>
@@ -586,3 +587,245 @@ window.deleteTemplate = async function(templateId) {
         }
     );
 };
+
+/**
+ * 导出模板为JSON文件
+ */
+window.exportTemplate = function(templateId) {
+    // 直接通过浏览器下载
+    window.location.href = `/api/projects/templates/${templateId}/export`;
+};
+
+/**
+ * 打开导入模板模态框
+ */
+export function openImportTemplateModal() {
+    const modal = document.getElementById('importTemplateModal');
+    if (!modal) return;
+    
+    // 重置表单
+    const form = document.getElementById('importTemplateForm');
+    if (form) form.reset();
+    
+    // 清空预览
+    const preview = document.getElementById('importTemplatePreview');
+    if (preview) {
+        preview.innerHTML = '';
+        preview.style.display = 'none';
+    }
+    
+    openModal(modal);
+}
+
+/**
+ * 关闭导入模板模态框
+ */
+export function closeImportTemplateModal() {
+    const modal = document.getElementById('importTemplateModal');
+    if (modal) {
+        closeModal(modal);
+    }
+}
+
+/**
+ * 监听导入模板文件变化，预览内容
+ */
+window.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('importTemplateFile');
+    if (fileInput) {
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const preview = document.getElementById('importTemplatePreview');
+            const nameInput = document.getElementById('importTemplateName');
+            
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    
+                    // 显示预览
+                    if (preview) {
+                        const cycleCount = data.cycles?.length || 0;
+                        const documents = data.documents || {};
+                        
+                        // 统计文档数量和附加要求
+                        let docCount = 0;
+                        let docsWithAttrs = 0;
+                        let customAttrDocs = 0;
+                        const attrSummary = {
+                            party_a_sign: 0,
+                            party_b_sign: 0,
+                            party_a_seal: 0,
+                            party_b_seal: 0,
+                            need_doc_number: 0,
+                            need_doc_date: 0,
+                            need_sign_date: 0
+                        };
+                        const standardAttrs = new Set(Object.keys(attrSummary));
+                        
+                        for (const cycleData of Object.values(documents)) {
+                            if (cycleData && typeof cycleData === 'object' && 'required_docs' in cycleData) {
+                                for (const doc of cycleData.required_docs || []) {
+                                    docCount++;
+                                    const attrs = doc.attributes || {};
+                                    // 检查是否有任何附加要求
+                                    const hasStandardAttr = standardAttrs.has && Object.keys(attrs).some(k => standardAttrs.has(k) && attrs[k]);
+                                    const hasCustomAttr = Object.keys(attrs).some(k => !standardAttrs.has(k) && attrs[k]);
+                                    if (hasStandardAttr) docsWithAttrs++;
+                                    if (hasCustomAttr) customAttrDocs++;
+                                    
+                                    // 统计每种附加要求
+                                    for (const [key, count] of Object.entries(attrSummary)) {
+                                        if (attrs[key]) attrSummary[key]++;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 收集自定义属性定义
+                        const customDefs = data.custom_attribute_definitions || [];
+                        
+                        // 构建附加要求预览HTML
+                        const activeAttrs = Object.entries(attrSummary)
+                            .filter(([_, count]) => count > 0)
+                            .map(([key, count]) => {
+                                const labels = {
+                                    party_a_sign: '甲方签字',
+                                    party_b_sign: '乙方签字',
+                                    party_a_seal: '甲方盖章',
+                                    party_b_seal: '乙方盖章',
+                                    need_doc_number: '发文号',
+                                    need_doc_date: '文档日期',
+                                    need_sign_date: '签字日期'
+                                };
+                                return `<span class="attr-badge" title="${labels[key]}">${labels[key]}: ${count}</span>`;
+                            });
+                        
+                        let attrHtml = '';
+                        if (activeAttrs.length > 0 || customDefs.length > 0 || docsWithAttrs > 0) {
+                            attrHtml = `
+                                <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;">
+                                    <strong>附加要求统计:</strong>
+                                    <div style="margin-top: 4px;">
+                                        ${docsWithAttrs > 0 ? `<span class="attr-badge info">含附加要求文档: ${docsWithAttrs}</span>` : ''}
+                                        ${customAttrDocs > 0 ? `<span class="attr-badge warning">含自定义属性: ${customAttrDocs}</span>` : ''}
+                                        ${activeAttrs.join('')}
+                                        ${customDefs.length > 0 ? `<span class="attr-badge">自定义属性定义: ${customDefs.length}</span>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        preview.innerHTML = `
+                            <p><strong>周期数:</strong> ${cycleCount} | <strong>文档数:</strong> ${docCount}</p>
+                            ${attrHtml}
+                            <details style="margin-top: 8px;">
+                                <summary>周期列表</summary>
+                                <ul style="margin: 5px 0; padding-left: 20px;">
+                                    ${(data.cycles || []).map(c => `<li>${c}</li>`).join('')}
+                                </ul>
+                            </details>
+                        `;
+                        preview.style.display = 'block';
+                    }
+                    
+                    // 自动填入名称（如果用户没有修改过）
+                    if (nameInput && !nameInput.dataset.userEdited) {
+                        nameInput.value = data.name || '';
+                    }
+                } catch (err) {
+                    showNotification('JSON格式解析失败', 'error');
+                    if (preview) preview.style.display = 'none';
+                }
+            };
+            reader.readAsText(file);
+        });
+        
+        // 标记用户是否编辑过名称
+        const nameInput = document.getElementById('importTemplateName');
+        if (nameInput) {
+            nameInput.addEventListener('input', function() {
+                nameInput.dataset.userEdited = 'true';
+            });
+        }
+    }
+    
+    // 监听导入表单提交
+    const form = document.getElementById('importTemplateForm');
+    if (form) {
+        form.addEventListener('submit', handleImportTemplate);
+    }
+});
+
+/**
+ * 处理导入模板提交
+ */
+async function handleImportTemplate(e) {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('importTemplateFile');
+    const nameInput = document.getElementById('importTemplateName');
+    const descInput = document.getElementById('importTemplateDescription');
+    
+    const file = fileInput?.files[0];
+    const name = nameInput?.value.trim();
+    const description = descInput?.value.trim();
+    
+    if (!file) {
+        showNotification('请选择JSON文件', 'error');
+        return;
+    }
+    
+    if (!name) {
+        showNotification('请输入模板名称', 'error');
+        return;
+    }
+    
+    showLoading(true);
+    try {
+        // 读取文件内容
+        const fileContent = await file.text();
+        const templateData = JSON.parse(fileContent);
+        
+        // 调用导入API
+        const response = await fetch('/api/projects/templates/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                description: description,
+                template_data: templateData
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            // 构建成功消息，包含附加要求统计
+            let successMsg = '模板导入成功';
+            if (result.custom_attributes_count > 0) {
+                successMsg += `（含 ${result.custom_attributes_count} 个自定义属性定义）`;
+            }
+            if (result.docs_with_attributes > 0) {
+                successMsg += `，${result.docs_with_attributes} 个文档包含附加要求`;
+                if (result.docs_with_custom_attrs > 0) {
+                    successMsg += `（其中 ${result.docs_with_custom_attrs} 个含自定义属性）`;
+                }
+            }
+            showNotification(successMsg, 'success');
+            closeImportTemplateModal();
+            
+            // 刷新模板列表
+            await loadTemplateList();
+        } else {
+            showNotification('导入失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('导入模板失败:', error);
+        showNotification('导入失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}

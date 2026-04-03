@@ -2008,6 +2008,38 @@ body {
     flex-direction: column;
 }
 
+/* 导入模板预览样式 */
+.import-template-preview {
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+/* 附加要求属性徽章 */
+.attr-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 6px;
+    margin: 2px;
+    background: #e9ecef;
+    border-radius: 3px;
+    color: #495057;
+}
+
+.attr-badge.info {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.attr-badge.warning {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.attr-badge.success {
+    background: #d4edda;
+    color: #155724;
+}
+
 .empty-state {
     text-align: center;
     padding: 40px;

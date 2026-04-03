@@ -212,6 +212,20 @@ class ProjectDataManager:
                         original_filename = doc_info.get('original_filename')
                         status = doc_info.get('status', 'uploaded')
                         
+                        # 新增字段：盖章和签字
+                        has_seal = 1 if doc_info.get('has_seal') else 0
+                        party_a_seal = 1 if doc_info.get('party_a_seal') else 0
+                        party_b_seal = 1 if doc_info.get('party_b_seal') else 0
+                        no_seal = 1 if doc_info.get('no_seal') else 0
+                        no_signature = 1 if doc_info.get('no_signature') else 0
+                        party_a_signer = doc_info.get('party_a_signer', '')
+                        party_b_signer = doc_info.get('party_b_signer', '')
+                        doc_date = doc_info.get('doc_date', '')
+                        sign_date = doc_info.get('sign_date', '')
+                        directory = doc_info.get('directory') or '/'  # 默认为根目录
+                        source = doc_info.get('source', '')
+                        custom_attrs = doc_info.get('custom_attrs', {})  # 自定义属性
+                        
                         db.add_document(
                             doc_id=doc_id,
                             project_id=project_id,
@@ -222,7 +236,19 @@ class ProjectDataManager:
                             file_size=file_size,
                             file_type=file_type,
                             original_filename=original_filename,
-                            status=status
+                            status=status,
+                            has_seal=has_seal,
+                            party_a_seal=party_a_seal,
+                            party_b_seal=party_b_seal,
+                            no_seal=no_seal,
+                            no_signature=no_signature,
+                            party_a_signer=party_a_signer,
+                            party_b_signer=party_b_signer,
+                            doc_date=doc_date,
+                            sign_date=sign_date,
+                            directory=directory,
+                            source=source,
+                            custom_attrs=custom_attrs
                         )
                     logger.info(f"文档索引已保存到数据库: {project_name}, {len(docs_list)} 个文档")
                 except Exception as db_err:

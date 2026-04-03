@@ -10,7 +10,7 @@ from .export import export_project, import_project, import_project_file, package
 from .acceptance import confirm_cycle_acceptance, download_project_package, verify_project_files
 from .logs import get_operation_logs, get_external_logs
 from .versions import list_config_versions, save_config_version, load_config_version, switch_config_version, delete_config_version, export_config_version
-from .templates import list_templates, save_template, load_template, delete_template, apply_template_to_project
+from .templates import list_templates, save_template, load_template, delete_template, apply_template_to_project, export_template, import_template
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
 
@@ -65,6 +65,8 @@ project_bp.route('/templates', methods=['GET'])(list_templates)
 project_bp.route('/templates', methods=['POST'])(save_template)
 project_bp.route('/templates/<template_id>', methods=['GET'])(load_template)
 project_bp.route('/templates/<template_id>', methods=['DELETE'])(delete_template)
+project_bp.route('/templates/<template_id>/export', methods=['GET'])(export_template)
+project_bp.route('/templates/import', methods=['POST'])(import_template)
 project_bp.route('/<project_id>/apply-template/<template_id>', methods=['POST'])(apply_template_to_project)
 
 # 新版文档清单模式路由

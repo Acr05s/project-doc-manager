@@ -710,7 +710,8 @@ export async function handleZipArchive() {
                         project_id: appState.currentProjectId,
                         cycle: appState.currentCycle,
                         source_path: file.path,
-                        doc_name: appState.currentDocument
+                        doc_name: appState.currentDocument,
+                        source_dir: file.source_dir || ''  // 携带目录信息
                     })
                 });
                 

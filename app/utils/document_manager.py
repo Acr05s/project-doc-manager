@@ -960,6 +960,18 @@ class DocumentManager:
             return self.projects.delete_template(template_id)
         return {'status': 'error', 'message': '项目管理模块不可用'}
     
+    def export_template(self, template_id: str) -> Optional[Dict]:
+        """导出指定模板"""
+        if self.projects:
+            return self.projects.export_template(template_id)
+        return None
+    
+    def import_template(self, template_data: Dict, name: str = None, description: str = None) -> Dict:
+        """导入模板"""
+        if self.projects:
+            return self.projects.import_template(template_data, name, description)
+        return {'status': 'error', 'message': '项目管理模块不可用'}
+    
     def get_documents(self, cycle: str = None, doc_name: str = None, project_id: str = None) -> List[Dict]:
         """获取文档列表
         

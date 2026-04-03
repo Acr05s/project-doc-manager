@@ -90,11 +90,9 @@ def upload_document():
                 'source': 'upload',
                 'file_size': result.get('size'),
                 'doc_id': doc_id,
-                'directory': result.get('directory', '')
+                'directory': result.get('directory') or '/',  # 目录：默认根目录
+                'custom_attrs': custom_attributes  # 自定义属性
             }
-            
-            # 合并自定义属性
-            doc_metadata.update(custom_attributes)
             
             # 添加到documents_db
             doc_manager.documents_db[doc_id] = doc_metadata
@@ -289,11 +287,9 @@ def merge_chunks():
                 'source': 'upload',
                 'file_size': result.get('size'),
                 'doc_id': doc_id,
-                'directory': result.get('directory', '')
+                'directory': result.get('directory') or '/',  # 目录：默认根目录
+                'custom_attrs': custom_attributes  # 自定义属性
             }
-            
-            # 合并自定义属性
-            doc_metadata.update(custom_attributes)
             
             # 添加到documents_db
             doc_manager.documents_db[doc_id] = doc_metadata
@@ -388,7 +384,7 @@ def merge_zip_chunks():
         
         # 合并分片 - 使用临时文件避免内存占用
         import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.tmp') as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
             temp_file_path = temp_file.name
             
         try:
@@ -398,53 +394,33 @@ def merge_zip_chunks():
                 for chunk_file in temp_dir.iterdir():
                     if chunk_file.name.startswith('chunk_'):
                         try:
-                            chunk_index = int(chunk_file.name.split('_')[1])
-                            chunk_files.append((chunk_index, chunk_file))
-                        except:
+                            idx = int(chunk_file.name.replace('chunk_', ''))
+                            chunk_files.append((idx, chunk_file))
+                        except ValueError:
                             pass
                 
-                # 按索引排序
                 chunk_files.sort(key=lambda x: x[0])
                 
-                # 合并所有分片
-                for chunk_index, chunk_file in chunk_files:
-                    with open(chunk_file, 'rb') as f:
+                for idx, chunk_path in chunk_files:
+                    with open(chunk_path, 'rb') as f:
                         # 分块读取以减少内存使用
                         while True:
                             chunk_data = f.read(8192)  # 8KB chunks
                             if not chunk_data:
                                 break
                             merged_file.write(chunk_data)
-            
-            # 读取合并后的内容
-            with open(temp_file_path, 'rb') as f:
-                merged_content = f.read()
         except Exception as e:
+            # 清理临时文件
             import os
             if os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
-            return jsonify({'status': 'error', 'message': f'合并ZIP文件失败: {str(e)}'}), 500
+            return jsonify({'status': 'error', 'message': f'合并文件失败: {str(e)}'}), 500
         
-        # 保存合并后的ZIP文件
-        import uuid
-        zip_save_dir = Path('uploads/zip')
-        zip_save_dir.mkdir(parents=True, exist_ok=True)
-        zip_file_path = zip_save_dir / f"{file_id}_{file_name}"
-        
-        with open(zip_file_path, 'wb') as f:
-            f.write(merged_content)
-        
-        # 清理临时文件
-        import os
-        os.unlink(temp_file_path)
-        
-        # 清理分片临时目录
-        import shutil
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        
+        # 返回合并后的文件路径
         return jsonify({
             'status': 'success',
-            'file_path': str(zip_file_path)
+            'file_path': temp_file_path,
+            'file_name': file_name
         })
     
     except Exception as e:

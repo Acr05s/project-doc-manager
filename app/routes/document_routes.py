@@ -1148,7 +1148,8 @@ def select_files():
                 'source': 'select',
                 'file_size': file_path.stat().st_size,
                 'doc_id': doc_id,
-                'directory': source_dir   # 保存目录信息，供打包时建立子目录结构
+                'directory': source_dir if source_dir else '/',  # 目录：默认根目录
+                'custom_attrs': custom_attributes if 'custom_attributes' in dir() else {}  # 自定义属性
             }
             
             # 添加到documents_db
@@ -2146,6 +2147,7 @@ def archive_from_zip():
         no_seal = data.get('no_seal', False)
         other_seal = data.get('other_seal', '')
         project_id = data.get('project_id')
+        source_dir = data.get('source_dir', '')  # 携带的目录信息
 
         if not all([source_path, cycle, doc_name]):
             return jsonify({'status': 'error', 'message': '参数不完整：需要source_path、cycle、doc_name'}), 400
@@ -2194,7 +2196,9 @@ def archive_from_zip():
             'sign_confidence': 0.0,
             'detected_seal': detected_seal,
             'seal_confidence': 0.0,
-            'file_size': dest_path.stat().st_size
+            'file_size': dest_path.stat().st_size,
+            'directory': source_dir if source_dir else '/',  # 目录：默认根目录
+            'custom_attrs': {}  # 自定义属性（归档时不携带）
         }
 
         doc_id = f"{cycle}_{doc_name}_{timestamp}"
@@ -2225,7 +2229,9 @@ def archive_from_zip():
                     'has_seal': has_seal or detected_seal,
                     'upload_time': datetime.now().isoformat(),
                     'source': 'zip',
-                    'doc_id': doc_id
+                    'doc_id': doc_id,
+                    'directory': source_dir if source_dir else '/',  # 目录：默认根目录
+                    'custom_attrs': {}  # 自定义属性（归档时不携带）
                 })
                 
                 # 保存项目配置
@@ -2285,6 +2291,15 @@ def confirm_pending_files():
                 cycle = file_info.get('cycle')
                 doc_name = file_info.get('doc_name')
                 filename = file_info.get('filename')
+                # 获取目录信息（从ZIP相对路径或source_dir中提取）
+                directory = ''
+                relative_path = file_info.get('relative_path', '')
+                if relative_path:
+                    parts = Path(relative_path).parts
+                    if len(parts) > 1:
+                        directory = parts[0]
+                elif file_info.get('source_dir'):
+                    directory = file_info.get('source_dir')
                 
                 if source_path and cycle and doc_name:
                     source_file = Path(source_path)
@@ -2334,7 +2349,9 @@ def confirm_pending_files():
                                 'has_seal': False,
                                 'upload_time': datetime.now().isoformat(),
                                 'source': 'zip',
-                                'doc_id': doc_id
+                                'doc_id': doc_id,
+                                'directory': directory if directory else '/',  # 目录：默认根目录
+                                'custom_attrs': {}  # 自定义属性（归档时不携带）
                             })
                             
                             doc_manager._save_project(project_id, project_config)

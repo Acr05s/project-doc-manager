@@ -1361,3 +1361,166 @@ class ProjectManager:
         except Exception as e:
             logger.error(f"删除需求模板失败: {e}")
             return {'status': 'error', 'message': str(e)}
+    
+    def export_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        """导出指定模板为JSON数据（用于下载）
+        
+        Args:
+            template_id: 模板ID
+            
+        Returns:
+            Optional[Dict]: 模板JSON数据，失败返回None
+        """
+        try:
+            template_path = self.config.projects_folder / 'common' / f"{template_id}.json"
+            
+            if not template_path.exists():
+                logger.warning(f"导出模板失败，模板不存在: {template_id}")
+                return None
+            
+            with open(template_path, 'r', encoding='utf-8') as f:
+                template = json.load(f)
+            
+            # 递归处理文档结构，移除内部ID，保留所有属性
+            def process_docs(documents):
+                if not documents:
+                    return documents
+                result = {}
+                for cycle, cycle_data in documents.items():
+                    if isinstance(cycle_data, dict) and 'required_docs' in cycle_data:
+                        result[cycle] = {
+                            'required_docs': [
+                                self._process_doc_item(doc)
+                                for doc in cycle_data.get('required_docs', [])
+                            ],
+                            'categories': cycle_data.get('categories', {})
+                        }
+                    else:
+                        result[cycle] = cycle_data
+                return result
+            
+            # 处理单个文档项，保留attributes（包括内置和自定义属性）
+            _processed_docs = []
+            
+            # 移除内部ID，使用导出格式
+            export_data = {
+                'name': template.get('name', ''),
+                'description': template.get('description', ''),
+                'cycles': template.get('cycles', []),
+                'documents': self._deep_copy_without_id(template.get('documents', {})),
+                'custom_attribute_definitions': template.get('custom_attribute_definitions', [])
+            }
+            
+            logger.info(f"已导出模板: {template_id}，包含 {len(export_data.get('custom_attribute_definitions', []))} 个自定义属性定义")
+            return export_data
+            
+        except Exception as e:
+            logger.error(f"导出需求模板失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
+            return None
+    
+    def _deep_copy_without_id(self, obj):
+        """递归复制对象，移除内部ID字段，保留attributes"""
+        if isinstance(obj, dict):
+            result = {}
+            for key, value in obj.items():
+                # 跳过内部ID字段，但保留attributes
+                if key in ('id', 'internal_id'):
+                    continue
+                result[key] = self._deep_copy_without_id(value)
+            return result
+        elif isinstance(obj, list):
+            return [self._deep_copy_without_id(item) for item in obj]
+        else:
+            return obj
+    
+    def import_template(self, template_data: Dict[str, Any], name: str = None, description: str = None) -> Dict[str, Any]:
+        """导入模板JSON数据
+        
+        Args:
+            template_data: 模板JSON数据（包含name, description, cycles, documents, custom_attribute_definitions）
+            name: 可选，覆盖导入时的模板名称
+            description: 可选，覆盖导入时的模板描述
+            
+        Returns:
+            Dict: 导入结果
+        """
+        try:
+            # 验证必要字段
+            if not template_data:
+                return {'status': 'error', 'message': '模板数据不能为空'}
+            
+            cycles = template_data.get('cycles', [])
+            documents = template_data.get('documents', {})
+            
+            if not cycles and not documents:
+                return {'status': 'error', 'message': '模板数据缺少周期或文档配置'}
+            
+            # 获取模板名称和描述
+            template_name = name or template_data.get('name', '')
+            template_desc = description or template_data.get('description', '')
+            
+            if not template_name:
+                return {'status': 'error', 'message': '模板名称不能为空'}
+            
+            # 获取自定义属性定义
+            custom_attribute_definitions = template_data.get('custom_attribute_definitions', [])
+            
+            # 创建公共模板目录
+            common_dir = self.config.projects_folder / 'common'
+            common_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 生成模板ID
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            template_id = f"template_{timestamp}"
+            
+            # 构建模板数据（保留所有属性，包括内置属性和自定义属性）
+            template = {
+                'id': template_id,
+                'name': template_name,
+                'description': template_desc,
+                'created_time': datetime.now().isoformat(),
+                'cycles': cycles,
+                'documents': documents,
+                'custom_attribute_definitions': custom_attribute_definitions
+            }
+            
+            # 统计包含附加要求的文档数量
+            docs_with_attrs = 0
+            custom_attr_docs = 0
+            if documents:
+                for cycle_data in documents.values():
+                    if isinstance(cycle_data, dict) and 'required_docs' in cycle_data:
+                        for doc in cycle_data.get('required_docs', []):
+                            attrs = doc.get('attributes', {})
+                            if attrs and any(v for k, v in attrs.items() if k != 'requirement'):
+                                docs_with_attrs += 1
+                            # 检查是否有非标准属性（自定义属性）
+                            standard_attrs = {'party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal', 
+                                            'need_doc_number', 'need_doc_date', 'need_sign_date'}
+                            if any(k not in standard_attrs and v for k, v in attrs.items()):
+                                custom_attr_docs += 1
+            
+            # 保存模板文件
+            template_path = common_dir / f"{template_id}.json"
+            with open(template_path, 'w', encoding='utf-8') as f:
+                json.dump(template, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"需求模板已导入: {template_name}，包含 {len(custom_attribute_definitions)} 个自定义属性定义，"
+                       f"{docs_with_attrs} 个文档设置了附加要求，{custom_attr_docs} 个文档包含自定义属性")
+            
+            return {
+                'status': 'success',
+                'template_id': template_id,
+                'template_name': template_name,
+                'custom_attributes_count': len(custom_attribute_definitions),
+                'docs_with_attributes': docs_with_attrs,
+                'docs_with_custom_attrs': custom_attr_docs
+            }
+            
+        except Exception as e:
+            logger.error(f"导入需求模板失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
+            return {'status': 'error', 'message': str(e)}
