@@ -418,9 +418,8 @@ def import_project_merge():
         if custom_name:
             project_name = custom_name
         
-        # ★ 提前生成新项目ID，目录名用项目ID而不是项目名，确保唯一性
-        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-        target_project_dir = projects_dir / new_project_id
+        # 目录名用项目名（与系统约定一致：get_project_folder 用项目名）
+        target_project_dir = projects_dir / project_name
         
         # 确定项目源目录
         if project_config_file:
@@ -430,53 +429,47 @@ def import_project_merge():
         else:
             project_source_dir = extract_dir
         
-        logger.info(f"[导入] 新项目ID: {new_project_id}")
         logger.info(f"[导入] 源目录: {project_source_dir}")
         logger.info(f"[导入] 目标目录: {target_project_dir}")
-        
-        # 检查同名项目是否已存在（通过遍历索引中的 name 字段）
-        existing_project_id = None
-        for pid, pinfo in doc_manager.projects.projects_db.items():
-            if pinfo.get('name') == project_name:
-                existing_project_id = pid
-                break
         
         is_renamed = False
         merge_stats = None
         should_copy_files = True
         
-        # 处理冲突（同名项目已存在时）
-        if existing_project_id:
-            existing_project_dir = projects_dir / existing_project_id
+        # 冲突检测：直接检查目标目录是否存在（比查索引更可靠）
+        project_exists = target_project_dir.exists()
+        
+        # 处理冲突（同名项目目录已存在时）
+        if project_exists:
             if conflict_action == 'merge':
                 logger.info(f"开始合并项目数据: {project_name}")
                 merge_stats = merge_project_data(
                     project_source_dir,
-                    existing_project_dir,
+                    target_project_dir,
                     project_name,
                     doc_manager
                 )
                 logger.info(f"项目数据合并完成: {merge_stats}")
                 should_copy_files = False
-                # 合并时复用原项目ID
-                new_project_id = existing_project_id
-                target_project_dir = existing_project_dir
             elif conflict_action == 'overwrite':
-                shutil.rmtree(str(existing_project_dir), ignore_errors=True)
-                logger.info(f"已删除现有项目目录: {existing_project_dir}")
-                # 覆盖时用原项目ID，保持一致
-                new_project_id = existing_project_id
-                target_project_dir = existing_project_dir
+                shutil.rmtree(str(target_project_dir), ignore_errors=True)
+                logger.info(f"已删除现有项目目录: {target_project_dir}")
             elif conflict_action == 'manual' and custom_name:
                 # 手动名称冲突，追加时间戳区分
                 project_name = f"{custom_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                target_project_dir = projects_dir / project_name
                 is_renamed = True
                 logger.info(f"手动名称冲突，生成新名称: {project_name}")
             else:
-                # 默认：重命名，追加时间戳区分，用全新ID
+                # 默认：重命名，追加时间戳区分
                 project_name = f"{original_project_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                target_project_dir = projects_dir / project_name
                 is_renamed = True
                 logger.info(f"项目已存在，生成新名称: {project_name}")
+        
+        # 生成新项目ID（不作为目录名，仅用于索引）
+        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        logger.info(f"[导入] 新项目ID: {new_project_id}, 项目名: {project_name}")
         
         logger.info(f"项目源目录: {project_source_dir}")
         logger.info(f"项目目标目录: {target_project_dir}")
@@ -510,16 +503,16 @@ def import_project_merge():
                 
                 logger.info(f"读取到 {len(index_data.get('documents', {}))} 个文档")
                 
-                # 更新文档路径中的项目目录名（旧目录名 → 新项目ID目录名）
+                # 更新文档路径中的项目目录名（旧目录名 → 新项目名目录名）
                 documents = index_data.get('documents', {})
                 for doc_id, doc_info in documents.items():
-                    # 更新file_path中的目录名（旧备份目录名 → 新项目ID）
+                    # 更新file_path中的目录名（旧备份目录名 → 新项目名）
                     if 'file_path' in doc_info:
                         old_dir_name = project_source_dir.name
-                        new_dir_name = new_project_id  # ★ 目录名是项目ID
+                        new_dir_name = project_name  # 目录名是项目名
                         if old_dir_name != new_dir_name:
                             doc_info['file_path'] = doc_info['file_path'].replace(old_dir_name, new_dir_name)
-                    # 更新project_name字段（用项目显示名称）
+                    # 更新project_name字段
                     doc_info['project_name'] = project_name
                 
                 # 保存更新后的索引
@@ -587,6 +580,12 @@ def import_project_merge():
             description=project_config.get('description', ''),
             created_time=project_config.get('created_time')
         )
+        
+        # ★ 通过 data_manager 再保存一次配置，确保 load_full_config(project_name) 能正常读取
+        # （data_manager 使用项目名作为目录名，与系统其他部分一致）
+        if not merge_stats:  # 合并操作已经处理了数据，不需要重复保存
+            doc_manager.data_manager.save_full_config(project_name, project_config)
+            logger.info(f"[导入] 已通过 data_manager 保存配置: {project_name}")
         
         # 清理临时文件
         shutil.rmtree(temp_dir, ignore_errors=True)
