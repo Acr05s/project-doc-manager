@@ -16,7 +16,7 @@ reportlab==4.0.9
 docx2pdf==0.1.8
 comtypes==1.4.16
 flasgger==0.9.7.1
-Flask-CORS==4.0.0
+Flask-CORS==6.0.0
 # WSGI服务器依赖
 gunicorn==21.2.0  # Linux/Mac
 waitress==3.0.1    # Windows
