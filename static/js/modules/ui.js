@@ -33,6 +33,7 @@ import {
 import {
     openTreeEditor, closeTreeEditor,
     saveTreeConfig, saveTreeAsTemplate, loadTemplateToTree,
+    openImportModuleModal, exportTreeConfig,
     closeAttributePanel, saveAttributes
 } from './tree-editor.js';
 import { handleSaveTemplate } from './requirement-editor.js';
