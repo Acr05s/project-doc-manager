@@ -1191,8 +1191,9 @@ export async function markDocumentNotInvolved(cycle, docName) {
  */
 export async function previewDocument(docId) {
     try {
-        // 先获取文档信息
-        const docResponse = await fetch(`/api/documents/${docId}`);
+        // 先获取文档信息（对docId做URL编码，防止特殊字符如:导致404）
+        const encodedDocId = encodeURIComponent(docId);
+        const docResponse = await fetch(`/api/documents/${encodedDocId}`);
         const docResult = await docResponse.json();
         
         if (docResult.status !== 'success') {
@@ -2623,9 +2624,10 @@ export async function openEditModal(docId, cycle, docName) {
     }
     
     try {
-        // 尝试从API获取文档信息
-        console.log('尝试从API获取文档信息:', `/api/documents/${docId}`);
-        const response = await fetch(`/api/documents/${docId}`);
+        // 尝试从API获取文档信息（对docId做URL编码，防止特殊字符导致404）
+        const encodedId = encodeURIComponent(docId);
+        console.log('尝试从API获取文档信息:', `/api/documents/${encodedId}`);
+        const response = await fetch(`/api/documents/${encodedId}`);
         console.log('API响应状态:', response.status);
         
         const result = await response.json();
