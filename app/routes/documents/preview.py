@@ -538,7 +538,7 @@ def start_progressive_preview(doc_id):
     
     优化方案：
     1. PDF文件直接返回，浏览器原生预览
-    2. Office文档转换为PDF后返回PDF（保持原格式）
+    2. Office文档同步转换为PDF后返回PDF URL
     3. 图片直接返回
     """
     try:
@@ -559,6 +559,7 @@ def start_progressive_preview(doc_id):
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
         
         file_ext = file_path_obj.suffix.lower()
+        file_path = str(file_path_obj)
         
         # 支持的文件类型
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
@@ -570,10 +571,59 @@ def start_progressive_preview(doc_id):
                 'fallback': 'download'
             }), 400
         
-        # 所有文件都使用 direct 模式：
-        # - PDF直接返回
-        # - Office文档通过 view_document 转换为PDF后返回
-        # - 图片直接返回
+        # Office文档：同步转换为PDF，返回PDF的view URL
+        if file_ext in office_extensions:
+            try:
+                # 先执行转换，确保PDF生成完成
+                from src.services.pdf_conversion_record import pdf_conversion_record
+                from src.services.pdf_conversion_service import PDFConversionService
+                import time
+                
+                file_mtime = os.path.getmtime(file_path)
+                cache_key = f"{doc_id}_{int(file_mtime)}"
+                
+                # 检查缓存
+                cached_record = pdf_conversion_record.get_record(cache_key)
+                if cached_record and os.path.exists(cached_record.get('pdf_path', '')):
+                    print(f"[start_progressive_preview] 使用已缓存的PDF")
+                else:
+                    # 同步执行转换
+                    preview_temp_dir = Path('uploads/temp/preview')
+                    preview_temp_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    pdf_service = PDFConversionService()
+                    pdf_service.set_preview_temp_dir(str(preview_temp_dir))
+                    
+                    print(f"[start_progressive_preview] 开始同步转换: {file_path}")
+                    start_time = time.time()
+                    pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
+                    elapsed_time = time.time() - start_time
+                    print(f"[start_progressive_preview] 转换完成，耗时: {elapsed_time:.2f}秒")
+                    
+                    # 保存转换记录
+                    pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
+                    if cache_key in pdf_conversion_record.records:
+                        pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
+                        pdf_conversion_record._save_records()
+                
+                # 返回view URL（会通过view_document返回PDF）
+                return jsonify({
+                    'status': 'success',
+                    'mode': 'direct',
+                    'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
+                    'file_ext': '.pdf'  # 告诉前端这是PDF
+                })
+                
+            except Exception as conv_err:
+                print(f"[start_progressive_preview] 转换失败: {conv_err}")
+                # 转换失败，返回原始文件下载
+                return jsonify({
+                    'status': 'error',
+                    'message': f'PDF转换失败: {str(conv_err)}',
+                    'fallback': 'download'
+                }), 500
+        
+        # PDF和图片：直接返回view URL
         return jsonify({
             'status': 'success',
             'mode': 'direct',
