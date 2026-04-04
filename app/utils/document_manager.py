@@ -1005,11 +1005,12 @@ class DocumentManager:
                                     continue
                                 # 确保文档有 ID
                                 doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc.get('doc_name')}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
-                                # 添加到结果列表
-                                result.append({
-                                    'id': doc_id,
-                                    **doc
-                                })
+                                # 添加到结果列表（注意：先展开 doc，再设置 id，避免 doc 中旧的 id 字段覆盖正确的 doc_id）
+                                doc_copy = dict(doc)
+                                doc_copy['id'] = doc_id
+                                if not doc_copy.get('doc_id'):
+                                    doc_copy['doc_id'] = doc_id
+                                result.append(doc_copy)
         
         # 如果项目配置中没有文档，再从内存中的documents_db获取
         if not result:

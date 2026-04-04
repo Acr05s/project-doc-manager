@@ -278,13 +278,38 @@ def _get_document_metadata(doc_manager, doc_id):
                 for cycle, cycle_info in project_data['documents'].items():
                     if 'uploaded_docs' in cycle_info:
                         for d in cycle_info['uploaded_docs']:
-                            if d.get('doc_id') == doc_id:
+                            if d.get('doc_id') == doc_id or d.get('id') == doc_id:
                                 doc_manager.documents_db[doc_id] = d
                                 return d
     
-    # 尝试从项目文件中查找
+    # 从 current_project 中查找
+    if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+        for cycle, cycle_info in doc_manager.current_project.get('documents', {}).items():
+            if 'uploaded_docs' in cycle_info:
+                for d in cycle_info['uploaded_docs']:
+                    if d.get('doc_id') == doc_id or d.get('id') == doc_id:
+                        doc_manager.documents_db[doc_id] = d
+                        return d
+    
+    # 尝试从项目文件中查找（扫描根目录 *.json 和子目录的 project_config.json）
     import json
     projects_dir = doc_manager.config.projects_base_folder
+    
+    # 先通过 data_manager 的文档索引查找（最准确）
+    if hasattr(doc_manager, 'data_manager'):
+        try:
+            for project_dir in projects_dir.iterdir():
+                if project_dir.is_dir():
+                    project_name = project_dir.name
+                    doc_index = doc_manager.data_manager.load_documents_index(project_name)
+                    if 'documents' in doc_index and doc_id in doc_index['documents']:
+                        d = doc_index['documents'][doc_id]
+                        doc_manager.documents_db[doc_id] = d
+                        return d
+        except Exception:
+            pass
+    
+    # 扫描根目录 *.json
     for project_file in projects_dir.glob('*.json'):
         try:
             with open(project_file, 'r', encoding='utf-8') as f:
@@ -293,11 +318,35 @@ def _get_document_metadata(doc_manager, doc_id):
                 for cycle, cycle_info in project_data['documents'].items():
                     if 'uploaded_docs' in cycle_info:
                         for d in cycle_info['uploaded_docs']:
-                            if d.get('doc_id') == doc_id:
+                            if d.get('doc_id') == doc_id or d.get('id') == doc_id:
                                 doc_manager.documents_db[doc_id] = d
                                 return d
-        except:
+        except Exception:
             pass
+    
+    # 扫描子目录中的 project_config.json
+    try:
+        for project_dir in projects_dir.iterdir():
+            if not project_dir.is_dir():
+                continue
+            config_file = project_dir / 'project_config.json'
+            if not config_file.exists():
+                continue
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    project_data = json.load(f)
+                if 'documents' in project_data:
+                    for cycle, cycle_info in project_data['documents'].items():
+                        if not isinstance(cycle_info, dict):
+                            continue
+                        for d in cycle_info.get('uploaded_docs', []):
+                            if d.get('doc_id') == doc_id or d.get('id') == doc_id:
+                                doc_manager.documents_db[doc_id] = d
+                                return d
+            except Exception:
+                pass
+    except Exception:
+        pass
     
     return None
 

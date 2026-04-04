@@ -69,6 +69,13 @@ def get_document(doc_id):
             # 尝试从项目配置中查找
             found_doc = None
             
+            def _doc_matches(doc, search_id):
+                """检查文档是否匹配给定的 doc_id（兼容多种字段格式）"""
+                return (doc.get('doc_id') == search_id or
+                        doc.get('id') == search_id or
+                        doc.get('original_filename') == search_id or
+                        doc.get('filename') == search_id)
+            
             # 1. 从当前项目中查找
             if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
                 project_config = doc_manager.current_project
@@ -76,7 +83,7 @@ def get_document(doc_id):
                     for cycle, cycle_info in project_config['documents'].items():
                         if 'uploaded_docs' in cycle_info:
                             for doc in cycle_info['uploaded_docs']:
-                                if doc.get('doc_id') == doc_id:
+                                if _doc_matches(doc, doc_id):
                                     found_doc = doc
                                     break
                         if found_doc:
@@ -89,7 +96,7 @@ def get_document(doc_id):
                         for cycle, cycle_info in project_data['documents'].items():
                             if 'uploaded_docs' in cycle_info:
                                 for doc in cycle_info['uploaded_docs']:
-                                    if doc.get('doc_id') == doc_id:
+                                    if _doc_matches(doc, doc_id):
                                         found_doc = doc
                                         break
                             if found_doc:
@@ -110,7 +117,7 @@ def get_document(doc_id):
                             for cycle, cycle_info in project_data['documents'].items():
                                 if isinstance(cycle_info, dict) and 'uploaded_docs' in cycle_info:
                                     for doc in cycle_info['uploaded_docs']:
-                                        if doc.get('doc_id') == doc_id:
+                                        if _doc_matches(doc, doc_id):
                                             found_doc = doc
                                             break
                                 if found_doc:
