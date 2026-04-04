@@ -4,9 +4,24 @@ import os
 from flask import request, jsonify, send_file
 from pathlib import Path
 from .utils import get_doc_manager
-from src.services.preview_service import PreviewService
-from src.services.pdf_conversion_service import PDFConversionService
 from app.services.task_service import task_service
+
+# 导入预览服务（容错处理）
+try:
+    from src.services.preview_service import PreviewService
+except ImportError:
+    PreviewService = None
+
+try:
+    from src.services.pdf_conversion_service import PDFConversionService
+except ImportError:
+    PDFConversionService = None
+
+try:
+    from src.services.progressive_pdf_service import ProgressivePDFService
+    progressive_pdf_service = ProgressivePDFService()
+except ImportError:
+    progressive_pdf_service = None
 
 
 def normalize_path(path_str):
@@ -234,7 +249,7 @@ def view_document(doc_id):
                 
                 # 重定向到带有task_id的URL
                 from flask import redirect, url_for
-                return redirect(f"{url_for('document_bp.view_document', doc_id=doc_id)}?task_id={task_id}")
+                return redirect(f"{url_for('document.view_document', doc_id=doc_id)}?task_id={task_id}")
             else:
                 # 未被匹配的文档，使用本地预览
                 print(f"[view_document] 文档未被匹配，使用本地预览")
@@ -363,6 +378,8 @@ def _resolve_file_path(doc_manager, metadata):
 def preview_status(file_hash):
     """获取文档预览转换状态"""
     try:
+        if not progressive_pdf_service:
+            return jsonify({'status': 'error', 'message': '预览服务不可用'}), 503
         status = progressive_pdf_service.get_status(file_hash)
         return jsonify(status)
     except Exception as e:
@@ -372,6 +389,8 @@ def preview_status(file_hash):
 def preview_page(file_hash, page):
     """获取指定预览页面图片"""
     try:
+        if not progressive_pdf_service:
+            return jsonify({'status': 'error', 'message': '预览服务不可用'}), 503
         page_path = progressive_pdf_service.get_page(file_hash, page)
         if page_path and page_path.exists():
             return send_file(str(page_path), mimetype='image/png')
@@ -422,6 +441,14 @@ def start_progressive_preview(doc_id):
         
         # 启动渐进式转换（Office文档）或直接返回PDF信息
         if file_ext in office_extensions or file_ext == '.pdf':
+            # 如果渐进式服务不可用，降级为直接查看
+            if not progressive_pdf_service:
+                return jsonify({
+                    'status': 'success',
+                    'mode': 'direct',
+                    'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
+                    'file_ext': file_ext
+                })
             # 启动后台转换
             source_type = 'pdf' if file_ext == '.pdf' else 'office'
             file_hash = progressive_pdf_service.start_conversion(file_path, source_type)
@@ -446,7 +473,7 @@ def start_progressive_preview(doc_id):
             return jsonify({
                 'status': 'success',
                 'mode': 'direct',
-                'file_url': f'/api/documents/view/{doc_id}',
+                'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
                 'file_ext': file_ext
             })
         
