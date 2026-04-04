@@ -316,6 +316,7 @@ def _convert_and_view_office(file_path, doc_id, file_path_obj):
         print(f"[view_document] 转换失败: {e}")
         print(traceback.format_exc())
         # 转换失败，返回友好的错误页面
+        file_ext = file_path_obj.suffix.lower()
         return _office_convert_error_response(file_path_obj, file_ext, str(e))
 
 
