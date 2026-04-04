@@ -181,7 +181,13 @@ def preview_document_local(doc_id):
 
 
 def view_document(doc_id):
-    """直接查看文档（用于PDF、图片等可直接在浏览器显示的文件）"""
+    """直接查看文档（用于PDF、图片等可直接在浏览器显示的文件）
+    
+    优化方案：
+    1. PDF和图片直接返回，无需转换
+    2. Office文档使用同步快速转换+缓存，优先使用已缓存的PDF
+    3. 缓存键包含文件修改时间，确保文件更新后重新转换
+    """
     try:
         import urllib.parse
         doc_id = urllib.parse.unquote(doc_id)
@@ -227,53 +233,11 @@ def view_document(doc_id):
         # 检查是否为Office文档
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
         if file_ext in office_extensions:
-            # 先检查是否已有转换缓存（PDF已存在）
-            task_id = request.args.get('task_id')
-            if task_id:
-                task_status = task_service.get_task_status(task_id)
-                if task_status:
-                    if task_status['status'] == 'completed':
-                        pdf_path = task_status['result']['pdf_path']
-                        print(f"[view_document] 使用后台转换结果: {pdf_path}")
-                        return send_file(pdf_path, mimetype='application/pdf',
-                                       as_attachment=False,
-                                       download_name=f"{file_path_obj.stem}.pdf")
-                    elif task_status['status'] == 'error':
-                        print(f"[view_document] 后台转换失败，使用在线预览降级")
-                        # 降级为在线预览
-                        return _office_online_viewer_response(file_path_obj, file_ext)
-                    else:
-                        # 转换中，返回等待页面
-                        return (f"<html><body><h1>PDF转换中...</h1>"
-                                f"<p>请稍候，正在转换文档为PDF格式。</p>"
-                                f"<script>setTimeout(() => window.location.reload(), 2000);</script>"
-                                f"</body></html>"), 200
-            
-            # 尝试检查是否有现有转换记录（避免重复启动任务）
-            from src.services.pdf_conversion_service import pdf_conversion_record
-            existing_record = pdf_conversion_record.get_record(doc_id)
-            if existing_record and os.path.exists(existing_record['pdf_path']):
-                print(f"[view_document] 使用已有PDF缓存: {existing_record['pdf_path']}")
-                return send_file(existing_record['pdf_path'], mimetype='application/pdf',
-                               as_attachment=False,
-                               download_name=f"{file_path_obj.stem}.pdf")
-            
-            # 检查转换服务是否可用（LibreOffice/COM）
-            conversion_available = _check_conversion_available(file_ext)
-            if conversion_available:
-                # 启动后台转换任务
-                task_result = task_service.start_pdf_conversion_task(file_path, doc_id)
-                task_id = task_result['task_id']
-                print(f"[view_document] 启动后台转换任务: {task_id}")
-                from flask import redirect, url_for
-                return redirect(f"{url_for('document.view_document', doc_id=doc_id)}?task_id={task_id}")
-            else:
-                # 转换工具不可用，直接返回在线预览降级方案
-                print(f"[view_document] 转换工具不可用，使用在线预览降级")
-                return _office_online_viewer_response(file_path_obj, file_ext)
+            # 使用优化的同步转换（带缓存）
+            return _convert_and_view_office(file_path, doc_id, file_path_obj)
         
-        # 其他文件类型，返回本地预览
-        return preview_document_local(doc_id)
+        # 其他文件类型，返回下载
+        return send_file(file_path, as_attachment=True)
         
     except Exception as e:
         import traceback
@@ -282,40 +246,88 @@ def view_document(doc_id):
         return jsonify({'status': 'error', 'message': f'查看失败: {str(e)}'}), 500
 
 
-def _check_conversion_available(file_ext: str) -> bool:
-    """检查PDF转换工具是否可用"""
-    import shutil
-    import platform
+def _convert_and_view_office(file_path, doc_id, file_path_obj):
+    """转换Office文档为PDF并查看（同步快速转换+智能缓存）"""
+    from src.services.pdf_conversion_record import pdf_conversion_record
+    from src.services.pdf_conversion_service import PDFConversionService
+    import time
     
-    # 检查 LibreOffice（所有平台）
-    if shutil.which('libreoffice') or shutil.which('soffice'):
-        return True
-    
-    # Windows 平台检查 COM（需要装 Word/Excel/PPT）和 docx2pdf
-    if platform.system() == 'Windows':
-        if file_ext in ('.docx', '.doc'):
-            try:
-                import docx2pdf
-                return True
-            except ImportError:
-                pass
-            try:
-                import comtypes.client
-                return True
-            except ImportError:
-                pass
-        else:
-            try:
-                import comtypes.client
-                return True
-            except ImportError:
-                pass
-    
-    return False
+    try:
+        # 获取文件修改时间作为缓存有效性检查
+        file_mtime = os.path.getmtime(file_path)
+        
+        # 检查是否有有效的缓存
+        cache_key = f"{doc_id}_{int(file_mtime)}"
+        cached_record = pdf_conversion_record.get_record(cache_key)
+        
+        if cached_record:
+            pdf_path = cached_record.get('pdf_path')
+            if pdf_path and os.path.exists(pdf_path):
+                print(f"[view_document] 使用缓存的PDF: {pdf_path}")
+                pdf_conversion_record.update_access_time(cache_key)
+                return send_file(pdf_path, mimetype='application/pdf',
+                               as_attachment=False,
+                               download_name=f"{file_path_obj.stem}.pdf")
+        
+        # 检查doc_id的旧缓存（兼容旧版本，但会检查文件是否更新）
+        old_record = pdf_conversion_record.get_record(doc_id)
+        if old_record:
+            old_pdf_path = old_record.get('pdf_path')
+            old_file_path = old_record.get('file_path')
+            old_mtime = old_record.get('file_mtime', 0)
+            
+            # 如果文件路径相同且修改时间未变，使用旧缓存
+            if (old_pdf_path and os.path.exists(old_pdf_path) and 
+                old_file_path == file_path and old_mtime == file_mtime):
+                print(f"[view_document] 使用旧缓存的PDF: {old_pdf_path}")
+                pdf_conversion_record.update_access_time(doc_id)
+                return send_file(old_pdf_path, mimetype='application/pdf',
+                               as_attachment=False,
+                               download_name=f"{file_path_obj.stem}.pdf")
+            else:
+                # 文件已更新，删除旧缓存
+                print(f"[view_document] 文件已更新，删除旧缓存")
+                pdf_conversion_record.delete_record(doc_id)
+        
+        # 没有缓存或缓存失效，执行同步转换
+        print(f"[view_document] 开始同步转换: {file_path}")
+        start_time = time.time()
+        
+        # 创建预览文件临时目录
+        preview_temp_dir = Path('uploads/temp/preview')
+        preview_temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 初始化PDF转换服务
+        pdf_service = PDFConversionService()
+        pdf_service.set_preview_temp_dir(str(preview_temp_dir))
+        
+        # 执行转换
+        pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
+        
+        # 保存转换记录（包含文件修改时间）
+        pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
+        # 同时更新记录，添加文件修改时间
+        if cache_key in pdf_conversion_record.records:
+            pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
+            pdf_conversion_record._save_records()
+        
+        elapsed_time = time.time() - start_time
+        print(f"[view_document] 转换完成，耗时: {elapsed_time:.2f}秒, PDF: {pdf_path}")
+        
+        return send_file(pdf_path, mimetype='application/pdf',
+                       as_attachment=False,
+                       download_name=f"{file_path_obj.stem}.pdf")
+        
+    except Exception as e:
+        import traceback
+        print(f"[view_document] 转换失败: {e}")
+        print(traceback.format_exc())
+        # 转换失败，返回友好的错误页面
+        return _office_convert_error_response(file_path_obj, file_ext, str(e))
 
 
-def _office_online_viewer_response(file_path_obj, file_ext):
-    """当本地转换工具不可用时，返回包含下载链接的降级HTML"""
+def _office_convert_error_response(file_path_obj, file_ext, error_msg):
+    """当Office转换失败时，返回友好的错误页面"""
     filename = file_path_obj.name
     file_icons = {
         '.docx': '📝', '.doc': '📝',
@@ -337,15 +349,17 @@ def _office_online_viewer_response(file_path_obj, file_ext):
   .btn-primary {{ background:#4f8ef7; color:#fff; }}
   .btn-secondary {{ background:#f0f0f0; color:#555; border:1px solid #ddd; }}
   .hint {{ font-size:12px; color:#aaa; margin-top:16px; }}
+  .error {{ font-size:11px; color:#e74c3c; margin-top:10px; background:#fee; padding:8px; border-radius:4px; }}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="icon">{icon}</div>
   <h3>{filename}</h3>
-  <p>此文件格式需要 Word/Excel/LibreOffice 才能在线转换预览，<br>服务器暂时不支持自动转换。</p>
-  <a class="btn btn-primary" href="javascript:window.parent.location.href=window.location.href" onclick="window.open(window.location.href,'_blank');return false;">↓ 在新标签下载查看</a>
+  <p>PDF转换暂时不可用，请下载后查看</p>
+  <a class="btn btn-primary" href="/api/documents/download/{filename}" download>↓ 下载文件</a>
   <div class="hint">提示：您也可以右键文件名→另存为，下载后用本地软件打开</div>
+  <div class="error">转换错误: {error_msg[:100]}</div>
 </div>
 </body>
 </html>"""
@@ -593,7 +607,9 @@ def start_progressive_preview(doc_id):
                 source_type = 'pdf' if file_ext == '.pdf' else 'office'
                 file_hash = progressive_pdf_service.start_conversion(file_path, source_type)
                 
-                # 获取初始状态
+                # 获取初始状态，等待一段时间让转换开始
+                import time
+                time.sleep(0.5)  # 等待0.5秒让转换开始
                 status = progressive_pdf_service.get_status(file_hash)
                 total_pages = status.get('total_pages', 1)
                 
@@ -669,4 +685,3 @@ def delete_pdf_conversion():
         print(f"[delete_pdf_conversion] 错误: {e}")
         print(traceback.format_exc())
         return jsonify({'status': 'error', 'message': f'删除PDF转换记录失败: {str(e)}'}), 500
-
