@@ -169,18 +169,78 @@ class PDFConversionService:
     
     def _convert_with_com(self, input_path, output_path, ext):
         """使用COM对象转换Office文档（Windows专用）"""
-        import comtypes.client
+        # 尝试使用win32com（更稳定）
+        try:
+            import win32com.client
+            self._convert_with_win32com(input_path, output_path, ext)
+            return
+        except Exception as e:
+            print(f"[PDFConversionService] win32com失败，尝试comtypes: {e}")
+        
+        # 回退到comtypes
+        self._convert_with_comtypes(input_path, output_path, ext)
+    
+    def _convert_with_win32com(self, input_path, output_path, ext):
+        """使用win32com转换（Windows专用）"""
+        import win32com.client
         import pythoncom
         
-        # 确保路径是绝对路径且格式正确
+        # 确保路径是绝对路径
         input_path = os.path.abspath(input_path)
         output_path = os.path.abspath(output_path)
         
-        # 检查文件是否存在
         if not os.path.exists(input_path):
             raise Exception(f"输入文件不存在: {input_path}")
         
-        # 确保输出目录存在
+        output_dir = os.path.dirname(output_path)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
+        app = None
+        try:
+            pythoncom.CoInitialize()
+            
+            print(f"[PDFConversionService] win32com转换: {input_path}")
+            
+            if ext in ['.doc', '.docx']:
+                app = win32com.client.Dispatch('Word.Application')
+                app.Visible = False
+                
+                # 打开文档
+                doc = app.Documents.Open(input_path)
+                
+                # 保存为PDF (17 = wdFormatPDF)
+                doc.SaveAs(output_path, FileFormat=17)
+                
+                doc.Close(SaveChanges=False)
+                app.Quit()
+                
+                print(f"[PDFConversionService] Word转换成功")
+                
+        except Exception as e:
+            if app:
+                try:
+                    app.Quit()
+                except:
+                    pass
+            raise e
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
+    
+    def _convert_with_comtypes(self, input_path, output_path, ext):
+        """使用comtypes转换（备用方案）"""
+        import comtypes.client
+        import pythoncom
+        
+        input_path = os.path.abspath(input_path)
+        output_path = os.path.abspath(output_path)
+        
+        if not os.path.exists(input_path):
+            raise Exception(f"输入文件不存在: {input_path}")
+        
         output_dir = os.path.dirname(output_path)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
@@ -188,38 +248,25 @@ class PDFConversionService:
         app = None
         doc = None
         try:
-            # 初始化COM
             pythoncom.CoInitialize()
             
-            print(f"[PDFConversionService] COM转换: {input_path} -> {output_path}")
+            print(f"[PDFConversionService] comtypes转换: {input_path}")
             
             if ext in ['.doc', '.docx']:
-                try:
-                    app = comtypes.client.CreateObject('Word.Application')
-                    app.Visible = False
-                    app.DisplayAlerts = 0  # wdAlertsNone
-                    
-                    # 打开文档
-                    doc = app.Documents.Open(input_path, ReadOnly=True)
-                    if not doc:
-                        raise Exception("Word无法打开文档")
-                    
-                    # 保存为PDF (FileFormat=17 是 PDF)
-                    doc.SaveAs2(output_path, FileFormat=17)
-                    
-                    # 关闭文档
-                    doc.Close(SaveChanges=False)
-                    doc = None
-                    
-                    # 退出Word
-                    app.Quit()
-                    app = None
-                    
-                    print(f"[PDFConversionService] Word转换成功")
-                    
-                except Exception as word_err:
-                    print(f"[PDFConversionService] Word错误: {word_err}")
-                    raise Exception(f"Word转换失败: {str(word_err)}")
+                app = comtypes.client.CreateObject('Word.Application')
+                app.Visible = False
+                app.DisplayAlerts = 0
+                
+                # 使用Open方法，不传关键字参数
+                doc = app.Documents.Open(input_path)
+                
+                # 使用SaveAs
+                doc.SaveAs(output_path, FileFormat=17)
+                
+                doc.Close(SaveChanges=False)
+                app.Quit()
+                
+                print(f"[PDFConversionService] Word转换成功")
                 
             elif ext in ['.xls', '.xlsx']:
                 try:
