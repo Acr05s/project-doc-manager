@@ -366,7 +366,11 @@ class ProgressivePDFService:
         <head>
             <meta charset="UTF-8">
             <title>文档预览</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
+                html {{
+                    scroll-behavior: smooth;
+                }}
                 body {{
                     margin: 0;
                     padding: 20px;
@@ -456,7 +460,14 @@ class ProgressivePDFService:
                     <div class="loading-spinner" id="status-spinner"></div>
                     <span id="status-text">{status_text}</span>
                 </div>
-                <span id="page-count">共 {total_pages} 页</span>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <button onclick="window.scrollTo({{ top: 0, behavior: 'smooth' }})" 
+                            style="background: #4CAF50; color: white; border: none; padding: 5px 12px; 
+                                   border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        首页
+                    </button>
+                    <span id="page-count">共 {total_pages} 页</span>
+                </div>
             </div>
             <div class="page-list" id="page-list">
                 {''.join(pages_html)}
@@ -485,6 +496,7 @@ class ProgressivePDFService:
                             
                             // 检查每个页面
                             if (data.pages_ready) {{
+                                let firstPageJustLoaded = false;
                                 data.pages_ready.forEach(page => {{
                                     const container = document.getElementById(`page-${{page}}`);
                                     if (container && container.classList.contains('loading')) {{
@@ -495,8 +507,17 @@ class ProgressivePDFService:
                                                  alt="第${{page}}页" 
                                                  class="page-image">
                                         `;
+                                        // 标记第一页是否刚加载
+                                        if (page === 1) {{
+                                            firstPageJustLoaded = true;
+                                        }}
                                     }}
                                 }});
+                                
+                                // 如果第一页刚加载完成，自动滚动到顶部显示第一页
+                                if (firstPageJustLoaded) {{
+                                    window.scrollTo({{ top: 0, behavior: 'smooth' }});
+                                }}
                             }}
                             
                             // 如果还没完成，继续轮询
@@ -509,6 +530,11 @@ class ProgressivePDFService:
                             setTimeout(checkPages, 5000);
                         }});
                 }}
+                
+                // 页面加载时滚动到顶部（确保显示第一页）
+                window.addEventListener('load', () => {{
+                    window.scrollTo({{ top: 0, behavior: 'auto' }});
+                }});
                 
                 // 开始轮询
                 setTimeout(checkPages, 1000);
