@@ -162,10 +162,19 @@ def preview_document_local(doc_id):
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
         
         # 使用PreviewService生成预览
-        preview_service = PreviewService()
-        html_content = preview_service.get_full_preview(str(file_path_obj), page)
-        
-        return html_content
+        if PreviewService:
+            try:
+                preview_service = PreviewService()
+                html_content = preview_service.get_full_preview(str(file_path_obj), page)
+                from flask import make_response
+                resp = make_response(html_content, 200)
+                resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+                return resp
+            except Exception as e:
+                return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
+        else:
+            # 预览服务不可用，返回错误
+            return jsonify({'status': 'error', 'message': '预览服务不可用'}), 503
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
