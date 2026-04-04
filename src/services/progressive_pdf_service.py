@@ -124,26 +124,43 @@ class ProgressivePDFService:
     def start_conversion(self, source_path: str, source_type: str = 'office') -> str:
         """
         开始渐进式转换
-        
+
         Args:
             source_path: 源文件路径
             source_type: 源文件类型 ('office' 或 'pdf')
-        
+
         Returns:
             file_hash: 文件哈希值，用于后续查询
         """
         file_hash = self._get_file_hash(source_path)
-        
-        # 检查是否已在转换
+
+        # 检查内存中是否已有转换状态
         with self.STATUS_LOCK:
             if file_hash in self.CONVERSION_STATUS:
                 if self.CONVERSION_STATUS[file_hash].get('status') == 'completed':
                     return file_hash
-                # 否则继续等待
-        
+                # 已在转换中，直接返回
+
+        # 检查磁盘缓存：PDF是否已存在（避免 gunicorn 重启后重复转换）
+        cached_pdf_path = self._get_cache_pdf_path(file_hash)
+        if cached_pdf_path.exists():
+            # PDF 已缓存，直接标记完成
+            total_pages = self._get_pdf_page_count(str(cached_pdf_path))
+            with self.STATUS_LOCK:
+                self.CONVERSION_STATUS[file_hash] = {
+                    'status': 'completed',
+                    'source_path': source_path,
+                    'pages_ready': list(range(1, total_pages + 1)) if total_pages > 0 else [],
+                    'total_pages': total_pages,
+                    'start_time': time.time(),
+                    'completed_time': time.time()
+                }
+            print(f"[ProgressivePDFService] 使用磁盘缓存PDF: {cached_pdf_path}")
+            return file_hash
+
         # 提交转换任务
         future = self.executor.submit(self._do_conversion, source_path, file_hash, source_type)
-        
+
         with self.STATUS_LOCK:
             self.CONVERSION_STATUS[file_hash] = {
                 'status': 'converting',
@@ -153,7 +170,7 @@ class ProgressivePDFService:
                 'total_pages': 0,
                 'start_time': time.time()
             }
-        
+
         return file_hash
     
     def _do_conversion(self, source_path: str, file_hash: str, source_type: str):
@@ -162,8 +179,8 @@ class ProgressivePDFService:
             # 1. 首先转换整个文档为PDF（如果是Office文档）
             pdf_path = self._get_cache_pdf_path(file_hash)
             
-            if source_type in ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
-                # 需要先转换为PDF
+            if source_type == 'office' or source_type in ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
+                # 需要先转换为PDF（source_type='office' 来自 preview.py）
                 pdf_path = self._convert_office_to_pdf(source_path, pdf_path)
             else:
                 # 已经是PDF，复制到缓存
