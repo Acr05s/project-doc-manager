@@ -45,6 +45,7 @@ show_help() {
     echo "  enable      Install as system service (auto-start on boot)"
     echo "  disable     Remove system service"
     echo "  service     View service status"
+    echo "  install-lo  Install LibreOffice headless (for Office→PDF preview)"
     echo "  help        Show this help message"
     echo ""
     echo "Options:"
@@ -57,6 +58,7 @@ show_help() {
     echo "  ./Daemon.sh install         # Install dependencies"
     echo "  ./Daemon.sh upgrade         # Upgrade to latest version"
     echo "  ./Daemon.sh logs            # View logs in real-time"
+    echo "  ./Daemon.sh install-lo      # Install LibreOffice headless"
     echo ""
 }
 
@@ -126,6 +128,87 @@ cmd_install() {
     # 创建必要目录
     mkdir -p "$APP_DIR/projects" "$APP_DIR/uploads" "$APP_DIR/logs"
     echo -e "${GREEN}[OK] Directories initialized${NC}"
+}
+
+# 安装 LibreOffice headless（无桌面服务器）
+cmd_install_libreoffice() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}  Install LibreOffice Headless${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+
+    # 检测包管理器
+    if command -v apt-get &> /dev/null; then
+        PKG_MGR="apt"
+    elif command -v dnf &> /dev/null; then
+        PKG_MGR="dnf"
+    elif command -v yum &> /dev/null; then
+        PKG_MGR="yum"
+    else
+        echo -e "${RED}[ERROR] 未识别的包管理器，请手动安装 LibreOffice headless${NC}"
+        echo "  Ubuntu/Debian: sudo apt-get install -y libreoffice-headless libreoffice-writer libreoffice-calc libreoffice-impress"
+        echo "  CentOS/RHEL:   sudo yum install -y libreoffice libreoffice-headless"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}检测到包管理器: $PKG_MGR${NC}"
+    echo ""
+
+    # 安装
+    if [ "$PKG_MGR" = "apt" ]; then
+        echo -e "${YELLOW}[1/3] 更新软件源...${NC}"
+        sudo apt-get update -qq
+
+        echo -e "${YELLOW}[2/3] 安装 LibreOffice headless 及中文字体...${NC}"
+        sudo apt-get install -y \
+            libreoffice-headless \
+            libreoffice-writer \
+            libreoffice-calc \
+            libreoffice-impress \
+            libreoffice-draw \
+            fonts-noto-cjk \
+            fonts-wqy-zenhei \
+            fonts-wqy-microhei
+
+    elif [ "$PKG_MGR" = "dnf" ]; then
+        echo -e "${YELLOW}[2/3] 安装 LibreOffice headless 及中文字体...${NC}"
+        sudo dnf install -y \
+            libreoffice \
+            libreoffice-headless \
+            wqy-zenhei-fonts \
+            wqy-microhei-fonts
+
+    elif [ "$PKG_MGR" = "yum" ]; then
+        echo -e "${YELLOW}[2/3] 安装 LibreOffice headless 及中文字体...${NC}"
+        sudo yum install -y \
+            libreoffice \
+            libreoffice-headless \
+            wqy-zenhei-fonts
+    fi
+
+    echo ""
+    echo -e "${YELLOW}[3/3] 验证安装...${NC}"
+    if command -v libreoffice &> /dev/null || command -v soffice &> /dev/null; then
+        LO_BIN=$(command -v libreoffice 2>/dev/null || command -v soffice 2>/dev/null)
+        LO_VER=$("$LO_BIN" --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "${GREEN}[OK] LibreOffice 安装成功: $LO_VER${NC}"
+        echo -e "${GREEN}     路径: $LO_BIN${NC}"
+        echo ""
+        echo -e "${YELLOW}测试 headless 模式...${NC}"
+        # 简单测试：让 LibreOffice 打印版本（headless 模式）
+        "$LO_BIN" --headless --version 2>/dev/null && \
+            echo -e "${GREEN}[OK] Headless 模式正常${NC}" || \
+            echo -e "${YELLOW}[WARN] Headless 测试有警告，但不影响使用${NC}"
+        echo ""
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}  LibreOffice 安装完成！${NC}"
+        echo -e "${GREEN}  现在重启应用即可使用 Office 文档预览：${NC}"
+        echo -e "${GREEN}    ./Daemon.sh restart${NC}"
+        echo -e "${GREEN}========================================${NC}"
+    else
+        echo -e "${RED}[ERROR] 安装后未找到 libreoffice/soffice 命令，请检查安装日志${NC}"
+        exit 1
+    fi
 }
 
 # 检查服务器状态
@@ -658,6 +741,9 @@ case $COMMAND in
         ;;
     service)
         cmd_service_status
+        ;;
+    install-lo|install-libreoffice)
+        cmd_install_libreoffice
         ;;
     help)
         show_help
