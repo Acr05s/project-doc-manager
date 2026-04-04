@@ -215,45 +215,53 @@ def view_document(doc_id):
             content_type = mime_types.get(file_ext, 'application/octet-stream')
             return send_file(file_path, mimetype=content_type)
         
-        # 检查是否为Office文档，使用后台任务转换为PDF
+        # 检查是否为Office文档
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
         if file_ext in office_extensions:
-            # 检查文档是否被匹配使用（有doc_name字段）
-            doc_name = metadata.get('doc_name')
-            if doc_name:
-                # 检查是否已经有转换任务
-                task_id = request.args.get('task_id')
-                if task_id:
-                    # 检查任务状态
-                    task_status = task_service.get_task_status(task_id)
-                    if task_status:
-                        if task_status['status'] == 'completed':
-                            # 转换完成，返回PDF
-                            pdf_path = task_status['result']['pdf_path']
-                            print(f"[view_document] 使用后台转换结果: {pdf_path}")
-                            return send_file(pdf_path, mimetype='application/pdf', 
-                                           as_attachment=False, 
-                                           download_name=f"{file_path_obj.stem}.pdf")
-                        elif task_status['status'] == 'error':
-                            # 转换失败，返回本地预览
-                            print(f"[view_document] 后台转换失败: {task_status['message']}")
-                            return preview_document_local(doc_id)
-                        else:
-                            # 转换中，返回等待页面
-                            return f"<html><body><h1>PDF转换中...</h1><p>请稍候，正在转换文档为PDF格式。</p><script>setTimeout(() => window.location.reload(), 2000);</script></body></html>", 200
-                
+            # 先检查是否已有转换缓存（PDF已存在）
+            task_id = request.args.get('task_id')
+            if task_id:
+                task_status = task_service.get_task_status(task_id)
+                if task_status:
+                    if task_status['status'] == 'completed':
+                        pdf_path = task_status['result']['pdf_path']
+                        print(f"[view_document] 使用后台转换结果: {pdf_path}")
+                        return send_file(pdf_path, mimetype='application/pdf',
+                                       as_attachment=False,
+                                       download_name=f"{file_path_obj.stem}.pdf")
+                    elif task_status['status'] == 'error':
+                        print(f"[view_document] 后台转换失败，使用在线预览降级")
+                        # 降级为在线预览
+                        return _office_online_viewer_response(file_path_obj, file_ext)
+                    else:
+                        # 转换中，返回等待页面
+                        return (f"<html><body><h1>PDF转换中...</h1>"
+                                f"<p>请稍候，正在转换文档为PDF格式。</p>"
+                                f"<script>setTimeout(() => window.location.reload(), 2000);</script>"
+                                f"</body></html>"), 200
+            
+            # 尝试检查是否有现有转换记录（避免重复启动任务）
+            from src.services.pdf_conversion_service import pdf_conversion_record
+            existing_record = pdf_conversion_record.get_record(doc_id)
+            if existing_record and os.path.exists(existing_record['pdf_path']):
+                print(f"[view_document] 使用已有PDF缓存: {existing_record['pdf_path']}")
+                return send_file(existing_record['pdf_path'], mimetype='application/pdf',
+                               as_attachment=False,
+                               download_name=f"{file_path_obj.stem}.pdf")
+            
+            # 检查转换服务是否可用（LibreOffice/COM）
+            conversion_available = _check_conversion_available(file_ext)
+            if conversion_available:
                 # 启动后台转换任务
                 task_result = task_service.start_pdf_conversion_task(file_path, doc_id)
                 task_id = task_result['task_id']
                 print(f"[view_document] 启动后台转换任务: {task_id}")
-                
-                # 重定向到带有task_id的URL
                 from flask import redirect, url_for
                 return redirect(f"{url_for('document.view_document', doc_id=doc_id)}?task_id={task_id}")
             else:
-                # 未被匹配的文档，使用本地预览
-                print(f"[view_document] 文档未被匹配，使用本地预览")
-                return preview_document_local(doc_id)
+                # 转换工具不可用，直接返回在线预览降级方案
+                print(f"[view_document] 转换工具不可用，使用在线预览降级")
+                return _office_online_viewer_response(file_path_obj, file_ext)
         
         # 其他文件类型，返回本地预览
         return preview_document_local(doc_id)
@@ -263,6 +271,79 @@ def view_document(doc_id):
         print(f"[view_document] 错误: {e}")
         print(traceback.format_exc())
         return jsonify({'status': 'error', 'message': f'查看失败: {str(e)}'}), 500
+
+
+def _check_conversion_available(file_ext: str) -> bool:
+    """检查PDF转换工具是否可用"""
+    import shutil
+    import platform
+    
+    # 检查 LibreOffice（所有平台）
+    if shutil.which('libreoffice') or shutil.which('soffice'):
+        return True
+    
+    # Windows 平台检查 COM（需要装 Word/Excel/PPT）和 docx2pdf
+    if platform.system() == 'Windows':
+        if file_ext in ('.docx', '.doc'):
+            try:
+                import docx2pdf
+                return True
+            except ImportError:
+                pass
+            try:
+                import comtypes.client
+                return True
+            except ImportError:
+                pass
+        else:
+            try:
+                import comtypes.client
+                return True
+            except ImportError:
+                pass
+    
+    return False
+
+
+def _office_online_viewer_response(file_path_obj, file_ext):
+    """当本地转换工具不可用时，返回包含下载链接的降级HTML"""
+    filename = file_path_obj.name
+    file_icons = {
+        '.docx': '📝', '.doc': '📝',
+        '.xlsx': '📊', '.xls': '📊',
+        '.pptx': '📑', '.ppt': '📑',
+    }
+    icon = file_icons.get(file_ext, '📄')
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{ font-family: 'Microsoft YaHei', sans-serif; display:flex; justify-content:center; align-items:center; height:80vh; margin:0; background:#f5f5f5; }}
+  .card {{ background:#fff; border-radius:12px; padding:40px 50px; text-align:center; box-shadow:0 2px 12px rgba(0,0,0,0.1); max-width:480px; }}
+  .icon {{ font-size:64px; }}
+  h3 {{ margin:16px 0 8px; color:#333; word-break:break-all; font-size:15px; }}
+  p {{ color:#666; font-size:13px; margin:0 0 24px; }}
+  .btn {{ display:inline-block; padding:10px 28px; border-radius:6px; text-decoration:none; font-size:14px; margin:6px; }}
+  .btn-primary {{ background:#4f8ef7; color:#fff; }}
+  .btn-secondary {{ background:#f0f0f0; color:#555; border:1px solid #ddd; }}
+  .hint {{ font-size:12px; color:#aaa; margin-top:16px; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">{icon}</div>
+  <h3>{filename}</h3>
+  <p>此文件格式需要 Word/Excel/LibreOffice 才能在线转换预览，<br>服务器暂时不支持自动转换。</p>
+  <a class="btn btn-primary" href="javascript:window.parent.location.href=window.location.href" onclick="window.open(window.location.href,'_blank');return false;">↓ 在新标签下载查看</a>
+  <div class="hint">提示：您也可以右键文件名→另存为，下载后用本地软件打开</div>
+</div>
+</body>
+</html>"""
+    from flask import make_response
+    resp = make_response(html, 200)
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return resp
 
 
 def _get_document_metadata(doc_manager, doc_id):
@@ -499,24 +580,34 @@ def start_progressive_preview(doc_id):
                     'file_ext': file_ext
                 })
             # 启动后台转换
-            source_type = 'pdf' if file_ext == '.pdf' else 'office'
-            file_hash = progressive_pdf_service.start_conversion(file_path, source_type)
-            
-            # 获取初始状态
-            status = progressive_pdf_service.get_status(file_hash)
-            total_pages = status.get('total_pages', 1)
-            
-            # 生成预览HTML
-            preview_html = progressive_pdf_service.get_preview_html(file_hash, total_pages)
-            
-            return jsonify({
-                'status': 'success',
-                'file_hash': file_hash,
-                'mode': 'progressive',
-                'total_pages': total_pages,
-                'preview_html': preview_html,
-                'file_ext': file_ext
-            })
+            try:
+                source_type = 'pdf' if file_ext == '.pdf' else 'office'
+                file_hash = progressive_pdf_service.start_conversion(file_path, source_type)
+                
+                # 获取初始状态
+                status = progressive_pdf_service.get_status(file_hash)
+                total_pages = status.get('total_pages', 1)
+                
+                # 生成预览HTML
+                preview_html = progressive_pdf_service.get_preview_html(file_hash, total_pages)
+                
+                return jsonify({
+                    'status': 'success',
+                    'file_hash': file_hash,
+                    'mode': 'progressive',
+                    'total_pages': total_pages,
+                    'preview_html': preview_html,
+                    'file_ext': file_ext
+                })
+            except Exception as conv_err:
+                # 渐进式转换失败，降级为 direct 模式（走 view 接口）
+                print(f"[start_progressive_preview] 渐进式转换失败，降级为 direct: {conv_err}")
+                return jsonify({
+                    'status': 'success',
+                    'mode': 'direct',
+                    'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
+                    'file_ext': file_ext
+                })
         else:
             # 图片直接返回
             return jsonify({

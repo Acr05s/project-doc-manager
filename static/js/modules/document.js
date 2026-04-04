@@ -1276,7 +1276,7 @@ async function loadProgressivePreview(docId, fileExt) {
                 // 渐进式预览：直接显示后端返回的HTML
                 previewBody.innerHTML = result.preview_html;
             } else if (result.mode === 'direct') {
-                // 直接预览（图片等）
+                // 直接预览（图片/PDF/转换降级等）
                 const viewUrl = result.file_url;
                 if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
                     previewBody.innerHTML = `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
@@ -1286,7 +1286,7 @@ async function loadProgressivePreview(docId, fileExt) {
             }
         } else {
             // API返回错误，显示错误信息
-            const viewUrl = `/api/documents/view/${docId}`;
+            const viewUrl = `/api/documents/view/${encodeURIComponent(docId)}`;
             if (result.message && result.message.includes('不支持')) {
                 // 不支持的文件类型
                 previewBody.innerHTML = `
@@ -1312,7 +1312,7 @@ async function loadProgressivePreview(docId, fileExt) {
  * 获取降级预览内容（原始方式）
  */
 function getFallbackPreviewContent(docId, fileExt) {
-    const viewUrl = `/api/documents/view/${docId}`;
+    const viewUrl = `/api/documents/view/${encodeURIComponent(docId)}`;
     
     // 图片预览
     if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
@@ -1324,7 +1324,7 @@ function getFallbackPreviewContent(docId, fileExt) {
         return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
     }
     
-    // Office文档预览（转换为PDF后预览）
+    // Office文档预览（走 view 接口，转换或降级）
     if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(fileExt)) {
         return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
     }
