@@ -1,8 +1,12 @@
-"""PDF转换服务 - 将Office文档转换为PDF（优化版）
+"""PDF转换服务 - 将Office文档转换为PDF（双平台优化版）
+
+支持平台：
+- Windows: 使用 COM 接口（Word/Excel/PPT）
+- Linux/Ubuntu: 使用 LibreOffice
 
 优化点：
-1. 优先使用轻量级库（如docx2pdf），避免启动Office应用
-2. 优化LibreOffice调用，使用更快的参数
+1. Windows优先使用COM（速度快，1-3秒）
+2. Ubuntu使用LibreOffice（跨平台方案）
 3. 完善的缓存机制，避免重复转换
 """
 
@@ -15,22 +19,19 @@ import shutil
 from .pdf_conversion_record import pdf_conversion_record
 
 class PDFConversionService:
-    """PDF转换服务类 - 优化版"""
+    """PDF转换服务类 - 双平台优化版"""
     
     def __init__(self):
         """初始化PDF转换服务"""
         self.platform = platform.system()
         self.preview_temp_dir = None
         self._libreoffice_available = None  # 缓存可用性检查结果
-        self._docx2pdf_available = None
         self._com_available = None
+        
+        print(f"[PDFConversionService] 初始化 - 平台: {self.platform}")
     
     def set_preview_temp_dir(self, temp_dir):
-        """设置预览临时目录
-        
-        Args:
-            temp_dir: 临时目录路径
-        """
+        """设置预览临时目录"""
         self.preview_temp_dir = temp_dir
     
     def _check_libreoffice(self):
@@ -39,30 +40,25 @@ class PDFConversionService:
             self._libreoffice_available = bool(
                 shutil.which('libreoffice') or shutil.which('soffice')
             )
+            print(f"[PDFConversionService] LibreOffice可用: {self._libreoffice_available}")
         return self._libreoffice_available
     
-    def _check_docx2pdf(self):
-        """检查docx2pdf是否可用（带缓存）"""
-        if self._docx2pdf_available is None:
-            try:
-                import docx2pdf
-                self._docx2pdf_available = True
-            except ImportError:
-                self._docx2pdf_available = False
-        return self._docx2pdf_available
-    
     def _check_com(self):
-        """检查COM是否可用（带缓存）"""
+        """检查COM是否可用（仅Windows，带缓存）"""
+        if self.platform != 'Windows':
+            return False
         if self._com_available is None:
             try:
                 import comtypes.client
                 self._com_available = True
+                print(f"[PDFConversionService] COM可用: True")
             except ImportError:
                 self._com_available = False
+                print(f"[PDFConversionService] COM可用: False (未安装comtypes)")
         return self._com_available
     
     def convert_to_pdf(self, input_path, doc_id=None):
-        """将Office文档转换为PDF（优化版）
+        """将Office文档转换为PDF
         
         Args:
             input_path: 输入文件路径
@@ -96,7 +92,7 @@ class PDFConversionService:
             temp_pdf_path = tempfile.mktemp(suffix='.pdf')
         
         try:
-            # 根据平台和文件类型选择最优的转换方法
+            # 根据平台选择转换方法
             if self.platform == 'Windows':
                 self._convert_windows(input_path, temp_pdf_path, ext)
             else:
@@ -124,64 +120,55 @@ class PDFConversionService:
             raise Exception(f"PDF转换失败: {str(e)}")
     
     def _convert_windows(self, input_path, output_path, ext):
-        """Windows平台转换（优化顺序）"""
+        """Windows平台转换 - 使用COM接口"""
         errors = []
         
-        # 1. 对于docx，优先使用docx2pdf（最快，无需启动Office）
-        if ext == '.docx':
-            try:
-                self._convert_with_docx2pdf(input_path, output_path)
-                return
-            except Exception as e:
-                errors.append(f"docx2pdf: {e}")
-                print(f"[PDFConversionService] docx2pdf失败，尝试其他方法: {e}")
-        
-        # 2. 对于所有Office文档，尝试LibreOffice（跨平台，较快）
-        if self._check_libreoffice():
-            try:
-                self._convert_with_libreoffice(input_path, output_path)
-                return
-            except Exception as e:
-                errors.append(f"LibreOffice: {e}")
-                print(f"[PDFConversionService] LibreOffice失败，尝试COM: {e}")
-        
-        # 3. 最后尝试COM（较慢，需要安装Office）
+        # Windows下所有Office文档都使用COM
         if ext in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
             if self._check_com():
                 try:
+                    print(f"[PDFConversionService] Windows使用COM转换: {ext}")
                     self._convert_with_com(input_path, output_path, ext)
+                    print(f"[PDFConversionService] COM转换成功")
                     return
                 except Exception as e:
                     errors.append(f"COM: {e}")
-                    raise Exception(f"; ".join(errors))
+                    print(f"[PDFConversionService] COM转换失败: {e}")
             else:
                 errors.append("COM: 未安装comtypes或Microsoft Office")
         
-        raise Exception(f"没有可用的转换工具: {'; '.join(errors)}")
-    
-    def _convert_linux(self, input_path, output_path, ext):
-        """Linux平台转换"""
-        # Linux下主要依赖LibreOffice
+        # COM失败，尝试LibreOffice
         if self._check_libreoffice():
             try:
-                self._convert_with_libreoffice(input_path, output_path, ext)
+                print(f"[PDFConversionService] 尝试LibreOffice转换")
+                self._convert_with_libreoffice(input_path, output_path)
+                print(f"[PDFConversionService] LibreOffice转换成功")
+                return
+            except Exception as e:
+                errors.append(f"LibreOffice: {e}")
+                print(f"[PDFConversionService] LibreOffice失败: {e}")
+        
+        raise Exception(f"Windows平台转换失败: {'; '.join(errors)}")
+    
+    def _convert_linux(self, input_path, output_path, ext):
+        """Linux/Ubuntu平台转换 - 使用LibreOffice"""
+        print(f"[PDFConversionService] Linux使用LibreOffice转换: {ext}")
+        
+        if self._check_libreoffice():
+            try:
+                self._convert_with_libreoffice(input_path, output_path)
+                print(f"[PDFConversionService] LibreOffice转换成功")
                 return
             except Exception as e:
                 raise Exception(f"LibreOffice转换失败: {e}")
         else:
-            raise Exception("Linux平台需要安装LibreOffice才能转换Office文档")
-    
-    def _convert_with_docx2pdf(self, input_path, output_path):
-        """使用docx2pdf转换（仅Windows，仅docx，最快）"""
-        try:
-            from docx2pdf import convert
-            convert(input_path, output_path)
-            print(f"[PDFConversionService] docx2pdf转换成功")
-        except Exception as e:
-            raise Exception(f"docx2pdf转换失败: {e}")
+            raise Exception(
+                "Linux平台需要安装LibreOffice才能转换Office文档。"
+                "请运行: sudo apt-get install libreoffice"
+            )
     
     def _convert_with_com(self, input_path, output_path, ext):
-        """使用COM对象转换Office文档（Windows专用，较慢）"""
+        """使用COM对象转换Office文档（Windows专用）"""
         import comtypes.client
         import pythoncom
         
@@ -217,8 +204,6 @@ class PDFConversionService:
                 pres.Close()
                 app.Quit()
             
-            print(f"[PDFConversionService] COM转换成功")
-            
         except Exception as e:
             # 尝试清理COM对象
             if app:
@@ -235,15 +220,11 @@ class PDFConversionService:
                 pass
     
     def _convert_with_libreoffice(self, input_path, output_path):
-        """使用LibreOffice转换文档（跨平台，较快）"""
+        """使用LibreOffice转换文档（跨平台）"""
         # 确定LibreOffice命令
         libreoffice_cmd = 'soffice' if shutil.which('soffice') else 'libreoffice'
         
         try:
-            # 使用优化的参数调用LibreOffice
-            # --headless: 无界面模式
-            # --convert-to pdf: 转换为PDF
-            # --outdir: 输出目录
             output_dir = os.path.dirname(output_path)
             
             result = subprocess.run(
@@ -252,7 +233,7 @@ class PDFConversionService:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=60  # 设置60秒超时
+                timeout=120  # 设置120秒超时
             )
             
             # LibreOffice生成的文件名是原文件名+.pdf
@@ -266,19 +247,13 @@ class PDFConversionService:
             else:
                 raise Exception("LibreOffice转换失败，未生成PDF文件")
             
-            print(f"[PDFConversionService] LibreOffice转换成功")
-            
         except subprocess.TimeoutExpired:
-            raise Exception("LibreOffice转换超时（超过60秒）")
+            raise Exception("LibreOffice转换超时（超过120秒）")
         except subprocess.CalledProcessError as e:
             raise Exception(f"LibreOffice转换失败: {e.stderr}")
     
     def cleanup(self, file_path):
-        """清理临时文件
-        
-        Args:
-            file_path: 要清理的文件路径
-        """
+        """清理临时文件"""
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)

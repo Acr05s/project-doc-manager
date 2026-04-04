@@ -787,7 +787,16 @@ async function handleImportTemplate(e) {
     try {
         // 读取文件内容
         const fileContent = await file.text();
-        const templateData = JSON.parse(fileContent);
+        let templateData;
+        
+        // 检查JSON语法
+        try {
+            templateData = JSON.parse(fileContent);
+        } catch (jsonError) {
+            showNotification(`JSON语法错误: ${jsonError.message}`, 'error');
+            showLoading(false);
+            return;
+        }
         
         // 调用导入API
         const response = await fetch('/api/projects/templates/import', {
@@ -820,7 +829,9 @@ async function handleImportTemplate(e) {
             // 刷新模板列表
             await loadTemplateList();
         } else {
-            showNotification('导入失败: ' + result.message, 'error');
+            // 显示详细的验证错误
+            const errorMsg = result.validation_error || result.message;
+            showNotification(`导入失败: ${errorMsg}`, 'error');
         }
     } catch (error) {
         console.error('导入模板失败:', error);
@@ -829,3 +840,6 @@ async function handleImportTemplate(e) {
         showLoading(false);
     }
 }
+
+// 全局绑定
+window.closeImportTemplateModal = closeImportTemplateModal;

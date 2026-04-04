@@ -1266,8 +1266,15 @@
             <h2>模板管理</h2>
             
             <div class="template-manage-section">
-                <h3>公共模板管理</h3>
-                <p class="template-manage-hint">管理存储在 /projects/common 目录下的公共模板</p>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div>
+                        <h3>公共模板管理</h3>
+                        <p class="template-manage-hint">管理存储在 /projects/common 目录下的公共模板</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="openImportTemplateModalForManage()">
+                        📥 导入模板
+                    </button>
+                </div>
                 
                 <div id="templateManageList" class="template-list">
                     <div class="loading">加载中...</div>

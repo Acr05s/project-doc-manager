@@ -2184,6 +2184,7 @@ async function loadTemplateListForManage() {
                 </div>
                 <div class="template-actions">
                     <button class="btn btn-sm btn-primary" onclick="loadTemplateToTreeEditor('${t.id}')">加载</button>
+                    <button class="btn btn-sm btn-info" onclick="exportTemplateFromManage('${t.id}')">导出</button>
                     <button class="btn btn-sm btn-danger" onclick="deleteTemplateConfirm('${t.id}', '${escapeHtml(t.name)}')">删除</button>
                 </div>
             </div>
@@ -2216,6 +2217,222 @@ window.deleteTemplateConfirm = function(templateId, templateName) {
         }
     );
 };
+
+// ==================== 模板导入/导出功能 ====================
+
+/**
+ * 从模板管理导出模板
+ */
+window.exportTemplateFromManage = function(templateId) {
+    // 直接通过浏览器下载
+    window.location.href = `/api/projects/templates/${templateId}/export`;
+    showNotification('模板导出中...', 'info');
+};
+
+/**
+ * 在模板管理中打开导入模板模态框
+ */
+window.openImportTemplateModalForManage = function() {
+    const modal = document.getElementById('importTemplateModal');
+    if (modal) {
+        // 重置表单
+        const form = document.getElementById('importTemplateForm');
+        if (form) form.reset();
+        
+        // 清空预览
+        const preview = document.getElementById('importTemplatePreview');
+        if (preview) {
+            preview.innerHTML = '';
+            preview.style.display = 'none';
+        }
+        
+        // 清空文件输入
+        const fileInput = document.getElementById('importTemplateFile');
+        if (fileInput) fileInput.value = '';
+        
+        openModal(modal);
+    }
+};
+
+/**
+ * 处理模板导入（用于模板管理）
+ */
+async function handleImportTemplateForManage(e) {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('importTemplateFile');
+    const nameInput = document.getElementById('importTemplateName');
+    const descInput = document.getElementById('importTemplateDescription');
+    
+    const file = fileInput?.files[0];
+    const name = nameInput?.value.trim();
+    const description = descInput?.value.trim();
+    
+    if (!file) {
+        showNotification('请选择JSON文件', 'error');
+        return;
+    }
+    
+    if (!name) {
+        showNotification('请输入模板名称', 'error');
+        return;
+    }
+    
+    showLoading(true);
+    try {
+        // 读取文件内容
+        const fileContent = await file.text();
+        let templateData;
+        
+        // 检查JSON语法
+        try {
+            templateData = JSON.parse(fileContent);
+        } catch (jsonError) {
+            showNotification(`JSON语法错误: ${jsonError.message}`, 'error');
+            showLoading(false);
+            return;
+        }
+        
+        // 客户端预验证
+        const clientValidation = validateTemplateClientSide(templateData);
+        if (!clientValidation.valid) {
+            showNotification(`数据验证失败: ${clientValidation.message}`, 'error');
+            showLoading(false);
+            return;
+        }
+        
+        // 调用导入API
+        const response = await fetch('/api/projects/templates/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                description: description,
+                template_data: templateData
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            let successMsg = '模板导入成功';
+            if (result.custom_attributes_count > 0) {
+                successMsg += `（含 ${result.custom_attributes_count} 个自定义属性定义）`;
+            }
+            if (result.docs_with_attributes > 0) {
+                successMsg += `，${result.docs_with_attributes} 个文档包含附加要求`;
+                if (result.docs_with_custom_attrs > 0) {
+                    successMsg += `（其中 ${result.docs_with_custom_attrs} 个含自定义属性）`;
+                }
+            }
+            showNotification(successMsg, 'success');
+            
+            // 关闭模态框
+            const modal = document.getElementById('importTemplateModal');
+            if (modal) closeModal(modal);
+            
+            // 刷新模板管理列表
+            await loadTemplateListForManage();
+        } else {
+            // 显示详细的验证错误
+            const errorMsg = result.validation_error || result.message;
+            showNotification(`导入失败: ${errorMsg}`, 'error');
+        }
+    } catch (error) {
+        console.error('导入模板失败:', error);
+        showNotification('导入失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 客户端模板验证
+ */
+function validateTemplateClientSide(templateData) {
+    if (!templateData || typeof templateData !== 'object') {
+        return { valid: false, message: '模板数据必须是JSON对象' };
+    }
+    
+    // 检查必需字段
+    if (!templateData.cycles) {
+        return { valid: false, message: '缺少必需字段: cycles' };
+    }
+    if (!templateData.documents) {
+        return { valid: false, message: '缺少必需字段: documents' };
+    }
+    
+    // 检查cycles
+    if (!Array.isArray(templateData.cycles)) {
+        return { valid: false, message: 'cycles 必须是数组' };
+    }
+    if (templateData.cycles.length === 0) {
+        return { valid: false, message: 'cycles 不能为空数组' };
+    }
+    
+    // 检查documents
+    if (typeof templateData.documents !== 'object') {
+        return { valid: false, message: 'documents 必须是对象' };
+    }
+    
+    // 检查每个周期是否存在
+    for (const cycleName of templateData.cycles) {
+        if (typeof cycleName !== 'string' || !cycleName.trim()) {
+            return { valid: false, message: `周期名称无效: ${cycleName}` };
+        }
+        
+        const cycleData = templateData.documents[cycleName];
+        if (!cycleData) {
+            return { valid: false, message: `周期 '${cycleName}' 缺少文档配置` };
+        }
+        
+        if (!cycleData.required_docs) {
+            return { valid: false, message: `周期 '${cycleName}' 缺少 required_docs 字段` };
+        }
+        
+        if (!Array.isArray(cycleData.required_docs)) {
+            return { valid: false, message: `周期 '${cycleName}' 的 required_docs 必须是数组` };
+        }
+        
+        // 检查文档名称
+        const docNames = new Set();
+        for (let i = 0; i < cycleData.required_docs.length; i++) {
+            const doc = cycleData.required_docs[i];
+            if (!doc || typeof doc !== 'object') {
+                return { valid: false, message: `周期 '${cycleName}' 的第 ${i+1} 个文档必须是对象` };
+            }
+            if (!doc.name) {
+                return { valid: false, message: `周期 '${cycleName}' 的第 ${i+1} 个文档缺少 name 字段` };
+            }
+            if (typeof doc.name !== 'string' || !doc.name.trim()) {
+                return { valid: false, message: `周期 '${cycleName}' 的第 ${i+1} 个文档名称无效` };
+            }
+            
+            // 检查重复
+            if (docNames.has(doc.name)) {
+                return { valid: false, message: `周期 '${cycleName}' 中存在重复的文档名称: ${doc.name}` };
+            }
+            docNames.add(doc.name);
+        }
+    }
+    
+    // 检查是否有未定义的周期
+    for (const cycleName in templateData.documents) {
+        if (!templateData.cycles.includes(cycleName)) {
+            return { valid: false, message: `文档配置中的周期 '${cycleName}' 不在 cycles 列表中` };
+        }
+    }
+    
+    return { valid: true, message: null };
+}
+
+// 监听导入表单提交
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('importTemplateForm');
+    if (form) {
+        form.addEventListener('submit', handleImportTemplateForManage);
+    }
+});
 
 // ==================== 导入/导出功能 ====================
 

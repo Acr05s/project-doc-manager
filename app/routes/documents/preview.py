@@ -17,13 +17,6 @@ try:
 except ImportError:
     PDFConversionService = None
 
-try:
-    from src.services.progressive_pdf_service import ProgressivePDFService
-    progressive_pdf_service = ProgressivePDFService()
-except ImportError:
-    progressive_pdf_service = None
-
-
 def normalize_path(path_str):
     """统一路径分隔符，支持Windows和Linux"""
     if not path_str:
@@ -529,36 +522,23 @@ def _resolve_file_path(doc_manager, metadata):
 
 
 def preview_status(file_hash):
-    """获取文档预览转换状态"""
-    try:
-        if not progressive_pdf_service:
-            return jsonify({'status': 'error', 'message': '预览服务不可用'}), 503
-        status = progressive_pdf_service.get_status(file_hash)
-        return jsonify(status)
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    """获取文档预览转换状态（已弃用，保留兼容）"""
+    return jsonify({'status': 'completed', 'message': '使用直接预览模式'})
 
 
 def preview_page(file_hash, page):
-    """获取指定预览页面图片"""
-    try:
-        if not progressive_pdf_service:
-            return jsonify({'status': 'error', 'message': '预览服务不可用'}), 503
-        page_path = progressive_pdf_service.get_page(file_hash, page)
-        if page_path and page_path.exists():
-            return send_file(str(page_path), mimetype='image/png')
-        else:
-            return jsonify({'status': 'error', 'message': '页面尚未准备好'}), 404
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    """获取指定预览页面图片（已弃用，保留兼容）"""
+    return jsonify({'status': 'error', 'message': '已切换到PDF直接预览模式'}), 410
 
 
 def start_progressive_preview(doc_id):
     """
-    启动渐进式文档预览
-    1. 获取文档文件路径
-    2. 启动后台转换
-    3. 返回预览页面HTML
+    启动文档预览
+    
+    优化方案：
+    1. PDF文件直接返回，浏览器原生预览
+    2. Office文档转换为PDF后返回PDF（保持原格式）
+    3. 图片直接返回
     """
     try:
         import urllib.parse
@@ -578,69 +558,27 @@ def start_progressive_preview(doc_id):
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
         
         file_ext = file_path_obj.suffix.lower()
-        file_path = str(file_path_obj)
         
-        # 检查是否为支持的Office文档类型
+        # 支持的文件类型
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
-        pdf_extensions = ['.pdf']
         
-        if file_ext not in (office_extensions + pdf_extensions + ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']):
-            # 不支持的文件类型，返回错误
+        if file_ext not in (office_extensions + ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']):
             return jsonify({
                 'status': 'error', 
-                'message': f'该文件类型 ({file_ext}) 不支持渐进式预览',
+                'message': f'该文件类型 ({file_ext}) 不支持预览',
                 'fallback': 'download'
             }), 400
         
-        # 启动渐进式转换（Office文档）或直接返回PDF信息
-        if file_ext in office_extensions or file_ext == '.pdf':
-            # 如果渐进式服务不可用，降级为直接查看
-            if not progressive_pdf_service:
-                return jsonify({
-                    'status': 'success',
-                    'mode': 'direct',
-                    'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
-                    'file_ext': file_ext
-                })
-            # 启动后台转换
-            try:
-                source_type = 'pdf' if file_ext == '.pdf' else 'office'
-                file_hash = progressive_pdf_service.start_conversion(file_path, source_type)
-                
-                # 获取初始状态，等待一段时间让转换开始
-                import time
-                time.sleep(0.5)  # 等待0.5秒让转换开始
-                status = progressive_pdf_service.get_status(file_hash)
-                total_pages = status.get('total_pages', 1)
-                
-                # 生成预览HTML
-                preview_html = progressive_pdf_service.get_preview_html(file_hash, total_pages)
-                
-                return jsonify({
-                    'status': 'success',
-                    'file_hash': file_hash,
-                    'mode': 'progressive',
-                    'total_pages': total_pages,
-                    'preview_html': preview_html,
-                    'file_ext': file_ext
-                })
-            except Exception as conv_err:
-                # 渐进式转换失败，降级为 direct 模式（走 view 接口）
-                print(f"[start_progressive_preview] 渐进式转换失败，降级为 direct: {conv_err}")
-                return jsonify({
-                    'status': 'success',
-                    'mode': 'direct',
-                    'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
-                    'file_ext': file_ext
-                })
-        else:
-            # 图片直接返回
-            return jsonify({
-                'status': 'success',
-                'mode': 'direct',
-                'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
-                'file_ext': file_ext
-            })
+        # 所有文件都使用 direct 模式：
+        # - PDF直接返回
+        # - Office文档通过 view_document 转换为PDF后返回
+        # - 图片直接返回
+        return jsonify({
+            'status': 'success',
+            'mode': 'direct',
+            'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
+            'file_ext': file_ext
+        })
         
     except Exception as e:
         import traceback
