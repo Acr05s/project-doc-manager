@@ -2636,13 +2636,25 @@ window.loadTemplateToTreeEditor = async function(templateId) {
         const template = result.template;
         const tempConfig = {
             cycles: template.cycles || [],
-            documents: template.documents || {}
+            documents: template.documents || {},
+            custom_attribute_definitions: template.custom_attribute_definitions || []
         };
 
         currentTreeData = buildTreeData(tempConfig);
         renderTree();
-        closeModal(document.getElementById('templateLibraryModal'));
-        showNotification('模板加载成功，请保存配置', 'success');
+        
+        // 关闭可能打开的模态框（模板库或模板管理）
+        const templateLibraryModal = document.getElementById('templateLibraryModal');
+        const templateManageModal = document.getElementById('templateManageModal');
+        if (templateLibraryModal) closeModal(templateLibraryModal);
+        if (templateManageModal) closeModal(templateManageModal);
+        
+        const attrCount = tempConfig.custom_attribute_definitions.length;
+        if (attrCount > 0) {
+            showNotification(`模板加载成功，包含 ${attrCount} 个自定义属性定义，请保存配置`, 'success');
+        } else {
+            showNotification('模板加载成功，请保存配置', 'success');
+        }
         markDirty();
     } catch (error) {
         console.error('加载模板失败:', error);
