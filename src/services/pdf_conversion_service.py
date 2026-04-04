@@ -172,45 +172,111 @@ class PDFConversionService:
         import comtypes.client
         import pythoncom
         
+        # 确保路径是绝对路径且格式正确
+        input_path = os.path.abspath(input_path)
+        output_path = os.path.abspath(output_path)
+        
+        # 检查文件是否存在
+        if not os.path.exists(input_path):
+            raise Exception(f"输入文件不存在: {input_path}")
+        
+        # 确保输出目录存在
+        output_dir = os.path.dirname(output_path)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
         app = None
+        doc = None
         try:
             # 初始化COM
             pythoncom.CoInitialize()
             
+            print(f"[PDFConversionService] COM转换: {input_path} -> {output_path}")
+            
             if ext in ['.doc', '.docx']:
-                app = comtypes.client.CreateObject('Word.Application')
-                app.Visible = False
-                app.DisplayAlerts = False
-                doc = app.Documents.Open(input_path)
-                doc.SaveAs(output_path, FileFormat=17)  # 17 = PDF
-                doc.Close(SaveChanges=False)
-                app.Quit()
+                try:
+                    app = comtypes.client.CreateObject('Word.Application')
+                    app.Visible = False
+                    app.DisplayAlerts = 0  # wdAlertsNone
+                    
+                    # 打开文档
+                    doc = app.Documents.Open(input_path, ReadOnly=True)
+                    if not doc:
+                        raise Exception("Word无法打开文档")
+                    
+                    # 保存为PDF (FileFormat=17 是 PDF)
+                    doc.SaveAs2(output_path, FileFormat=17)
+                    
+                    # 关闭文档
+                    doc.Close(SaveChanges=False)
+                    doc = None
+                    
+                    # 退出Word
+                    app.Quit()
+                    app = None
+                    
+                    print(f"[PDFConversionService] Word转换成功")
+                    
+                except Exception as word_err:
+                    print(f"[PDFConversionService] Word错误: {word_err}")
+                    raise Exception(f"Word转换失败: {str(word_err)}")
                 
             elif ext in ['.xls', '.xlsx']:
-                app = comtypes.client.CreateObject('Excel.Application')
-                app.Visible = False
-                app.DisplayAlerts = False
-                wb = app.Workbooks.Open(input_path)
-                wb.ExportAsFixedFormat(0, output_path)  # 0 = PDF
-                wb.Close(SaveChanges=False)
-                app.Quit()
+                try:
+                    app = comtypes.client.CreateObject('Excel.Application')
+                    app.Visible = False
+                    app.DisplayAlerts = False
+                    
+                    wb = app.Workbooks.Open(input_path, ReadOnly=True)
+                    if not wb:
+                        raise Exception("Excel无法打开工作簿")
+                    
+                    # 导出为PDF
+                    wb.ExportAsFixedFormat(0, output_path)  # 0 = PDF
+                    
+                    wb.Close(SaveChanges=False)
+                    app.Quit()
+                    
+                    print(f"[PDFConversionService] Excel转换成功")
+                    
+                except Exception as excel_err:
+                    print(f"[PDFConversionService] Excel错误: {excel_err}")
+                    raise Exception(f"Excel转换失败: {str(excel_err)}")
                 
             elif ext in ['.ppt', '.pptx']:
-                app = comtypes.client.CreateObject('PowerPoint.Application')
-                app.Visible = False
-                app.DisplayAlerts = False
-                pres = app.Presentations.Open(input_path)
-                pres.SaveAs(output_path, 32)  # 32 = PDF
-                pres.Close()
-                app.Quit()
+                try:
+                    app = comtypes.client.CreateObject('PowerPoint.Application')
+                    app.Visible = False
+                    app.DisplayAlerts = False
+                    
+                    pres = app.Presentations.Open(input_path, ReadOnly=True)
+                    if not pres:
+                        raise Exception("PowerPoint无法打开演示文稿")
+                    
+                    # 保存为PDF (32 = PDF)
+                    pres.SaveAs(output_path, 32)
+                    
+                    pres.Close()
+                    app.Quit()
+                    
+                    print(f"[PDFConversionService] PowerPoint转换成功")
+                    
+                except Exception as ppt_err:
+                    print(f"[PDFConversionService] PowerPoint错误: {ppt_err}")
+                    raise Exception(f"PowerPoint转换失败: {str(ppt_err)}")
             
         except Exception as e:
             # 尝试清理COM对象
-            if app:
-                try:
+            try:
+                if doc:
+                    doc.Close(SaveChanges=False)
+            except:
+                pass
+            try:
+                if app:
                     app.Quit()
-                except:
-                    pass
+            except:
+                pass
             raise e
         finally:
             # 释放COM
