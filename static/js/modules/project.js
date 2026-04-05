@@ -1495,52 +1495,46 @@ window.closeFileCheckModal = function() {
 /**
  * 处理一键清理无效文件记录
  */
-window.handleCleanInvalidFiles = async function() {
+window.handleCleanInvalidFiles = function() {
     if (!appState.currentProjectId) {
         showNotification('请先选择项目', 'error');
         return;
     }
-    
-    // 确认对话框
-    const confirmed = confirm(
-        '⚠️ 警告：此操作将删除所有文件不存在的记录！\n\n' +
-        '删除后这些文档记录将无法恢复，需要重新上传文件。\n\n' +
-        '建议先备份项目或导出项目包。\n\n' +
-        '确定要继续吗？'
-    );
-    
-    if (!confirmed) {
-        return;
-    }
-    
-    showLoading(true, '正在清理无效文件记录...');
-    
-    try {
-        const result = await cleanInvalidFiles(appState.currentProjectId);
-        
-        if (result.status === 'success') {
-            showNotification(`成功清理 ${result.cleaned_count} 个无效文件记录`, 'success');
-            
-            // 重新加载项目以更新显示
-            await loadProject(appState.currentProjectId);
-            
-            // 关闭模态框
-            closeFileCheckModal();
-            
-            // 重新渲染当前周期
-            if (appState.currentCycle) {
-                const { renderCycleDocuments } = await import('./document.js');
-                renderCycleDocuments(appState.currentCycle);
+
+    // 用模态框替代原生 confirm
+    showConfirmModal(
+        '⚠️ 警告：清理无效文件记录',
+        '此操作将删除所有文件不存在的记录！\n\n删除后这些文档记录将无法恢复，需要重新上传文件。\n\n建议先备份项目或导出项目包。\n\n确定要继续吗？',
+        async () => {
+            showLoading(true, '正在清理无效文件记录...');
+            try {
+                const result = await cleanInvalidFiles(appState.currentProjectId);
+
+                if (result.status === 'success') {
+                    showNotification(`成功清理 ${result.cleaned_count} 个无效文件记录`, 'success');
+
+                    // 重新加载项目以更新显示
+                    await loadProject(appState.currentProjectId);
+
+                    // 关闭文件检查模态框
+                    closeFileCheckModal();
+
+                    // 重新渲染当前周期
+                    if (appState.currentCycle) {
+                        const { renderCycleDocuments } = await import('./document.js');
+                        renderCycleDocuments(appState.currentCycle);
+                    }
+                } else {
+                    showNotification('清理失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                console.error('清理无效文件失败:', error);
+                showNotification('清理失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
             }
-        } else {
-            showNotification('清理失败: ' + result.message, 'error');
         }
-    } catch (error) {
-        console.error('清理无效文件失败:', error);
-        showNotification('清理失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
+    );
 };
 
 /**

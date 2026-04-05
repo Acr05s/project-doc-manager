@@ -51,7 +51,7 @@ def confirm_cycle_acceptance(project_id):
                 }
             message = '所有周期验收确认完成'
 
-        doc_manager._save_project(project_id, project_config)
+        doc_manager.save_project(project_config)
         doc_manager.log_operation('确认验收', message, project=project_id)
 
         return jsonify({'status': 'success', 'message': message, 'project': project_config})
@@ -223,7 +223,7 @@ def clean_invalid_files(project_id):
             doc_data['uploaded_docs'] = valid_docs
         
         # 保存更新后的项目配置
-        doc_manager._save_project(project_id, project_config)
+        doc_manager.save_project(project_config)
         
         # 记录操作日志
         doc_manager.log_operation('清理无效文件', f'清理了 {cleaned_count} 个无效文件记录', project=project_id)
