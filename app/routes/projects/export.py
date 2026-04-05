@@ -1299,7 +1299,7 @@ def preview_import_package():
             shutil.rmtree(extract_dir, ignore_errors=True)
             temp_zip_path.unlink(missing_ok=True)
             return jsonify({'status': 'error', 'message': 'ZIP包中未找到项目配置文件'}), 400
-        
+
         # 读取项目配置
         try:
             with open(str(config_file), 'r', encoding='utf-8') as f:
@@ -1308,11 +1308,48 @@ def preview_import_package():
             shutil.rmtree(extract_dir, ignore_errors=True)
             temp_zip_path.unlink(missing_ok=True)
             return jsonify({'status': 'error', 'message': f'读取项目配置失败: {str(e)}'}), 400
-        
+
         project_name = project_config.get('name', '')
         if not project_name:
             project_name = file.filename.replace('.zip', '')
-        
+
+        # ── 补充读取 cycles（来自 requirements.json）和 documents_index ──
+        project_folder = config_file.parent
+        requirements_file = project_folder / 'requirements.json'
+        doc_index_file = project_folder / 'data' / 'documents_index.json'
+
+        # 从 requirements.json 读取 cycles（主要来源）
+        cycles_list = []
+        if requirements_file.exists():
+            try:
+                with open(requirements_file, 'r', encoding='utf-8') as f:
+                    req_data = json.load(f)
+                cycles_list = req_data.get('cycles', [])
+            except Exception:
+                pass
+
+        # cycles 也可能直接在 project_config 里（旧格式兼容）
+        if not cycles_list and project_config.get('cycles'):
+            cycles_list = project_config.get('cycles', [])
+
+        # 从 documents_index.json 读取已上传文档数量
+        doc_count = 0
+        if doc_index_file.exists():
+            try:
+                with open(doc_index_file, 'r', encoding='utf-8') as f:
+                    doc_index = json.load(f)
+                doc_count = len(doc_index.get('documents', {}))
+            except Exception:
+                pass
+
+        # 如果没有 documents_index，尝试从 project_config.documents 统计
+        if doc_count == 0 and project_config.get('documents'):
+            for cycle_data in project_config['documents'].values():
+                if isinstance(cycle_data, dict):
+                    doc_count += len(cycle_data.get('uploaded_docs', []))
+
+        cycle_count = len(cycles_list)
+
         # 检查是否有同名项目
         existing_project = None
         try:
@@ -1326,17 +1363,9 @@ def preview_import_package():
             logger.info(f"[预览] 同名项目检查结果: {'找到' if existing_project else '未找到'}")
         except Exception as e:
             logger.error(f"[预览] 检查同名项目出错: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             pass
-        
-        # 统计ZIP包中的文档数量
-        doc_count = 0
-        if 'documents' in project_config:
-            for cycle_data in project_config['documents'].values():
-                if isinstance(cycle_data, dict):
-                    doc_count += len(cycle_data.get('uploaded_docs', []))
-        
-        # 获取周期数量
-        cycle_count = len(project_config.get('cycles', []))
         
         # 构建响应
         result = {
