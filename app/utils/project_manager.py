@@ -669,6 +669,18 @@ class ProjectManager:
         Returns:
             List: 已删除项目列表
         """
+        # 过滤掉无效的条目（如 'deleted_projects' 键本身）
+        valid_deleted = {}
+        for project_id, info in self.deleted_projects.items():
+            # 跳过非字典类型的值和特殊的键
+            if not isinstance(info, dict):
+                logger.warning(f"[list_deleted] 跳过非字典类型的已删除项目: {project_id}")
+                continue
+            if project_id in ('deleted_projects', 'updated_time', 'meta'):
+                logger.warning(f"[list_deleted] 跳过特殊的已删除项目键: {project_id}")
+                continue
+            valid_deleted[project_id] = info
+        
         return [
             {
                 'id': project_id,
@@ -677,7 +689,7 @@ class ProjectManager:
                 'deleted_time': info.get('deleted_time', ''),
                 'created_time': info.get('created_time', '')
             }
-            for project_id, info in self.deleted_projects.items()
+            for project_id, info in valid_deleted.items()
         ]
     
     def add_to_index(self, project_id: str, name: str, description: str = '', 

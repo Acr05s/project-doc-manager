@@ -799,7 +799,19 @@ def preview_converted_pdf(cache_key):
                     break
             
             if not record:
-                return jsonify({'status': 'error', 'message': f'PDF转换记录不存在: {cache_key}'}), 404
+                # 尝试查找实际的PDF文件
+                preview_dir = Path('uploads/temp/preview')
+                if preview_dir.exists():
+                    possible_files = list(preview_dir.glob(f"*{cache_key}*.pdf"))
+                    if possible_files:
+                        # 找到文件但没有记录，重新创建记录
+                        pdf_path = str(possible_files[0])
+                        print(f"[preview_converted_pdf] 找到PDF文件但无记录，重新创建记录: {pdf_path}")
+                        pdf_conversion_record.add_record(cache_key, pdf_path, '')
+                        record = pdf_conversion_record.get_record(cache_key)
+                
+                if not record:
+                    return jsonify({'status': 'error', 'message': f'PDF转换记录不存在，请重新预览文档'}), 404
         
         pdf_path = record.get('pdf_path')
         print(f"[preview_converted_pdf] pdf_path: {pdf_path}")
