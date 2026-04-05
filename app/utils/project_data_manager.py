@@ -683,14 +683,29 @@ class ProjectDataManager:
             # 加载归档状态
             archived_data = self._db_load_config(project_id, 'documents_archived')
             if archived_data:
-                config['documents_archived'] = archived_data.get('documents_archived', [])
+                config['documents_archived'] = archived_data.get('documents_archived', {})
             else:
                 try:
                     archived_data = json_file_manager.read_json(str(self._get_archived_path(project_name)))
                     if archived_data:
-                        config['documents_archived'] = archived_data.get('documents_archived', [])
+                        config['documents_archived'] = archived_data.get('documents_archived', {})
                 except:
-                    pass
+                    config['documents_archived'] = {}
+            
+            # 加载不涉及状态
+            not_involved_data = self._db_load_config(project_id, 'documents_not_involved')
+            if not_involved_data:
+                config['documents_not_involved'] = not_involved_data.get('documents_not_involved', {})
+            else:
+                try:
+                    not_involved_path = self._get_project_folder(project_name) / 'data' / 'documents_not_involved.json'
+                    not_involved_data = json_file_manager.read_json(str(not_involved_path))
+                    if not_involved_data:
+                        config['documents_not_involved'] = not_involved_data.get('documents_not_involved', {})
+                    else:
+                        config['documents_not_involved'] = {}
+                except:
+                    config['documents_not_involved'] = {}
             
             return config
         except Exception as e:
@@ -998,6 +1013,18 @@ class ProjectDataManager:
                 else:
                     logger.warning(f"[DEBUG] documents_archived 保存到数据库失败，回退到文件")
                     json_file_manager.write_json(str(self._get_archived_path(project_name)), archived_data)
+            
+            # 6. 保存不涉及状态到数据库
+            if 'documents_not_involved' in config:
+                not_involved_data = {'documents_not_involved': config['documents_not_involved']}
+                db_success = self._db_save_config(project_id, 'documents_not_involved', not_involved_data)
+                if db_success:
+                    logger.info(f"[DEBUG] documents_not_involved 保存到数据库成功")
+                else:
+                    logger.warning(f"[DEBUG] documents_not_involved 保存到数据库失败，回退到文件")
+                    not_involved_path = self._get_project_folder(project_name) / 'data' / 'documents_not_involved.json'
+                    not_involved_path.parent.mkdir(parents=True, exist_ok=True)
+                    json_file_manager.write_json(str(not_involved_path), not_involved_data)
             
             logger.info(f"完整配置已保存: {project_name}")
             return True
