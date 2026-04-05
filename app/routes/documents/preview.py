@@ -1,10 +1,28 @@
 """文档预览相关路由"""
 
 import os
+import json
 from flask import request, jsonify, send_file
 from pathlib import Path
 from .utils import get_doc_manager
 from app.services.task_service import task_service
+
+# 设置文件路径
+SETTINGS_FILE = Path(__file__).parent.parent.parent.parent / 'settings.json'
+
+def get_fast_preview_threshold():
+    """获取快速预览阈值（MB转字节）"""
+    try:
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                threshold_mb = settings.get('fast_preview_threshold', 5)
+                # 确保在合理范围1-50MB
+                threshold_mb = max(1, min(50, int(threshold_mb)))
+                return threshold_mb * 1024 * 1024
+    except Exception:
+        pass
+    return 5 * 1024 * 1024  # 默认5MB
 
 # 导入预览服务（容错处理）
 try:
@@ -41,9 +59,6 @@ def safe_join(*parts):
 def preview_document(doc_id):
     """预览文档（返回JSON格式的预览内容）"""
     try:
-        import urllib.parse
-        doc_id = urllib.parse.unquote(doc_id)
-        
         doc_manager = get_doc_manager()
         result = doc_manager.get_document_preview(doc_id)
         return jsonify(result)
@@ -504,6 +519,26 @@ def _resolve_file_path(doc_manager, metadata):
                     print(f"[_resolve_file_path] 找到文件: {full_path}")
                     return full_path
     
+    # 处理 {项目名}/uploads/... 格式的路径（不带 projects/ 前缀）
+    if project_name and normalized_path.startswith(f"{project_name}/"):
+        base_dir = doc_manager.config.projects_base_folder.parent
+        full_path = Path(safe_join(str(base_dir), 'projects', normalized_path))
+        print(f"[_resolve_file_path] 尝试项目相对路径: {full_path}")
+        if full_path.exists():
+            print(f"[_resolve_file_path] 找到文件: {full_path}")
+            return full_path
+    
+    # 尝试从路径中提取项目名（如果路径以任意项目名开头）
+    if normalized_path and '/' in normalized_path:
+        potential_project = normalized_path.split('/')[0]
+        if potential_project:
+            base_dir = doc_manager.config.projects_base_folder.parent
+            full_path = Path(safe_join(str(base_dir), 'projects', normalized_path))
+            print(f"[_resolve_file_path] 尝试提取项目路径: {full_path}")
+            if full_path.exists():
+                print(f"[_resolve_file_path] 找到文件: {full_path}")
+                return full_path
+    
     if project_name:
         project_uploads_dir = doc_manager.get_documents_folder(project_name)
         full_path = Path(safe_join(str(project_uploads_dir), normalized_path))
@@ -519,7 +554,43 @@ def _resolve_file_path(doc_manager, metadata):
         upload_folder = Path('uploads')
     full_path = Path(safe_join(str(upload_folder), normalized_path))
     print(f"[_resolve_file_path] 尝试uploads目录: {full_path}")
+    if full_path.exists():
+        return full_path
+    
+    # 备用方案：根据文件名在项目目录中搜索（处理ZIP文件夹被删除的情况）
+    original_filename = metadata.get('original_filename', '')
+    if original_filename and project_name:
+        print(f"[_resolve_file_path] 尝试搜索文件: {original_filename}")
+        found_path = _find_file_by_name(doc_manager, project_name, original_filename)
+        if found_path:
+            print(f"[_resolve_file_path] 通过文件名找到: {found_path}")
+            return found_path
+    
     return full_path
+
+
+def _find_file_by_name(doc_manager, project_name, filename):
+    """根据文件名在项目目录中搜索文件"""
+    try:
+        project_uploads_dir = doc_manager.get_documents_folder(project_name)
+        if not project_uploads_dir or not project_uploads_dir.exists():
+            return None
+        
+        # 在项目的 uploads 目录中递归搜索
+        for file_path in project_uploads_dir.rglob(filename):
+            if file_path.is_file():
+                return file_path
+        
+        # 如果没找到，尝试不区分大小写搜索
+        filename_lower = filename.lower()
+        for file_path in project_uploads_dir.rglob('*'):
+            if file_path.is_file() and file_path.name.lower() == filename_lower:
+                return file_path
+                
+    except Exception as e:
+        print(f"[_find_file_by_name] 搜索失败: {e}")
+    
+    return None
 
 
 def preview_status(file_hash):
@@ -534,12 +605,12 @@ def preview_page(file_hash, page):
 
 def start_progressive_preview(doc_id):
     """
-    启动文档预览
+    启动文档预览（优化版：大文件先显示第一页，后台转换完整PDF）
     
     优化方案：
-    1. PDF文件直接返回，浏览器原生预览
-    2. Office文档同步转换为PDF后返回PDF URL
-    3. 图片直接返回
+    1. 小文件（<5MB）：直接完整转换
+    2. 大文件（>=5MB）：先快速转换第1页显示，后台异步转换完整PDF
+    3. 提供转换状态查询接口
     """
     try:
         import urllib.parse
@@ -560,6 +631,7 @@ def start_progressive_preview(doc_id):
         
         file_ext = file_path_obj.suffix.lower()
         file_path = str(file_path_obj)
+        file_size = os.path.getsize(file_path)
         
         # 支持的文件类型
         office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
@@ -571,10 +643,9 @@ def start_progressive_preview(doc_id):
                 'fallback': 'download'
             }), 400
         
-        # Office文档：同步转换为PDF，返回PDF的view URL
+        # Office文档：智能转换策略
         if file_ext in office_extensions:
             try:
-                # 先执行转换，确保PDF生成完成
                 from src.services.pdf_conversion_record import pdf_conversion_record
                 from src.services.pdf_conversion_service import PDFConversionService
                 import time
@@ -582,19 +653,31 @@ def start_progressive_preview(doc_id):
                 file_mtime = os.path.getmtime(file_path)
                 cache_key = f"{doc_id}_{int(file_mtime)}"
                 
-                # 检查缓存
+                # 检查是否已有完整PDF缓存
                 cached_record = pdf_conversion_record.get_record(cache_key)
                 if cached_record and os.path.exists(cached_record.get('pdf_path', '')):
-                    print(f"[start_progressive_preview] 使用已缓存的PDF")
-                else:
-                    # 同步执行转换
-                    preview_temp_dir = Path('uploads/temp/preview')
-                    preview_temp_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    pdf_service = PDFConversionService()
-                    pdf_service.set_preview_temp_dir(str(preview_temp_dir))
-                    
-                    print(f"[start_progressive_preview] 开始同步转换: {file_path}")
+                    print(f"[start_progressive_preview] 使用已缓存的完整PDF")
+                    return jsonify({
+                        'status': 'success',
+                        'mode': 'direct',
+                        'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                        'file_ext': '.pdf'
+                    })
+                
+                # 判断文件大小，决定转换策略
+                # 小文件(<阈值): 直接完整转换
+                # 大文件(>=阈值): 先快速转换第1页，后台转换完整PDF
+                FAST_PREVIEW_THRESHOLD = get_fast_preview_threshold()
+                
+                preview_temp_dir = Path('uploads/temp/preview')
+                preview_temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                pdf_service = PDFConversionService()
+                pdf_service.set_preview_temp_dir(str(preview_temp_dir))
+                
+                if file_size < FAST_PREVIEW_THRESHOLD:
+                    # 小文件：直接完整转换
+                    print(f"[start_progressive_preview] 小文件({file_size/1024/1024:.1f}MB)，直接完整转换: {file_path}")
                     start_time = time.time()
                     pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
                     elapsed_time = time.time() - start_time
@@ -604,19 +687,72 @@ def start_progressive_preview(doc_id):
                     pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
                     if cache_key in pdf_conversion_record.records:
                         pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
+                        pdf_conversion_record.records[cache_key]['is_complete'] = True
                         pdf_conversion_record._save_records()
-                
-                # 返回view URL（会通过view_document返回PDF）
-                return jsonify({
-                    'status': 'success',
-                    'mode': 'direct',
-                    'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
-                    'file_ext': '.pdf'  # 告诉前端这是PDF
-                })
+                    
+                    return jsonify({
+                        'status': 'success',
+                        'mode': 'direct',
+                        'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                        'file_ext': '.pdf'
+                    })
+                else:
+                    # 大文件：先快速转换第1页
+                    print(f"[start_progressive_preview] 大文件({file_size/1024/1024:.1f}MB)，先转换第1页: {file_path}")
+                    
+                    first_page_key = f"{cache_key}_page1"
+                    first_page_path = os.path.join(str(preview_temp_dir), f"{first_page_key}.pdf")
+                    
+                    # 检查是否已有第一页缓存
+                    if not os.path.exists(first_page_path):
+                        try:
+                            # 快速转换第一页（使用PageRange=1-1）
+                            pdf_service.convert_first_page_fast(file_path, first_page_path)
+                            print(f"[start_progressive_preview] 第1页转换完成")
+                        except Exception as e:
+                            print(f"[start_progressive_preview] 第1页快速转换失败: {e}，尝试完整转换")
+                            # 回退到完整转换
+                            pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
+                            pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
+                            if cache_key in pdf_conversion_record.records:
+                                pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
+                                pdf_conversion_record.records[cache_key]['is_complete'] = True
+                                pdf_conversion_record._save_records()
+                            
+                            return jsonify({
+                                'status': 'success',
+                                'mode': 'direct',
+                                'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                                'file_ext': '.pdf'
+                            })
+                    
+                    # 保存第一页到转换记录
+                    pdf_conversion_record.add_record(first_page_key, first_page_path, file_path)
+                    
+                    # 启动后台任务转换完整PDF
+                    # 使用任务服务启动后台转换
+                    try:
+                        from app.services.task_service import task_service
+                        task_service.start_pdf_conversion_task(doc_id, file_path, cache_key)
+                        print(f"[start_progressive_preview] 已启动后台完整转换任务")
+                    except Exception as e:
+                        print(f"[start_progressive_preview] 启动后台任务失败: {e}")
+                    
+                    # 返回第一页的URL，并标记为不完整预览
+                    return jsonify({
+                        'status': 'success',
+                        'mode': 'direct',
+                        'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(first_page_key, safe="")}',
+                        'file_ext': '.pdf',
+                        'is_partial': True,  # 标记为部分预览
+                        'full_preview_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                        'message': '正在生成完整预览，当前仅显示第1页'
+                    })
                 
             except Exception as conv_err:
                 print(f"[start_progressive_preview] 转换失败: {conv_err}")
-                # 转换失败，返回原始文件下载
+                import traceback
+                print(traceback.format_exc())
                 return jsonify({
                     'status': 'error',
                     'message': f'PDF转换失败: {str(conv_err)}',
@@ -636,6 +772,56 @@ def start_progressive_preview(doc_id):
         print(f"[start_progressive_preview] 错误: {e}")
         print(traceback.format_exc())
         return jsonify({'status': 'error', 'message': f'启动预览失败: {str(e)}'}), 500
+
+
+def preview_converted_pdf(cache_key):
+    """直接返回转换后的PDF文件（避免循环转换）"""
+    try:
+        import urllib.parse
+        from src.services.pdf_conversion_record import pdf_conversion_record
+        from flask import send_file
+        
+        # URL解码 cache_key（处理特殊字符）
+        cache_key = urllib.parse.unquote(cache_key)
+        print(f"[preview_converted_pdf] cache_key: {cache_key}")
+        
+        # 获取转换记录
+        record = pdf_conversion_record.get_record(cache_key)
+        
+        if not record:
+            print(f"[preview_converted_pdf] 记录不存在，尝试列出可用记录...")
+            print(f"[preview_converted_pdf] 可用记录数: {len(pdf_conversion_record.records)}")
+            # 尝试模糊匹配
+            for key in pdf_conversion_record.records.keys():
+                if cache_key in key or key in cache_key:
+                    print(f"[preview_converted_pdf] 找到相似记录: {key}")
+                    record = pdf_conversion_record.get_record(key)
+                    break
+            
+            if not record:
+                return jsonify({'status': 'error', 'message': f'PDF转换记录不存在: {cache_key}'}), 404
+        
+        pdf_path = record.get('pdf_path')
+        print(f"[preview_converted_pdf] pdf_path: {pdf_path}")
+        
+        if not pdf_path:
+            return jsonify({'status': 'error', 'message': 'PDF路径为空'}), 404
+            
+        if not os.path.exists(pdf_path):
+            return jsonify({'status': 'error', 'message': f'PDF文件已被清理: {pdf_path}'}), 404
+        
+        # 更新访问时间
+        pdf_conversion_record.update_access_time(cache_key)
+        
+        # 直接返回PDF文件
+        return send_file(pdf_path, mimetype='application/pdf', 
+                        as_attachment=False)
+        
+    except Exception as e:
+        import traceback
+        print(f"[preview_converted_pdf] 错误: {e}")
+        print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': f'加载PDF失败: {str(e)}'}), 500
 
 
 def start_batch_pdf_conversion():

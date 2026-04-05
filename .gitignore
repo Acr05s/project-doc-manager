@@ -52,6 +52,13 @@ installer_output/
 .DS_Store
 Thumbs.db
 
+# Test generated files
+test/output/
+test/__pycache__/
+test/*.pyc
+test/temp/
+temp_test_*
+
 # Temporary files
 *.tmp
 *.bak

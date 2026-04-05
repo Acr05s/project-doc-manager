@@ -201,6 +201,7 @@ class ProjectDataManager:
                 try:
                     # 清空旧数据，重新导入
                     # 注意：数据库会保留已归档等状态
+                    db.clear_documents()  # 先清空数据库
                     docs_list = documents.get('documents', {})
                     for doc_id, doc_info in docs_list.items():
                         project_id = doc_info.get('project_id', '')

@@ -30,8 +30,8 @@ def list_documents():
             
             if unique_key and unique_key not in seen_ids:
                 seen_ids.add(unique_key)
-                # 确保文档有 id 字段
-                if 'id' not in doc and doc_id:
+                # 确保文档有 id 字段（总是使用 doc_id 覆盖，确保正确性）
+                if doc_id:
                     doc['id'] = doc_id
                 # 确保文档有 directory 字段
                 if 'directory' not in doc:

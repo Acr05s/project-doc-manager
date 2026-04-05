@@ -6,9 +6,9 @@
     <title>项目文档管理中心</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026040401">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026040501">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026040401"></script>
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026040501"></script>
     <style>
         /* 文件完整性检查模态框样式 */
         .file-check-content {
@@ -562,8 +562,15 @@
     <!-- 项目选择弹窗（主页打开时显示） -->
     <div id="projectSelectModal" class="modal">
         <div class="modal-content" style="max-width: 700px;">
-            <span class="close" onclick="closeProjectSelectModal()">&times;</span>
-            <h2>项目管理</h2>
+            <div class="modal-header">
+                <h2>项目管理</h2>
+                <div class="modal-header-actions">
+                    <button id="systemSettingsBtn" class="btn btn-secondary btn-sm" title="系统设置">
+                        <span style="font-size: 16px;">⚙️</span> 设置
+                    </button>
+                    <span class="close" onclick="closeProjectSelectModal()">&times;</span>
+                </div>
+            </div>
 
             <div class="project-select-container">
                 <!-- 操作按钮区域 -->
@@ -737,6 +744,71 @@
         </div>
     </div>
 
+    <!-- 系统设置模态框 -->
+    <div id="systemSettingsModal" class="modal">
+        <div class="modal-content" style="max-width: 550px;">
+            <span class="close">&times;</span>
+            <h2>系统设置</h2>
+            
+            <!-- 标签页导航 -->
+            <div class="settings-tabs">
+                <button class="settings-tab-btn active" data-tab="basic">基本信息</button>
+                <button class="settings-tab-btn" data-tab="features">功能设置</button>
+                <button class="settings-tab-btn" data-tab="update">系统更新</button>
+            </div>
+            
+            <!-- 基本信息标签页 -->
+            <div id="settingsTab-basic" class="settings-tab-content active">
+                <div class="settings-section">
+                    <h3>基本信息</h3>
+                    <div class="form-group">
+                        <label for="systemName">系统名称：</label>
+                        <input type="text" id="systemName" class="form-control" placeholder="项目文档管理中心">
+                    </div>
+                    <div class="form-group">
+                        <label for="systemVersion">版本号：</label>
+                        <input type="text" id="systemVersion" class="form-control" placeholder="1.0.0" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="systemAuthor">版权所有：</label>
+                        <input type="text" id="systemAuthor" class="form-control" placeholder="项目验收团队">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 功能设置标签页 -->
+            <div id="settingsTab-features" class="settings-tab-content">
+                <div class="settings-section">
+                    <h3>功能设置</h3>
+                    <div class="form-group">
+                        <label for="fastPreviewThreshold">大文件快速预览阈值 (MB)：</label>
+                        <input type="number" id="fastPreviewThreshold" class="form-control" placeholder="5" min="1" max="50" value="5">
+                        <small style="color: #666; font-size: 12px;">超过此大小的文件将使用快速预览模式（先显示第一页）</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 系统更新标签页 -->
+            <div id="settingsTab-update" class="settings-tab-content">
+                <div class="settings-section">
+                    <h3>系统更新</h3>
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <div>当前版本：<span id="currentVersionDisplay">-</span></div>
+                            <div id="latestVersionInfo" style="color: #666; font-size: 14px; margin-top: 5px;">点击检查更新</div>
+                        </div>
+                        <button id="checkUpdateBtn" class="btn btn-primary">检查更新</button>
+                    </div>
+                    <div id="updateMessage" style="display: none; padding: 10px; border-radius: 4px; margin-top: 10px;"></div>
+                </div>
+            </div>
+            
+            <div class="modal-actions" style="margin-top: 30px; text-align: right; border-top: 1px solid #eee; padding-top: 15px;">
+                <button type="button" id="saveSettingsBtn" class="btn btn-success">保存设置</button>
+                <button type="button" class="btn btn-secondary close-modal">取消</button>
+            </div>
+        </div>
+    </div>
 
     <!-- 压缩包上传弹窗 -->
     <div id="zipUploadModal" class="modal">

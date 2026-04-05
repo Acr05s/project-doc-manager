@@ -104,3 +104,66 @@ def get_version():
             return '0.0.1\n\n版本文件不存在', 200, {'Content-Type': 'text/plain; charset=utf-8'}
     except Exception as e:
         return f'0.0.1\n\n获取版本信息失败: {str(e)}', 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
+# ========== 系统设置路由 ==========
+from .settings import load_settings, save_settings, update_plugin_json, get_local_version, check_github_update
+
+@main_bp.route('/api/settings', methods=['GET'])
+def api_get_settings():
+    """获取系统设置"""
+    settings = load_settings()
+    settings['current_version'] = get_local_version()
+    return jsonify({
+        'status': 'success',
+        'data': settings
+    })
+
+@main_bp.route('/api/settings', methods=['POST'])
+def api_update_settings():
+    """更新系统设置"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': '无效的数据'}), 400
+        
+        # 加载当前设置
+        current_settings = load_settings()
+        
+        # 更新允许修改的字段
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold']
+        for field in allowed_fields:
+            if field in data:
+                current_settings[field] = data[field]
+        
+        # 保存到settings.json
+        if save_settings(current_settings):
+            # 同步更新plugin.json
+            update_plugin_json(current_settings)
+            
+            return jsonify({
+                'status': 'success',
+                'message': '设置已保存',
+                'data': current_settings
+            })
+        else:
+            return jsonify({'status': 'error', 'message': '保存设置失败'}), 500
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@main_bp.route('/api/settings/check-update', methods=['GET'])
+def api_check_update():
+    """检查系统更新"""
+    result = check_github_update()
+    
+    if 'error' in result:
+        return jsonify({
+            'status': 'error',
+            'message': result['error']
+        }), 500
+    
+    return jsonify({
+        'status': 'success',
+        'data': result
+    })

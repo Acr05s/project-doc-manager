@@ -399,6 +399,9 @@ class TaskService:
         # 启动后台线程执行任务
         def pdf_conversion_task():
             try:
+                from src.services.pdf_conversion_record import pdf_conversion_record
+                import os
+                
                 # 创建预览文件临时目录
                 preview_temp_dir = Path('uploads/temp/preview')
                 preview_temp_dir.mkdir(parents=True, exist_ok=True)
@@ -414,6 +417,14 @@ class TaskService:
                 
                 # 执行转换
                 pdf_path = pdf_service.convert_to_pdf(file_path, doc_id)
+                
+                # 保存转换记录（标记为完整转换）
+                file_mtime = os.path.getmtime(file_path)
+                pdf_conversion_record.add_record(doc_id, pdf_path, file_path)
+                if doc_id in pdf_conversion_record.records:
+                    pdf_conversion_record.records[doc_id]['file_mtime'] = file_mtime
+                    pdf_conversion_record.records[doc_id]['is_complete'] = True
+                    pdf_conversion_record._save_records()
                 
                 # 更新进度
                 self.tasks_store[task_id]['progress'] = 75

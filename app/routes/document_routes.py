@@ -179,11 +179,10 @@ def list_documents():
                                     continue
                                 # 确保文档有 ID
                                 doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc_doc_name}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
-                                # 添加到结果列表
-                                docs.append({
-                                    'id': doc_id,
-                                    **doc
-                                })
+                                # 添加到结果列表（先展开 doc，再设置 id，避免 doc 中旧的 id 字段覆盖正确的 doc_id）
+                                doc_copy = dict(doc)
+                                doc_copy['id'] = doc_id
+                                docs.append(doc_copy)
         
         return jsonify({
             'status': 'success',

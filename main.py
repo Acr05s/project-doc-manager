@@ -56,6 +56,7 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     from app.routes.documents import document_bp, init_doc_manager as init_document_manager
     from app.routes.task_routes import task_bp
     from app.routes.swagger_routes import swagger_bp
+    from app.routes.settings import settings_bp
     
     # 初始化文档管理器到路由模块
     init_main_manager(doc_manager)
@@ -68,6 +69,7 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     app.register_blueprint(document_bp, url_prefix='/api/documents')
     app.register_blueprint(task_bp)
     app.register_blueprint(swagger_bp)
+    app.register_blueprint(settings_bp)
     
     # 报告生成路由
     @app.route('/api/report', methods=['POST'])

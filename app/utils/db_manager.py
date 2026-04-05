@@ -697,6 +697,16 @@ class ProjectDocumentsDB(DatabaseManager):
         """删除文档"""
         sql = 'DELETE FROM documents WHERE doc_id = ?'
         return self.execute_write(sql, (doc_id,)) > 0
+    
+    def clear_documents(self) -> bool:
+        """清空所有文档记录"""
+        sql = 'DELETE FROM documents'
+        try:
+            self.execute_write(sql)
+            return True
+        except Exception as e:
+            logger.error(f"清空文档记录失败: {e}")
+            return False
 
     def mark_archived(self, doc_id: str, archived: bool = True) -> bool:
         """标记文档为已归档"""

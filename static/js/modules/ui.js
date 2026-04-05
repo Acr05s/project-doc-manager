@@ -955,6 +955,206 @@ export function setupEventListeners() {
             }
         });
     }
+
+    // 系统设置按钮
+    const systemSettingsBtn = document.getElementById('systemSettingsBtn');
+    const systemSettingsModal = document.getElementById('systemSettingsModal');
+    if (systemSettingsBtn && systemSettingsModal) {
+        systemSettingsBtn.addEventListener('click', () => {
+            loadSystemSettings();
+            openModal(systemSettingsModal);
+        });
+    }
+
+    // 保存设置按钮
+    const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+    if (saveSettingsBtn) {
+        saveSettingsBtn.addEventListener('click', saveSystemSettings);
+    }
+
+    // 检查更新按钮
+    const checkUpdateBtn = document.getElementById('checkUpdateBtn');
+    if (checkUpdateBtn) {
+        checkUpdateBtn.addEventListener('click', checkSystemUpdate);
+    }
+
+    // 设置标签页切换
+    document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            // 移除所有active类
+            document.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
+            
+            // 添加active类到当前按钮和对应内容
+            btn.classList.add('active');
+            const tabId = 'settingsTab-' + btn.dataset.tab;
+            const tabContent = document.getElementById(tabId);
+            if (tabContent) {
+                tabContent.classList.add('active');
+            }
+        });
+    });
+}
+
+/**
+ * 加载系统设置
+ */
+async function loadSystemSettings() {
+    try {
+        const response = await fetch('/api/settings');
+        const result = await response.json();
+        
+        if (result.status === 'success' && result.data) {
+            const settings = result.data;
+            
+            // 填充基本信息
+            const systemName = document.getElementById('systemName');
+            const systemVersion = document.getElementById('systemVersion');
+            const systemAuthor = document.getElementById('systemAuthor');
+            const currentVersionDisplay = document.getElementById('currentVersionDisplay');
+            
+            if (systemName) systemName.value = settings.system_name || '';
+            if (systemVersion) systemVersion.value = settings.version || '';
+            if (systemAuthor) systemAuthor.value = settings.author || '';
+            if (currentVersionDisplay) currentVersionDisplay.textContent = settings.current_version || '-';
+            
+            // 填充功能设置
+            const fastPreviewThreshold = document.getElementById('fastPreviewThreshold');
+            if (fastPreviewThreshold) {
+                // 从设置中读取，默认5MB
+                const thresholdMB = settings.fast_preview_threshold || 5;
+                fastPreviewThreshold.value = thresholdMB;
+            }
+        }
+    } catch (error) {
+        console.error('加载系统设置失败:', error);
+        showNotification('加载设置失败', 'error');
+    }
+}
+
+/**
+ * 保存系统设置
+ */
+async function saveSystemSettings() {
+    try {
+        const systemName = document.getElementById('systemName');
+        const systemAuthor = document.getElementById('systemAuthor');
+        const fastPreviewThreshold = document.getElementById('fastPreviewThreshold');
+        
+        const settings = {
+            system_name: systemName ? systemName.value : '',
+            author: systemAuthor ? systemAuthor.value : ''
+        };
+        
+        // 添加功能设置
+        if (fastPreviewThreshold) {
+            const thresholdValue = parseInt(fastPreviewThreshold.value, 10);
+            settings.fast_preview_threshold = isNaN(thresholdValue) || thresholdValue < 1 ? 5 : thresholdValue;
+        }
+        
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showNotification('设置已保存', 'success');
+            
+            // 更新页面标题
+            if (settings.system_name) {
+                document.title = settings.system_name;
+                const projectTitle = document.getElementById('projectTitle');
+                if (projectTitle) {
+                    // 保留图标，只更新文字部分
+                    const icon = projectTitle.querySelector('span');
+                    projectTitle.innerHTML = '📁 ' + settings.system_name + ' ';
+                    if (icon) {
+                        projectTitle.appendChild(icon);
+                    }
+                }
+            }
+            
+            closeModal(document.getElementById('systemSettingsModal'));
+        } else {
+            showNotification('保存失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('保存系统设置失败:', error);
+        showNotification('保存设置失败', 'error');
+    }
+}
+
+/**
+ * 检查系统更新
+ */
+async function checkSystemUpdate() {
+    const updateMessage = document.getElementById('updateMessage');
+    const latestVersionInfo = document.getElementById('latestVersionInfo');
+    const checkUpdateBtn = document.getElementById('checkUpdateBtn');
+    
+    if (updateMessage) {
+        updateMessage.style.display = 'block';
+        updateMessage.className = 'info';
+        updateMessage.textContent = '正在检查更新...';
+    }
+    
+    if (checkUpdateBtn) {
+        checkUpdateBtn.disabled = true;
+        checkUpdateBtn.textContent = '检查中...';
+    }
+    
+    try {
+        const response = await fetch('/api/settings/check-update');
+        const result = await response.json();
+        
+        if (result.status === 'success' && result.data) {
+            const data = result.data;
+            
+            if (data.has_update) {
+                if (updateMessage) {
+                    updateMessage.className = 'warning';
+                    updateMessage.innerHTML = `
+                        <strong>发现新版本！</strong><br>
+                        当前版本: ${data.current_version}<br>
+                        最新版本: ${data.latest_version}<br>
+                        <a href="${data.download_url}" target="_blank" style="color: #1890ff;">点击下载更新</a>
+                    `;
+                }
+                if (latestVersionInfo) {
+                    latestVersionInfo.innerHTML = `<span style="color: #ff4d4f;">有新版本: ${data.latest_version}</span>`;
+                }
+            } else {
+                if (updateMessage) {
+                    updateMessage.className = 'success';
+                    updateMessage.textContent = '已是最新版本！';
+                }
+                if (latestVersionInfo) {
+                    latestVersionInfo.textContent = '已是最新版本';
+                }
+            }
+        } else {
+            if (updateMessage) {
+                updateMessage.className = 'error';
+                updateMessage.textContent = '检查更新失败: ' + (result.message || '未知错误');
+            }
+        }
+    } catch (error) {
+        console.error('检查更新失败:', error);
+        if (updateMessage) {
+            updateMessage.className = 'error';
+            updateMessage.textContent = '检查更新失败: 网络错误';
+        }
+    } finally {
+        if (checkUpdateBtn) {
+            checkUpdateBtn.disabled = false;
+            checkUpdateBtn.textContent = '检查更新';
+        }
+    }
 }
 
 /**
