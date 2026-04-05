@@ -7,7 +7,7 @@ from .requirements import load_project_config, apply_requirements_to_project_rou
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
 from .export import export_project, import_project, import_project_file, package_project, import_package, download_package, import_project_chunk, import_project_merge, package_full_project, preview_import_package, import_from_preview, preview_package_chunk, preview_package_merge
-from .acceptance import confirm_cycle_acceptance, download_project_package, verify_project_files
+from .acceptance import confirm_cycle_acceptance, download_project_package, verify_project_files, clean_invalid_files
 from .logs import get_operation_logs, get_external_logs
 from .versions import list_config_versions, save_config_version, load_config_version, switch_config_version, delete_config_version, export_config_version
 from .templates import list_templates, save_template, load_template, delete_template, apply_template_to_project, export_template, import_template
@@ -46,6 +46,7 @@ project_bp.route('/package/preview-merge', methods=['POST'])(preview_package_mer
 # 验收相关路由
 project_bp.route('/<project_id>/confirm-acceptance', methods=['POST'])(confirm_cycle_acceptance)
 project_bp.route('/<project_id>/verify-files', methods=['GET'])(verify_project_files)
+project_bp.route('/<project_id>/clean-invalid-files', methods=['POST'])(clean_invalid_files)
 project_bp.route('/<project_id>/download-package', methods=['GET'])(download_project_package)
 
 # 日志相关路由

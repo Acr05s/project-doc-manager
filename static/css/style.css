@@ -4080,3 +4080,24 @@ input[type="month"].compact-input {
 #systemSettingsBtn:hover {
     background-color: #f0f0f0;
 }
+
+
+/* 一键清理按钮样式 */
+.file-check-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 15px;
+}
+
+.file-check-actions .btn-warning {
+    background-color: #ff9800;
+    border-color: #f57c00;
+    color: white;
+}
+
+.file-check-actions .btn-warning:hover {
+    background-color: #f57c00;
+    border-color: #e65100;
+}

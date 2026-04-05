@@ -727,6 +727,25 @@ export async function verifyProjectFiles(projectId) {
 }
 
 /**
+ * 清理无效文件记录
+ */
+export async function cleanInvalidFiles(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/clean-invalid-files`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('清理无效文件失败:', error);
+        throw error;
+    }
+}
+
+/**
  * 下载项目包
  */
 export async function downloadPackage(projectId, options = {}) {

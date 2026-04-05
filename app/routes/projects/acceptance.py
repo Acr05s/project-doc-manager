@@ -150,6 +150,97 @@ def verify_project_files(project_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def clean_invalid_files(project_id):
+    """清理项目中文件不存在的无效记录"""
+    try:
+        from pathlib import Path
+        
+        doc_manager = get_doc_manager()
+        
+        project_result = doc_manager.load_project(project_id)
+        if project_result['status'] != 'success':
+            return jsonify(project_result), 404
+
+        project_config = project_result['project']
+        project_name = project_config.get('name', project_id)
+        
+        # 清理结果统计
+        cleaned_count = 0
+        cleaned_files = []
+        
+        # 遍历所有周期检查文件
+        for cycle, doc_data in project_config.get('documents', {}).items():
+            uploaded_docs = doc_data.get('uploaded_docs', [])
+            valid_docs = []
+            
+            for doc_meta in uploaded_docs:
+                if not isinstance(doc_meta, dict):
+                    continue
+                
+                file_path = doc_meta.get('file_path', '')
+                doc_name = doc_meta.get('doc_name', '未知')
+                filename = doc_meta.get('filename', '未知')
+                
+                # 检查文件路径是否为空
+                if not file_path:
+                    cleaned_count += 1
+                    cleaned_files.append({
+                        'cycle': cycle,
+                        'doc_name': doc_name,
+                        'filename': filename,
+                        'reason': '文件路径为空'
+                    })
+                    continue
+                
+                # 解析文件路径
+                file_path_obj = Path(file_path)
+                
+                # 处理相对路径
+                if not file_path_obj.is_absolute():
+                    normalized_path = file_path_obj.as_posix()
+                    if normalized_path.startswith('projects/'):
+                        base_dir = doc_manager.config.projects_base_folder.parent
+                        file_path_obj = base_dir / file_path
+                    else:
+                        project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+                        file_path_obj = project_uploads_dir / file_path
+                
+                # 检查文件是否存在
+                if not file_path_obj.exists():
+                    cleaned_count += 1
+                    cleaned_files.append({
+                        'cycle': cycle,
+                        'doc_name': doc_name,
+                        'filename': filename,
+                        'file_path': str(file_path),
+                        'reason': '文件不存在'
+                    })
+                else:
+                    # 文件存在，保留
+                    valid_docs.append(doc_meta)
+            
+            # 更新上传文档列表（只保留有效文件）
+            doc_data['uploaded_docs'] = valid_docs
+        
+        # 保存更新后的项目配置
+        doc_manager._save_project(project_id, project_config)
+        
+        # 记录操作日志
+        doc_manager.log_operation('清理无效文件', f'清理了 {cleaned_count} 个无效文件记录', project=project_id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'成功清理 {cleaned_count} 个无效文件记录',
+            'cleaned_count': cleaned_count,
+            'cleaned_files': cleaned_files
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def download_project_package(project_id):
     """打包下载项目所有文档（优先使用新版导出）"""
     try:

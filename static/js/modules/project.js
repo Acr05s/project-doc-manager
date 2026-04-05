@@ -6,7 +6,7 @@
 
 import { appState, elements, initSession, unlockCurrentProject } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, previewImportPackage, importFromPreview } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, cleanInvalidFiles, previewImportPackage, importFromPreview } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -1429,7 +1429,12 @@ function renderFileCheckResult(result) {
         html += `
             <div class="file-check-footer">
                 <p class="warning-text">请修复以上问题后再进行打包下载</p>
-                <button class="btn btn-secondary" onclick="closeFileCheckModal()">关闭</button>
+                <div class="file-check-actions" style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" onclick="closeFileCheckModal()">关闭</button>
+                    <button class="btn btn-warning" onclick="handleCleanInvalidFiles()" title="删除所有文件不存在的记录（不可恢复）">
+                        🧹 一键清理无效记录
+                    </button>
+                </div>
             </div>
         `;
     } else {
@@ -1484,6 +1489,57 @@ window.closeFileCheckModal = function() {
     const modal = document.getElementById('fileCheckModal');
     if (modal) {
         modal.classList.remove('show');
+    }
+};
+
+/**
+ * 处理一键清理无效文件记录
+ */
+window.handleCleanInvalidFiles = async function() {
+    if (!appState.currentProjectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+    
+    // 确认对话框
+    const confirmed = confirm(
+        '⚠️ 警告：此操作将删除所有文件不存在的记录！\n\n' +
+        '删除后这些文档记录将无法恢复，需要重新上传文件。\n\n' +
+        '建议先备份项目或导出项目包。\n\n' +
+        '确定要继续吗？'
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    showLoading(true, '正在清理无效文件记录...');
+    
+    try {
+        const result = await cleanInvalidFiles(appState.currentProjectId);
+        
+        if (result.status === 'success') {
+            showNotification(`成功清理 ${result.cleaned_count} 个无效文件记录`, 'success');
+            
+            // 重新加载项目以更新显示
+            await loadProject(appState.currentProjectId);
+            
+            // 关闭模态框
+            closeFileCheckModal();
+            
+            // 重新渲染当前周期
+            if (appState.currentCycle) {
+                const { renderCycleDocuments } = await import('./document.js');
+                renderCycleDocuments(appState.currentCycle);
+            }
+        } else {
+            showNotification('清理失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('清理无效文件失败:', error);
+        showNotification('清理失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
     }
 };
 
