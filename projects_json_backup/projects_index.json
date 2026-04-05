@@ -1,0 +1,37 @@
+{
+  "updated_time": "2026-04-05T22:38:34.851971",
+  "project_20260401090901": {
+    "id": "project_20260401090901",
+    "name": "IPv6",
+    "description": "",
+    "created_time": "2026-04-01T09:09:01.696576",
+    "deleted": 0
+  },
+  "project_20260331154552": {
+    "id": "project_20260331154552",
+    "name": "AI平台建设(一期)项目",
+    "description": "",
+    "created_time": "2026-03-31T15:45:52.761378",
+    "deleted": 0
+  },
+  "project_20260327133326": {
+    "id": "project_20260327133326",
+    "name": "智慧党建",
+    "description": "",
+    "created_time": "2026-03-27T13:33:26.990228",
+    "deleted": 0,
+    "locked": true,
+    "session_id": "sess_1775399849547_j80yxaeid",
+    "session_expire": "2026-04-05T22:42:29.549682",
+    "updated_time": "2026-04-05T22:37:57.832919",
+    "packaging": false
+  },
+  "project_20260330095139_71049089": {
+    "id": "project_20260330095139_71049089",
+    "name": "人力资源市场平台项目",
+    "description": "",
+    "created_time": "2026-03-26T14:19:30.118189",
+    "deleted": 0
+  },
+  "deleted_projects": {}
+}

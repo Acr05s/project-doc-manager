@@ -264,6 +264,22 @@ class ProjectsIndexDB(DatabaseManager):
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_zip_project ON zip_uploads(project_id)')
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_zip_time ON zip_uploads(upload_time DESC)')
 
+                # 项目配置数据表（存储所有项目配置JSON）
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS project_configs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id TEXT NOT NULL,
+                        config_type TEXT NOT NULL,
+                        config_data TEXT NOT NULL,
+                        updated_time TEXT,
+                        UNIQUE(project_id, config_type)
+                    )
+                ''')
+
+                # 索引
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_config_project ON project_configs(project_id)')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_config_type ON project_configs(config_type)')
+
                 conn.commit()
             finally:
                 conn.close()
@@ -437,6 +453,82 @@ class ProjectsIndexDB(DatabaseManager):
             return True
         except Exception as e:
             print(f"从JSON导入失败: {e}")
+            return False
+
+    # ==================== 项目配置数据 CRUD ====================
+
+    def save_project_config(self, project_id: str, config_type: str, config_data: Dict) -> bool:
+        """保存项目配置数据
+        
+        Args:
+            project_id: 项目ID
+            config_type: 配置类型（project_info, requirements, categories, documents_index, documents_archived, draft, zip_uploads等）
+            config_data: 配置数据字典
+        
+        Returns:
+            bool: 是否保存成功
+        """
+        import json
+        try:
+            sql = '''
+                INSERT INTO project_configs (project_id, config_type, config_data, updated_time)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(project_id, config_type) DO UPDATE SET
+                    config_data = excluded.config_data,
+                    updated_time = excluded.updated_time
+            '''
+            self.execute_write(sql, (
+                project_id,
+                config_type,
+                json.dumps(config_data, ensure_ascii=False, indent=2),
+                datetime.now().isoformat()
+            ))
+            return True
+        except Exception as e:
+            print(f"保存项目配置失败: {e}")
+            return False
+
+    def get_project_config(self, project_id: str, config_type: str) -> Optional[Dict]:
+        """获取项目配置数据
+        
+        Args:
+            project_id: 项目ID
+            config_type: 配置类型
+        
+        Returns:
+            Optional[Dict]: 配置数据，不存在返回None
+        """
+        import json
+        try:
+            sql = 'SELECT config_data FROM project_configs WHERE project_id = ? AND config_type = ?'
+            results = self.execute(sql, (project_id, config_type))
+            if results:
+                return json.loads(results[0]['config_data'])
+            return None
+        except Exception as e:
+            print(f"获取项目配置失败: {e}")
+            return None
+
+    def delete_project_config(self, project_id: str, config_type: str = None) -> bool:
+        """删除项目配置数据
+        
+        Args:
+            project_id: 项目ID
+            config_type: 配置类型（None表示删除该项目的所有配置）
+        
+        Returns:
+            bool: 是否删除成功
+        """
+        try:
+            if config_type:
+                sql = 'DELETE FROM project_configs WHERE project_id = ? AND config_type = ?'
+                self.execute_write(sql, (project_id, config_type))
+            else:
+                sql = 'DELETE FROM project_configs WHERE project_id = ?'
+                self.execute_write(sql, (project_id,))
+            return True
+        except Exception as e:
+            print(f"删除项目配置失败: {e}")
             return False
 
     def export_to_json(self) -> Dict:

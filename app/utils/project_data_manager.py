@@ -96,6 +96,31 @@ class ProjectDataManager:
         db_dir.mkdir(parents=True, exist_ok=True)
         return db_dir
     
+    def _get_index_db(self):
+        """获取项目索引数据库（用于存储项目配置数据）"""
+        try:
+            from .db_manager import get_projects_index_db
+            return get_projects_index_db()
+        except Exception as e:
+            logger.warning(f"获取索引数据库失败: {e}")
+            return None
+    
+    # ========== 数据库优先的读写方法 ==========
+    
+    def _db_save_config(self, project_id: str, config_type: str, config_data: Dict) -> bool:
+        """保存配置到数据库（优先）"""
+        db = self._get_index_db()
+        if db:
+            return db.save_project_config(project_id, config_type, config_data)
+        return False
+    
+    def _db_load_config(self, project_id: str, config_type: str) -> Optional[Dict]:
+        """从数据库加载配置（优先）"""
+        db = self._get_index_db()
+        if db:
+            return db.get_project_config(project_id, config_type)
+        return None
+    
     # ========== 项目基本信息 ==========
     
     def save_project_info(self, project_name: str, info: Dict[str, Any]) -> bool:
@@ -519,7 +544,7 @@ class ProjectDataManager:
     # ========== 项目完整配置 ==========
     
     def load_full_config(self, project_name: str) -> Optional[Dict[str, Any]]:
-        """加载项目完整配置（合并所有数据文件）
+        """加载项目完整配置（合并所有数据文件，数据库优先）
         
         Args:
             project_name: 项目名称
@@ -530,40 +555,149 @@ class ProjectDataManager:
         try:
             logger.info(f"[DEBUG] load_full_config 开始: project_name={project_name}")
             
-            # 检查是否存在任何配置文件
-            project_info_path = self._get_project_info_path(project_name)
-            requirements_path = self._get_requirements_path(project_name)
+            # 优先从数据库加载
+            db = self._get_index_db()
+            project_id = None
             
-            logger.info(f"[DEBUG] project_info_path: {project_info_path}, exists: {project_info_path.exists()}")
-            logger.info(f"[DEBUG] requirements_path: {requirements_path}, exists: {requirements_path.exists()}")
+            # 先获取 project_id（从数据库或从文件）
+            if db:
+                db_project = db.get_project_by_name(project_name)
+                if db_project:
+                    project_id = db_project['id']
+                    logger.info(f"[DEBUG] 从数据库获取到 project_id: {project_id}")
             
-            # 如果没有任何配置文件，返回 None 以触发旧格式加载
-            if not (project_info_path.exists() or requirements_path.exists()):
-                logger.info(f"[DEBUG] 未找到项目 {project_name} 的配置文件")
-                # 列出目录内容帮助调试
-                project_folder = self._get_project_folder(project_name)
-                if project_folder.exists():
-                    logger.info(f"[DEBUG] 目录存在但配置文件不存在: {project_folder}")
+            if not project_id:
+                # 尝试从文件读取
+                project_info_path = self._get_project_info_path(project_name)
+                if project_info_path.exists():
                     try:
-                        contents = list(project_folder.iterdir())
-                        logger.info(f"[DEBUG] 目录内容: {[p.name for p in contents]}")
+                        data = json_file_manager.read_json(str(project_info_path))
+                        project_id = data.get('id')
+                        logger.info(f"[DEBUG] 从文件获取到 project_id: {project_id}")
                     except Exception as e:
-                        logger.info(f"[DEBUG] 列出目录内容失败: {e}")
-                else:
-                    logger.info(f"[DEBUG] 项目目录不存在: {project_folder}")
+                        logger.warning(f"[DEBUG] 从文件获取 project_id 失败: {e}")
+            
+            if not project_id:
+                logger.warning(f"[DEBUG] 无法获取 project_id")
                 return None
             
-            # 加载项目基本信息
-            config = self.load_project_info(project_name)
-            logger.info(f"[DEBUG] load_project_info 返回: {config is not None}")
-            if config is None:
-                logger.info(f"[DEBUG] load_project_info 返回 None，尝试读取文件内容")
+            # 从数据库加载各配置（数据库优先）
+            config = {}
+            
+            # 加载 project_info
+            project_info = self._db_load_config(project_id, 'project_info')
+            if project_info:
+                config.update(project_info)
+                logger.info(f"[DEBUG] 从数据库加载 project_info 成功")
+            else:
+                # 回退到文件
+                config = self.load_project_info(project_name) or {}
+                if not config:
+                    logger.warning(f"[DEBUG] project_info 不存在")
+                    return None
+            
+            # 加载 requirements
+            requirements = self._db_load_config(project_id, 'requirements')
+            if requirements:
+                config['cycles'] = requirements.get('cycles', [])
+                config['custom_attribute_definitions'] = requirements.get('custom_attribute_definitions', [])
+                config['_requirements_docs'] = requirements.get('documents', {})
+            else:
+                requirements = self.load_requirements(project_name)
+                if requirements:
+                    config['cycles'] = requirements.get('cycles', [])
+                    config['custom_attribute_definitions'] = requirements.get('custom_attribute_definitions', [])
+                    config['_requirements_docs'] = requirements.get('documents', {})
+            
+            # 加载 categories
+            categories_data = self._db_load_config(project_id, 'categories')
+            if categories_data:
+                categories = categories_data.get('categories', {})
+            else:
+                categories_data = self.load_categories(project_name)
+                categories = categories_data.get('categories', {}) if categories_data else {}
+            
+            # 初始化 documents
+            if 'documents' not in config:
+                config['documents'] = {}
+            
+            # 合并 requirements 中的文档配置（不含 uploaded_docs）
+            for cycle, cycle_info in config.get('_requirements_docs', {}).items():
+                if cycle not in config['documents']:
+                    config['documents'][cycle] = {}
+                config['documents'][cycle].update(cycle_info)
+            
+            # 合并 categories
+            for cycle, cycle_cats in categories.items():
+                if cycle not in config['documents']:
+                    config['documents'][cycle] = {}
+                if 'categories' not in config['documents'][cycle]:
+                    config['documents'][cycle]['categories'] = {}
+                config['documents'][cycle]['categories'].update(cycle_cats)
+            
+            # 清空 uploaded_docs，从 documents_index 重新加载
+            for cycle in config['documents']:
+                if 'uploaded_docs' in config['documents'][cycle]:
+                    config['documents'][cycle]['uploaded_docs'] = []
+            
+            # 加载 documents_index
+            doc_index = self._db_load_config(project_id, 'documents_index')
+            if doc_index:
+                documents = doc_index.get('documents', {})
+                logger.info(f"[DEBUG] 从数据库加载 documents_index: {len(documents)} 个文档")
+            else:
+                doc_index = self.load_documents_index(project_name)
+                documents = doc_index.get('documents', {}) if doc_index else {}
+                logger.info(f"[DEBUG] 从文件加载 documents_index: {len(documents)} 个文档")
+            
+            # 合并文档索引到 uploaded_docs
+            known_cycles = config.get('cycles', [])
+            loaded_count = 0
+            for doc_id, doc_info in documents.items():
+                cycle = doc_info.get('cycle')
+                doc_name = doc_info.get('doc_name')
+                
+                if not cycle or not doc_name:
+                    matched_cycle = None
+                    for known_cycle in known_cycles:
+                        if doc_id.startswith(known_cycle + '_'):
+                            matched_cycle = known_cycle
+                            break
+                        cycle_without_prefix = re.sub(r'^\d+[\.、\s]+', '', known_cycle)
+                        if doc_id.startswith(cycle_without_prefix + '_') or doc_id.startswith(known_cycle + '_'):
+                            matched_cycle = known_cycle
+                            break
+                    if matched_cycle:
+                        cycle = matched_cycle
+                
+                if cycle and doc_name:
+                    if cycle not in config['documents']:
+                        config['documents'][cycle] = {}
+                    if 'uploaded_docs' not in config['documents'][cycle]:
+                        config['documents'][cycle]['uploaded_docs'] = []
+                    config['documents'][cycle]['uploaded_docs'].append(doc_info)
+                    loaded_count += 1
+            
+            logger.info(f"[DEBUG] 文档加载完成: {loaded_count} 个")
+            
+            # 加载归档状态
+            archived_data = self._db_load_config(project_id, 'documents_archived')
+            if archived_data:
+                config['documents_archived'] = archived_data.get('documents_archived', [])
+            else:
                 try:
-                    with open(project_info_path, 'r', encoding='utf-8') as f:
-                        logger.info(f"[DEBUG] 文件内容预览: {f.read()[:200]}")
-                except Exception as e:
-                    logger.info(f"[DEBUG] 读取文件失败: {e}")
-            config = config or {}
+                    archived_data = json_file_manager.read_json(str(self._get_archived_path(project_name)))
+                    if archived_data:
+                        config['documents_archived'] = archived_data.get('documents_archived', [])
+                except:
+                    pass
+            
+            return config
+        except Exception as e:
+            logger.error(f"加载完整配置失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] {traceback.format_exc()}")
+            return None
             
             # 加载需求配置
             requirements = self.load_requirements(project_name)
@@ -761,7 +895,7 @@ class ProjectDataManager:
             return None
     
     def save_full_config(self, project_name: str, config: Dict[str, Any]) -> bool:
-        """保存项目完整配置（分发到各个数据文件）
+        """保存项目完整配置（数据库优先）
         
         Args:
             project_name: 项目名称
@@ -772,13 +906,26 @@ class ProjectDataManager:
         """
         try:
             logger.info(f"[DEBUG] save_full_config 开始: project_name={project_name}, config_id={config.get('id')}")
+            
+            # 获取 project_id
+            db = self._get_index_db()
+            project_id = config.get('id')
+            if not project_id and db:
+                db_project = db.get_project_by_name(project_name)
+                if db_project:
+                    project_id = db_project['id']
+            
+            if not project_id:
+                logger.warning(f"[DEBUG] 无法获取 project_id")
+                return False
+            
             # 确保项目目录存在
             project_folder = self._get_project_folder(project_name)
-            logger.info(f"[DEBUG] 项目目录: {project_folder}, 存在: {project_folder.exists()}")
+            project_folder.mkdir(parents=True, exist_ok=True)
             
-            # 保存项目基本信息
+            # 1. 保存 project_info 到数据库
             project_info = {
-                'id': config.get('id'),
+                'id': project_id,
                 'name': config.get('name'),
                 'description': config.get('description'),
                 'party_a': config.get('party_a'),
@@ -789,11 +936,14 @@ class ProjectDataManager:
                 'created_time': config.get('created_time'),
                 'updated_time': datetime.now().isoformat()
             }
-            self.save_project_info(project_name, project_info)
+            db_success = self._db_save_config(project_id, 'project_info', project_info)
+            if db_success:
+                logger.info(f"[DEBUG] project_info 保存到数据库成功")
+            else:
+                logger.warning(f"[DEBUG] project_info 保存到数据库失败，回退到文件")
+                self.save_project_info(project_name, project_info)
             
-            # 保存需求配置
-            # 注意：uploaded_docs 不再保存到 requirements.json，
-            # 而是单独保存到 documents_index.json，避免重复数据
+            # 2. 保存 requirements 到数据库
             requirements = {
                 'cycles': config.get('cycles', []),
                 'documents': {},
@@ -803,19 +953,28 @@ class ProjectDataManager:
                 if isinstance(cycle_info, dict):
                     requirements['documents'][cycle] = {
                         'required_docs': cycle_info.get('required_docs', []),
-                        # 'uploaded_docs': cycle_info.get('uploaded_docs', []),  # 不再保存 uploaded_docs
                         'categories': cycle_info.get('categories', {})
                     }
-            self.save_requirements(project_name, requirements)
+            db_success = self._db_save_config(project_id, 'requirements', requirements)
+            if db_success:
+                logger.info(f"[DEBUG] requirements 保存到数据库成功")
+            else:
+                logger.warning(f"[DEBUG] requirements 保存到数据库失败，回退到文件")
+                self.save_requirements(project_name, requirements)
             
-            # 保存目录分类
+            # 3. 保存 categories 到数据库
             categories_data = {'categories': {}}
             for cycle, cycle_info in config.get('documents', {}).items():
                 if isinstance(cycle_info, dict) and 'categories' in cycle_info:
                     categories_data['categories'][cycle] = cycle_info['categories']
-            self.save_categories(project_name, categories_data)
+            db_success = self._db_save_config(project_id, 'categories', categories_data)
+            if db_success:
+                logger.info(f"[DEBUG] categories 保存到数据库成功")
+            else:
+                logger.warning(f"[DEBUG] categories 保存到数据库失败，回退到文件")
+                self.save_categories(project_name, categories_data)
             
-            # 保存文档索引
+            # 4. 保存 documents_index 到数据库
             doc_index = {'documents': {}}
             for cycle, cycle_info in config.get('documents', {}).items():
                 if isinstance(cycle_info, dict) and 'uploaded_docs' in cycle_info:
@@ -823,17 +982,29 @@ class ProjectDataManager:
                         doc_id = doc.get('doc_id') or doc.get('id')
                         if doc_id:
                             doc_index['documents'][doc_id] = doc
-            self.save_documents_index(project_name, doc_index)
+            db_success = self._db_save_config(project_id, 'documents_index', doc_index)
+            if db_success:
+                logger.info(f"[DEBUG] documents_index 保存到数据库成功: {len(doc_index['documents'])} 个文档")
+            else:
+                logger.warning(f"[DEBUG] documents_index 保存到数据库失败，回退到文件")
+                self.save_documents_index(project_name, doc_index)
             
-            # 保存归档状态
+            # 5. 保存归档状态到数据库
             if 'documents_archived' in config:
                 archived_data = {'documents_archived': config['documents_archived']}
-                json_file_manager.write_json(str(self._get_archived_path(project_name)), archived_data)
+                db_success = self._db_save_config(project_id, 'documents_archived', archived_data)
+                if db_success:
+                    logger.info(f"[DEBUG] documents_archived 保存到数据库成功")
+                else:
+                    logger.warning(f"[DEBUG] documents_archived 保存到数据库失败，回退到文件")
+                    json_file_manager.write_json(str(self._get_archived_path(project_name)), archived_data)
             
             logger.info(f"完整配置已保存: {project_name}")
             return True
         except Exception as e:
             logger.error(f"保存完整配置失败: {e}")
+            import traceback
+            logger.error(f"[DEBUG] {traceback.format_exc()}")
             return False
     
     # ========== 项目创建和删除 ==========
