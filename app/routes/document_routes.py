@@ -348,22 +348,37 @@ def preview_document_local(doc_id):
         # 处理相对路径
         file_path_obj = Path(file_path)
         if not file_path_obj.is_absolute():
-            # 相对路径，相对于项目的uploads目录
-            project_name = metadata.get('project_name')
-            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                project_name = doc_manager.current_project.get('name')
-            
-            if project_name:
-                project_uploads_dir = doc_manager.get_documents_folder(project_name)
-                file_path_obj = project_uploads_dir / file_path
+            # 兼容新旧两种 file_path 格式：
+            # 1. 新格式：projects/{name}/uploads/... （以 projects/ 开头）
+            # 2. 旧格式：相对路径 uploads/xxx 或直接路径
+            normalized_fp = file_path.replace('\\', '/')
+            rel_path = normalized_fp
+
+            # 剥离可能存在的 "projects/{project_name}/uploads/" 前缀，避免路径重复
+            proj_name = metadata.get('project_name')
+            if not proj_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                proj_name = doc_manager.current_project.get('name')
+
+            if proj_name:
+                prefix_patterns = [
+                    f'projects/{proj_name}/uploads/',
+                    f'{proj_name}/uploads/',
+                ]
+                for p in prefix_patterns:
+                    if rel_path.startswith(p):
+                        rel_path = rel_path[len(p):]
+                        break
+                if rel_path.startswith('uploads/'):
+                    rel_path = rel_path[len('uploads/'):]
+
+                project_uploads_dir = doc_manager.get_documents_folder(proj_name)
+                file_path_obj = project_uploads_dir / rel_path
             else:
-                # 如果没有项目名称，尝试使用绝对路径
-                # 检查文件是否存在于uploads目录中
                 if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
                     upload_folder = doc_manager.config.upload_folder
                 else:
                     upload_folder = Path('uploads')
-                file_path_obj = upload_folder / file_path
+                file_path_obj = upload_folder / rel_path
         
         if not file_path or not file_path_obj.exists():
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
@@ -438,22 +453,37 @@ def view_document(doc_id):
         # 处理相对路径
         file_path_obj = Path(file_path)
         if not file_path_obj.is_absolute():
-            # 相对路径，相对于项目的uploads目录
-            project_name = metadata.get('project_name')
-            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                project_name = doc_manager.current_project.get('name')
-            
-            if project_name:
-                project_uploads_dir = doc_manager.get_documents_folder(project_name)
-                file_path_obj = project_uploads_dir / file_path
+            # 兼容新旧两种 file_path 格式：
+            # 1. 新格式：projects/{name}/uploads/... （以 projects/ 开头）
+            # 2. 旧格式：相对路径 uploads/xxx 或直接路径
+            normalized_fp = file_path.replace('\\', '/')
+            rel_path = normalized_fp
+
+            # 剥离可能存在的 "projects/{project_name}/uploads/" 前缀，避免路径重复
+            proj_name = metadata.get('project_name')
+            if not proj_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                proj_name = doc_manager.current_project.get('name')
+
+            if proj_name:
+                prefix_patterns = [
+                    f'projects/{proj_name}/uploads/',
+                    f'{proj_name}/uploads/',
+                ]
+                for p in prefix_patterns:
+                    if rel_path.startswith(p):
+                        rel_path = rel_path[len(p):]
+                        break
+                if rel_path.startswith('uploads/'):
+                    rel_path = rel_path[len('uploads/'):]
+
+                project_uploads_dir = doc_manager.get_documents_folder(proj_name)
+                file_path_obj = project_uploads_dir / rel_path
             else:
-                # 如果没有项目名称，尝试使用绝对路径
-                # 检查文件是否存在于uploads目录中
                 if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
                     upload_folder = doc_manager.config.upload_folder
                 else:
                     upload_folder = Path('uploads')
-                file_path_obj = upload_folder / file_path
+                file_path_obj = upload_folder / rel_path
         
         if not file_path or not file_path_obj.exists():
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
@@ -539,22 +569,37 @@ def download_document(doc_id):
         # 处理相对路径
         file_path_obj = Path(file_path)
         if not file_path_obj.is_absolute():
-            # 相对路径，相对于项目的uploads目录
-            project_name = metadata.get('project_name')
-            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                project_name = doc_manager.current_project.get('name')
-            
-            if project_name:
-                project_uploads_dir = doc_manager.get_documents_folder(project_name)
-                file_path_obj = project_uploads_dir / file_path
+            # 兼容新旧两种 file_path 格式：
+            # 1. 新格式：projects/{name}/uploads/... （以 projects/ 开头）
+            # 2. 旧格式：相对路径 uploads/xxx 或直接路径
+            normalized_fp = file_path.replace('\\', '/')
+            rel_path = normalized_fp
+
+            # 剥离可能存在的 "projects/{project_name}/uploads/" 前缀，避免路径重复
+            proj_name = metadata.get('project_name')
+            if not proj_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                proj_name = doc_manager.current_project.get('name')
+
+            if proj_name:
+                prefix_patterns = [
+                    f'projects/{proj_name}/uploads/',
+                    f'{proj_name}/uploads/',
+                ]
+                for p in prefix_patterns:
+                    if rel_path.startswith(p):
+                        rel_path = rel_path[len(p):]
+                        break
+                if rel_path.startswith('uploads/'):
+                    rel_path = rel_path[len('uploads/'):]
+
+                project_uploads_dir = doc_manager.get_documents_folder(proj_name)
+                file_path_obj = project_uploads_dir / rel_path
             else:
-                # 如果没有项目名称，尝试使用绝对路径
-                # 检查文件是否存在于uploads目录中
                 if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
                     upload_folder = doc_manager.config.upload_folder
                 else:
                     upload_folder = Path('uploads')
-                file_path_obj = upload_folder / file_path
+                file_path_obj = upload_folder / rel_path
         
         if not file_path or not file_path_obj.exists():
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404

@@ -111,20 +111,36 @@ def verify_project_files(project_id):
                 
                 # 解析文件路径
                 file_path_obj = Path(file_path)
-                
+
                 # 处理相对路径
                 if not file_path_obj.is_absolute():
                     # 使用 pathlib 处理跨平台路径（自动适配 Windows/Unix 分隔符）
                     normalized_path = file_path_obj.as_posix()
-                    if normalized_path.startswith('projects/'):
-                        # 完整相对路径
-                        base_dir = doc_manager.config.projects_base_folder.parent
-                        file_path_obj = base_dir / file_path
-                    else:
-                        # 旧格式或 uploads 格式
-                        project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
-                        file_path_obj = project_uploads_dir / file_path
-                
+
+                    # 剥离可能存在的 "projects/{project_name}/uploads/" 前缀，避免路径重复
+                    # file_path 格式可能是：
+                    # 1. "projects/{name}/uploads/..." （标准上传格式）
+                    # 2. "uploads/..." （带 uploads 前缀）
+                    # 3. "temp/..." （直接相对 uploads 目录）
+                    prefix_patterns = [
+                        f'projects/{project_name}/uploads/',
+                        f'projects/{project_name}\\uploads\\',
+                        f'{project_name}/uploads/',
+                        f'{project_name}\\uploads\\',
+                    ]
+                    rel_path = normalized_path
+                    for p in prefix_patterns:
+                        if rel_path.startswith(p):
+                            rel_path = rel_path[len(p):]
+                            break
+
+                    # 如果剩余路径以 uploads/ 开头，再剥离一层 uploads/（避免 uploads/uploads/）
+                    if rel_path.startswith('uploads/') or rel_path.startswith('uploads\\'):
+                        rel_path = rel_path[len('uploads/'):]
+
+                    project_uploads_dir = Path(doc_manager.config.projects_base_folder) / project_name / 'uploads'
+                    file_path_obj = project_uploads_dir / rel_path
+
                 # 检查文件是否存在
                 if not file_path_obj.exists():
                     result['missing_files'].append({
@@ -194,17 +210,35 @@ def clean_invalid_files(project_id):
                 
                 # 解析文件路径
                 file_path_obj = Path(file_path)
-                
+
                 # 处理相对路径
                 if not file_path_obj.is_absolute():
                     normalized_path = file_path_obj.as_posix()
-                    if normalized_path.startswith('projects/'):
-                        base_dir = doc_manager.config.projects_base_folder.parent
-                        file_path_obj = base_dir / file_path
-                    else:
-                        project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
-                        file_path_obj = project_uploads_dir / file_path
-                
+
+                    # 剥离可能存在的 "projects/{project_name}/uploads/" 前缀，避免路径重复
+                    # file_path 格式可能是：
+                    # 1. "projects/{name}/uploads/..." （标准上传格式）
+                    # 2. "uploads/..." （带 uploads 前缀）
+                    # 3. "temp/..." （直接相对 uploads 目录）
+                    prefix_patterns = [
+                        f'projects/{project_name}/uploads/',
+                        f'projects/{project_name}\\uploads\\',
+                        f'{project_name}/uploads/',
+                        f'{project_name}\\uploads\\',
+                    ]
+                    rel_path = normalized_path
+                    for p in prefix_patterns:
+                        if rel_path.startswith(p):
+                            rel_path = rel_path[len(p):]
+                            break
+
+                    # 如果剩余路径以 uploads/ 开头，再剥离一层 uploads/（避免 uploads/uploads/）
+                    if rel_path.startswith('uploads/') or rel_path.startswith('uploads\\'):
+                        rel_path = rel_path[len('uploads/'):]
+
+                    project_uploads_dir = Path(doc_manager.config.projects_base_folder) / project_name / 'uploads'
+                    file_path_obj = project_uploads_dir / rel_path
+
                 # 检查文件是否存在
                 if not file_path_obj.exists():
                     cleaned_count += 1
