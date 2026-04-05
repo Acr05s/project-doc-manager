@@ -137,13 +137,23 @@ class PDFConversionService:
         try:
             output_dir = os.path.dirname(output_path)
             
+            # 构建环境变量（继承当前环境，叠加 LANG/LC_ALL 确保中文字体支持）
+            env = os.environ.copy()
+            env.setdefault('LANG', 'zh_CN.UTF-8')
+            env.setdefault('LC_ALL', 'zh_CN.UTF-8')
+            env.setdefault('LC_CTYPE', 'zh_CN.UTF-8')
+            # LibreOffice 在 Ubuntu 下需要有效的 HOME 才能读取用户配置和字体
+            if 'HOME' not in env or not env['HOME']:
+                env['HOME'] = '/root'
+            
             result = subprocess.run(
                 [libreoffice_cmd, '--headless', '--convert-to', 'pdf',
                  '--outdir', output_dir, input_path],
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=120,
+                env=env
             )
             
             # LibreOffice生成的文件名是原文件名.pdf
@@ -157,7 +167,7 @@ class PDFConversionService:
                 raise Exception("LibreOffice未生成PDF文件")
                 
         except subprocess.TimeoutExpired:
-            raise Exception("LibreOffice转换超时")
+            raise Exception("LibreOffice转换超时（120秒）")
         except subprocess.CalledProcessError as e:
             raise Exception(f"LibreOffice错误: {e.stderr}")
     
@@ -226,6 +236,14 @@ class PDFConversionService:
             output_dir = os.path.dirname(output_path)
             base_name = os.path.splitext(os.path.basename(input_path))[0]
             
+            # 构建环境变量（同 _convert_with_libreoffice）
+            env = os.environ.copy()
+            env.setdefault('LANG', 'zh_CN.UTF-8')
+            env.setdefault('LC_ALL', 'zh_CN.UTF-8')
+            env.setdefault('LC_CTYPE', 'zh_CN.UTF-8')
+            if 'HOME' not in env or not env['HOME']:
+                env['HOME'] = '/root'
+            
             # 使用PageRange参数只转换第一页
             # LibreOffice PDF导出参数：PageRange=1-1 表示只转第1页
             result = subprocess.run(
@@ -234,7 +252,8 @@ class PDFConversionService:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=30  # 第一页转换超时30秒
+                timeout=30,  # 第一页转换超时30秒
+                env=env
             )
             
             generated_pdf = os.path.join(output_dir, f"{base_name}.pdf")

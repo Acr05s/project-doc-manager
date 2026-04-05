@@ -997,7 +997,42 @@ export function setupEventListeners() {
 }
 
 /**
- * 加载系统设置
+ * 将系统名称应用到页面标题（供初始化时调用）
+ */
+function _applySystemNameToPage(systemName) {
+    if (!systemName) return;
+    document.title = systemName;
+    const projectTitle = document.getElementById('projectTitle');
+    if (projectTitle) {
+        // 保留版本号徽章 span
+        const badge = projectTitle.querySelector('span#appVersion');
+        projectTitle.innerHTML = '📁 ' + systemName + ' ';
+        if (badge) {
+            projectTitle.appendChild(badge);
+        }
+    }
+}
+
+/**
+ * 页面初始化时读取系统设置并应用到标题（不打开弹窗）
+ */
+export async function applySystemSettingsToPage() {
+    try {
+        const response = await fetch('/api/settings');
+        const result = await response.json();
+        if (result.status === 'success' && result.data) {
+            const settings = result.data;
+            _applySystemNameToPage(settings.system_name);
+            // 存储到 appState 供其他地方使用
+            appState.systemSettings = settings;
+        }
+    } catch (error) {
+        console.warn('初始化系统设置失败（不影响主流程）:', error);
+    }
+}
+
+/**
+ * 加载系统设置（打开设置弹窗时调用，填充表单）
  */
 async function loadSystemSettings() {
     try {
@@ -1066,18 +1101,7 @@ async function saveSystemSettings() {
             showNotification('设置已保存', 'success');
             
             // 更新页面标题
-            if (settings.system_name) {
-                document.title = settings.system_name;
-                const projectTitle = document.getElementById('projectTitle');
-                if (projectTitle) {
-                    // 保留图标，只更新文字部分
-                    const icon = projectTitle.querySelector('span');
-                    projectTitle.innerHTML = '📁 ' + settings.system_name + ' ';
-                    if (icon) {
-                        projectTitle.appendChild(icon);
-                    }
-                }
-            }
+            _applySystemNameToPage(settings.system_name);
             
             closeModal(document.getElementById('systemSettingsModal'));
         } else {

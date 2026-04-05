@@ -4,7 +4,7 @@
 
 // 导入各个模块
 import { appState, elements, initSession } from './app-state.js';
-import { setupEventListeners, initDocModalResizer, showProjectButtons, showNotification, toggleOperationLog, refreshOperationLog, closeConfirmModal, closeInputModal } from './ui.js';
+import { setupEventListeners, initDocModalResizer, showProjectButtons, showNotification, toggleOperationLog, refreshOperationLog, closeConfirmModal, closeInputModal, applySystemSettingsToPage } from './ui.js';
 import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage } from './api.js';
 import { handleUploadDocument, handleFileSelect, handleEditDocument, handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments, renderCycleDocuments, previewDocument, openUploadModal, openEditModal, archiveDocument, unarchiveDocument, generateReport } from './document.js';
 import { renderProjectsList, selectProject, handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, handleSaveProject, handlePackageProject, handleImportPackage, handleConfirmAcceptance, handleDownloadPackage, handleRematchFileManagement, handleAddCycle, handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, populateProjectManageSelects, populateDocSelect, resetImportPackageModal, openProjectSelectModal, closeProjectSelectModal, handleOpenProject, handleSoftDeleteProject, handleRestoreProject, handlePermanentDeleteProject, toggleDeletedProjects, openNewProjectModal, handlePackageFileSelect, handlePackageFileSelectInModal, handleImportPackageInModal } from './project.js';
@@ -36,6 +36,10 @@ export async function initApp() {
     
     setupEventListeners();
     console.log('事件监听器已设置');
+    
+    // 初始化时从服务端读取系统设置并应用到页面标题
+    applySystemSettingsToPage();
+    
     const projects = await loadProjectsList();
     renderProjectsList(projects);
     console.log('项目列表已加载');
