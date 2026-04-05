@@ -98,44 +98,25 @@ def download_document(doc_id):
                 path_parts = normalized_path.split('/')
                 file_path_obj = Path(safe_join(str(base_dir), *path_parts))
             else:
-                # 处理 {项目名}/uploads/... 格式的路径
-                base_dir = doc_manager.config.projects_base_folder.parent
-                potential_path = Path(safe_join(str(base_dir), 'projects', normalized_path))
-                if potential_path.exists():
-                    file_path_obj = potential_path
+                # 相对路径，相对于项目的uploads目录
+                project_name = metadata.get('project_name')
+                if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+                    project_name = doc_manager.current_project.get('name')
+                
+                if project_name:
+                    project_uploads_dir = doc_manager.get_documents_folder(project_name)
+                    file_path_obj = Path(safe_join(str(project_uploads_dir), normalized_path))
                 else:
-                    # 相对路径，相对于项目的uploads目录
-                    project_name = metadata.get('project_name')
-                    if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                        project_name = doc_manager.current_project.get('name')
-                    
-                    if project_name:
-                        project_uploads_dir = doc_manager.get_documents_folder(project_name)
-                        file_path_obj = Path(safe_join(str(project_uploads_dir), normalized_path))
+                    # 如果没有项目名称，尝试使用绝对路径
+                    # 检查文件是否存在于uploads目录中
+                    if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+                        upload_folder = doc_manager.config.upload_folder
                     else:
-                        # 如果没有项目名称，尝试使用绝对路径
-                        # 检查文件是否存在于uploads目录中
-                        if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
-                            upload_folder = doc_manager.config.upload_folder
-                        else:
-                            upload_folder = Path('uploads')
-                        file_path_obj = Path(safe_join(str(upload_folder), normalized_path))
+                        upload_folder = Path('uploads')
+                    file_path_obj = Path(safe_join(str(upload_folder), normalized_path))
         
-        # 如果文件不存在，尝试根据文件名搜索（处理ZIP文件夹被删除的情况）
         if not file_path or not file_path_obj.exists():
-            original_filename = metadata.get('original_filename', '')
-            project_name = metadata.get('project_name')
-            if not project_name and hasattr(doc_manager, 'current_project') and doc_manager.current_project:
-                project_name = doc_manager.current_project.get('name')
-            
-            if original_filename and project_name:
-                found_path = _find_file_by_name(doc_manager, project_name, original_filename)
-                if found_path:
-                    file_path_obj = found_path
-                else:
-                    return jsonify({'status': 'error', 'message': '文件不存在'}), 404
-            else:
-                return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
         
         file_path = str(file_path_obj)
         
@@ -146,27 +127,3 @@ def download_document(doc_id):
         )
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'下载失败: {str(e)}'}), 500
-
-
-def _find_file_by_name(doc_manager, project_name, filename):
-    """根据文件名在项目目录中搜索文件"""
-    try:
-        project_uploads_dir = doc_manager.get_documents_folder(project_name)
-        if not project_uploads_dir or not project_uploads_dir.exists():
-            return None
-        
-        # 在项目的 uploads 目录中递归搜索
-        for file_path in project_uploads_dir.rglob(filename):
-            if file_path.is_file():
-                return file_path
-        
-        # 如果没找到，尝试不区分大小写搜索
-        filename_lower = filename.lower()
-        for file_path in project_uploads_dir.rglob('*'):
-            if file_path.is_file() and file_path.name.lower() == filename_lower:
-                return file_path
-                
-    except Exception as e:
-        print(f"[_find_file_by_name] 搜索失败: {e}")
-    
-    return None

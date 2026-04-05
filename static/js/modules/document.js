@@ -1260,7 +1260,7 @@ export async function previewDocument(docId) {
 }
 
 /**
- * 加载渐进式预览（支持大文件部分预览）
+ * 加载渐进式预览
  */
 async function loadProgressivePreview(docId, fileExt) {
     const previewBody = document.getElementById('previewBody');
@@ -1278,30 +1278,10 @@ async function loadProgressivePreview(docId, fileExt) {
             } else if (result.mode === 'direct') {
                 // 直接预览（图片/PDF/转换降级等）
                 const viewUrl = result.file_url;
-                
-                // 检查是否为部分预览（大文件）
-                if (result.is_partial && result.full_preview_url) {
-                    // 显示部分预览提示和加载状态
-                    previewBody.innerHTML = `
-                        <div style="position: relative; height: 100%;">
-                            <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" style="height: calc(100% - 40px);"></iframe>
-                            <div id="partialPreviewBanner" style="position: absolute; bottom: 0; left: 0; right: 0; height: 40px; background: #e6f7ff; border-top: 1px solid #91d5ff; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; color: #1890ff;">
-                                <span class="loading-spinner" style="width: 16px; height: 16px; border: 2px solid #1890ff; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
-                                <span>${escapeHtml(result.message || '正在生成完整预览...')}</span>
-                            </div>
-                        </div>
-                        <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
-                    `;
-                    
-                    // 后台轮询检查完整PDF是否就绪
-                    setTimeout(() => checkFullPreviewReady(docId, result.full_preview_url, fileExt), 5000);
+                if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
+                    previewBody.innerHTML = `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
                 } else {
-                    // 正常预览
-                    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
-                        previewBody.innerHTML = `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
-                    } else {
-                        previewBody.innerHTML = `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
-                    }
+                    previewBody.innerHTML = `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
                 }
             }
         } else {
@@ -1325,37 +1305,6 @@ async function loadProgressivePreview(docId, fileExt) {
         console.error('渐进式预览加载失败:', error);
         // 降级到原始预览方式
         previewBody.innerHTML = getFallbackPreviewContent(docId, fileExt);
-    }
-}
-
-/**
- * 检查完整PDF预览是否就绪
- */
-async function checkFullPreviewReady(docId, fullPreviewUrl, fileExt) {
-    const previewBody = document.getElementById('previewBody');
-    if (!previewBody) return;
-    
-    const banner = document.getElementById('partialPreviewBanner');
-    if (!banner) return; // 用户已关闭预览
-    
-    try {
-        // 尝试访问完整预览URL，检查是否返回200
-        const response = await fetch(fullPreviewUrl, { method: 'HEAD' });
-        
-        if (response.ok) {
-            // 完整PDF已就绪，刷新iframe
-            console.log('[预览] 完整PDF已就绪，刷新显示');
-            previewBody.innerHTML = `<iframe src="${fullPreviewUrl}" class="preview-iframe" frameborder="0"></iframe>`;
-            showNotification('完整预览已生成', 'success');
-        } else {
-            // 还未就绪，继续轮询
-            console.log('[预览] 完整PDF尚未就绪，继续等待...');
-            setTimeout(() => checkFullPreviewReady(docId, fullPreviewUrl, fileExt), 5000);
-        }
-    } catch (error) {
-        // 访问失败，继续轮询
-        console.log('[预览] 检查完整预览状态失败，继续等待...');
-        setTimeout(() => checkFullPreviewReady(docId, fullPreviewUrl, fileExt), 5000);
     }
 }
 
