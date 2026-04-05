@@ -204,12 +204,7 @@ class TaskService:
                 # 完成任务
                 self.tasks_store[task_id]['status'] = 'completed'
                 self.tasks_store[task_id]['progress'] = 100
-                # 区分实际文件和不涉及占位文件
-                actual_files = processed_files - not_involved_count if not_involved_count > 0 else processed_files
-                if not_involved_count > 0:
-                    self.tasks_store[task_id]['message'] = f'打包完成！共 {actual_files} 个文件，{not_involved_count} 个不涉及占位文件'
-                else:
-                    self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
+                self.tasks_store[task_id]['message'] = f'打包完成！共 {processed_files} 个文件'
                 self.tasks_store[task_id]['result'] = {
                     'package_path': str(package_path),
                     'package_filename': package_filename,
