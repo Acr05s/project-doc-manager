@@ -209,14 +209,117 @@ def import_package():
         with open(config_file, 'r', encoding='utf-8') as f:
             project_config = json.load(f)
 
-        # 处理文档文件
-        documents_dir = extract_dir / 'documents'
-        if documents_dir.exists():
-            # 可以在这里处理文档文件的复制
-            pass
+        # ── 确定原始项目名、新项目名 ──
+        original_project_name = project_config.get('name', '')
 
-        # 导入项目
-        result = doc_manager.import_project_json(project_config)
+        # 如果项目名冲突，import_project_json 会加时间戳后缀，先自行判断
+        existing_projects = doc_manager.projects.list_all() if doc_manager.projects else []
+        existing_names = {p.get('name') for p in existing_projects}
+        new_project_name = original_project_name
+        if new_project_name in existing_names:
+            new_project_name = f"{new_project_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        # ── 复制文件：ZIP 里的 {原项目名}/uploads/ → 新项目的 uploads 目录 ──
+        # 备份打包时 arcname = relative_to(project_dir.parent)，
+        # 所以 ZIP 内路径格式：  {原项目名}/uploads/xxx/yyy.docx
+        try:
+            projects_base = Path(doc_manager.config.projects_base_folder)
+            new_project_uploads = projects_base / new_project_name / 'uploads'
+            new_project_uploads.mkdir(parents=True, exist_ok=True)
+
+            copied_count = 0
+            # 在解压目录中查找与原项目名同名的子目录
+            # extract_dir 可能直接就是解压根，也可能 config_file 在子目录里
+            # 尝试几种目录结构：
+            # 1. extract_dir/{原项目名}/uploads/...
+            # 2. extract_dir/uploads/...（配置文件在根目录时）
+            src_uploads_candidates = [
+                extract_dir / original_project_name / 'uploads',
+                extract_dir / 'uploads',
+            ]
+            src_uploads = None
+            for candidate in src_uploads_candidates:
+                if candidate.exists() and candidate.is_dir():
+                    src_uploads = candidate
+                    break
+
+            if src_uploads:
+                # 递归复制 uploads 目录下所有文件
+                for src_file in src_uploads.rglob('*'):
+                    if src_file.is_file():
+                        rel = src_file.relative_to(src_uploads)
+                        dst_file = new_project_uploads / rel
+                        dst_file.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src_file, dst_file)
+                        copied_count += 1
+                logger.info(f"[导入备份] 复制文件完成，共 {copied_count} 个")
+            else:
+                logger.warning(f"[导入备份] 未找到 uploads 目录（原项目名={original_project_name}），跳过文件复制")
+        except Exception as copy_err:
+            logger.error(f"[导入备份] 复制文件失败: {copy_err}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # 文件复制失败不阻塞配置导入，继续执行
+
+        # ── 更新 project_config 中的项目名（import_project_json 也会更新，但提前同步名称） ──
+        project_config['name'] = new_project_name
+
+        # ── 更新 project_config 里所有 file_path 中的旧项目名 → 新项目名 ──
+        def _fix_path(path_str: str) -> str:
+            """把 file_path 中的旧项目名替换为新项目名"""
+            if not path_str or not original_project_name or original_project_name == new_project_name:
+                return path_str
+            # 兼容 Windows 和 Unix 路径分隔符
+            fixed = path_str.replace(original_project_name, new_project_name)
+            return fixed
+
+        for cycle, cycle_info in project_config.get('documents', {}).items():
+            if not isinstance(cycle_info, dict):
+                continue
+            for doc in cycle_info.get('uploaded_docs', []):
+                if 'file_path' in doc:
+                    doc['file_path'] = _fix_path(doc['file_path'])
+        # 也更新顶层 documents_index（如果有）
+        for doc_id, doc_info in project_config.get('documents_index', {}).items():
+            if isinstance(doc_info, dict) and 'file_path' in doc_info:
+                doc_info['file_path'] = _fix_path(doc_info['file_path'])
+
+        # ── 处理备份里的 documents_index.json（新版本的主要文档记录来源）──
+        # 备份打包时递归打包了整个项目目录，所以 ZIP 里有：
+        # {项目名}/data/documents_index.json  或  {项目名}/documents_index.json
+        doc_index_candidates = [
+            extract_dir / original_project_name / 'data' / 'documents_index.json',
+            extract_dir / original_project_name / 'documents_index.json',
+            extract_dir / 'data' / 'documents_index.json',
+            extract_dir / 'documents_index.json',
+        ]
+        doc_index_file = None
+        for candidate in doc_index_candidates:
+            if candidate.exists():
+                doc_index_file = candidate
+                break
+
+        if doc_index_file:
+            try:
+                with open(doc_index_file, 'r', encoding='utf-8') as f:
+                    doc_index = json.load(f)
+                # 更新 file_path
+                for doc_id, doc_info in doc_index.get('documents', {}).items():
+                    if isinstance(doc_info, dict) and 'file_path' in doc_info:
+                        doc_info['file_path'] = _fix_path(doc_info['file_path'])
+                        doc_info['project_name'] = new_project_name
+                # 注入到 project_config 供 import_project_json / save_full_config 使用
+                project_config['_imported_doc_index'] = doc_index
+                logger.info(f"[导入备份] 找到 documents_index.json，共 {len(doc_index.get('documents', {}))} 个文档记录")
+            except Exception as idx_err:
+                logger.warning(f"[导入备份] 读取 documents_index.json 失败（不影响主流程）: {idx_err}")
+
+        # ── 导入项目（传入 new_name，避免函数内部再次重命名导致路径不一致） ──
+        result = doc_manager.import_project_json(project_config, new_name=new_project_name)
+
+        if result.get('status') == 'success':
+            result['copied_files'] = copied_count if src_uploads else 0
+            result['message'] = f"项目导入成功，已恢复 {copied_count if src_uploads else 0} 个文件"
 
         # 清理临时文件
         shutil.rmtree(extract_dir, ignore_errors=True)

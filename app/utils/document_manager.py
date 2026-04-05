@@ -348,13 +348,15 @@ class DocumentManager:
             from datetime import datetime
             new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
             
-            # 检查项目名称是否已存在
-            existing_projects = self.projects.list_all()
-            for proj in existing_projects:
-                if proj.get('name') == project_name:
-                    # 如果项目名已存在，添加时间戳后缀
-                    project_name = f"{project_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    break
+            # 检查项目名称是否已存在（只有外部未传 new_name 时才自动加后缀，
+            # 如果外部已传 new_name 说明调用方已处理过冲突，直接使用）
+            if not new_name:
+                existing_projects = self.projects.list_all()
+                for proj in existing_projects:
+                    if proj.get('name') == project_name:
+                        # 如果项目名已存在，添加时间戳后缀
+                        project_name = f"{project_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                        break
             
             # 更新配置
             project_config['id'] = new_project_id
@@ -367,6 +369,16 @@ class DocumentManager:
             
             # 保存项目配置
             self.data_manager.save_full_config(project_name, project_config)
+            
+            # 如果调用方注入了 _imported_doc_index（来自备份 ZIP 里的 documents_index.json），
+            # 把它写入新项目的文档索引（覆盖 save_full_config 可能产生的空索引）
+            imported_doc_index = project_config.pop('_imported_doc_index', None)
+            if imported_doc_index and isinstance(imported_doc_index, dict):
+                try:
+                    self.data_manager.save_documents_index(project_name, imported_doc_index)
+                    logger.info(f"[import_project_json] 已导入文档索引：{len(imported_doc_index.get('documents', {}))} 个文档")
+                except Exception as idx_err:
+                    logger.warning(f"[import_project_json] 写入文档索引失败（不影响主流程）: {idx_err}")
             
             # 添加到项目索引
             self.projects.add_to_index(
