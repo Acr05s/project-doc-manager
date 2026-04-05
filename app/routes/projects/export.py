@@ -209,26 +209,8 @@ def import_package():
         with open(config_file, 'r', encoding='utf-8') as f:
             project_config = json.load(f)
 
-        # ── 确定项目目录和原始项目名 ──
-        # config_file 通常在 {项目目录}/project_config.json 或 {项目目录}/project_info.json
-        # 项目目录可能是项目名（如 "AI平台建设(一期)项目"）或旧系统的项目ID（如 "project_20260327..."）
-        src_project_folder = config_file.parent  # ZIP解压后的项目目录
-
-        # 从 project_info.json 读取真实项目名；若找不到则用 config 里的 name；再没有则用目录名
-        project_name_from_file = None
-        for info_name in ('project_info.json', 'project_config.json'):
-            info_path = src_project_folder / info_name
-            if info_path.exists() and info_path != config_file:
-                try:
-                    with open(info_path, 'r', encoding='utf-8') as f:
-                        info_data = json.load(f)
-                    project_name_from_file = info_data.get('name')
-                    if project_name_from_file:
-                        break
-                except Exception:
-                    pass
-
-        original_project_name = project_name_from_file or project_config.get('name', '') or src_project_folder.name
+        # ── 确定原始项目名、新项目名 ──
+        original_project_name = project_config.get('name', '')
 
         # 如果项目名冲突，import_project_json 会加时间戳后缀，先自行判断
         existing_projects = doc_manager.projects.list_all() if doc_manager.projects else []
@@ -237,18 +219,31 @@ def import_package():
         if new_project_name in existing_names:
             new_project_name = f"{new_project_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        # ── 复制文件：ZIP 里的 src_project_folder/uploads/ → 新项目的 uploads 目录 ──
-        # 旧系统用 project_id 作目录名（如 project_20260327...），新系统用项目名；
-        # 无论哪种，uploads 都在 config_file.parent 的相对路径下，直接用 src_project_folder 查找
+        # ── 复制文件：ZIP 里的 {原项目名}/uploads/ → 新项目的 uploads 目录 ──
+        # 备份打包时 arcname = relative_to(project_dir.parent)，
+        # 所以 ZIP 内路径格式：  {原项目名}/uploads/xxx/yyy.docx
         try:
             projects_base = Path(doc_manager.config.projects_base_folder)
             new_project_uploads = projects_base / new_project_name / 'uploads'
             new_project_uploads.mkdir(parents=True, exist_ok=True)
 
             copied_count = 0
-            # uploads 目录直接位于 src_project_folder 下
-            src_uploads = src_project_folder / 'uploads'
-            if src_uploads.exists() and src_uploads.is_dir():
+            # 在解压目录中查找与原项目名同名的子目录
+            # extract_dir 可能直接就是解压根，也可能 config_file 在子目录里
+            # 尝试几种目录结构：
+            # 1. extract_dir/{原项目名}/uploads/...
+            # 2. extract_dir/uploads/...（配置文件在根目录时）
+            src_uploads_candidates = [
+                extract_dir / original_project_name / 'uploads',
+                extract_dir / 'uploads',
+            ]
+            src_uploads = None
+            for candidate in src_uploads_candidates:
+                if candidate.exists() and candidate.is_dir():
+                    src_uploads = candidate
+                    break
+
+            if src_uploads:
                 # 递归复制 uploads 目录下所有文件
                 for src_file in src_uploads.rglob('*'):
                     if src_file.is_file():
@@ -259,29 +254,23 @@ def import_package():
                         copied_count += 1
                 logger.info(f"[导入备份] 复制文件完成，共 {copied_count} 个")
             else:
-                logger.warning(f"[导入备份] 未找到 uploads 目录（项目目录={src_project_folder.name}），跳过文件复制")
+                logger.warning(f"[导入备份] 未找到 uploads 目录（原项目名={original_project_name}），跳过文件复制")
         except Exception as copy_err:
             logger.error(f"[导入备份] 复制文件失败: {copy_err}")
             import traceback
             logger.error(traceback.format_exc())
             # 文件复制失败不阻塞配置导入，继续执行
 
-        # ── 更新 project_config 中的项目名 ──
+        # ── 更新 project_config 中的项目名（import_project_json 也会更新，但提前同步名称） ──
         project_config['name'] = new_project_name
 
-        # ── 更新 project_config 里所有 file_path 中的旧项目目录名 → 新项目名 ──
-        # file_path 格式可能是 uploads/xxx 或 {项目名}/uploads/xxx，需要双向替换
+        # ── 更新 project_config 里所有 file_path 中的旧项目名 → 新项目名 ──
         def _fix_path(path_str: str) -> str:
-            """把 file_path 中的旧项目名（或旧项目目录名）替换为新项目名"""
-            if not path_str:
+            """把 file_path 中的旧项目名替换为新项目名"""
+            if not path_str or not original_project_name or original_project_name == new_project_name:
                 return path_str
-            fixed = path_str
-            # 先用项目目录名（可能是 project_id 或 project_name）替换
-            if src_project_folder.name and src_project_folder.name != new_project_name:
-                fixed = fixed.replace(src_project_folder.name, new_project_name)
-            # 再用原始项目名（config里的name）替换（兜底）
-            if original_project_name and original_project_name != new_project_name:
-                fixed = fixed.replace(original_project_name, new_project_name)
+            # 兼容 Windows 和 Unix 路径分隔符
+            fixed = path_str.replace(original_project_name, new_project_name)
             return fixed
 
         for cycle, cycle_info in project_config.get('documents', {}).items():
@@ -296,10 +285,13 @@ def import_package():
                 doc_info['file_path'] = _fix_path(doc_info['file_path'])
 
         # ── 处理备份里的 documents_index.json（新版本的主要文档记录来源）──
-        # 位于 src_project_folder/data/documents_index.json 或 src_project_folder/documents_index.json
+        # 备份打包时递归打包了整个项目目录，所以 ZIP 里有：
+        # {项目名}/data/documents_index.json  或  {项目名}/documents_index.json
         doc_index_candidates = [
-            src_project_folder / 'data' / 'documents_index.json',
-            src_project_folder / 'documents_index.json',
+            extract_dir / original_project_name / 'data' / 'documents_index.json',
+            extract_dir / original_project_name / 'documents_index.json',
+            extract_dir / 'data' / 'documents_index.json',
+            extract_dir / 'documents_index.json',
         ]
         doc_index_file = None
         for candidate in doc_index_candidates:
