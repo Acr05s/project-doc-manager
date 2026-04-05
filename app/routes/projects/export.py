@@ -524,15 +524,19 @@ def import_project_merge():
                     except Exception as e:
                         logger.warning(f"读取 requirements.json 失败，跳过 cycle 推断: {e}")
                 
-                # 更新文档路径中的项目目录名（旧目录名 → 新项目名目录名）并推断 cycle
+                # 更新文档路径中的项目目录名（旧项目名 → 新项目名）并推断 cycle
                 documents = index_data.get('documents', {})
                 for doc_id, doc_info in documents.items():
-                    # 更新file_path中的目录名（旧备份目录名 → 新项目名）
+                    # 更新file_path中的目录名
+                    # file_path 格式: projects\{原项目名}\uploads\...
+                    # 需要把原项目名替换为新项目名
                     if 'file_path' in doc_info:
-                        old_dir_name = project_source_dir.name
+                        # 优先用 project_name 字段作为旧名（最准确）
+                        old_name_in_path = doc_info.get('project_name') or original_project_name
                         new_dir_name = project_name  # 目录名是项目名
-                        if old_dir_name != new_dir_name:
-                            doc_info['file_path'] = doc_info['file_path'].replace(old_dir_name, new_dir_name)
+                        if old_name_in_path and old_name_in_path != new_dir_name:
+                            doc_info['file_path'] = doc_info['file_path'].replace(old_name_in_path, new_dir_name)
+                    # 始终同步 project_name 字段
                     # 更新project_name字段
                     doc_info['project_name'] = project_name
                     # ★ 根据 doc_name 推断 cycle（documents_index.json 中的文档 cycle 通常为 None）
@@ -577,9 +581,32 @@ def import_project_merge():
                 with open(requirements_file, 'r', encoding='utf-8') as f:
                     requirements = json.load(f)
                 
-                # 更新项目配置
+                # 先保留原 project_config 里的 uploaded_docs（路径需要同步更新）
+                old_documents = project_config.get('documents', {})
+                
+                # 更新项目配置（cycles 和 required_docs 来自 requirements）
                 project_config['cycles'] = requirements.get('cycles', [])
                 project_config['documents'] = requirements.get('documents', {})
+                
+                # 将原 uploaded_docs 回填到新 documents 中，并同步 file_path 里的项目名
+                for cycle, old_cycle_data in old_documents.items():
+                    uploaded_docs = old_cycle_data.get('uploaded_docs', [])
+                    if not uploaded_docs:
+                        continue
+                    # 确保目标 cycle 存在
+                    if cycle not in project_config['documents']:
+                        project_config['documents'][cycle] = {'required_docs': [], 'uploaded_docs': []}
+                    elif 'uploaded_docs' not in project_config['documents'][cycle]:
+                        project_config['documents'][cycle]['uploaded_docs'] = []
+                    # 更新每个文档的 file_path 和 project_name
+                    for doc in uploaded_docs:
+                        if 'file_path' in doc:
+                            old_name = doc.get('project_name') or original_project_name
+                            if old_name and old_name != project_name:
+                                doc['file_path'] = doc['file_path'].replace(old_name, project_name)
+                        doc['project_name'] = project_name
+                    # 回填到配置（只添加 project_info 里已有的，不重复）
+                    project_config['documents'][cycle]['uploaded_docs'] = uploaded_docs
                 
                 logger.info(f"已加载requirements.json文件: {requirements_file}")
             except Exception as e:
