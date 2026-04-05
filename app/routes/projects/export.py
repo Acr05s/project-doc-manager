@@ -266,12 +266,40 @@ def import_package():
 
         # ── 更新 project_config 里所有 file_path 中的旧项目名 → 新项目名 ──
         def _fix_path(path_str: str) -> str:
-            """把 file_path 中的旧项目名替换为新项目名"""
-            if not path_str or not original_project_name or original_project_name == new_project_name:
+            """把 file_path 中的旧项目名替换为新项目名，同时处理路径分隔符兼容性"""
+            if not path_str:
                 return path_str
-            # 兼容 Windows 和 Unix 路径分隔符
-            fixed = path_str.replace(original_project_name, new_project_name)
-            return fixed
+            
+            # 第一步：统一路径分隔符为正斜杠（兼容性处理）
+            # Windows 备份用反斜杠，Linux 用正斜杠，统一用正斜杠更通用
+            normalized = path_str.replace('\\', '/')
+            
+            # 第二步：替换项目名（支持两种分隔符格式）
+            if not original_project_name or original_project_name == new_project_name:
+                return normalized
+            
+            # 尝试替换两种分隔符格式的项目名
+            # 格式1: projects/原项目名/uploads/...
+            # 格式2: 原项目名/uploads/...
+            for sep in ['/', '\\']:
+                old_patterns = [
+                    f'projects{sep}{original_project_name}{sep}uploads{sep}',
+                    f'{original_project_name}{sep}uploads{sep}',
+                ]
+                new_patterns = [
+                    f'projects{sep}{new_project_name}{sep}uploads{sep}',
+                    f'{new_project_name}{sep}uploads{sep}',
+                ]
+                for old_p, new_p in zip(old_patterns, new_patterns):
+                    if old_p in normalized:
+                        normalized = normalized.replace(old_p, new_p)
+                        break
+            
+            # 直接替换原项目名（兜底处理）
+            if original_project_name in normalized:
+                normalized = normalized.replace(original_project_name, new_project_name)
+            
+            return normalized
 
         for cycle, cycle_info in project_config.get('documents', {}).items():
             if not isinstance(cycle_info, dict):
@@ -283,6 +311,38 @@ def import_package():
         for doc_id, doc_info in project_config.get('documents_index', {}).items():
             if isinstance(doc_info, dict) and 'file_path' in doc_info:
                 doc_info['file_path'] = _fix_path(doc_info['file_path'])
+
+        # ── 复制项目文档数据库 documents.db（如果有）──
+        # 新版本使用 documents.db 存储文档信息，需要一起恢复
+        db_copied = False
+        db_candidates = [
+            extract_dir / original_project_name / 'data' / 'db' / 'documents.db',
+            extract_dir / original_project_name / 'data' / 'db' / 'documents.db.lock',
+            extract_dir / 'data' / 'db' / 'documents.db',
+            extract_dir / 'data' / 'db' / 'documents.db.lock',
+        ]
+        for db_candidate in db_candidates:
+            if db_candidate.exists() and 'documents.db' in db_candidate.name:
+                try:
+                    # 获取解压目录中的源 db 目录
+                    src_db_dir = db_candidate.parent
+                    # 目标 db 目录（在新项目中）
+                    projects_base = Path(doc_manager.config.projects_base_folder)
+                    dst_db_dir = projects_base / new_project_name / 'data' / 'db'
+                    dst_db_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # 复制所有 db 文件（.db 和 .db.lock）
+                    for db_file in src_db_dir.glob('documents.db*'):
+                        dst_file = dst_db_dir / db_file.name
+                        shutil.copy2(db_file, dst_file)
+                        logger.info(f"[导入备份] 复制数据库文件: {db_file.name} -> {dst_file}")
+                        db_copied = True
+                    break
+                except Exception as db_err:
+                    logger.warning(f"[导入备份] 复制 documents.db 失败（不影响主流程）: {db_err}")
+        
+        if db_copied:
+            logger.info(f"[导入备份] 已恢复 documents.db 数据库")
 
         # ── 处理备份里的 documents_index.json（新版本的主要文档记录来源）──
         # 备份打包时递归打包了整个项目目录，所以 ZIP 里有：
@@ -308,6 +368,79 @@ def import_package():
                     if isinstance(doc_info, dict) and 'file_path' in doc_info:
                         doc_info['file_path'] = _fix_path(doc_info['file_path'])
                         doc_info['project_name'] = new_project_name
+                
+                # ── 同步 documents 结构（供验收检查使用）──
+                # 验收检查读取的是 project_config['documents'][cycle]['uploaded_docs']
+                # 需要从 documents_index 重建 documents 结构
+                imported_docs = doc_index.get('documents', {})
+                if imported_docs:
+                    # 构建 documents 结构
+                    # 结构：{ cycle: { doc_name: { uploaded_docs: [...] } } }
+                    # 需要先从 project_config 中获取 cycles 列表
+                    imported_cycles = project_config.get('cycles', [])
+                    imported_documents = project_config.get('documents', {})
+                    
+                    # 确保 documents 结构存在
+                    if not imported_documents:
+                        imported_documents = {}
+                    
+                    # 按 cycle 和 doc_name 分组
+                    for doc_id, doc_info in imported_docs.items():
+                        if not isinstance(doc_info, dict):
+                            continue
+                        
+                        cycle = doc_info.get('cycle', '未分类')
+                        doc_name = doc_info.get('doc_name', '未知文档')
+                        directory = doc_info.get('directory', '')
+                        
+                        # 确保 cycle 存在
+                        if cycle not in imported_documents:
+                            imported_documents[cycle] = {'uploaded_docs': []}
+                        if 'uploaded_docs' not in imported_documents[cycle]:
+                            imported_documents[cycle]['uploaded_docs'] = []
+                        
+                        # 构建 uploaded_doc 记录
+                        uploaded_doc = {
+                            'doc_id': doc_id,
+                            'doc_name': doc_name,
+                            'filename': doc_info.get('original_filename', ''),
+                            'file_path': doc_info.get('file_path', ''),
+                            'file_size': doc_info.get('file_size', 0),
+                            'file_type': doc_info.get('file_type', ''),
+                            'upload_time': doc_info.get('upload_time', ''),
+                            'directory': directory,
+                            'status': doc_info.get('status', 'uploaded'),
+                        }
+                        # 添加附加属性
+                        if doc_info.get('has_seal'):
+                            uploaded_doc['has_seal'] = doc_info.get('has_seal')
+                        if doc_info.get('party_a_seal'):
+                            uploaded_doc['party_a_seal'] = doc_info.get('party_a_seal')
+                        if doc_info.get('party_b_seal'):
+                            uploaded_doc['party_b_seal'] = doc_info.get('party_b_seal')
+                        if doc_info.get('no_seal'):
+                            uploaded_doc['no_seal'] = doc_info.get('no_seal')
+                        if doc_info.get('no_signature'):
+                            uploaded_doc['no_signature'] = doc_info.get('no_signature')
+                        if doc_info.get('party_a_signer'):
+                            uploaded_doc['party_a_signer'] = doc_info.get('party_a_signer')
+                        if doc_info.get('party_b_signer'):
+                            uploaded_doc['party_b_signer'] = doc_info.get('party_b_signer')
+                        if doc_info.get('doc_date'):
+                            uploaded_doc['doc_date'] = doc_info.get('doc_date')
+                        if doc_info.get('sign_date'):
+                            uploaded_doc['sign_date'] = doc_info.get('sign_date')
+                        if doc_info.get('source'):
+                            uploaded_doc['source'] = doc_info.get('source')
+                        if doc_info.get('custom_attrs'):
+                            uploaded_doc['custom_attrs'] = doc_info.get('custom_attrs')
+                        
+                        imported_documents[cycle]['uploaded_docs'].append(uploaded_doc)
+                    
+                    # 更新 project_config 中的 documents
+                    project_config['documents'] = imported_documents
+                    logger.info(f"[导入备份] 同步 documents 结构：{len(imported_docs)} 个文档")
+                
                 # 注入到 project_config 供 import_project_json / save_full_config 使用
                 project_config['_imported_doc_index'] = doc_index
                 logger.info(f"[导入备份] 找到 documents_index.json，共 {len(doc_index.get('documents', {}))} 个文档记录")

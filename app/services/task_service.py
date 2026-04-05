@@ -138,20 +138,10 @@ class TaskService:
                 projects_base = Path(self.doc_manager.config.projects_base_folder)
                 project_dir = None
                 
-                # 尝试多种方式查找项目目录
-                possible_paths = [
-                    projects_base / project_name,
-                    projects_base / project_id,
-                    projects_base / f"{project_name}_{project_id}"
-                ]
-                
-                for path in possible_paths:
-                    if path.exists() and path.is_dir():
-                        project_dir = path
-                        break
-                
-                if not project_dir:
-                    raise Exception('项目目录不存在')
+                # 查找项目目录（只使用项目名称）
+                project_dir = projects_base / project_name
+                if not project_dir.exists() or not project_dir.is_dir():
+                    raise Exception(f'项目目录不存在: {project_name}')
                 
                 # 创建临时目录存放打包文件
                 temp_dir = projects_base / 'temp' / 'packages'
