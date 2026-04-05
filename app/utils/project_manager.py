@@ -62,9 +62,9 @@ class ProjectManager:
             self._db = None
     
     def _load_projects_index(self):
-        """加载项目索引（数据库优先，兼容JSON文件）"""
+        """加载项目索引（仅从数据库加载，JSON仅作启动兜底）"""
         try:
-            # 优先从数据库加载
+            # 从数据库加载
             if self._db is not None:
                 try:
                     # 从数据库加载活动项目
@@ -90,13 +90,13 @@ class ProjectManager:
                                 'created_time': proj.get('created_time', '')
                             }
 
-                    if self.projects_db or self.deleted_projects:
-                        logger.info(f"从数据库加载了 {len(self.projects_db)} 个活动项目, {len(self.deleted_projects)} 个已删除项目")
-                        return
+                    logger.info(f"从数据库加载了 {len(self.projects_db)} 个活动项目, {len(self.deleted_projects)} 个已删除项目")
+                    return
                 except Exception as db_err:
-                    logger.warning(f"从数据库加载失败，回退到JSON文件: {db_err}")
+                    logger.warning(f"从数据库加载失败: {db_err}")
 
-            # 回退到JSON文件加载
+            # 数据库不可用时才使用JSON备份（仅首次启动兜底）
+            logger.warning("数据库不可用，检查JSON备份文件")
             self._load_from_json_file()
         except Exception as e:
             logger.error(f"加载项目索引失败: {e}")
@@ -156,8 +156,8 @@ class ProjectManager:
             self.deleted_projects = {}
     
     def _save_projects_index(self) -> bool:
-        """保存项目索引（同时保存到数据库和JSON文件）
-
+        """保存项目索引（数据库优先，JSON仅作备份）
+        
         Returns:
             bool: 是否保存成功
         """
@@ -190,36 +190,24 @@ class ProjectManager:
                 except Exception as db_err:
                     logger.warning(f"保存到数据库失败: {db_err}")
                     db_success = False
-
-            # 2. 保存到JSON文件（保持向后兼容）
+            
+            # 2. JSON文件仅作备份，不再作为主要数据源
+            # 如果数据库成功，只更新备份文件（可选）
+            if db_success:
+                return True
+            
+            # 数据库失败时，更新JSON备份文件作为兜底
+            logger.warning("数据库保存失败，JSON文件仅作备份")
             index_file = self.config.projects_folder / 'projects_index.json'
-            logger.info(f"[DEBUG] 保存项目索引到: {index_file}")
-            logger.info(f"[DEBUG] 项目数量: {len(self.projects_db)}")
-            logger.info(f"[DEBUG] 已删除项目数量: {len(self.deleted_projects)}")
-
-            # 获取文件锁
             with get_file_lock(str(index_file)):
-                # 保持旧格式：直接用项目ID作为键
                 data = {
                     'updated_time': datetime.now().isoformat()
                 }
-
-                # 直接保存projects_db（确保与_load_projects_index保持一致）
                 data.update(self.projects_db)
-                logger.info(f"[DEBUG] 使用旧格式保存，项目数量: {len(self.projects_db)}")
-
-                # 添加已删除项目
                 data['deleted_projects'] = self.deleted_projects
-                logger.info(f"[DEBUG] 保存已删除项目数量: {len(self.deleted_projects)}")
-
-                # 写入文件并检查返回值
-                json_success = json_file_manager.write_json(str(index_file), data)
-                if json_success:
-                    logger.info(f"项目索引保存成功: {index_file}")
-                else:
-                    logger.error(f"项目索引保存失败: {index_file}")
-
-                return json_success and db_success
+                json_file_manager.write_json(str(index_file), data)
+            
+            return db_success
 
         except Exception as e:
             logger.error(f"保存项目索引失败: {e}")
