@@ -1187,7 +1187,29 @@ export async function markDocumentNotInvolved(cycle, docName) {
 }
 
 /**
- * 预览文档（渐进式预览）
+ * 获取文件类型图标
+ */
+function getFileIcon(fileExt) {
+    const iconMap = {
+        'pdf': '📄',
+        'doc': '📝',
+        'docx': '📝',
+        'xls': '📊',
+        'xlsx': '📊',
+        'ppt': '📑',
+        'pptx': '📑',
+        'png': '🖼️',
+        'jpg': '🖼️',
+        'jpeg': '🖼️',
+        'gif': '🖼️',
+        'webp': '🖼️',
+        'bmp': '🖼️'
+    };
+    return iconMap[fileExt.toLowerCase()] || '📄';
+}
+
+/**
+ * 预览文档（渐进式预览）- 带进度条
  */
 export async function previewDocument(docId) {
     try {
@@ -1219,7 +1241,11 @@ export async function previewDocument(docId) {
             fileExt = 'pdf';
         }
         
-        // 创建预览模态框（带加载状态）
+        // 判断是否需要转换（Office文档需要转换）
+        const officeExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+        const needsConversion = officeExtensions.includes(fileExt);
+        
+        // 创建预览模态框（带增强版加载状态）
         const modalContent = `
             <div class="preview-modal-content">
                 <div class="preview-header">
@@ -1227,9 +1253,24 @@ export async function previewDocument(docId) {
                     <button class="close-btn" onclick="document.getElementById('previewModal').style.display='none'">×</button>
                 </div>
                 <div class="preview-body" id="previewBody">
-                    <div class="preview-loading">
-                        <div class="loading-spinner"></div>
-                        <p>正在启动预览...</p>
+                    <div class="preview-loading-enhanced" id="previewLoading">
+                        <div class="preview-file-info">
+                            <div class="file-icon">${getFileIcon(fileExt)}</div>
+                            <div class="file-name">${escapeHtml(filename)}</div>
+                        </div>
+                        <div class="loading-icon">⚡</div>
+                        <div class="loading-title" id="loadingTitle">${needsConversion ? '正在转换文档...' : '正在加载文档...'}</div>
+                        <div class="loading-status" id="loadingStatus">${needsConversion ? '正在生成预览，请稍候...' : '正在读取文件内容...'}</div>
+                        <div class="preview-progress-container">
+                            <div class="preview-progress-bar">
+                                <div class="preview-progress-indeterminate" id="progressBar"></div>
+                            </div>
+                            <div class="preview-progress-text" id="progressText">处理中...</div>
+                        </div>
+                        <div class="loading-hint">
+                            <span class="hint-icon">💡</span>
+                            <span id="loadingHint">${needsConversion ? '首次预览需要转换文档格式，可能需要几秒钟' : '正在加载文件，请稍候'}</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1254,6 +1295,17 @@ export async function previewDocument(docId) {
             }
         };
         
+        // 更新加载状态的辅助函数
+        const updateLoadingStatus = (title, status, hint) => {
+            const titleEl = document.getElementById('loadingTitle');
+            const statusEl = document.getElementById('loadingStatus');
+            const hintEl = document.getElementById('loadingHint');
+            
+            if (titleEl) titleEl.textContent = title;
+            if (statusEl) statusEl.textContent = status;
+            if (hintEl && hint) hintEl.textContent = hint;
+        };
+        
         // 调用渐进式预览API
         await loadProgressivePreview(docId, fileExt);
         
@@ -1264,51 +1316,173 @@ export async function previewDocument(docId) {
 }
 
 /**
- * 加载渐进式预览
+ * 检查完整PDF是否已生成
+ */
+async function checkFullPdfStatus(docId) {
+    try {
+        const response = await fetch(`/api/documents/preview/status/${encodeURIComponent(docId)}`);
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('检查PDF状态失败:', error);
+        return { status: 'error' };
+    }
+}
+
+/**
+ * 加载渐进式预览 - 支持先显示第一页，再加载完整PDF
  */
 async function loadProgressivePreview(docId, fileExt) {
     const previewBody = document.getElementById('previewBody');
     if (!previewBody) return;
     
     try {
+        // 更新加载状态 - 开始请求
+        const updateLoadingText = (text, hint) => {
+            const statusEl = document.getElementById('loadingStatus');
+            const hintEl = document.getElementById('loadingHint');
+            if (statusEl) statusEl.textContent = text;
+            if (hintEl && hint) hintEl.textContent = hint;
+        };
+        
+        updateLoadingText('正在连接服务器并转换文档...', '转换时间取决于文件大小，请耐心等待');
+        
         // 调用渐进式预览API
         const response = await fetch(`/api/documents/preview/${encodeURIComponent(docId)}`);
         const result = await response.json();
         
         if (result.status === 'success') {
             if (result.mode === 'progressive') {
-                // 渐进式预览：直接显示后端返回的HTML
+                // HTML预览模式（PDF转换失败后的回退）
                 previewBody.innerHTML = result.preview_html;
-            } else if (result.mode === 'direct') {
-                // 直接预览（图片/PDF/转换降级等）
-                const viewUrl = result.file_url;
+                return;
+            }
+            
+            // PDF预览模式
+            const viewUrl = result.file_url;
+            
+            if (result.is_partial) {
+                // 部分预览：只转换了第一页
+                updateLoadingText('第一页已就绪，完整PDF生成中...', '您可以先查看第一页内容');
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // 显示第一页PDF，并添加提示
+                previewBody.innerHTML = `
+                    <div style="position: relative; width: 100%; height: 80vh;">
+                        <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" 
+                            style="width: 100%; height: 100%; border: none;"></iframe>
+                        <div id="pdfProgressHint" style="position: absolute; top: 10px; right: 10px; 
+                            background: rgba(255,255,255,0.95); padding: 10px 16px; border-radius: 6px; 
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 13px; color: #666;
+                            display: flex; align-items: center; gap: 8px; z-index: 100;">
+                            <span class="loading-spinner-small" style="width: 16px; height: 16px; 
+                                border: 2px solid #e0e0e0; border-top-color: #1890ff; border-radius: 50%; 
+                                animation: spin 1s linear infinite; display: inline-block;"></span>
+                            <span>正在生成完整PDF预览...</span>
+                        </div>
+                    </div>
+                `;
+                
+                // 定期检查完整PDF是否准备好
+                const fullPreviewUrl = result.full_preview_url;
+                let checkCount = 0;
+                const maxChecks = 30; // 最多检查30次（约2分钟）
+                
+                const checkInterval = setInterval(async () => {
+                    checkCount++;
+                    const statusResult = await checkFullPdfStatus(docId);
+                    
+                    if (statusResult.status === 'completed' && statusResult.is_complete) {
+                        // 完整PDF已准备好，自动切换
+                        clearInterval(checkInterval);
+                        const hintEl = document.getElementById('pdfProgressHint');
+                        if (hintEl) {
+                            hintEl.innerHTML = '<span style="color: #52c41a;">✓ 完整PDF已就绪，正在切换...</span>';
+                        }
+                        
+                        // 延迟后切换到完整PDF
+                        setTimeout(() => {
+                            previewBody.innerHTML = `
+                                <iframe src="${fullPreviewUrl}" class="preview-iframe" frameborder="0" 
+                                    style="width: 100%; height: 80vh; border: none;"></iframe>
+                            `;
+                        }, 1500);
+                    } else if (checkCount >= maxChecks) {
+                        // 超过最大检查次数，停止检查
+                        clearInterval(checkInterval);
+                        const hintEl = document.getElementById('pdfProgressHint');
+                        if (hintEl) {
+                            hintEl.innerHTML = '<span style="color: #999;">第一页预览 • 刷新可查看完整文档</span>';
+                        }
+                    }
+                }, 4000); // 每4秒检查一次
+                
+            } else {
+                // 完整PDF直接显示
+                updateLoadingText('加载完成，正在显示...', '预览内容准备就绪');
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
                 if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
-                    previewBody.innerHTML = `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
+                    previewBody.innerHTML = `
+                        <div style="display: flex; justify-content: center; align-items: center; min-height: 400px; background: #f5f5f5;">
+                            <img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)" style="max-width: 100%; max-height: 80vh; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                        </div>
+                    `;
                 } else {
-                    previewBody.innerHTML = `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
+                    previewBody.innerHTML = `
+                        <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)" style="width: 100%; height: 80vh; border: none;"></iframe>
+                    `;
                 }
             }
         } else {
-            // API返回错误，显示错误信息
-            const viewUrl = `/api/documents/view/${encodeURIComponent(docId)}`;
-            if (result.message && result.message.includes('不支持')) {
-                // 不支持的文件类型
-                previewBody.innerHTML = `
-                    <div class="preview-other">
-                        <div class="file-icon">📄</div>
-                        <p>${escapeHtml(result.message)}</p>
-                        <a href="${viewUrl}" class="btn btn-primary" target="_blank">下载文件</a>
-                    </div>
-                `;
-            } else {
-                // 其他错误，显示原始预览（降级方案）
-                previewBody.innerHTML = getFallbackPreviewContent(docId, fileExt);
+            // API返回错误，显示友好的错误界面
+            const downloadUrl = `/api/documents/download/${encodeURIComponent(docId)}`;
+            const errorMessage = escapeHtml(result.message || '预览加载失败');
+            
+            // 根据错误类型选择不同的图标和提示
+            let icon = '📄';
+            let hint = '您可以下载文件后使用本地软件查看';
+            
+            if (errorMessage.includes('不存在') || errorMessage.includes('移动') || errorMessage.includes('删除')) {
+                icon = '❌';
+                hint = '文件可能已被移动或删除，请检查文件是否存在';
+            } else if (errorMessage.includes('权限')) {
+                icon = '🔒';
+                hint = '无法访问该文件，请检查文件权限';
+            } else if (errorMessage.includes('损坏')) {
+                icon = '⚠️';
+                hint = '文件可能已损坏，请尝试下载后查看';
+            } else if (errorMessage.includes('转换')) {
+                icon = '🔄';
+                hint = 'PDF转换服务暂时不可用，请下载后查看';
             }
+            
+            previewBody.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 40px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 400px; border-radius: 12px;">
+                    <div style="font-size: 64px; margin-bottom: 24px;">${icon}</div>
+                    <div style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 12px;">预览失败</div>
+                    <div style="font-size: 14px; color: #666; margin-bottom: 8px; text-align: center; max-width: 400px;">${errorMessage}</div>
+                    <div style="font-size: 13px; color: #999; margin-bottom: 24px; text-align: center;">${hint}</div>
+                    <a href="${downloadUrl}" class="btn btn-primary" target="_blank" style="padding: 12px 32px; font-size: 14px; text-decoration: none; border-radius: 6px; background: #4f8ef7; color: white;">⬇️ 下载文件查看</a>
+                    <div style="font-size: 12px; color: #aaa; margin-top: 20px; padding-top: 16px; border-top: 1px solid #ddd;">
+                        💡 提示：下载后可用 Word、WPS 等软件打开
+                    </div>
+                </div>
+            `;
         }
     } catch (error) {
         console.error('渐进式预览加载失败:', error);
-        // 降级到原始预览方式
-        previewBody.innerHTML = getFallbackPreviewContent(docId, fileExt);
+        // 显示友好的错误界面
+        const downloadUrl = `/api/documents/download/${encodeURIComponent(docId)}`;
+        previewBody.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 40px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 400px; border-radius: 12px;">
+                <div style="font-size: 64px; margin-bottom: 24px;">⚠️</div>
+                <div style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 12px;">加载失败</div>
+                <div style="font-size: 14px; color: #666; margin-bottom: 8px; text-align: center;">${escapeHtml(error.message || '网络错误或服务器无响应')}</div>
+                <div style="font-size: 13px; color: #999; margin-bottom: 24px; text-align: center;">请检查网络连接后重试，或直接下载文件查看</div>
+                <a href="${downloadUrl}" class="btn btn-primary" target="_blank" style="padding: 12px 32px; font-size: 14px; text-decoration: none; border-radius: 6px; background: #4f8ef7; color: white;">⬇️ 下载文件查看</a>
+            </div>
+        `;
     }
 }
 
@@ -1320,25 +1494,29 @@ function getFallbackPreviewContent(docId, fileExt) {
     
     // 图片预览
     if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(fileExt)) {
-        return `<img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)">`;
+        return `
+            <div style="display: flex; justify-content: center; align-items: center; min-height: 400px; background: #f5f5f5;">
+                <img src="${viewUrl}" class="preview-image" alt="预览图片" onerror="handlePreviewError(this)" style="max-width: 100%; max-height: 80vh; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+            </div>
+        `;
     }
     
     // PDF预览
     if (fileExt === 'pdf') {
-        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
+        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)" style="width: 100%; height: 80vh; border: none;"></iframe>`;
     }
     
     // Office文档预览（走 view 接口，转换或降级）
     if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(fileExt)) {
-        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)"></iframe>`;
+        return `<iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)" style="width: 100%; height: 80vh; border: none;"></iframe>`;
     }
     
     // 其他文件类型
     return `
-        <div class="preview-other">
-            <div class="file-icon">📄</div>
-            <p>该文件类型不支持在线预览</p>
-            <a href="${viewUrl}" class="btn btn-primary" target="_blank">下载文件</a>
+        <div class="preview-other" style="padding: 60px 20px; text-align: center;">
+            <div class="file-icon" style="font-size: 64px; margin-bottom: 20px;">📄</div>
+            <p style="color: #666; margin-bottom: 20px;">该文件类型不支持在线预览</p>
+            <a href="${viewUrl}" class="btn btn-primary" target="_blank" style="padding: 10px 24px;">下载文件查看</a>
         </div>
     `;
 }

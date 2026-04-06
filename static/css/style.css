@@ -935,6 +935,17 @@ body {
     100% { transform: rotate(360deg); }
 }
 
+/* 小型加载旋转器 */
+.loading-spinner-small {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e0e0e0;
+    border-top-color: #1890ff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+
 /* 通知 */
 .notification {
     position: fixed;
@@ -2709,6 +2720,132 @@ body {
 .preview-loading p {
     margin: 0;
     color: #999;
+}
+
+/* 增强版预览加载界面 */
+.preview-loading-enhanced {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 40px;
+    color: #333;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 12px;
+    min-height: 400px;
+}
+
+.preview-loading-enhanced .loading-icon {
+    font-size: 64px;
+    margin-bottom: 24px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.preview-loading-enhanced .loading-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 12px;
+}
+
+.preview-loading-enhanced .loading-status {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 24px;
+    text-align: center;
+    min-height: 20px;
+}
+
+/* 进度条容器 */
+.preview-progress-container {
+    width: 100%;
+    max-width: 400px;
+    margin-bottom: 16px;
+}
+
+/* 进度条 */
+.preview-progress-bar {
+    width: 100%;
+    height: 8px;
+    background-color: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.preview-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #1890ff 0%, #40a9ff 50%, #1890ff 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    animation: progressShine 2s linear infinite;
+}
+
+@keyframes progressShine {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* 不确定进度条动画 */
+.preview-progress-indeterminate {
+    height: 100%;
+    background: linear-gradient(90deg, #1890ff 0%, #40a9ff 50%, #1890ff 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    animation: indeterminateProgress 1.5s ease-in-out infinite;
+}
+
+@keyframes indeterminateProgress {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(0); }
+    100% { transform: translateX(100%); }
+}
+
+.preview-progress-text {
+    text-align: center;
+    font-size: 13px;
+    color: #666;
+    margin-top: 8px;
+}
+
+.preview-loading-enhanced .loading-hint {
+    font-size: 12px;
+    color: #999;
+    margin-top: 16px;
+    text-align: center;
+}
+
+.preview-loading-enhanced .loading-hint .hint-icon {
+    margin-right: 4px;
+}
+
+/* 文件信息 */
+.preview-file-info {
+    background: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    text-align: center;
+    max-width: 500px;
+}
+
+.preview-file-info .file-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+.preview-file-info .file-name {
+    font-size: 14px;
+    color: #333;
+    word-break: break-all;
+    max-width: 400px;
 }
 
 /* 渐进式预览页面列表 */

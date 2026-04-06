@@ -2369,10 +2369,29 @@ async function loadUploadedDocuments(cycle, docName) {
 }
 
 /**
- * 预览文档
+ * 获取文件类型图标
  */
+function getFileIcon(fileExt) {
+    const iconMap = {
+        'pdf': '📄',
+        'doc': '📝',
+        'docx': '📝',
+        'xls': '📊',
+        'xlsx': '📊',
+        'ppt': '📑',
+        'pptx': '📑',
+        'png': '🖼️',
+        'jpg': '🖼️',
+        'jpeg': '🖼️',
+        'gif': '🖼️',
+        'webp': '🖼️',
+        'bmp': '🖼️'
+    };
+    return iconMap[fileExt.toLowerCase()] || '📄';
+}
+
 /**
- * 预览文档
+ * 预览文档 - 带进度条
  */
 function previewDocument(docId) {
     const modal = document.getElementById('previewModal');
@@ -2380,32 +2399,108 @@ function previewDocument(docId) {
     const content = document.getElementById('previewContent');
     const downloadBtn = document.getElementById('previewDownloadBtn');
 
-    title.textContent = '正在加载预览...';
+    // 显示增强版加载界面
+    title.textContent = '正在准备预览...';
     downloadBtn.href = `/api/documents/download/${encodeURIComponent(docId)}`;
-    content.innerHTML = '<div class="preview-loading"><div class="spinner"></div><p>正在加载预览...</p></div>';
+    
+    // 使用增强版加载界面
+    content.innerHTML = `
+        <div class="preview-loading-enhanced" id="previewLoadingEnhanced">
+            <div class="preview-file-info">
+                <div class="file-icon" id="previewFileIcon">📄</div>
+                <div class="file-name" id="previewFileName">正在获取文件信息...</div>
+            </div>
+            <div class="loading-icon">⚡</div>
+            <div class="loading-title" id="loadingTitle">正在准备预览...</div>
+            <div class="loading-status" id="loadingStatus">正在连接服务器...</div>
+            <div class="preview-progress-container">
+                <div class="preview-progress-bar">
+                    <div class="preview-progress-indeterminate" id="progressBar"></div>
+                </div>
+                <div class="preview-progress-text" id="progressText">初始化中...</div>
+            </div>
+            <div class="loading-hint">
+                <span class="hint-icon">💡</span>
+                <span id="loadingHint">首次预览需要转换文档格式，请稍候</span>
+            </div>
+        </div>
+    `;
     modal.classList.add('show');
-
+    
     fetch(`/api/documents/preview/${encodeURIComponent(docId)}`)
         .then(response => response.json())
         .then(result => {
             if (result.status === 'success') {
-                title.textContent = `预览: ${result.data.filename || '文档'}`;
-                renderPreviewContent(result.data, content);
+                // 更新文件名和图标
+                const filename = result.data.filename || '文档';
+                const fileExt = filename.split('.').pop().toLowerCase();
+                const fileIconEl = document.getElementById('previewFileIcon');
+                const fileNameEl = document.getElementById('previewFileName');
+                if (fileIconEl) fileIconEl.textContent = getFileIcon(fileExt);
+                if (fileNameEl) fileNameEl.textContent = filename;
+                
+                // 显示加载完成状态
+                const loadingTitle = document.getElementById('loadingTitle');
+                const loadingStatus = document.getElementById('loadingStatus');
+                if (loadingTitle) loadingTitle.textContent = '加载完成，正在渲染...';
+                if (loadingStatus) loadingStatus.textContent = '正在显示预览内容';
+                
+                // 延迟后显示内容
+                setTimeout(() => {
+                    title.textContent = `预览: ${filename}`;
+                    renderPreviewContent(result.data, content);
+                }, 200);
             } else {
-                content.innerHTML = `<div class="preview-error">
-                    <p>预览加载失败</p>
-                    <p style="font-size:12px;color:#666;">${result.message}</p>
-                    <p style="margin-top:15px;">请使用下载按钮查看文件</p>
-                </div>`;
+                // API返回错误，显示友好的错误界面
+                const errorMessage = result.message || '预览加载失败';
+                const downloadUrl = `/api/documents/download/${encodeURIComponent(docId)}`;
+                
+                // 根据错误类型选择不同的图标和提示
+                let icon = '📄';
+                let hint = '您可以下载文件后使用本地软件查看';
+                
+                if (errorMessage.includes('不存在') || errorMessage.includes('移动') || errorMessage.includes('删除')) {
+                    icon = '❌';
+                    hint = '文件可能已被移动或删除，请检查文件是否存在';
+                } else if (errorMessage.includes('权限')) {
+                    icon = '🔒';
+                    hint = '无法访问该文件，请检查文件权限';
+                } else if (errorMessage.includes('损坏')) {
+                    icon = '⚠️';
+                    hint = '文件可能已损坏，请尝试下载后查看';
+                } else if (errorMessage.includes('转换')) {
+                    icon = '🔄';
+                    hint = 'PDF转换服务暂时不可用，请下载后查看';
+                }
+                
+                title.textContent = '预览失败';
+                content.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 40px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 400px; border-radius: 12px;">
+                        <div style="font-size: 64px; margin-bottom: 24px;">${icon}</div>
+                        <div style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 12px;">预览失败</div>
+                        <div style="font-size: 14px; color: #666; margin-bottom: 8px; text-align: center; max-width: 400px;">${errorMessage}</div>
+                        <div style="font-size: 13px; color: #999; margin-bottom: 24px; text-align: center;">${hint}</div>
+                        <a href="${downloadUrl}" class="btn btn-primary" target="_blank" style="padding: 12px 32px; font-size: 14px; text-decoration: none; border-radius: 6px; background: #4f8ef7; color: white;">⬇️ 下载文件查看</a>
+                        <div style="font-size: 12px; color: #aaa; margin-top: 20px; padding-top: 16px; border-top: 1px solid #ddd;">
+                            💡 提示：下载后可用 Word、WPS 等软件打开
+                        </div>
+                    </div>
+                `;
             }
         })
         .catch(error => {
             console.error('预览加载失败:', error);
-            content.innerHTML = `<div class="preview-error">
-                <p>预览加载失败</p>
-                <p style="font-size:12px;color:#666;">${error.message}</p>
-                <p style="margin-top:15px;">请使用下载按钮查看文件</p>
-            </div>`;
+            const downloadUrl = `/api/documents/download/${encodeURIComponent(docId)}`;
+            title.textContent = '预览失败';
+            content.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 40px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 400px; border-radius: 12px;">
+                    <div style="font-size: 64px; margin-bottom: 24px;">⚠️</div>
+                    <div style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 12px;">加载失败</div>
+                    <div style="font-size: 14px; color: #666; margin-bottom: 8px; text-align: center;">${error.message || '网络错误或服务器无响应'}</div>
+                    <div style="font-size: 13px; color: #999; margin-bottom: 24px; text-align: center;">请检查网络连接后重试，或直接下载文件查看</div>
+                    <a href="${downloadUrl}" class="btn btn-primary" target="_blank" style="padding: 12px 32px; font-size: 14px; text-decoration: none; border-radius: 6px; background: #4f8ef7; color: white;">⬇️ 下载文件查看</a>
+                </div>
+            `;
         });
 }
 

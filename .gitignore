@@ -63,3 +63,4 @@ temp_test_*
 *.tmp
 *.bak
 *.cache
+.playwright-mcp/

@@ -261,6 +261,18 @@ def _convert_and_view_office(file_path, doc_id, file_path_obj):
     import time
     
     try:
+        # 首先再次验证文件是否存在（避免路径解析错误）
+        if not os.path.exists(file_path):
+            print(f"[view_document] 文件不存在: {file_path}")
+            return _office_convert_error_response(file_path_obj, file_path_obj.suffix.lower(), 
+                                                  "文件不存在或已被移动/删除")
+        
+        # 验证文件大小
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            return _office_convert_error_response(file_path_obj, file_path_obj.suffix.lower(),
+                                                  "文件大小为0，可能已损坏")
+        
         # 获取文件修改时间作为缓存有效性检查
         file_mtime = os.path.getmtime(file_path)
         
@@ -328,16 +340,36 @@ def _convert_and_view_office(file_path, doc_id, file_path_obj):
         
     except Exception as e:
         import traceback
-        print(f"[view_document] 转换失败: {e}")
+        error_msg = str(e)
+        print(f"[view_document] 转换失败: {error_msg}")
         print(traceback.format_exc())
+        
         # 转换失败，返回友好的错误页面
         file_ext = file_path_obj.suffix.lower()
-        return _office_convert_error_response(file_path_obj, file_ext, str(e))
+        
+        # 针对特定错误提供更友好的提示
+        if "Package not found" in error_msg:
+            user_msg = "文档转换服务无法访问该文件，可能文件已被移动或删除"
+        elif "Permission" in error_msg or "Access is denied" in error_msg:
+            user_msg = "无法访问该文件，请检查文件权限"
+        elif "not a" in error_msg.lower() and "file" in error_msg.lower():
+            user_msg = "文件可能已损坏或格式不正确"
+        else:
+            user_msg = f"PDF转换失败: {error_msg[:80]}"
+        
+        return _office_convert_error_response(file_path_obj, file_ext, user_msg, doc_id)
 
 
-def _office_convert_error_response(file_path_obj, file_ext, error_msg):
+def _office_convert_error_response(file_path_obj, file_ext, error_msg, doc_id=None):
     """当Office转换失败时，返回友好的错误页面"""
     filename = file_path_obj.name
+    # 使用doc_id构建下载链接，如果没有doc_id则使用文件名（编码后）
+    import urllib.parse
+    if doc_id:
+        download_url = f"/api/documents/download/{urllib.parse.quote(str(doc_id), safe='')}" 
+    else:
+        download_url = f"/api/documents/download/{urllib.parse.quote(filename, safe='')}" 
+    
     file_icons = {
         '.docx': '📝', '.doc': '📝',
         '.xlsx': '📊', '.xls': '📊',
@@ -351,24 +383,30 @@ def _office_convert_error_response(file_path_obj, file_ext, error_msg):
 <style>
   body {{ font-family: 'Microsoft YaHei', sans-serif; display:flex; justify-content:center; align-items:center; height:80vh; margin:0; background:#f5f5f5; }}
   .card {{ background:#fff; border-radius:12px; padding:40px 50px; text-align:center; box-shadow:0 2px 12px rgba(0,0,0,0.1); max-width:480px; }}
-  .icon {{ font-size:64px; }}
+  .icon {{ font-size:64px; margin-bottom:16px; }}
   h3 {{ margin:16px 0 8px; color:#333; word-break:break-all; font-size:15px; }}
-  p {{ color:#666; font-size:13px; margin:0 0 24px; }}
-  .btn {{ display:inline-block; padding:10px 28px; border-radius:6px; text-decoration:none; font-size:14px; margin:6px; }}
+  p {{ color:#666; font-size:14px; margin:0 0 24px; line-height:1.5; }}
+  .btn {{ display:inline-block; padding:12px 32px; border-radius:6px; text-decoration:none; font-size:14px; margin:6px; transition:all 0.2s; }}
+  .btn:hover {{ transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,0.15); }}
   .btn-primary {{ background:#4f8ef7; color:#fff; }}
+  .btn-primary:hover {{ background:#3d7de6; }}
   .btn-secondary {{ background:#f0f0f0; color:#555; border:1px solid #ddd; }}
-  .hint {{ font-size:12px; color:#aaa; margin-top:16px; }}
-  .error {{ font-size:11px; color:#e74c3c; margin-top:10px; background:#fee; padding:8px; border-radius:4px; }}
+  .hint {{ font-size:12px; color:#999; margin-top:20px; padding-top:16px; border-top:1px solid #eee; }}
+  .error {{ font-size:12px; color:#e74c3c; margin-top:16px; background:#fef2f2; padding:12px; border-radius:6px; border-left:3px solid #e74c3c; text-align:left; }}
+  .error-title {{ font-weight:bold; margin-bottom:4px; }}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="icon">{icon}</div>
   <h3>{filename}</h3>
-  <p>PDF转换暂时不可用，请下载后查看</p>
-  <a class="btn btn-primary" href="/api/documents/download/{filename}" download>↓ 下载文件</a>
-  <div class="hint">提示：您也可以右键文件名→另存为，下载后用本地软件打开</div>
-  <div class="error">转换错误: {error_msg[:100]}</div>
+  <p>📄 PDF转换暂时不可用<br>请下载后使用本地软件查看</p>
+  <a class="btn btn-primary" href="{download_url}" download>⬇️ 下载文件</a>
+  <div class="hint">💡 提示：下载后可用 Word、WPS 等软件打开查看</div>
+  <div class="error">
+    <div class="error-title">⚠️ 错误信息：</div>
+    {error_msg[:120]}
+  </div>
 </div>
 </body>
 </html>"""
@@ -599,8 +637,46 @@ def _find_file_by_name(doc_manager, project_name, filename):
 
 
 def preview_status(file_hash):
-    """获取文档预览转换状态（已弃用，保留兼容）"""
-    return jsonify({'status': 'completed', 'message': '使用直接预览模式'})
+    """获取文档预览转换状态（用于检查完整PDF是否已生成）"""
+    try:
+        import urllib.parse
+        doc_id = urllib.parse.unquote(file_hash)
+        
+        doc_manager = get_doc_manager()
+        
+        # 获取文档元数据
+        metadata = _get_document_metadata(doc_manager, doc_id)
+        if not metadata:
+            return jsonify({'status': 'error', 'message': '文档不存在'}), 404
+        
+        # 解析文件路径
+        file_path_obj = _resolve_file_path(doc_manager, metadata)
+        if not file_path_obj or not file_path_obj.exists():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        file_path = str(file_path_obj)
+        file_mtime = os.path.getmtime(file_path)
+        cache_key = f"{doc_id}_{int(file_mtime)}"
+        
+        # 检查是否有完整PDF缓存
+        from src.services.pdf_conversion_record import pdf_conversion_record
+        cached_record = pdf_conversion_record.get_record(cache_key)
+        
+        if cached_record and os.path.exists(cached_record.get('pdf_path', '')):
+            return jsonify({
+                'status': 'completed',
+                'is_complete': True,
+                'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}'
+            })
+        else:
+            return jsonify({
+                'status': 'processing',
+                'is_complete': False,
+                'message': '完整PDF正在生成中'
+            })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 def preview_page(file_hash, page):
@@ -610,12 +686,12 @@ def preview_page(file_hash, page):
 
 def start_progressive_preview(doc_id):
     """
-    启动文档预览（优化版：大文件先显示第一页，后台转换完整PDF）
+    启动文档预览（优化版：优先使用PDF转换，失败时回退到HTML预览）
     
     优化方案：
-    1. 小文件（<5MB）：直接完整转换
-    2. 大文件（>=5MB）：先快速转换第1页显示，后台异步转换完整PDF
-    3. 提供转换状态查询接口
+    1. 优先尝试PDF转换（效果最好）
+    2. PDF转换失败时，回退到HTML预览（原方案，兼容性好）
+    3. 大文件（>=5MB）：先快速转换第1页显示，后台异步转换完整PDF
     """
     try:
         import urllib.parse
@@ -648,7 +724,10 @@ def start_progressive_preview(doc_id):
                 'fallback': 'download'
             }), 400
         
-        # Office文档：智能转换策略
+        # 获取分页参数（用于HTML预览）
+        page = request.args.get('page', 0, type=int)
+        
+        # Office文档：先尝试PDF转换，失败时回退到HTML预览
         if file_ext in office_extensions:
             try:
                 from src.services.pdf_conversion_record import pdf_conversion_record
@@ -755,13 +834,42 @@ def start_progressive_preview(doc_id):
                     })
                 
             except Exception as conv_err:
-                print(f"[start_progressive_preview] 转换失败: {conv_err}")
+                error_msg = str(conv_err)
+                print(f"[start_progressive_preview] PDF转换失败: {error_msg}，尝试回退到HTML预览")
                 import traceback
                 print(traceback.format_exc())
+                
+                # PDF转换失败，回退到HTML预览（使用PreviewService）
+                if PreviewService:
+                    try:
+                        preview_service = PreviewService()
+                        html_content = preview_service.get_full_preview(str(file_path_obj), page)
+                        print(f"[start_progressive_preview] HTML预览生成成功")
+                        return jsonify({
+                            'status': 'success',
+                            'mode': 'progressive',
+                            'preview_html': html_content,
+                            'file_ext': file_ext
+                        })
+                    except Exception as html_err:
+                        print(f"[start_progressive_preview] HTML预览也失败: {html_err}")
+                
+                # 所有预览方式都失败，返回错误
+                # 针对特定错误提供更友好的提示
+                if "Package not found" in error_msg:
+                    user_msg = "文档转换服务无法访问该文件，可能文件已被移动或删除"
+                elif "Permission" in error_msg or "Access is denied" in error_msg:
+                    user_msg = "无法访问该文件，请检查文件权限"
+                elif "not a" in error_msg.lower() and "file" in error_msg.lower():
+                    user_msg = "文件可能已损坏或格式不正确"
+                else:
+                    user_msg = f"PDF转换失败: {error_msg[:80]}"
+                
                 return jsonify({
                     'status': 'error',
-                    'message': f'PDF转换失败: {str(conv_err)}',
-                    'fallback': 'download'
+                    'message': user_msg,
+                    'fallback': 'download',
+                    'doc_id': doc_id
                 }), 500
         
         # PDF和图片：直接返回view URL
