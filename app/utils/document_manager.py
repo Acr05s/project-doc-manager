@@ -1413,7 +1413,9 @@ class DocumentManager:
                         return {'status': 'error', 'message': '文件不存在'}
                     from src.services.preview_service import PreviewService
                     preview_svc = PreviewService()
-                    return preview_svc.get_full_preview(str(file_path_obj))
+                    preview_html = preview_svc.get_full_preview(str(file_path_obj))
+                    # 返回与前端 loadProgressivePreview 期望的格式一致
+                    return {'status': 'success', 'mode': 'progressive', 'preview_html': preview_html}
                 else:
                     return {'status': 'error', 'message': '文件路径不存在'}
             else:

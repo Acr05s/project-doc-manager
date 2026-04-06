@@ -1,16 +1,10 @@
-2.3.6
+2.3.7
 
 更新内容：
 
-1. 数据全面检查和修复
-   - 修复 path 规范化函数 normalize_file_path 的调用参数问题
-   - 所有 4 个项目的 documents.db 和 JSON 路径格式统一
-   - 所有文件验证存在
+1. 预览功能修复
+   - 前端 loadProgressivePreview 调用路径从 /preview/start/ 改为 /preview/
+   - 后端 get_document_preview 返回格式从纯 HTML 改为 JSON {status, mode, preview_html}
+   - 匹配前后端接口约定
 
-数据状态：
-- AI平台建设(一期)项目: 43 文档 ✓
-- IPv6: 9 文档 ✓
-- 人力资源市场平台项目: 80 文档 ✓
-- 智慧党建: 107 文档 ✓
-
-版本号: 2026040707
+版本号: 2026040708

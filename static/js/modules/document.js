@@ -1267,8 +1267,8 @@ async function loadProgressivePreview(docId, fileExt) {
     if (!previewBody) return;
     
     try {
-        // 调用渐进式预览启动API
-        const response = await fetch(`/api/documents/preview/start/${encodeURIComponent(docId)}`);
+        // 调用渐进式预览API
+        const response = await fetch(`/api/documents/preview/${encodeURIComponent(docId)}`);
         const result = await response.json();
         
         if (result.status === 'success') {
