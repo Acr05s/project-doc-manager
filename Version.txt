@@ -1,11 +1,10 @@
-2.3.4
+2.3.5
 
 更新内容：
 
-1. 数据迁移修复
-   - 统一 documents_index 数据源：load_full_config 改用 load_documents_index（带质量检测和回退）
-   - 规范化所有项目的 file_path 格式（添加 uploads/ 前缀，正斜杠格式）
-   - 重建所有项目的 documents_index（projects_index.db + JSON 文件）
-   - 修复预览报错：添加 filename 默认值防御性检查
+1. 导入功能修复
+   - save_full_config: 导入 JSON 时自动规范化 uploaded_docs 中的 file_path
+   - save_documents_index: 导入 ZIP 包时自动规范化 file_path
+   - 确保导入的项目数据格式统一，避免打包/验收找不到文件
 
-版本号: 2026040705
+版本号: 2026040706

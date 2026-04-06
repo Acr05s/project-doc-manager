@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from .base import DocumentConfig, setup_logging, ensure_dir
+from .base import DocumentConfig, setup_logging, ensure_dir, normalize_file_path
 from .json_file_manager import json_file_manager
 
 logger = setup_logging(__name__)
@@ -232,7 +232,10 @@ class ProjectDataManager:
                         project_id = doc_info.get('project_id', '')
                         cycle = doc_info.get('cycle', '')
                         doc_name = doc_info.get('doc_name', '')
+                        # 规范化 file_path（导入时可能包含旧格式路径）
                         file_path = doc_info.get('file_path', '')
+                        if file_path:
+                            file_path = normalize_file_path(file_path, project_name)
                         file_size = doc_info.get('file_size', 0)
                         file_type = doc_info.get('file_type')
                         original_filename = doc_info.get('original_filename')
@@ -1020,7 +1023,11 @@ class ProjectDataManager:
                     for doc in cycle_info['uploaded_docs']:
                         doc_id = doc.get('doc_id') or doc.get('id')
                         if doc_id:
-                            doc_index['documents'][doc_id] = doc
+                            # 规范化 file_path（导入 JSON 时可能包含旧格式路径）
+                            doc_copy = dict(doc)
+                            if doc_copy.get('file_path'):
+                                doc_copy['file_path'] = normalize_file_path(doc_copy['file_path'], project_name)
+                            doc_index['documents'][doc_id] = doc_copy
             db_success = self._db_save_config(project_id, 'documents_index', doc_index)
             if db_success:
                 logger.info(f"[DEBUG] documents_index 保存到数据库成功: {len(doc_index['documents'])} 个文档")
