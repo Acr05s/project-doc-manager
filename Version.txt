@@ -1,10 +1,10 @@
-2.3.7
+2.3.8
 
 更新内容：
 
-1. 预览功能修复
-   - 前端 loadProgressivePreview 调用路径从 /preview/start/ 改为 /preview/
-   - 后端 get_document_preview 返回格式从纯 HTML 改为 JSON {status, mode, preview_html}
-   - 匹配前后端接口约定
+1. PDF/图片预览修复
+   - PDF 和图片使用 mode: 'direct' 返回 file_url
+   - 前端用 iframe/img 直接嵌入浏览器原生预览
+   - Office 文档继续使用渐进式 HTML 预览
 
-版本号: 2026040708
+版本号: 2026040709

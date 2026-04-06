@@ -301,7 +301,6 @@ class PreviewService:
                 # doc文件或其他错误，尝试使用libreoffice转换为docx
                 import tempfile
                 import subprocess
-                import os
                 
                 temp_docx_path = tempfile.mktemp(suffix='.docx')
                 try:
