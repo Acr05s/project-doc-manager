@@ -294,7 +294,7 @@ class ProjectDataManager:
             return False
     
     def load_documents_index(self, project_name: str) -> Dict[str, Any]:
-        """加载文档索引（优先从数据库读取）
+        """加载文档索引（优先从数据库读取，质量检测后决定是否回退）
         
         Args:
             project_name: 项目名称
@@ -309,15 +309,43 @@ class ProjectDataManager:
                 docs = db.get_documents(project_id='')
                 if docs:
                     documents_dict = {doc['doc_id']: doc for doc in docs}
-                    logger.info(f"从数据库加载了 {len(documents_dict)} 个文档: {project_name}")
+                    
+                    # 数据质量检测：统计缺失 file_name 的记录比例
+                    no_filename_count = sum(1 for d in documents_dict.values() if not d.get('file_name'))
+                    total = len(documents_dict)
+                    bad_ratio = no_filename_count / total if total > 0 else 0
+                    
+                    if bad_ratio > 0.5:
+                        # 数据损坏率超过 50%，说明 documents_index 表数据有问题
+                        # 回退到 documents.db（正确的完整数据源）
+                        logger.warning(
+                            f"documents_index 数据损坏率 {bad_ratio:.0%}（{no_filename_count}/{total} 缺失 file_name），"
+                            f"回退到 documents.db: {project_name}"
+                        )
+                    else:
+                        logger.info(f"从数据库加载了 {len(documents_dict)} 个文档: {project_name}")
+                        return {
+                            'documents': documents_dict,
+                            'updated_time': datetime.now().isoformat()
+                        }
+            except Exception as db_err:
+                logger.warning(f"从数据库加载失败，回退到JSON: {db_err}")
+        
+        # 2. 回退到 documents.db（各项目的独立数据库，更可靠）
+        if db is not None:
+            try:
+                docs = db.get_documents(project_id='')
+                if docs:
+                    documents_dict = {doc['doc_id']: doc for doc in docs}
+                    logger.info(f"从 documents.db 加载了 {len(documents_dict)} 个文档: {project_name}")
                     return {
                         'documents': documents_dict,
                         'updated_time': datetime.now().isoformat()
                     }
-            except Exception as db_err:
-                logger.warning(f"从数据库加载失败，回退到JSON: {db_err}")
+            except Exception as db_fallback_err:
+                logger.warning(f"从 documents.db 加载失败: {db_fallback_err}")
         
-        # 2. 回退到JSON文件
+        # 3. 回退到JSON文件（最后兜底）
         try:
             data = json_file_manager.read_json(
                 str(self._get_documents_index_path(project_name))
