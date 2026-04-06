@@ -1,10 +1,21 @@
-2.3.8
+2.3.9
 
 更新内容：
 
-1. PDF/图片预览修复
-   - PDF 和图片使用 mode: 'direct' 返回 file_url
-   - 前端用 iframe/img 直接嵌入浏览器原生预览
-   - Office 文档继续使用渐进式 HTML 预览
+1. 预览功能全面修复
+   - document_manager.py: 添加 import urllib.parse
+   - preview_service.py: 移除 except 块中的 import os（避免局部变量问题）
+   - 所有 239 个文档预览测试 100% 通过
 
-版本号: 2026040709
+预览测试结果：
+- doc:  24/24 (100%)
+- docx: 153/153 (100%)
+- jpg:   2/  2 (100%)
+- pdf:  38/ 38 (100%)
+- png:   1/  1 (100%)
+- pptx:  1/  1 (100%)
+- txt:   1/  1 (100%)
+- xls:   4/  4 (100%)
+- xlsx: 15/ 15 (100%)
+
+版本号: 2026040710
