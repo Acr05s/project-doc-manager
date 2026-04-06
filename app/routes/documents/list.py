@@ -69,12 +69,22 @@ def get_document(doc_id):
             # 尝试从项目配置中查找
             found_doc = None
             
-            def _doc_matches(doc, search_id):
-                """检查文档是否匹配给定的 doc_id（兼容多种字段格式）"""
-                return (doc.get('doc_id') == search_id or
+            def _doc_matches(doc, search_id, doc_cycle=None):
+                """检查文档是否匹配给定的 doc_id（兼容多种字段格式）
+                
+                兜底逻辑：对于历史数据里没有 doc_id 字段的记录，
+                用 {cycle}_{doc_name}_{upload_time}（与 get_documents 生成规则相同）动态对比
+                """
+                if (doc.get('doc_id') == search_id or
                         doc.get('id') == search_id or
                         doc.get('original_filename') == search_id or
-                        doc.get('filename') == search_id)
+                        doc.get('filename') == search_id):
+                    return True
+                # 动态 ID 兜底：重新生成并对比（需要传入 cycle）
+                _cycle = doc_cycle or doc.get('cycle', doc.get('doc_cycle', ''))
+                upload_time = doc.get('upload_time', '').replace(':', '_').replace('-', '_')
+                dynamic_id = f"{_cycle}_{doc.get('doc_name', '')}_{upload_time}"
+                return dynamic_id == search_id
             
             # 1. 从当前项目中查找
             if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
@@ -83,7 +93,7 @@ def get_document(doc_id):
                     for cycle, cycle_info in project_config['documents'].items():
                         if 'uploaded_docs' in cycle_info:
                             for doc in cycle_info['uploaded_docs']:
-                                if _doc_matches(doc, doc_id):
+                                if _doc_matches(doc, doc_id, cycle):
                                     found_doc = doc
                                     break
                         if found_doc:
@@ -96,7 +106,7 @@ def get_document(doc_id):
                         for cycle, cycle_info in project_data['documents'].items():
                             if 'uploaded_docs' in cycle_info:
                                 for doc in cycle_info['uploaded_docs']:
-                                    if _doc_matches(doc, doc_id):
+                                    if _doc_matches(doc, doc_id, cycle):
                                         found_doc = doc
                                         break
                             if found_doc:
@@ -117,7 +127,7 @@ def get_document(doc_id):
                             for cycle, cycle_info in project_data['documents'].items():
                                 if isinstance(cycle_info, dict) and 'uploaded_docs' in cycle_info:
                                     for doc in cycle_info['uploaded_docs']:
-                                        if _doc_matches(doc, doc_id):
+                                        if _doc_matches(doc, doc_id, cycle):
                                             found_doc = doc
                                             break
                                 if found_doc:

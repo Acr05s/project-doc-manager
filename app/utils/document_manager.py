@@ -1004,6 +1004,8 @@ class DocumentManager:
                 project_config = project_result.get('project')
                 if project_config and 'documents' in project_config:
                     documents = project_config['documents']
+                    project_name = project_config.get('name', '')
+                    need_save = False  # 是否有补写了 doc_id 需要持久化
                     # 遍历所有周期
                     for doc_cycle, cycle_info in documents.items():
                         # 过滤周期
@@ -1015,14 +1017,22 @@ class DocumentManager:
                                 # 过滤文档名称
                                 if doc_name and doc.get('doc_name') != doc_name:
                                     continue
-                                # 确保文档有 ID
-                                doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc.get('doc_name')}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
+                                # 确保文档有 ID：如果原始记录中没有 doc_id，则生成并写回，避免每次重启后 ID 不一致
+                                if not doc.get('doc_id'):
+                                    generated_id = f"{doc_cycle}_{doc.get('doc_name')}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
+                                    doc['doc_id'] = generated_id  # 写回原始 dict（引用），持久化时一并保存
+                                    need_save = True
+                                doc_id = doc['doc_id']
                                 # 添加到结果列表（注意：先展开 doc，再设置 id，避免 doc 中旧的 id 字段覆盖正确的 doc_id）
                                 doc_copy = dict(doc)
                                 doc_copy['id'] = doc_id
-                                if not doc_copy.get('doc_id'):
-                                    doc_copy['doc_id'] = doc_id
                                 result.append(doc_copy)
+                    # 若有新补写的 doc_id，持久化回 JSON 文件，确保下次直接查到
+                    if need_save and project_name and self.data_manager:
+                        try:
+                            self.data_manager.save_full_config(project_name, project_config)
+                        except Exception as _e:
+                            logger.warning(f"补写 doc_id 后持久化失败（非致命）: {_e}")
         
         # 如果项目配置中没有文档，再从内存中的documents_db获取
         if not result:

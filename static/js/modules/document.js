@@ -1197,12 +1197,12 @@ export async function previewDocument(docId) {
         const docResult = await docResponse.json();
         
         if (docResult.status !== 'success') {
-            // 文档记录不存在
+            // 文档记录未能在服务器内存中找到（可能是服务重启后缓存失效）
             showConfirmModal(
-                '文档不存在',
-                '该文档记录不存在，可能是因为已经被删除。',
+                '文档加载失败',
+                '无法加载该文档的记录（服务重启后可能需要重新打开项目）。\n\n点击确定将刷新当前文档列表，然后再次点击文件名预览。',
                 async () => {
-                    // 刷新文档列表
+                    // 刷新文档列表（重新从服务器加载项目配置）
                     if (appState.currentCycle) {
                         await renderCycleDocuments(appState.currentCycle);
                     }
