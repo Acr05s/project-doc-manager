@@ -1212,7 +1212,7 @@ export async function previewDocument(docId) {
         }
         
         const docInfo = docResult.data;
-        const filename = docInfo.original_filename || docInfo.filename;
+        const filename = docInfo.original_filename || docInfo.filename || docInfo.name || '未知文件';
         const fileExt = filename.split('.').pop().toLowerCase();
         
         // 创建预览模态框（带加载状态）
