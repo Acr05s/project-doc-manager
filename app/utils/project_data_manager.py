@@ -310,16 +310,17 @@ class ProjectDataManager:
                 if docs:
                     documents_dict = {doc['doc_id']: doc for doc in docs}
                     
-                    # 数据质量检测：统计缺失 file_name 的记录比例
-                    no_filename_count = sum(1 for d in documents_dict.values() if not d.get('file_name'))
+                    # 数据质量检测：documents.db 没有 file_name 列，改用 file_path 前缀检测
+                    # documents_index 损坏时 file_path 格式如 'mn7edg7k5...\\10、运维\\xxx.docx'（反斜杠+无 uploads/）
+                    # documents.db 正确时 file_path 格式如 'uploads/mn7edg7k5.../10、运维/xxx.docx'（正斜杠+有 uploads/）
+                    bad_path_count = sum(1 for d in documents_dict.values() if not d.get('file_path', '').startswith('uploads/'))
                     total = len(documents_dict)
-                    bad_ratio = no_filename_count / total if total > 0 else 0
+                    bad_ratio = bad_path_count / total if total > 0 else 0
                     
                     if bad_ratio > 0.5:
-                        # 数据损坏率超过 50%，说明 documents_index 表数据有问题
-                        # 回退到 documents.db（正确的完整数据源）
+                        # 数据损坏率超过 50%，回退到 documents.db
                         logger.warning(
-                            f"documents_index 数据损坏率 {bad_ratio:.0%}（{no_filename_count}/{total} 缺失 file_name），"
+                            f"documents_index 数据损坏率 {bad_ratio:.0%}（{bad_path_count}/{total} file_path 格式错误），"
                             f"回退到 documents.db: {project_name}"
                         )
                     else:

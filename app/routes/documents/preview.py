@@ -478,15 +478,20 @@ def _resolve_file_path(doc_manager, metadata):
     if file_path_obj.is_absolute():
         return file_path_obj
     
-    # 获取项目名
+    # 获取项目名（多级回退：metadata → doc_id解析 → current_project → 空）
     project_name = metadata.get('project_name')
     if not project_name:
-        # 尝试从doc_id中解析项目名
+        # 尝试从doc_id中解析项目名（格式：cycle_docName_timestamp）
         doc_id = metadata.get('doc_id', '')
         if '_' in doc_id and not doc_id.startswith('_'):
             parts = doc_id.split('_')
             if parts[0]:
                 project_name = parts[0]
+    # 回退：从当前加载的项目中获取项目名（服务重启后 documents_db 为空时）
+    if not project_name:
+        current_proj = getattr(doc_manager, 'current_project', None)
+        if current_proj and isinstance(current_proj, dict):
+            project_name = current_proj.get('name')
     
     # 优先：处理新的完整相对路径格式：projects/{项目名}/uploads/...
     if normalized_path.startswith('projects/'):
