@@ -1411,10 +1411,20 @@ class DocumentManager:
                     
                     if not file_path_obj.exists():
                         return {'status': 'error', 'message': '文件不存在'}
+                    
+                    # 根据文件扩展名决定预览方式
+                    file_ext = str(file_path_obj.suffix).lower()
+                    
+                    # PDF 和图片使用 iframe/img 直接嵌入浏览器原生预览
+                    if file_ext in ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']:
+                        # 构建文件访问 URL
+                        file_url = f'/api/documents/view/{urllib.parse.quote(doc_id)}'
+                        return {'status': 'success', 'mode': 'direct', 'file_url': file_url}
+                    
+                    # Office 文档使用渐进式预览（HTML 转换）
                     from src.services.preview_service import PreviewService
                     preview_svc = PreviewService()
                     preview_html = preview_svc.get_full_preview(str(file_path_obj))
-                    # 返回与前端 loadProgressivePreview 期望的格式一致
                     return {'status': 'success', 'mode': 'progressive', 'preview_html': preview_html}
                 else:
                     return {'status': 'error', 'message': '文件路径不存在'}
