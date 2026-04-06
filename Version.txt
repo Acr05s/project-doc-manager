@@ -1,11 +1,11 @@
-2.3.9
+2.4.0
 
 更新内容：
 
-1. 预览功能全面修复
-   - document_manager.py: 添加 import urllib.parse
-   - preview_service.py: 移除 except 块中的 import os（避免局部变量问题）
-   - 所有 239 个文档预览测试 100% 通过
+1. View API 修复
+   - document_routes.py: view_document 路由添加从 documents_index.db 查找的逻辑
+   - 解决服务重启后 PDF/图片无法预览的问题
+   - 预览测试 100% 通过
 
 预览测试结果：
 - doc:  24/24 (100%)
@@ -18,4 +18,4 @@
 - xls:   4/  4 (100%)
 - xlsx: 15/ 15 (100%)
 
-版本号: 2026040710
+版本号: 2026040711

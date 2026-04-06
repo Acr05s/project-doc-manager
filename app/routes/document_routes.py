@@ -402,30 +402,43 @@ def view_document(doc_id):
         
         # 首先从 documents_db 中查找
         if doc_id not in doc_manager.documents_db:
-            # 尝试从项目配置中查找
+            # 尝试从 documents_index.db 中查找（服务重启后用这个）
             doc = None
-            if hasattr(doc_manager, 'projects') and doc_manager.projects:
-                for project_id, project_data in doc_manager.projects.projects_db.items():
-                    if 'documents' in project_data:
-                        for cycle, cycle_info in project_data['documents'].items():
-                            if 'uploaded_docs' in cycle_info:
-                                for d in cycle_info['uploaded_docs']:
+            try:
+                db_path = Path('projects/projects_index.db')
+                if db_path.exists():
+                    import sqlite3
+                    conn = sqlite3.connect(str(db_path))
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT config_data FROM project_configs WHERE config_type = 'documents_index'"
+                    )
+                    for (config_data,) in cursor.fetchall():
+                        import json
+                        try:
+                            docs_index = json.loads(config_data)
+                            if isinstance(docs_index, dict) and 'data' in docs_index:
+                                for d in docs_index['data']:
                                     if d.get('doc_id') == doc_id:
                                         doc = d
                                         break
-                                if doc:
-                                    break
-                        if doc:
-                            break
+                            elif isinstance(docs_index, list):
+                                for d in docs_index:
+                                    if d.get('doc_id') == doc_id:
+                                        doc = d
+                                        break
+                            if doc:
+                                break
+                        except:
+                            pass
+                    conn.close()
+            except Exception as e:
+                pass
             
-            # 尝试从项目文件中查找
+            # 如果还没找到，尝试从项目文件中查找
             if not doc:
-                import json
-                projects_dir = doc_manager.config.projects_base_folder
-                for project_file in projects_dir.glob('*.json'):
-                    try:
-                        with open(project_file, 'r', encoding='utf-8') as f:
-                            project_data = json.load(f)
+                if hasattr(doc_manager, 'projects') and doc_manager.projects:
+                    for project_id, project_data in doc_manager.projects.projects_db.items():
                         if 'documents' in project_data:
                             for cycle, cycle_info in project_data['documents'].items():
                                 if 'uploaded_docs' in cycle_info:
@@ -433,12 +446,10 @@ def view_document(doc_id):
                                         if d.get('doc_id') == doc_id:
                                             doc = d
                                             break
-                                    if doc:
-                                        break
-                            if doc:
-                                break
-                    except Exception as e:
-                        pass
+                                if doc:
+                                    break
+                        if doc:
+                            break
             
             if not doc:
                 return jsonify({'status': 'error', 'message': '文档不存在'}), 404
