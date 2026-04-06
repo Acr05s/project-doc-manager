@@ -1212,8 +1212,12 @@ export async function previewDocument(docId) {
         }
         
         const docInfo = docResult.data;
-        const filename = docInfo.original_filename || docInfo.filename || docInfo.name || '未知文件';
-        const fileExt = filename.split('.').pop().toLowerCase();
+        const filename = docInfo.file_name || docInfo.original_filename || docInfo.filename || docInfo.name || '未知文件';
+        let fileExt = filename.split('.').pop().toLowerCase();
+        // 处理特殊情况：.pdff 视为 .pdf
+        if (fileExt === 'pdff') {
+            fileExt = 'pdf';
+        }
         
         // 创建预览模态框（带加载状态）
         const modalContent = `

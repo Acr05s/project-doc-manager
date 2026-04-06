@@ -276,16 +276,155 @@ def get_document(doc_id):
 
 @document_bp.route('/preview/<doc_id>', methods=['GET'])
 def preview_document(doc_id):
-    """预览文档（返回JSON格式的预览内容）"""
+    """启动文档预览（优化版：大文件先显示第一页，后台转换完整PDF）"""
     try:
         import urllib.parse
         doc_id = urllib.parse.unquote(doc_id)
         
-        result = doc_manager.get_document_preview(doc_id)
-        return jsonify(result)
+        # 导入预览服务
+        from src.services.pdf_conversion_record import pdf_conversion_record
+        from src.services.pdf_conversion_service import PDFConversionService
+        import os
+        from pathlib import Path
+        
+        # 获取文档元数据
+        metadata = _get_document_metadata(doc_id)
+        if not metadata:
+            return jsonify({'status': 'error', 'message': '文档不存在'}), 404
+        
+        # 解析文件路径
+        file_path_obj = _resolve_file_path(metadata)
+        if not file_path_obj or not file_path_obj.exists():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+        
+        file_ext = file_path_obj.suffix.lower()
+        # 处理特殊情况：.pdff 视为 .pdf
+        if file_ext == '.pdff':
+            file_ext = '.pdf'
+        file_path = str(file_path_obj)
+        file_size = os.path.getsize(file_path)
+        
+        # 支持的文件类型
+        office_extensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        
+        if file_ext not in (office_extensions + ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']):
+            return jsonify({
+                'status': 'error', 
+                'message': f'该文件类型 ({file_ext}) 不支持预览',
+                'fallback': 'download'
+            }), 400
+        
+        # Office文档：智能转换策略
+        if file_ext in office_extensions:
+            try:
+                import time
+                
+                file_mtime = os.path.getmtime(file_path)
+                cache_key = f"{doc_id}_{int(file_mtime)}"
+                
+                # 检查是否已有完整PDF缓存
+                cached_record = pdf_conversion_record.get_record(cache_key)
+                if cached_record and os.path.exists(cached_record.get('pdf_path', '')):
+                    return jsonify({
+                        'status': 'success',
+                        'mode': 'direct',
+                        'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                        'file_ext': '.pdf'
+                    })
+                
+                # 判断文件大小，决定转换策略
+                from app.routes.documents.preview import get_fast_preview_threshold
+                FAST_PREVIEW_THRESHOLD = get_fast_preview_threshold()
+                
+                preview_temp_dir = Path('uploads/temp/preview')
+                preview_temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                pdf_service = PDFConversionService()
+                pdf_service.set_preview_temp_dir(str(preview_temp_dir))
+                
+                if file_size < FAST_PREVIEW_THRESHOLD:
+                    # 小文件：直接完整转换
+                    pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
+                    
+                    # 保存转换记录
+                    pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
+                    if cache_key in pdf_conversion_record.records:
+                        pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
+                        pdf_conversion_record.records[cache_key]['is_complete'] = True
+                        pdf_conversion_record._save_records()
+                    
+                    return jsonify({
+                        'status': 'success',
+                        'mode': 'direct',
+                        'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                        'file_ext': '.pdf'
+                    })
+                else:
+                    # 大文件：先快速转换第1页
+                    first_page_key = f"{cache_key}_page1"
+                    first_page_path = os.path.join(str(preview_temp_dir), f"{first_page_key}.pdf")
+                    
+                    # 检查是否已有第一页缓存
+                    if not os.path.exists(first_page_path):
+                        try:
+                            # 快速转换第一页
+                            pdf_service.convert_first_page_fast(file_path, first_page_path)
+                        except Exception as e:
+                            # 回退到完整转换
+                            pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
+                            pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
+                            if cache_key in pdf_conversion_record.records:
+                                pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
+                                pdf_conversion_record.records[cache_key]['is_complete'] = True
+                                pdf_conversion_record._save_records()
+                            
+                            return jsonify({
+                                'status': 'success',
+                                'mode': 'direct',
+                                'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                                'file_ext': '.pdf'
+                            })
+                    
+                    # 保存第一页到转换记录
+                    pdf_conversion_record.add_record(first_page_key, first_page_path, file_path)
+                    
+                    # 启动后台任务转换完整PDF
+                    from app.services.task_service import task_service
+                    try:
+                        task_service.start_pdf_conversion_task(doc_id, file_path, cache_key)
+                    except Exception as e:
+                        pass
+                    
+                    # 返回第一页的URL，并标记为不完整预览
+                    return jsonify({
+                        'status': 'success',
+                        'mode': 'direct',
+                        'file_url': f'/api/documents/preview/pdf/{urllib.parse.quote(first_page_key, safe="")}',
+                        'file_ext': '.pdf',
+                        'is_partial': True,
+                        'full_preview_url': f'/api/documents/preview/pdf/{urllib.parse.quote(cache_key, safe="")}',
+                        'message': '正在生成完整预览，当前仅显示第1页'
+                    })
+                
+            except Exception as conv_err:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'PDF转换失败: {str(conv_err)}',
+                    'fallback': 'download'
+                }), 500
+        
+        # PDF和图片：直接返回view URL
+        return jsonify({
+            'status': 'success',
+            'mode': 'direct',
+            'file_url': f'/api/documents/view/{urllib.parse.quote(doc_id, safe="")}',
+            'file_ext': file_ext
+        })
         
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': f'启动预览失败: {str(e)}'}), 500
 
 @document_bp.route('/preview-local/<doc_id>', methods=['GET'])
 def preview_document_local(doc_id):
@@ -392,6 +531,210 @@ def preview_document_local(doc_id):
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
+
+def _get_document_metadata(doc_id):
+    """获取文档元数据"""
+    # 首先从 documents_db 中查找
+    if doc_id in doc_manager.documents_db:
+        return doc_manager.documents_db[doc_id]
+    
+    # 尝试从项目配置中查找
+    if hasattr(doc_manager, 'projects') and doc_manager.projects:
+        for project_id, project_data in doc_manager.projects.projects_db.items():
+            if 'documents' in project_data:
+                for cycle, cycle_info in project_data['documents'].items():
+                    if 'uploaded_docs' in cycle_info:
+                        for d in cycle_info['uploaded_docs']:
+                            if d.get('doc_id') == doc_id or d.get('id') == doc_id:
+                                doc_manager.documents_db[doc_id] = d
+                                return d
+    
+    # 从 current_project 中查找
+    if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+        for cycle, cycle_info in doc_manager.current_project.get('documents', {}).items():
+            if 'uploaded_docs' in cycle_info:
+                for d in cycle_info['uploaded_docs']:
+                    if d.get('doc_id') == doc_id or d.get('id') == doc_id:
+                        doc_manager.documents_db[doc_id] = d
+                        return d
+    
+    # 尝试从项目文件中查找（扫描根目录 *.json 和子目录的 project_config.json）
+    import json
+    projects_dir = doc_manager.config.projects_base_folder
+    
+    # 先通过 data_manager 的文档索引查找（最准确）
+    if hasattr(doc_manager, 'data_manager'):
+        try:
+            for project_dir in projects_dir.iterdir():
+                if project_dir.is_dir():
+                    project_name = project_dir.name
+                    doc_index = doc_manager.data_manager.load_documents_index(project_name)
+                    if 'documents' in doc_index and doc_id in doc_index['documents']:
+                        d = doc_index['documents'][doc_id]
+                        doc_manager.documents_db[doc_id] = d
+                        return d
+        except Exception:
+            pass
+    
+    # 扫描根目录 *.json
+    for project_file in projects_dir.glob('*.json'):
+        try:
+            with open(project_file, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+            if 'documents' in project_data:
+                for cycle, cycle_info in project_data['documents'].items():
+                    if 'uploaded_docs' in cycle_info:
+                        for d in cycle_info['uploaded_docs']:
+                            if d.get('doc_id') == doc_id or d.get('id') == doc_id:
+                                doc_manager.documents_db[doc_id] = d
+                                return d
+        except Exception:
+            pass
+    
+    # 扫描子目录中的 project_config.json
+    try:
+        for project_dir in projects_dir.iterdir():
+            if not project_dir.is_dir():
+                continue
+            config_file = project_dir / 'project_config.json'
+            if not config_file.exists():
+                continue
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    project_data = json.load(f)
+                if 'documents' in project_data:
+                    for cycle, cycle_info in project_data['documents'].items():
+                        if not isinstance(cycle_info, dict):
+                            continue
+                        for d in cycle_info.get('uploaded_docs', []):
+                            if d.get('doc_id') == doc_id or d.get('id') == doc_id:
+                                doc_manager.documents_db[doc_id] = d
+                                return d
+            except Exception:
+                pass
+    except Exception:
+        pass
+    
+    return None
+
+
+def _resolve_file_path(metadata):
+    """解析文件路径，处理相对路径和绝对路径"""
+    file_path = metadata.get('file_path')
+    if not file_path:
+        return None
+    
+    # 规范化路径
+    normalized_path = file_path.replace('\\', '/')
+    file_path_obj = Path(normalized_path)
+    
+    # 如果是绝对路径，直接返回
+    if file_path_obj.is_absolute():
+        return file_path_obj
+    
+    # 获取项目名
+    project_name = metadata.get('project_name')
+    if not project_name:
+        # 尝试从doc_id中解析项目名
+        doc_id = metadata.get('doc_id', '')
+        if '_' in doc_id and not doc_id.startswith('_'):
+            parts = doc_id.split('_')
+            if parts[0]:
+                project_name = parts[0]
+    # 回退：从当前加载的项目中获取项目名
+    if not project_name:
+        current_proj = getattr(doc_manager, 'current_project', None)
+        if current_proj and isinstance(current_proj, dict):
+            project_name = current_proj.get('name')
+    
+    # 优先：处理新的完整相对路径格式：projects/{项目名}/uploads/...
+    if normalized_path.startswith('projects/'):
+        base_dir = doc_manager.config.projects_base_folder.parent
+        path_parts = normalized_path.split('/')
+        full_path = Path(os.path.join(str(base_dir), *path_parts))
+        if full_path.exists():
+            return full_path
+    
+    # 处理 uploads/ 相对路径（不带项目名前缀）
+    if normalized_path.startswith('uploads/'):
+        if project_name:
+            base_dir = doc_manager.config.projects_base_folder.parent
+            full_path = Path(os.path.join(str(base_dir), 'projects', project_name, normalized_path))
+            if full_path.exists():
+                return full_path
+        # 尝试从当前项目查找
+        if hasattr(doc_manager, 'current_project') and doc_manager.current_project:
+            project_name = doc_manager.current_project.get('name', project_name)
+            if project_name:
+                base_dir = doc_manager.config.projects_base_folder.parent
+                full_path = Path(os.path.join(str(base_dir), 'projects', project_name, normalized_path))
+                if full_path.exists():
+                    return full_path
+    
+    # 处理 {项目名}/uploads/... 格式的路径（不带 projects/ 前缀）
+    if project_name and normalized_path.startswith(f"{project_name}/"):
+        base_dir = doc_manager.config.projects_base_folder.parent
+        full_path = Path(os.path.join(str(base_dir), 'projects', normalized_path))
+        if full_path.exists():
+            return full_path
+    
+    # 尝试从路径中提取项目名
+    if normalized_path and '/' in normalized_path:
+        potential_project = normalized_path.split('/')[0]
+        if potential_project:
+            base_dir = doc_manager.config.projects_base_folder.parent
+            full_path = Path(os.path.join(str(base_dir), 'projects', normalized_path))
+            if full_path.exists():
+                return full_path
+    
+    if project_name:
+        project_uploads_dir = doc_manager.get_documents_folder(project_name)
+        full_path = Path(os.path.join(str(project_uploads_dir), normalized_path))
+        if full_path.exists():
+            return full_path
+    
+    # 最后尝试uploads目录
+    if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
+        upload_folder = doc_manager.config.upload_folder
+    else:
+        upload_folder = Path('uploads')
+    full_path = Path(os.path.join(str(upload_folder), normalized_path))
+    if full_path.exists():
+        return full_path
+    
+    # 备用方案：根据文件名在项目目录中搜索
+    original_filename = metadata.get('original_filename', '')
+    if original_filename and project_name:
+        found_path = _find_file_by_name(project_name, original_filename)
+        if found_path:
+            return found_path
+    
+    return full_path
+
+
+def _find_file_by_name(project_name, filename):
+    """根据文件名在项目目录中搜索文件"""
+    try:
+        project_uploads_dir = doc_manager.get_documents_folder(project_name)
+        if not project_uploads_dir or not project_uploads_dir.exists():
+            return None
+        
+        # 在项目的 uploads 目录中递归搜索
+        for file_path in project_uploads_dir.rglob(filename):
+            if file_path.is_file():
+                return file_path
+        
+        # 如果没找到，尝试不区分大小写搜索
+        filename_lower = filename.lower()
+        for file_path in project_uploads_dir.rglob('*'):
+            if file_path.is_file() and file_path.name.lower() == filename_lower:
+                return file_path
+                
+    except Exception as e:
+        pass
+    
+    return None
+
 
 @document_bp.route('/view/<doc_id>', methods=['GET'])
 def view_document(doc_id):
@@ -803,6 +1146,62 @@ def batch_update_documents():
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@document_bp.route('/preview/pdf/<cache_key>', methods=['GET'])
+def preview_converted_pdf(cache_key):
+    """直接返回转换后的PDF文件"""
+    try:
+        import urllib.parse
+        from src.services.pdf_conversion_record import pdf_conversion_record
+        from flask import send_file
+        
+        # URL解码 cache_key
+        cache_key = urllib.parse.unquote(cache_key)
+        
+        # 获取转换记录
+        record = pdf_conversion_record.get_record(cache_key)
+        
+        if not record:
+            # 尝试模糊匹配
+            for key in pdf_conversion_record.records.keys():
+                if cache_key in key or key in cache_key:
+                    record = pdf_conversion_record.get_record(key)
+                    break
+            
+            if not record:
+                # 尝试查找实际的PDF文件
+                preview_dir = Path('uploads/temp/preview')
+                if preview_dir.exists():
+                    possible_files = list(preview_dir.glob(f"*{cache_key}*.pdf"))
+                    if possible_files:
+                        # 找到文件但没有记录，重新创建记录
+                        pdf_path = str(possible_files[0])
+                        pdf_conversion_record.add_record(cache_key, pdf_path, '')
+                        record = pdf_conversion_record.get_record(cache_key)
+                
+                if not record:
+                    return jsonify({'status': 'error', 'message': 'PDF转换记录不存在，请重新预览文档'}), 404
+        
+        pdf_path = record.get('pdf_path')
+        
+        if not pdf_path:
+            return jsonify({'status': 'error', 'message': 'PDF路径为空'}), 404
+            
+        if not os.path.exists(pdf_path):
+            return jsonify({'status': 'error', 'message': 'PDF文件已被清理'}), 404
+        
+        # 更新访问时间
+        pdf_conversion_record.update_access_time(cache_key)
+        
+        # 直接返回PDF文件
+        return send_file(pdf_path, mimetype='application/pdf', 
+                        as_attachment=False)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': f'加载PDF失败: {str(e)}'}), 500
+
 
 @document_bp.route('/batch-delete', methods=['POST'])
 def batch_delete_documents():
