@@ -669,15 +669,10 @@ class ProjectDataManager:
                 if 'uploaded_docs' in config['documents'][cycle]:
                     config['documents'][cycle]['uploaded_docs'] = []
             
-            # 加载 documents_index
-            doc_index = self._db_load_config(project_id, 'documents_index')
-            if doc_index:
-                documents = doc_index.get('documents', {})
-                logger.info(f"[DEBUG] 从数据库加载 documents_index: {len(documents)} 个文档")
-            else:
-                doc_index = self.load_documents_index(project_name)
-                documents = doc_index.get('documents', {}) if doc_index else {}
-                logger.info(f"[DEBUG] 从文件加载 documents_index: {len(documents)} 个文档")
+            # 加载 documents_index（统一走 load_documents_index，它有质量检测和回退逻辑）
+            doc_index = self.load_documents_index(project_name)
+            documents = doc_index.get('documents', {}) if doc_index else {}
+            logger.info(f"[DEBUG] 从 load_documents_index 加载: {len(documents)} 个文档")
             
             # 合并文档索引到 uploaded_docs
             known_cycles = config.get('cycles', [])
