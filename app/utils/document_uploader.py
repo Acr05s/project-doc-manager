@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .base import DocumentConfig, setup_logging
+from .base import DocumentConfig, setup_logging, normalize_file_path
 from .folder_manager import FolderManager
 from .image_analyzer import ImageAnalyzer
 
@@ -112,12 +112,24 @@ class DocumentUploader:
             
             # 构建返回信息
             # 保存相对路径，以便在不同环境中都能正确找到文件
+            # 统一使用 normalize_file_path，格式为 {项目名}/uploads/...
             if project_name:
-                # 相对路径：projects/{project_name}/uploads/temp/{cycle}/{doc_name}/{new_filename}
-                if category:
-                    relative_path = f"projects/{project_name}/uploads/temp/{cycle.replace('/', '_')}/{doc_name.replace('/', '_')}/{category.replace('/', '_')}/{new_filename}"
-                else:
-                    relative_path = f"projects/{project_name}/uploads/temp/{cycle.replace('/', '_')}/{doc_name.replace('/', '_')}/{new_filename}"
+                # 先计算相对于 projects uploads 目录的路径
+                project_uploads_dir = self.config.projects_base_folder / project_name / 'uploads'
+                try:
+                    rel_to_uploads = str(file_path.relative_to(project_uploads_dir))
+                    relative_path = normalize_file_path(
+                        f'{project_name}/uploads/{rel_to_uploads}',
+                        project_name,
+                        self.config.projects_base_folder
+                    )
+                except ValueError:
+                    # 回退：使用绝对路径规范化
+                    relative_path = normalize_file_path(
+                        str(file_path),
+                        project_name,
+                        self.config.projects_base_folder
+                    )
             else:
                 # 兼容旧版，使用相对路径
                 try:

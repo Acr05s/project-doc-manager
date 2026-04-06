@@ -11,6 +11,7 @@ from typing import Dict
 from app.utils.document_manager import DocumentManager
 from app.utils.zip_matcher import create_matcher
 from app.utils.json_file_manager import json_file_manager
+from app.utils.base import normalize_file_path
 from src.services.preview_service import PreviewService
 
 document_bp = Blueprint('document', __name__)
@@ -2219,12 +2220,23 @@ def archive_from_zip():
             detected_seal, _ = doc_manager.detect_seal(str(dest_path))
 
         # 保存文档元数据
+        # 规范化路径：优先尝试相对于 projects_base_folder
+        _proj_name_for_norm = None
+        if project_id:
+            _tmp_result = doc_manager.load_project(project_id)
+            if _tmp_result and _tmp_result.get('status') == 'success':
+                _proj_name_for_norm = _tmp_result['project'].get('name')
+        _norm_path = normalize_file_path(
+            str(dest_path),
+            _proj_name_for_norm or '',
+            doc_manager.config.projects_base_folder if _proj_name_for_norm else None
+        )
         metadata = {
             'cycle': cycle,
             'doc_name': doc_name,
             'filename': new_filename,
             'original_filename': source_file.name,
-            'file_path': str(dest_path),
+            'file_path': _norm_path,
             'doc_date': doc_date,
             'sign_date': sign_date,
             'signer': signer,
@@ -2254,6 +2266,7 @@ def archive_from_zip():
             project_result = doc_manager.load_project(project_id)
             if project_result['status'] == 'success':
                 project_config = project_result['project']
+                project_name = project_config.get('name', '')
                 if 'documents' not in project_config:
                     project_config['documents'] = {}
                 if cycle not in project_config['documents']:
@@ -2266,7 +2279,7 @@ def archive_from_zip():
                     'doc_name': doc_name,
                     'filename': new_filename,
                     'original_filename': source_file.name,
-                    'file_path': str(dest_path),
+                    'file_path': normalize_file_path(str(dest_path), project_name, doc_manager.config.projects_base_folder),
                     'doc_date': doc_date,
                     'sign_date': sign_date,
                     'signer': signer,

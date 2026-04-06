@@ -11,6 +11,8 @@ from datetime import datetime
 import logging
 import re
 
+from .base import normalize_file_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -451,15 +453,25 @@ class ZipMatcher:
                 project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
                 try:
                     # 计算相对路径
-                    relative_path = str(source_path.relative_to(project_uploads_dir))
+                    rel_to_uploads = str(source_path.relative_to(project_uploads_dir))
                     # 提取目录信息，与document_uploader.py保持一致
-                    rel_path_parts = Path(relative_path).parts
+                    rel_path_parts = Path(rel_to_uploads).parts
                     if len(rel_path_parts) > 1:
                         # 如果文件在子目录中，取第一个目录作为directory
                         directory = rel_path_parts[0]
+                    # 统一规范化：{项目名}/uploads/...
+                    projects_base = project_uploads_dir.parent.parent  # projects_base_folder
+                    relative_path = normalize_file_path(
+                        f'{project_name}/uploads/{rel_to_uploads}',
+                        project_name,
+                        projects_base
+                    )
                 except ValueError:
-                    # 如果文件不在项目uploads目录中，使用空相对路径
-                    relative_path = ''
+                    # 如果文件不在项目uploads目录中，使用绝对路径规范化
+                    relative_path = normalize_file_path(
+                        str(source_path),
+                        project_name
+                    )
                     directory = ''
             
             # 添加到项目配置的uploaded_docs字段

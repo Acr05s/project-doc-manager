@@ -4,6 +4,7 @@ from flask import request, jsonify
 from pathlib import Path
 from datetime import datetime
 from .utils import get_doc_manager
+from app.utils.base import normalize_file_path
 import re
 
 
@@ -370,20 +371,12 @@ def select_files():
                     # 如果文件不在项目上传目录中，使用原路径
                     pass
             
-            # 将路径转换为完整相对路径（从 projects 开始）
-            try:
-                # 尝试计算相对于 projects_base_folder 父目录的路径
-                projects_base = doc_manager.config.projects_base_folder.parent
-                file_path_relative = str(file_path.relative_to(projects_base))
-            except ValueError:
-                # 如果无法相对化，使用相对于 uploads 的路径
-                try:
-                    project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
-                    rel_to_uploads = str(file_path.relative_to(project_uploads_dir))
-                    file_path_relative = f"projects/{project_name}/uploads/{rel_to_uploads}"
-                except ValueError:
-                    # 最后使用绝对路径
-                    file_path_relative = str(file_path)
+            # 统一规范化路径格式为 {项目名}/uploads/...
+            file_path_relative = normalize_file_path(
+                str(file_path),
+                project_name,
+                doc_manager.config.projects_base_folder if project_name else None
+            )
             
             # 获取原始文件名（优先使用前端传来的文件名）
             original_name = file_info.get('name') or file_path.name

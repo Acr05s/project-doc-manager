@@ -675,7 +675,8 @@ class TaskService:
                 temp_dir = Path('uploads/temp/packages')
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 
-                project_name = project_config.get('name', '项目文档')
+                # 优先使用后端获取的项目名称
+                project_name = backend_project_config.get('name', project_config.get('name', '项目文档'))
                 safe_name = ''.join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip()
                 package_filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d')}_{task_id[:8]}.zip"
                 package_path = temp_dir / package_filename
@@ -868,17 +869,17 @@ class TaskService:
                                 if not file_path_obj.is_absolute():
                                     # 使用 pathlib 处理跨平台路径（自动适配 Windows/Unix 分隔符）
                                     normalized_path = file_path_obj.as_posix()
-                                    is_projects_path = normalized_path.startswith('projects/')
-                                    
-                                    if is_projects_path:
-                                        # file_path 已经是相对于项目根目录的完整路径（如 projects/项目名/uploads/...）
-                                        # 直接使用项目根目录拼接
-                                        base_dir = self.doc_manager.config.projects_base_folder.parent
-                                        file_path_obj = base_dir / file_path
+
+                                    # 统一处理：file_path 都是相对于 projects_base_folder 的路径
+                                    # 有些记录带有 projects/ 前缀（历史遗留问题），需要去掉
+                                    if normalized_path.startswith('projects/'):
+                                        # 去掉前缀部分
+                                        relative_path = normalized_path[len('projects/'):]
                                     else:
-                                        # file_path 是相对 uploads 目录的路径
-                                        project_uploads_dir = self.doc_manager.config.projects_base_folder / project_name / 'uploads'
-                                        file_path_obj = project_uploads_dir / file_path
+                                        relative_path = normalized_path
+
+                                    # 拼接完整路径
+                                    file_path_obj = self.doc_manager.config.projects_base_folder / relative_path
                                 
                                 if not file_path_obj.exists():
                                     logger.warning(f"[打包] 文件不存在: {file_path_obj}")

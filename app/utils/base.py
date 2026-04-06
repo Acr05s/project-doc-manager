@@ -247,3 +247,56 @@ def get_config(config: Optional[Dict[str, Any]] = None) -> DocumentConfig:
     if _config_instance is None or config is not None:
         _config_instance = DocumentConfig(config)
     return _config_instance
+
+
+def normalize_file_path(file_path: str, project_name: str, projects_base_folder: Optional[Path] = None) -> str:
+    """规范化文件路径，用于统一写入 uploaded_docs 中的 file_path 字段。
+
+    统一格式：**相对于 projects_base_folder 的正斜杠路径**，
+    即 ``{项目名}/uploads/...``（不含 ``projects/`` 前缀，不含反斜杠）。
+
+    所有写入 file_path 字段的代码都应通过此函数处理，避免格式不一致
+    导致打包、验收检查等功能找不到文件。
+
+    Args:
+        file_path: 原始路径字符串（可以是绝对路径、各种相对路径格式）
+        project_name: 项目名称
+        projects_base_folder: projects 根目录 Path（不传则自动获取）
+
+    Returns:
+        规范化后的相对路径字符串，格式为 ``{项目名}/uploads/...``
+    """
+    if not file_path:
+        return file_path
+
+    # 1. 统一分隔符为正斜杠
+    normalized = file_path.replace('\\', '/')
+
+    # 2. 如果是绝对路径，尝试转为相对路径
+    if Path(normalized).is_absolute():
+        if projects_base_folder is None:
+            cfg = get_config()
+            projects_base_folder = cfg.projects_base_folder
+        try:
+            relative = Path(file_path).relative_to(projects_base_folder)
+            return relative.as_posix()
+        except ValueError:
+            pass
+        # 如果无法相对化，降级：尝试从项目名开始截取
+        marker = f'/{project_name}/'
+        idx = normalized.find(marker)
+        if idx != -1:
+            return normalized[idx + 1:]
+        return normalized
+
+    # 3. 去掉 "projects/" 前缀（历史遗留问题）
+    if normalized.startswith('projects/'):
+        normalized = normalized[len('projects/'):]
+
+    # 4. 如果路径已经以项目名开头，直接返回
+    if normalized.startswith(f'{project_name}/'):
+        return normalized
+
+    # 5. 如果是纯文件名或不带项目名的相对路径，补全前缀
+    #    假设文件在 uploads 目录下
+    return f'{project_name}/uploads/{normalized}'
