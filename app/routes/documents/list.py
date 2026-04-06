@@ -58,14 +58,40 @@ def get_document(doc_id):
         import urllib.parse
         doc_id = urllib.parse.unquote(doc_id)
         
-        # 首先从 documents_db 中查找
+        # 首先从内存缓存 documents_db 中查找（命中率高，速度最快）
         if doc_id in doc_manager.documents_db:
             metadata = doc_manager.documents_db[doc_id]
             return jsonify({
                 'status': 'success',
                 'data': metadata
             })
-        else:
+        
+        # 内存缓存未命中，直接从数据库查找（服务重启后内存为空时走这条路）
+        try:
+            from app.utils.db_manager import get_projects_index_db
+            import sqlite3 as _sqlite3, json as _json
+            _db = get_projects_index_db()
+            _rows = _sqlite3.connect(_db.db_path, timeout=10.0)
+            _rows.row_factory = _sqlite3.Row
+            _all_rows = _rows.execute(
+                "SELECT config_data FROM project_configs WHERE config_type = 'documents_index'"
+            ).fetchall()
+            _rows.close()
+            for _row in _all_rows:
+                try:
+                    _docs = _json.loads(_row['config_data']).get('documents', {})
+                    if doc_id in _docs:
+                        _found = _docs[doc_id]
+                        _found['id'] = doc_id
+                        doc_manager.documents_db[doc_id] = _found  # 回写内存缓存
+                        return jsonify({'status': 'success', 'data': _found})
+                except Exception:
+                    continue
+        except Exception:
+            pass  # DB 不可用时继续走原有逻辑
+        
+        # DB 也没找到，走原有的多路兜底查找逻辑
+        if True:
             # 尝试从项目配置中查找
             found_doc = None
             
@@ -137,17 +163,46 @@ def get_document(doc_id):
                     except Exception as e:
                         pass
             
-            # 4. 从文档索引中查找
+            # 4. 优先从 projects_index.db 的 project_configs 表查找（最权威的数据源）
+            if not found_doc:
+                try:
+                    from app.utils.db_manager import get_projects_index_db
+                    index_db = get_projects_index_db()
+                    # 遍历所有项目的 documents_index 配置
+                    import sqlite3
+                    conn_path = index_db.db_path
+                    conn = sqlite3.connect(conn_path, timeout=10.0)
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute(
+                        "SELECT project_id, config_data FROM project_configs WHERE config_type = 'documents_index'"
+                    ).fetchall()
+                    conn.close()
+                    for row in rows:
+                        try:
+                            doc_index_data = json.loads(row['config_data'])
+                            docs_map = doc_index_data.get('documents', {})
+                            if doc_id in docs_map:
+                                found_doc = docs_map[doc_id]
+                                break
+                        except Exception:
+                            continue
+                except Exception as _e:
+                    pass  # DB 不可用时继续下一步
+
+            # 4.5. 从各项目 documents.db 文档索引中查找（兜底）
             if not found_doc and hasattr(doc_manager, 'data_manager') and doc_manager.data_manager:
                 # 遍历所有项目
                 projects_dir = doc_manager.config.projects_base_folder
                 for project_dir in projects_dir.iterdir():
                     if project_dir.is_dir():
                         project_name = project_dir.name
-                        doc_index = doc_manager.data_manager.load_documents_index(project_name)
-                        if 'documents' in doc_index and doc_id in doc_index['documents']:
-                            found_doc = doc_index['documents'][doc_id]
-                            break
+                        try:
+                            doc_index = doc_manager.data_manager.load_documents_index(project_name)
+                            if 'documents' in doc_index and doc_id in doc_index['documents']:
+                                found_doc = doc_index['documents'][doc_id]
+                                break
+                        except Exception:
+                            continue
             
             if found_doc:
                 # 确保文档有 id 字段
