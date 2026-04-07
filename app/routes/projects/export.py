@@ -1985,8 +1985,36 @@ def preview_package_merge():
 
         project_name = project_config.get('name', '未知项目')
         project_id = project_config.get('id', '')
-        doc_count = len(project_config.get('documents', {}))
-        cycle_count = len(project_config.get('cycles', []))
+
+        # ── 读取 cycles 和 documents 数量（与 preview_import_package 保持一致）──
+        project_folder = config_file.parent
+        requirements_file = project_folder / 'requirements.json'
+        if not requirements_file.exists():
+            requirements_file = project_folder / 'config' / 'requirements.json'
+        doc_index_file = project_folder / 'data' / 'documents_index.json'
+        if not doc_index_file.exists():
+            doc_index_file = project_folder / 'documents_index.json'
+
+        cycle_count = 0
+        doc_count = 0
+
+        # 从 requirements.json 读取 cycles
+        if requirements_file.exists():
+            try:
+                with open(requirements_file, 'r', encoding='utf-8') as f:
+                    req_data = json.load(f)
+                cycle_count = len(req_data.get('cycles', []))
+            except Exception:
+                pass
+
+        # 从 documents_index.json 读取文档数量
+        if doc_index_file.exists():
+            try:
+                with open(doc_index_file, 'r', encoding='utf-8') as f:
+                    doc_index = json.load(f)
+                doc_count = len(doc_index.get('documents', {}))
+            except Exception:
+                pass
 
         existing_project = None
         if project_name:
@@ -2008,7 +2036,8 @@ def preview_package_merge():
                 'cycle_count': cycle_count
             },
             'conflict': {
-                'exists': existing_project is not None,
+                'has_conflict': existing_project is not None,
+                'existing_project': existing_project,
                 'message': f'项目"{project_name}"已存在' if existing_project else None
             }
         }
