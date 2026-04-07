@@ -57,14 +57,12 @@ def safe_join(*parts):
 
 
 def preview_document(doc_id):
-    """预览文档（返回JSON格式的预览内容）"""
-    try:
-        doc_manager = get_doc_manager()
-        result = doc_manager.get_document_preview(doc_id)
-        return jsonify(result)
-        
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'预览失败: {str(e)}'}), 500
+    """预览文档（返回JSON格式的预览内容）
+    直接转发到 start_progressive_preview，使用统一的路径解析和 DB 查询逻辑。
+    """
+    return start_progressive_preview(doc_id)
+
+
 
 
 def preview_document_local(doc_id):
@@ -498,7 +496,31 @@ def _get_document_metadata(doc_manager, doc_id):
                 pass
     except Exception:
         pass
-    
+
+    # 最终兜底：直接查询 projects_index.db（服务重启后内存缓存为空时最可靠）
+    try:
+        from app.utils.db_manager import get_projects_index_db
+        import sqlite3 as _sqlite3
+        _db = get_projects_index_db()
+        _conn = _sqlite3.connect(_db.db_path, timeout=10.0)
+        _conn.row_factory = _sqlite3.Row
+        _all_rows = _conn.execute(
+            "SELECT config_data FROM project_configs WHERE config_type = 'documents_index'"
+        ).fetchall()
+        _conn.close()
+        for _row in _all_rows:
+            try:
+                _docs = json.loads(_row['config_data']).get('documents', {})
+                if doc_id in _docs:
+                    _found = _docs[doc_id]
+                    _found['id'] = doc_id
+                    doc_manager.documents_db[doc_id] = _found  # 回写内存缓存
+                    return _found
+            except Exception:
+                continue
+    except Exception:
+        pass
+
     return None
 
 
@@ -510,6 +532,23 @@ def _resolve_file_path(doc_manager, metadata):
     
     # 使用通用工具函数规范化路径
     normalized_path = normalize_path(file_path)
+    
+    # 防御性修正：识别 uploads/projects/{project_name}/uploads/ 双层路径
+    # 这是历史数据错误，normalize_file_path 写入时出现了路径重复
+    project_name_hint = metadata.get('project_name', '')
+    if project_name_hint and normalized_path.startswith(f'uploads/projects/{project_name_hint}/uploads/'):
+        prefix = f'uploads/projects/{project_name_hint}/uploads/'
+        normalized_path = 'uploads/' + normalized_path[len(prefix):]
+        print(f"[_resolve_file_path] 修正双层路径: {file_path} -> {normalized_path}")
+    elif normalized_path.startswith('uploads/projects/') and '/uploads/' in normalized_path[len('uploads/projects/'):]:
+        # 通用处理：uploads/projects/{任意名}/uploads/ 格式
+        rest = normalized_path[len('uploads/projects/'):]
+        idx = rest.find('/uploads/')
+        if idx != -1:
+            fixed = 'uploads/' + rest[idx + len('/uploads/'):]
+            print(f"[_resolve_file_path] 修正双层路径(通用): {normalized_path} -> {fixed}")
+            normalized_path = fixed
+
     file_path_obj = Path(normalized_path)
     
     # 如果是绝对路径，直接返回

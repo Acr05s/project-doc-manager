@@ -1,21 +1,16 @@
-2.4.0
+2.5.0
 
 更新内容：
 
-1. View API 修复
-   - document_routes.py: view_document 路由添加从 documents_index.db 查找的逻辑
-   - 解决服务重启后 PDF/图片无法预览的问题
-   - 预览测试 100% 通过
+1. PDF 转换重构
+   - 去掉 docx2pdf 依赖，改用 comtypes 直接调用 Office COM
+   - COM 方案支持所有 Office 格式（.doc/.docx/.xls/.xlsx/.ppt/.pptx）
+   - 修复 .doc 文件转换报 "Package not found" 的问题
+   - 转换逻辑按平台分支：Windows 优先 COM，Linux/Ubuntu 优先 LibreOffice
+   - convert_to_pdf 入口统一用 os.path.abspath() 确保绝对路径
 
-预览测试结果：
-- doc:  24/24 (100%)
-- docx: 153/153 (100%)
-- jpg:   2/  2 (100%)
-- pdf:  38/ 38 (100%)
-- png:   1/  1 (100%)
-- pptx:  1/  1 (100%)
-- txt:   1/  1 (100%)
-- xls:   4/  4 (100%)
-- xlsx: 15/ 15 (100%)
+2. 预览修复
+   - document.js previewDocument 添加 filename 默认值防御性检查
+   - 修复服务重启后文档预览报"文档不存在"的问题
 
-版本号: 2026040711
+版本号: 2026040712

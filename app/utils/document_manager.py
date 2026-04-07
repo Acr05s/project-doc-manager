@@ -1357,6 +1357,31 @@ class DocumentManager:
             if doc_id in self.documents_db:
                 doc = self.documents_db[doc_id]
             else:
+                # 优先直接查询 projects_index.db（服务重启后内存为空时最可靠）
+                try:
+                    from app.utils.db_manager import get_projects_index_db
+                    import sqlite3 as _sqlite3, json as _json
+                    _db = get_projects_index_db()
+                    _conn = _sqlite3.connect(_db.db_path, timeout=10.0)
+                    _conn.row_factory = _sqlite3.Row
+                    _all_rows = _conn.execute(
+                        "SELECT config_data FROM project_configs WHERE config_type = 'documents_index'"
+                    ).fetchall()
+                    _conn.close()
+                    for _row in _all_rows:
+                        try:
+                            _docs = _json.loads(_row['config_data']).get('documents', {})
+                            if doc_id in _docs:
+                                doc = _docs[doc_id]
+                                doc['id'] = doc_id
+                                self.documents_db[doc_id] = doc  # 回写内存缓存
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+            if not doc:
                 # 从所有项目的完整配置中查找 uploaded_docs
                 # 注意：projects.projects_db 只是项目索引，不包含 uploaded_docs
                 # 需要用 load_project 获取完整配置

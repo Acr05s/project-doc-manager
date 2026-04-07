@@ -1,4 +1,4 @@
-# 项目文档管理中心 v2.3.3 📁
+# 项目文档管理中心 v2.5.0 📁
 
 一个功能完整的项目全生命周期文档管理系统，支持文档收集、版本管理、自动签字/盖章识别、ZIP批量导入、项目打包导出等功能。
 
@@ -328,6 +328,17 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 
 ## 📝 更新日志
 
+### v2.5.0
+- 重构 PDF 转换服务：去掉 docx2pdf 依赖，改用 comtypes 直接调用 Office COM
+- 修复 .doc 文件转换报 "Package not found" 的问题
+- 转换逻辑按平台分支：Windows 优先 COM，Linux/Ubuntu 优先 LibreOffice
+- 修复服务重启后文档预览报"文档不存在"的问题
+- previewDocument 添加 filename 防御性检查
+
+### v2.4.0
+- 修复文档预览 API：view_document 添加 documents_index.db 查找逻辑
+- 解决服务重启后 PDF/图片无法预览的问题
+
 ### v2.3.3
 - 添加文档模板导入导出功能
 - 支持从 JSON 文件导入文档需求模板
@@ -351,7 +362,7 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 
 ---
 
-**版本**: v2.3.3  
-**最后更新**: 2026年4月  
+**版本**: v2.5.0  
+**最后更新**: 2026年4月7日
 **Python**: 3.8+  
 **支持**: Windows 10/11, Ubuntu, macOS

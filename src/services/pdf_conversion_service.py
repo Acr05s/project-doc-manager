@@ -2,13 +2,12 @@
 
 支持平台：
 - Windows/Ubuntu: 优先使用 LibreOffice（无需安装Office）
-- 备选方案: docx2pdf（仅Windows，仅docx）
-- 备选方案: COM（仅Windows，需要安装Office）
+- 备选方案: COM via comtypes（仅Windows，需安装Office，支持 .doc/.docx/.xls/.xlsx/.ppt/.pptx）
 
 特点：
 1. 优先使用LibreOffice，跨平台，速度快
-2. 不依赖Microsoft Office
-3. 支持国产系统（安装LibreOffice即可）
+2. Windows无LibreOffice时自动回退到 Office COM 接口（comtypes）
+3. COM方案支持所有Office格式，包括旧版 .doc/.xls/.ppt
 """
 
 import os
@@ -43,12 +42,11 @@ class PDFConversionService:
     def convert_to_pdf(self, input_path, doc_id=None):
         """将Office文档转换为PDF
         
-        转换优先级：
-        1. LibreOffice（跨平台，推荐）
-        2. docx2pdf（仅Windows，仅docx）
-        3. COM（仅Windows，需安装Office）
+        转换策略（按平台分支）：
+        - Windows：优先 Office COM（comtypes），回退 LibreOffice（若已安装）
+        - Linux/Ubuntu：优先 LibreOffice，无其他回退
         """
-        input_path = str(input_path)
+        input_path = os.path.abspath(str(input_path))
         ext = os.path.splitext(input_path)[1].lower()
         
         # 检查缓存
@@ -71,41 +69,44 @@ class PDFConversionService:
             temp_pdf_path = tempfile.mktemp(suffix='.pdf')
         
         errors = []
-        
-        # 1. 优先使用LibreOffice（跨平台，不依赖Office）
-        if self._check_libreoffice():
-            try:
-                self._convert_with_libreoffice(input_path, temp_pdf_path)
-                self._save_record(doc_id, temp_pdf_path, input_path)
-                return temp_pdf_path
-            except Exception as e:
-                errors.append(f"LibreOffice: {e}")
-                print(f"[PDFConversionService] LibreOffice失败: {e}")
-        
-        # 2. Windows下尝试docx2pdf（仅docx）
-        if self.platform == 'Windows' and ext == '.docx':
-            try:
-                from docx2pdf import convert
-                convert(input_path, temp_pdf_path)
-                self._save_record(doc_id, temp_pdf_path, input_path)
-                return temp_pdf_path
-            except Exception as e:
-                errors.append(f"docx2pdf: {e}")
-                print(f"[PDFConversionService] docx2pdf失败: {e}")
-        
-        # 3. Windows下尝试COM（需要安装Office，但会弹窗，不建议在服务器使用）
-        # 注意：COM转换会弹出打印机对话框，不适合后台服务
-        # 仅在没有其他选择时使用
-        if self.platform == 'Windows' and not errors:
-            # 只有在前面的方法都没尝试过（理论上不会到这里）才使用COM
-            try:
-                print("[PDFConversionService] 尝试COM转换（可能弹出打印机对话框）...")
-                self._convert_with_com(input_path, temp_pdf_path, ext)
-                self._save_record(doc_id, temp_pdf_path, input_path)
-                return temp_pdf_path
-            except Exception as e:
-                errors.append(f"COM: {e}")
-                print(f"[PDFConversionService] COM失败: {e}")
+        office_exts = ('.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx')
+
+        if self.platform == 'Windows':
+            # ── Windows 分支 ──────────────────────────────────────────────────
+            # 1. 优先用 Office COM（comtypes），支持所有 Office 格式，包括旧版 .doc
+            if ext in office_exts:
+                try:
+                    self._convert_with_com(input_path, temp_pdf_path, ext)
+                    if os.path.exists(temp_pdf_path) and os.path.getsize(temp_pdf_path) > 0:
+                        self._save_record(doc_id, temp_pdf_path, input_path)
+                        return temp_pdf_path
+                    else:
+                        raise Exception("COM转换未生成有效PDF文件")
+                except Exception as e:
+                    errors.append(f"COM: {e}")
+                    print(f"[PDFConversionService] COM转换失败: {e}")
+            
+            # 2. COM失败时回退 LibreOffice（用户自行安装了的情况）
+            if self._check_libreoffice():
+                try:
+                    self._convert_with_libreoffice(input_path, temp_pdf_path)
+                    self._save_record(doc_id, temp_pdf_path, input_path)
+                    return temp_pdf_path
+                except Exception as e:
+                    errors.append(f"LibreOffice: {e}")
+                    print(f"[PDFConversionService] LibreOffice失败: {e}")
+
+        else:
+            # ── Linux/Ubuntu 分支 ─────────────────────────────────────────────
+            # 唯一可用方案：LibreOffice
+            if self._check_libreoffice():
+                try:
+                    self._convert_with_libreoffice(input_path, temp_pdf_path)
+                    self._save_record(doc_id, temp_pdf_path, input_path)
+                    return temp_pdf_path
+                except Exception as e:
+                    errors.append(f"LibreOffice: {e}")
+                    print(f"[PDFConversionService] LibreOffice失败: {e}")
         
         # 所有方法都失败，清理临时文件
         if os.path.exists(temp_pdf_path):
@@ -114,11 +115,14 @@ class PDFConversionService:
             except:
                 pass
         
-        error_msg = "PDF转换失败。"
-        if not self._check_libreoffice():
-            error_msg += " 未检测到LibreOffice，请安装: https://www.libreoffice.org/download/"
+        if self.platform == 'Windows':
+            error_msg = "PDF转换失败。请确认已安装 Microsoft Office。"
+            if errors:
+                error_msg += " 错误详情: " + "; ".join(errors)
         else:
-            error_msg += " 详情: " + "; ".join(errors)
+            error_msg = "PDF转换失败。未检测到LibreOffice，请安装: https://www.libreoffice.org/download/"
+            if errors:
+                error_msg += " 错误详情: " + "; ".join(errors)
         raise Exception(error_msg)
     
     def _save_record(self, doc_id, pdf_path, input_path):
@@ -175,6 +179,10 @@ class PDFConversionService:
         """使用COM转换（Windows备选，需要Office）"""
         import comtypes.client
         import pythoncom
+        
+        # COM 接口要求绝对路径
+        input_path = os.path.abspath(str(input_path))
+        output_path = os.path.abspath(str(output_path))
         
         app = None
         try:
