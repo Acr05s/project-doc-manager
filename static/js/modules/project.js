@@ -3241,14 +3241,9 @@ export async function handleImportPackageInModal(e) {
             // 清除预览信息
             importPreviewInfo = null;
             
-            // 刷新项目列表
-            await loadProjectSelectList();
-            
-            // 清空表单
+            // 清空表单并隐藏导入区域
             const form = document.getElementById('importPackageFormInModal');
             if (form) form.reset();
-            
-            // 隐藏冲突选项和提示
             const conflictOptions = document.getElementById('conflictOptionsInModal');
             const hint = document.getElementById('importPackageNameHintInModal');
             const progressSection = document.getElementById('importProgressSectionInModal');
@@ -3262,8 +3257,19 @@ export async function handleImportPackageInModal(e) {
                 submitBtn.innerHTML = '📥 导入项目包';
             }
             
-            // 自动加载新导入的项目
+            // 刷新模态框内的项目列表
+            await loadProjectSelectList();
+            
+            // 刷新主界面顶部的项目下拉列表
+            const projects = await loadProjectsList();
+            renderProjectsList(projects);
+            
+            // 先关闭项目选择模态框
+            closeProjectSelectModal();
+            
+            // 短暂延迟后自动加载新导入的项目
             if (projectId) {
+                await new Promise(resolve => setTimeout(resolve, 300));
                 showNotification(`正在加载导入的项目: ${projectName}`, 'info');
                 await handleOpenProject(projectId);
             }
