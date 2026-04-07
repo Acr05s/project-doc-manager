@@ -1698,6 +1698,16 @@ def import_from_preview():
             # 10. 添加到项目索引
             ensure_project_index(doc_manager, project_id, project_name, project_config)
             
+            # 10.5 将导入的数据同步到数据库（load_full_config 从文件读取后写入数据库）
+            if hasattr(doc_manager, 'data_manager') and doc_manager.data_manager:
+                try:
+                    imported_config = doc_manager.data_manager.load_full_config(project_name)
+                    if imported_config:
+                        doc_manager.data_manager.save_full_config(project_name, imported_config)
+                        logger.info(f"[导入] 完整配置已同步到数据库: {project_name}")
+                except Exception as cfg_err:
+                    logger.warning(f"[导入] 同步配置到数据库失败（不影响导入）: {cfg_err}")
+            
             # 11. 刷新索引缓存
             if hasattr(doc_manager, 'projects') and doc_manager.projects:
                 doc_manager.projects._load_projects_index()
