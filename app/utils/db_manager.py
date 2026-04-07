@@ -124,42 +124,91 @@ class DatabaseManager:
 
     def execute(self, sql: str, params: tuple = ()) -> List[Dict]:
         """执行查询并返回结果（读操作）"""
-        with _file_lock(self.db_path, exclusive=False):
-            conn = self._get_connection()
-            try:
-                cursor = conn.execute(sql, params)
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
-            finally:
-                conn.close()
+        try:
+            with _file_lock(self.db_path, exclusive=False):
+                conn = self._get_connection()
+                try:
+                    cursor = conn.execute(sql, params)
+                    rows = cursor.fetchall()
+                    return [dict(row) for row in rows]
+                finally:
+                    conn.close()
+        except sqlite3.OperationalError as e:
+            if 'no such table' in str(e):
+                print(f"[DB] 检测到表不存在 ({e})，尝试重建数据库表...")
+                self._init_db()
+                # 重建后重试一次
+                with _file_lock(self.db_path, exclusive=False):
+                    conn = self._get_connection()
+                    try:
+                        cursor = conn.execute(sql, params)
+                        rows = cursor.fetchall()
+                        return [dict(row) for row in rows]
+                    finally:
+                        conn.close()
+            raise
 
     def execute_write(self, sql: str, params: tuple = ()) -> int:
         """执行写入操作并返回影响的行数"""
-        with _file_lock(self.db_path, exclusive=True):
-            conn = self._get_connection()
-            try:
-                cursor = conn.execute(sql, params)
-                conn.commit()
-                return cursor.rowcount
-            except Exception as e:
-                conn.rollback()
-                raise e
-            finally:
-                conn.close()
+        try:
+            with _file_lock(self.db_path, exclusive=True):
+                conn = self._get_connection()
+                try:
+                    cursor = conn.execute(sql, params)
+                    conn.commit()
+                    return cursor.rowcount
+                except Exception as e:
+                    conn.rollback()
+                    raise e
+                finally:
+                    conn.close()
+        except sqlite3.OperationalError as e:
+            if 'no such table' in str(e):
+                print(f"[DB] 检测到表不存在 ({e})，尝试重建数据库表...")
+                self._init_db()
+                with _file_lock(self.db_path, exclusive=True):
+                    conn = self._get_connection()
+                    try:
+                        cursor = conn.execute(sql, params)
+                        conn.commit()
+                        return cursor.rowcount
+                    except Exception as e2:
+                        conn.rollback()
+                        raise e2
+                    finally:
+                        conn.close()
+            raise
 
     def execute_insert(self, sql: str, params: tuple = ()) -> int:
         """执行插入操作并返回自增ID"""
-        with _file_lock(self.db_path, exclusive=True):
-            conn = self._get_connection()
-            try:
-                cursor = conn.execute(sql, params)
-                conn.commit()
-                return cursor.lastrowid if cursor.lastrowid else 0
-            except Exception as e:
-                conn.rollback()
-                raise e
-            finally:
-                conn.close()
+        try:
+            with _file_lock(self.db_path, exclusive=True):
+                conn = self._get_connection()
+                try:
+                    cursor = conn.execute(sql, params)
+                    conn.commit()
+                    return cursor.lastrowid if cursor.lastrowid else 0
+                except Exception as e:
+                    conn.rollback()
+                    raise e
+                finally:
+                    conn.close()
+        except sqlite3.OperationalError as e:
+            if 'no such table' in str(e):
+                print(f"[DB] 检测到表不存在 ({e})，尝试重建数据库表...")
+                self._init_db()
+                with _file_lock(self.db_path, exclusive=True):
+                    conn = self._get_connection()
+                    try:
+                        cursor = conn.execute(sql, params)
+                        conn.commit()
+                        return cursor.lastrowid if cursor.lastrowid else 0
+                    except Exception as e2:
+                        conn.rollback()
+                        raise e2
+                    finally:
+                        conn.close()
+            raise
 
     def execute_many(self, sql: str, params_list: List[tuple]) -> int:
         """批量执行写入操作"""
@@ -231,58 +280,109 @@ class ProjectsIndexDB(DatabaseManager):
 
     def _init_db(self):
         """初始化数据库表"""
-        with _file_lock(self.db_path, exclusive=True):
-            conn = self._get_connection()
+        try:
+            with _file_lock(self.db_path, exclusive=True):
+                conn = self._get_connection()
+                try:
+                    self._create_tables(conn)
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception as e:
+            print(f"[DB] 初始化数据库表失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 如果数据库文件损坏，尝试删除后重建
             try:
-                # 项目索引表
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS projects (
-                        id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL UNIQUE,
-                        created_time TEXT,
-                        description TEXT,
-                        deleted INTEGER DEFAULT 0,
-                        deleted_time TEXT
-                    )
-                ''')
+                if os.path.exists(self.db_path):
+                    print(f"[DB] 尝试删除损坏的数据库文件: {self.db_path}")
+                    os.remove(self.db_path)
+                    # 同时删除 WAL 和 SHM 文件
+                    for suffix in ('-wal', '-shm'):
+                        wal_path = self.db_path + suffix
+                        if os.path.exists(wal_path):
+                            os.remove(wal_path)
+                # 重新创建
+                with _file_lock(self.db_path, exclusive=True):
+                    conn = self._get_connection()
+                    try:
+                        self._create_tables(conn)
+                        conn.commit()
+                        print(f"[DB] 数据库重建成功: {self.db_path}")
+                    finally:
+                        conn.close()
+            except Exception as e2:
+                print(f"[DB] 数据库重建也失败了: {e2}")
+                import traceback
+                traceback.print_exc()
 
-                # ZIP上传记录表
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS zip_uploads (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        project_id TEXT NOT NULL,
-                        zip_filename TEXT NOT NULL,
-                        upload_time TEXT NOT NULL,
-                        file_count INTEGER DEFAULT 0,
-                        matched_count INTEGER DEFAULT 0,
-                        status TEXT DEFAULT 'pending',
-                        FOREIGN KEY (project_id) REFERENCES projects(id)
-                    )
-                ''')
+    def _create_tables(self, conn):
+        """创建所有数据库表"""
+        # 项目索引表
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                created_time TEXT,
+                description TEXT,
+                deleted INTEGER DEFAULT 0,
+                deleted_time TEXT
+            )
+        ''')
 
-                # 索引
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_zip_project ON zip_uploads(project_id)')
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_zip_time ON zip_uploads(upload_time DESC)')
+        # ZIP上传记录表
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS zip_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL,
+                zip_filename TEXT NOT NULL,
+                upload_time TEXT NOT NULL,
+                file_count INTEGER DEFAULT 0,
+                matched_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
 
-                # 项目配置数据表（存储所有项目配置JSON）
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS project_configs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        project_id TEXT NOT NULL,
-                        config_type TEXT NOT NULL,
-                        config_data TEXT NOT NULL,
-                        updated_time TEXT,
-                        UNIQUE(project_id, config_type)
-                    )
-                ''')
+        # 索引
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_zip_project ON zip_uploads(project_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_zip_time ON zip_uploads(upload_time DESC)')
 
-                # 索引
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_config_project ON project_configs(project_id)')
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_config_type ON project_configs(config_type)')
+        # 项目配置数据表（存储所有项目配置JSON）
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS project_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL,
+                config_type TEXT NOT NULL,
+                config_data TEXT NOT NULL,
+                updated_time TEXT,
+                UNIQUE(project_id, config_type)
+            )
+        ''')
 
-                conn.commit()
-            finally:
-                conn.close()
+        # 索引
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_config_project ON project_configs(project_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_config_type ON project_configs(config_type)')
+
+        # PDF转换缓存记录表
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS pdf_conversions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                pdf_path TEXT NOT NULL,
+                source_file_path TEXT,
+                source_file_mtime REAL,
+                is_complete INTEGER DEFAULT 1,
+                converted_at TEXT,
+                last_accessed TEXT,
+                UNIQUE(doc_id, cache_key)
+            )
+        ''')
+
+        # 索引
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_pdf_conv_doc_id ON pdf_conversions(doc_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_pdf_conv_cache_key ON pdf_conversions(cache_key)')
 
     # ==================== 项目 CRUD ====================
 
@@ -417,6 +517,130 @@ class ProjectsIndexDB(DatabaseManager):
         """删除ZIP上传记录"""
         sql = 'DELETE FROM zip_uploads WHERE id = ?'
         return self.execute_write(sql, (record_id,)) > 0
+
+    # ==================== PDF转换缓存 CRUD ====================
+
+    def add_pdf_conversion(self, doc_id: str, cache_key: str, pdf_path: str,
+                           source_file_path: str = None, source_file_mtime: float = None,
+                           is_complete: bool = True) -> int:
+        """添加或更新PDF转换记录"""
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        # 先尝试删除旧记录（同一 doc_id + cache_key）
+        self.execute_write(
+            'DELETE FROM pdf_conversions WHERE doc_id = ? AND cache_key = ?',
+            (doc_id, cache_key)
+        )
+        sql = '''
+            INSERT INTO pdf_conversions (doc_id, cache_key, pdf_path, source_file_path,
+                                          source_file_mtime, is_complete, converted_at, last_accessed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        return self.execute_insert(sql, (
+            doc_id, cache_key, pdf_path, source_file_path,
+            source_file_mtime, 1 if is_complete else 0, now, now
+        ))
+
+    def get_pdf_conversion(self, cache_key: str) -> Optional[Dict]:
+        """根据 cache_key 获取PDF转换记录"""
+        sql = 'SELECT * FROM pdf_conversions WHERE cache_key = ?'
+        results = self.execute(sql, (cache_key,))
+        return results[0] if results else None
+
+    def get_pdf_conversion_by_doc_id(self, doc_id: str) -> Optional[Dict]:
+        """根据 doc_id 获取最新的PDF转换记录"""
+        sql = 'SELECT * FROM pdf_conversions WHERE doc_id = ? ORDER BY converted_at DESC LIMIT 1'
+        results = self.execute(sql, (doc_id,))
+        return results[0] if results else None
+
+    def update_pdf_conversion_access(self, cache_key: str) -> bool:
+        """更新PDF转换记录的访问时间"""
+        from datetime import datetime
+        sql = 'UPDATE pdf_conversions SET last_accessed = ? WHERE cache_key = ?'
+        return self.execute_write(sql, (datetime.now().isoformat(), cache_key)) > 0
+
+    def delete_pdf_conversion(self, doc_id: str, cache_key: str = None) -> bool:
+        """删除PDF转换记录及其PDF文件"""
+        if cache_key:
+            sql = 'SELECT * FROM pdf_conversions WHERE doc_id = ? AND cache_key = ?'
+            results = self.execute(sql, (doc_id, cache_key))
+        else:
+            sql = 'SELECT * FROM pdf_conversions WHERE doc_id = ?'
+            results = self.execute(sql, (doc_id,))
+
+        deleted_count = 0
+        for record in results:
+            pdf_path = record.get('pdf_path')
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                    print(f"[DB] 删除PDF文件: {pdf_path}")
+                except Exception as e:
+                    print(f"[DB] 删除PDF文件失败: {e}")
+
+        if cache_key:
+            deleted_count = self.execute_write(
+                'DELETE FROM pdf_conversions WHERE doc_id = ? AND cache_key = ?',
+                (doc_id, cache_key)
+            )
+        else:
+            deleted_count = self.execute_write(
+                'DELETE FROM pdf_conversions WHERE doc_id = ?',
+                (doc_id,)
+            )
+        return deleted_count > 0
+
+    def get_pdf_conversions_by_project(self, project_id: str) -> List[Dict]:
+        """获取项目所有PDF转换记录（通过 project_configs 中的 documents_index 查找）"""
+        # 先获取项目的所有文档
+        sql = "SELECT config_data FROM project_configs WHERE config_type = 'documents_index' AND project_id = ?"
+        results = self.execute(sql, (project_id,))
+        all_records = []
+        for row in results:
+            try:
+                docs = json.loads(row.get('config_data', '{}')).get('documents', {})
+                for doc_id, doc_info in docs.items():
+                    record = self.get_pdf_conversion_by_doc_id(doc_id)
+                    if record:
+                        all_records.append(record)
+            except Exception:
+                continue
+        return all_records
+
+    def cleanup_expired_pdf_conversions(self, days: int = 30) -> int:
+        """清理过期的PDF转换记录"""
+        import time
+        from datetime import datetime
+        cutoff_time = time.time() - days * 24 * 3600
+        sql = 'SELECT * FROM pdf_conversions'
+        results = self.execute(sql)
+        expired_keys = []
+        for record in results:
+            last_accessed = record.get('last_accessed', record.get('converted_at', ''))
+            if last_accessed:
+                try:
+                    accessed_ts = datetime.fromisoformat(last_accessed).timestamp()
+                    if accessed_ts < cutoff_time:
+                        expired_keys.append(record['cache_key'])
+                except Exception:
+                    continue
+
+        deleted_count = 0
+        for key in expired_keys:
+            try:
+                record = self.get_pdf_conversion(key)
+                if record:
+                    pdf_path = record.get('pdf_path')
+                    if pdf_path and os.path.exists(pdf_path):
+                        os.remove(pdf_path)
+                self.execute_write('DELETE FROM pdf_conversions WHERE cache_key = ?', (key,))
+                deleted_count += 1
+            except Exception:
+                continue
+
+        if deleted_count > 0:
+            print(f"[DB] 清理了 {deleted_count} 个过期PDF转换记录")
+        return deleted_count
 
     # ==================== 数据迁移 ====================
 
@@ -566,73 +790,102 @@ class ProjectDocumentsDB(DatabaseManager):
 
     def _init_db(self):
         """初始化数据库表"""
-        with _file_lock(self.db_path, exclusive=True):
-            conn = self._get_connection()
+        try:
+            with _file_lock(self.db_path, exclusive=True):
+                conn = self._get_connection()
+                try:
+                    self._create_document_tables(conn)
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception as e:
+            print(f"[DB] 初始化文档数据库表失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 如果数据库文件损坏，尝试删除后重建
             try:
-                # 文档索引表
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS documents (
-                        doc_id TEXT PRIMARY KEY,
-                        project_id TEXT NOT NULL,
-                        project_name TEXT,
-                        cycle TEXT,
-                        doc_name TEXT,
-                        file_path TEXT,
-                        file_size INTEGER DEFAULT 0,
-                        file_type TEXT,
-                        original_filename TEXT,
-                        upload_time TEXT,
-                        status TEXT DEFAULT 'uploaded',
-                        matched_file TEXT,
-                        matched_time TEXT,
-                        archived INTEGER DEFAULT 0,
-                        -- 盖章和签字字段
-                        has_seal INTEGER DEFAULT 0,
-                        party_a_seal INTEGER DEFAULT 0,
-                        party_b_seal INTEGER DEFAULT 0,
-                        no_seal INTEGER DEFAULT 0,
-                        no_signature INTEGER DEFAULT 0,
-                        party_a_signer TEXT,
-                        party_b_signer TEXT,
-                        doc_date TEXT,
-                        sign_date TEXT,
-                        directory TEXT,
-                        source TEXT
-                    )
-                ''')
+                if os.path.exists(self.db_path):
+                    print(f"[DB] 尝试删除损坏的数据库文件: {self.db_path}")
+                    os.remove(self.db_path)
+                    for suffix in ('-wal', '-shm'):
+                        wal_path = self.db_path + suffix
+                        if os.path.exists(wal_path):
+                            os.remove(wal_path)
+                with _file_lock(self.db_path, exclusive=True):
+                    conn = self._get_connection()
+                    try:
+                        self._create_document_tables(conn)
+                        conn.commit()
+                        print(f"[DB] 文档数据库重建成功: {self.db_path}")
+                    finally:
+                        conn.close()
+            except Exception as e2:
+                print(f"[DB] 文档数据库重建也失败了: {e2}")
+                import traceback
+                traceback.print_exc()
 
-                # 检查并添加缺失的列（用于已存在的数据库升级）
-                existing_columns = [row[1] for row in conn.execute("PRAGMA table_info(documents)")]
-                new_columns = {
-                    'has_seal': 'INTEGER DEFAULT 0',
-                    'party_a_seal': 'INTEGER DEFAULT 0',
-                    'party_b_seal': 'INTEGER DEFAULT 0',
-                    'no_seal': 'INTEGER DEFAULT 0',
-                    'no_signature': 'INTEGER DEFAULT 0',
-                    'party_a_signer': 'TEXT',
-                    'party_b_signer': 'TEXT',
-                    'doc_date': 'TEXT',
-                    'sign_date': 'TEXT',
-                    'directory': 'TEXT DEFAULT "/"',
-                    'source': 'TEXT',
-                    'custom_attrs': 'TEXT'  # JSON格式存储自定义属性
-                }
-                for col_name, col_type in new_columns.items():
-                    if col_name not in existing_columns:
-                        try:
-                            conn.execute(f'ALTER TABLE documents ADD COLUMN {col_name} {col_type}')
-                            print(f"[DB] 添加列 {col_name} 成功")
-                        except Exception as e:
-                            print(f"[DB] 添加列 {col_name} 失败: {e}")
+    def _create_document_tables(self, conn):
+        """创建文档数据库表"""
+        # 文档索引表
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS documents (
+                doc_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                project_name TEXT,
+                cycle TEXT,
+                doc_name TEXT,
+                file_path TEXT,
+                file_size INTEGER DEFAULT 0,
+                file_type TEXT,
+                original_filename TEXT,
+                upload_time TEXT,
+                status TEXT DEFAULT 'uploaded',
+                matched_file TEXT,
+                matched_time TEXT,
+                archived INTEGER DEFAULT 0,
+                -- 盖章和签字字段
+                has_seal INTEGER DEFAULT 0,
+                party_a_seal INTEGER DEFAULT 0,
+                party_b_seal INTEGER DEFAULT 0,
+                no_seal INTEGER DEFAULT 0,
+                no_signature INTEGER DEFAULT 0,
+                party_a_signer TEXT,
+                party_b_signer TEXT,
+                doc_date TEXT,
+                sign_date TEXT,
+                directory TEXT,
+                source TEXT
+            )
+        ''')
 
-                # 索引
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_project ON documents(project_id)')
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_cycle ON documents(cycle)')
-                conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_docname ON documents(doc_name)')
+        # 检查并添加缺失的列（用于已存在的数据库升级）
+        existing_columns = [row[1] for row in conn.execute("PRAGMA table_info(documents)")]
+        new_columns = {
+            'has_seal': 'INTEGER DEFAULT 0',
+            'party_a_seal': 'INTEGER DEFAULT 0',
+            'party_b_seal': 'INTEGER DEFAULT 0',
+            'no_seal': 'INTEGER DEFAULT 0',
+            'no_signature': 'INTEGER DEFAULT 0',
+            'party_a_signer': 'TEXT',
+            'party_b_signer': 'TEXT',
+            'doc_date': 'TEXT',
+            'sign_date': 'TEXT',
+            'directory': 'TEXT DEFAULT "/"',
+            'source': 'TEXT',
+            'custom_attrs': 'TEXT'  # JSON格式存储自定义属性
+        }
+        for col_name, col_type in new_columns.items():
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(f'ALTER TABLE documents ADD COLUMN {col_name} {col_type}')
+                    print(f"[DB] 添加列 {col_name} 成功")
+                except Exception as e:
+                    print(f"[DB] 添加列 {col_name} 失败: {e}")
 
-                conn.commit()
-            finally:
-                conn.close()
+        # 索引
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_project ON documents(project_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_cycle ON documents(cycle)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_doc_docname ON documents(doc_name)')
 
     # ==================== 文档 CRUD ====================
 

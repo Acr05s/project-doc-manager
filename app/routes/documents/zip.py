@@ -342,6 +342,33 @@ def start_zip_match():
                         'unmatched_count': result.get('unmatched_count', 0),
                         'archived_files': result.get('archived_files', [])
                     }
+
+                    # 后台触发 PDF 转换（对所有新归档的 Office 文档）
+                    try:
+                        from app.services.task_service import task_service
+                        archived_files = result.get('archived_files', [])
+                        convert_count = 0
+                        for af in archived_files:
+                            af_path = af.get('file_path')
+                            af_doc_id = af.get('doc_id')
+                            if not af_path or not af_doc_id:
+                                continue
+                            from pathlib import Path as _Path
+                            fp = _Path(af_path)
+                            if not fp.is_absolute():
+                                fp = doc_manager.config.projects_base_folder.parent / 'projects' / af_path
+                            if fp.exists():
+                                ext = fp.suffix.lower()
+                                if ext in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+                                    import os as _os
+                                    mtime = int(_os.path.getmtime(str(fp)))
+                                    cache_key = f"{af_doc_id}_{mtime}"
+                                    task_service.start_pdf_conversion_task(str(fp), af_doc_id, cache_key)
+                                    convert_count += 1
+                        if convert_count > 0:
+                            print(f"[ZIP匹配] 已触发 {convert_count} 个文件的PDF转换", flush=True)
+                    except Exception as convert_err:
+                        print(f"[ZIP匹配] 触发PDF转换失败: {convert_err}", flush=True)
                 else:
                     # 匹配失败
                     zip_match_tasks[task_id]['status'] = 'failed'

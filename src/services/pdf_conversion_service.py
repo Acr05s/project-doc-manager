@@ -63,8 +63,12 @@ class PDFConversionService:
         
         # 创建临时PDF路径
         if self.preview_temp_dir:
-            import uuid
-            temp_pdf_path = os.path.join(self.preview_temp_dir, f"{uuid.uuid4()}.pdf")
+            # 使用 doc_id 作为文件名（而不是 UUID），便于缓存管理
+            if doc_id:
+                temp_pdf_path = os.path.join(self.preview_temp_dir, f"{doc_id}.pdf")
+            else:
+                import uuid
+                temp_pdf_path = os.path.join(self.preview_temp_dir, f"{uuid.uuid4()}.pdf")
         else:
             temp_pdf_path = tempfile.mktemp(suffix='.pdf')
         
@@ -129,10 +133,11 @@ class PDFConversionService:
         """保存转换记录"""
         if doc_id:
             file_mtime = os.path.getmtime(input_path)
-            pdf_conversion_record.add_record(doc_id, pdf_path, input_path)
-            if doc_id in pdf_conversion_record.records:
-                pdf_conversion_record.records[doc_id]['file_mtime'] = file_mtime
-                pdf_conversion_record._save_records()
+            # doc_id 可能是 cache_key（含 mtime 后缀），提取原始 doc_id
+            source_doc_id = doc_id.rsplit('_', 1)[0] if '_' in doc_id else doc_id
+            pdf_conversion_record.add_record(doc_id, pdf_path, input_path,
+                                             file_mtime=file_mtime, is_complete=True,
+                                             source_doc_id=source_doc_id)
     
     def _convert_with_libreoffice(self, input_path, output_path):
         """使用LibreOffice转换（跨平台，推荐）"""

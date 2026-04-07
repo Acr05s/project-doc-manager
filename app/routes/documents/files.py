@@ -1,5 +1,6 @@
 """文件搜索和选择相关路由"""
 
+import os
 from flask import request, jsonify
 from pathlib import Path
 from datetime import datetime
@@ -424,6 +425,31 @@ def select_files():
                 'doc_id': doc_id
             })
         
+        # 后台触发 PDF 转换（针对 Office 文档）
+        try:
+            from app.services.task_service import task_service
+            for result_item in results:
+                if result_item['status'] == 'success':
+                    rid = result_item['doc_id']
+                    rmeta = doc_manager.documents_db.get(rid, {})
+                    rpath = rmeta.get('file_path')
+                    if rpath:
+                        rpath_obj = Path(rpath)
+                        if not rpath_obj.is_absolute():
+                            rpath_obj = doc_manager.config.projects_base_folder.parent / 'projects' / rpath
+                        if rpath_obj.exists():
+                            ext = rpath_obj.suffix.lower()
+                            if ext in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+                                import time as _time
+                                mtime = int(os.path.getmtime(str(rpath_obj)))
+                                cache_key = f"{rid}_{mtime}"
+                                task_service.start_pdf_conversion_task(
+                                    str(rpath_obj), rid, cache_key
+                                )
+                                print(f"[select_files] 已触发后台PDF转换: {rid}")
+        except Exception as e:
+            print(f"[select_files] 触发PDF转换失败: {e}")
+
         return jsonify({
             'status': 'success',
             'results': results

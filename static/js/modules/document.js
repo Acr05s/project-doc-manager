@@ -1429,9 +1429,41 @@ async function loadProgressivePreview(docId, fileExt) {
                         </div>
                     `;
                 } else {
+                    // 使用隐藏 iframe + onload 检测，防止 PDF URL 返回 JSON 错误时直接显示原文
                     previewBody.innerHTML = `
-                        <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" onerror="handlePreviewError(this)" style="width: 100%; height: 80vh; border: none;"></iframe>
+                        <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" 
+                            style="width: 100%; height: 80vh; border: none;"></iframe>
+                        <div id="iframeLoadChecker" style="display:none;"></div>
                     `;
+                    // 检测 iframe 是否加载了 JSON 错误页面
+                    const iframe = previewBody.querySelector('iframe');
+                    if (iframe) {
+                        iframe.onload = function() {
+                            try {
+                                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                                const bodyText = doc.body ? doc.body.innerText : '';
+                                // 检测是否加载了 JSON 错误响应
+                                if (bodyText && bodyText.trim().startsWith('{') && bodyText.includes('"status"') && bodyText.includes('"error"')) {
+                                    let errorData;
+                                    try { errorData = JSON.parse(bodyText); } catch(e) {}
+                                    const msg = errorData?.message || '加载预览失败';
+                                    const downloadUrl = `/api/documents/download/${encodeURIComponent(docId)}`;
+                                    previewBody.innerHTML = `
+                                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 40px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 400px; border-radius: 12px;">
+                                            <div style="font-size: 64px; margin-bottom: 24px;">⏳</div>
+                                            <div style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 12px;">PDF正在生成中</div>
+                                            <div style="font-size: 14px; color: #666; margin-bottom: 8px; text-align: center; max-width: 400px;">${escapeHtml(msg)}</div>
+                                            <div style="font-size: 13px; color: #999; margin-bottom: 24px;">首次预览需要转换文档格式，请稍等片刻后重试</div>
+                                            <button class="btn btn-primary" onclick="previewDocument('${docId}')" style="padding: 12px 32px; font-size: 14px; border-radius: 6px; background: #4f8ef7; color: white; border: none; cursor: pointer;">🔄 重新预览</button>
+                                            <a href="${downloadUrl}" class="btn" target="_blank" style="margin-top: 12px; font-size: 13px; color: #999; text-decoration: none;">下载文件查看</a>
+                                        </div>
+                                    `;
+                                }
+                            } catch(e) {
+                                // 跨域无法访问 contentDocument，说明 PDF 正常加载了，无需处理
+                            }
+                        };
+                    }
                 }
             }
         } else {

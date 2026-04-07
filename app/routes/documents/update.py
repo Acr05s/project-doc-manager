@@ -53,6 +53,35 @@ def replace_doc(doc_id):
         }
         
         result = doc_manager.replace_document(doc_id, file, new_data)
+
+        # 文档替换成功后，删除旧的 PDF 转换缓存并触发新转换
+        if result.get('status') == 'success':
+            try:
+                from src.services.pdf_conversion_record import pdf_conversion_record
+                # 删除该文档的所有旧转换缓存
+                pdf_conversion_record.delete_record(doc_id)
+                print(f"[replace_doc] 已删除旧PDF转换缓存: {doc_id}")
+
+                # 触发新的后台 PDF 转换
+                updated_doc = doc_manager.documents_db.get(doc_id, {})
+                file_path = updated_doc.get('file_path')
+                if file_path:
+                    from pathlib import Path
+                    fp_obj = Path(file_path)
+                    if not fp_obj.is_absolute():
+                        fp_obj = doc_manager.config.projects_base_folder.parent / 'projects' / file_path
+                    if fp_obj.exists():
+                        import os
+                        ext = fp_obj.suffix.lower()
+                        if ext in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+                            from app.services.task_service import task_service
+                            mtime = int(os.path.getmtime(str(fp_obj)))
+                            cache_key = f"{doc_id}_{mtime}"
+                            task_service.start_pdf_conversion_task(str(fp_obj), doc_id, cache_key)
+                            print(f"[replace_doc] 已触发新的后台PDF转换: {doc_id}")
+            except Exception as e:
+                print(f"[replace_doc] PDF缓存清理/转换失败: {e}")
+
         return jsonify(result)
         
     except Exception as e:

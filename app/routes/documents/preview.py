@@ -330,11 +330,9 @@ def _convert_and_view_office(file_path, doc_id, file_path_obj):
         pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
         
         # 保存转换记录（包含文件修改时间）
-        pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
-        # 同时更新记录，添加文件修改时间
-        if cache_key in pdf_conversion_record.records:
-            pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
-            pdf_conversion_record._save_records()
+        pdf_conversion_record.add_record(cache_key, pdf_path, file_path,
+                                         file_mtime=file_mtime, is_complete=True,
+                                         source_doc_id=doc_id)
         
         elapsed_time = time.time() - start_time
         print(f"[view_document] 转换完成，耗时: {elapsed_time:.2f}秒, PDF: {pdf_path}")
@@ -814,11 +812,9 @@ def start_progressive_preview(doc_id):
                     print(f"[start_progressive_preview] 转换完成，耗时: {elapsed_time:.2f}秒")
                     
                     # 保存转换记录
-                    pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
-                    if cache_key in pdf_conversion_record.records:
-                        pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
-                        pdf_conversion_record.records[cache_key]['is_complete'] = True
-                        pdf_conversion_record._save_records()
+                    pdf_conversion_record.add_record(cache_key, pdf_path, file_path,
+                                                     file_mtime=file_mtime, is_complete=True,
+                                                     source_doc_id=doc_id)
                     
                     return jsonify({
                         'status': 'success',
@@ -843,11 +839,9 @@ def start_progressive_preview(doc_id):
                             print(f"[start_progressive_preview] 第1页快速转换失败: {e}，尝试完整转换")
                             # 回退到完整转换
                             pdf_path = pdf_service.convert_to_pdf(file_path, cache_key)
-                            pdf_conversion_record.add_record(cache_key, pdf_path, file_path)
-                            if cache_key in pdf_conversion_record.records:
-                                pdf_conversion_record.records[cache_key]['file_mtime'] = file_mtime
-                                pdf_conversion_record.records[cache_key]['is_complete'] = True
-                                pdf_conversion_record._save_records()
+                            pdf_conversion_record.add_record(cache_key, pdf_path, file_path,
+                                                             file_mtime=file_mtime, is_complete=True,
+                                                             source_doc_id=doc_id)
                             
                             return jsonify({
                                 'status': 'success',
@@ -941,7 +935,10 @@ def start_progressive_preview(doc_id):
 
 
 def preview_converted_pdf(cache_key):
-    """直接返回转换后的PDF文件（避免循环转换）"""
+    """直接返回转换后的PDF文件（避免循环转换）
+    
+    优化：完整PDF不可用时，回退到第一页缓存，避免直接报错。
+    """
     try:
         import urllib.parse
         from src.services.pdf_conversion_record import pdf_conversion_record
@@ -955,29 +952,56 @@ def preview_converted_pdf(cache_key):
         record = pdf_conversion_record.get_record(cache_key)
         
         if not record:
-            print(f"[preview_converted_pdf] 记录不存在，尝试列出可用记录...")
-            print(f"[preview_converted_pdf] 可用记录数: {len(pdf_conversion_record.records)}")
-            # 尝试模糊匹配
+            print(f"[preview_converted_pdf] 记录不存在，尝试查找...")
+
+            # 1. 尝试模糊匹配（内存缓存）
             for key in pdf_conversion_record.records.keys():
                 if cache_key in key or key in cache_key:
                     print(f"[preview_converted_pdf] 找到相似记录: {key}")
                     record = pdf_conversion_record.get_record(key)
                     break
-            
+
+            # 2. 尝试查找第一页缓存
             if not record:
-                # 尝试查找实际的PDF文件
+                first_page_key = f"{cache_key}_page1"
+                first_page_record = pdf_conversion_record.get_record(first_page_key)
+                if first_page_record and os.path.exists(first_page_record.get('pdf_path', '')):
+                    print(f"[preview_converted_pdf] 使用第一页缓存: {first_page_key}")
+                    record = first_page_record
+            
+            # 3. 尝试查找磁盘上的PDF文件
+            if not record:
                 preview_dir = Path('uploads/temp/preview')
                 if preview_dir.exists():
-                    possible_files = list(preview_dir.glob(f"*{cache_key}*.pdf"))
-                    if possible_files:
-                        # 找到文件但没有记录，重新创建记录
-                        pdf_path = str(possible_files[0])
-                        print(f"[preview_converted_pdf] 找到PDF文件但无记录，重新创建记录: {pdf_path}")
+                    # 先找精确匹配
+                    exact_files = list(preview_dir.glob(f"{cache_key}.pdf"))
+                    if exact_files:
+                        pdf_path = str(exact_files[0])
+                        print(f"[preview_converted_pdf] 找到精确匹配PDF: {pdf_path}")
                         pdf_conversion_record.add_record(cache_key, pdf_path, '')
                         record = pdf_conversion_record.get_record(cache_key)
-                
-                if not record:
-                    return jsonify({'status': 'error', 'message': f'PDF转换记录不存在，请重新预览文档'}), 404
+                    
+                    # 再找第一页文件
+                    if not record:
+                        page1_files = list(preview_dir.glob(f"{cache_key}_page1.pdf"))
+                        if page1_files:
+                            pdf_path = str(page1_files[0])
+                            print(f"[preview_converted_pdf] 找到第一页PDF文件: {pdf_path}")
+                            pdf_conversion_record.add_record(f"{cache_key}_page1", pdf_path, '')
+                            record = pdf_conversion_record.get_record(f"{cache_key}_page1")
+                    
+                    # 最后模糊匹配
+                    if not record:
+                        possible_files = list(preview_dir.glob(f"*{cache_key}*.pdf"))
+                        if possible_files:
+                            pdf_path = str(possible_files[0])
+                            print(f"[preview_converted_pdf] 找到模糊匹配PDF: {pdf_path}")
+                            pdf_conversion_record.add_record(cache_key, pdf_path, '')
+                            record = pdf_conversion_record.get_record(cache_key)
+            
+            if not record:
+                print(f"[preview_converted_pdf] 完全找不到记录和文件")
+                return jsonify({'status': 'error', 'message': f'PDF转换记录不存在，请重新预览文档'}), 404
         
         pdf_path = record.get('pdf_path')
         print(f"[preview_converted_pdf] pdf_path: {pdf_path}")
@@ -986,7 +1010,9 @@ def preview_converted_pdf(cache_key):
             return jsonify({'status': 'error', 'message': 'PDF路径为空'}), 404
             
         if not os.path.exists(pdf_path):
-            return jsonify({'status': 'error', 'message': f'PDF文件已被清理: {pdf_path}'}), 404
+            # PDF文件已被删除，清理记录
+            pdf_conversion_record.delete_record(cache_key)
+            return jsonify({'status': 'error', 'message': f'PDF文件已被清理，请重新预览'}), 404
         
         # 更新访问时间
         pdf_conversion_record.update_access_time(cache_key)

@@ -409,11 +409,9 @@ class TaskService:
                 
                 # 保存转换记录（标记为完整转换）
                 file_mtime = os.path.getmtime(file_path)
-                pdf_conversion_record.add_record(conversion_key, pdf_path, file_path)
-                if conversion_key in pdf_conversion_record.records:
-                    pdf_conversion_record.records[conversion_key]['file_mtime'] = file_mtime
-                    pdf_conversion_record.records[conversion_key]['is_complete'] = True
-                    pdf_conversion_record._save_records()
+                pdf_conversion_record.add_record(conversion_key, pdf_path, file_path,
+                                                 file_mtime=file_mtime, is_complete=True,
+                                                 source_doc_id=doc_id)
                 
                 # 更新进度
                 self.tasks_store[task_id]['progress'] = 75
