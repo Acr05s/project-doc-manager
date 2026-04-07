@@ -13,4 +13,8 @@
    - document.js previewDocument 添加 filename 默认值防御性检查
    - 修复服务重启后文档预览报"文档不存在"的问题
 
-版本号: 2026040712
+3. 项目导入修复
+   - 修复导入包预览时 requirements.json 路径错误（增加 config/ 子目录查找）
+   - 修复导入后自动打开项目失败（ensure_project_index 增加数据库双写）
+
+版本号: 2026040713

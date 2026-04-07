@@ -1448,8 +1448,14 @@ def preview_import_package():
 
         # ── 补充读取 cycles（来自 requirements.json）和 documents_index ──
         project_folder = config_file.parent
+        # requirements.json 可能在项目根目录或 config/ 子目录
         requirements_file = project_folder / 'requirements.json'
+        if not requirements_file.exists():
+            requirements_file = project_folder / 'config' / 'requirements.json'
+        # documents_index.json 可能在 data/ 子目录或项目根目录
         doc_index_file = project_folder / 'data' / 'documents_index.json'
+        if not doc_index_file.exists():
+            doc_index_file = project_folder / 'documents_index.json'
 
         # 从 requirements.json 读取 cycles（主要来源）
         cycles_list = []
@@ -1761,11 +1767,23 @@ def update_imported_project_info(project_dir, project_config):
 
 
 def ensure_project_index(doc_manager, project_id, project_name, project_config):
-    """确保项目在索引中存在（与 ProjectManager 保持一致）"""
+    """确保项目在索引中存在（JSON + 数据库双写）"""
     try:
         import json
         from app.utils.json_file_manager import json_file_manager, get_file_lock
-        
+
+        # ── 1. 写入数据库（主存储）──
+        if hasattr(doc_manager, 'projects') and doc_manager.projects and hasattr(doc_manager.projects, '_db') and doc_manager.projects._db:
+            db = doc_manager.projects._db
+            created_time = project_config.get('created_time', '')
+            description = project_config.get('description', '')
+            try:
+                db.create_project(project_id, project_name, created_time=created_time, description=description)
+                logger.info(f"[索引] 数据库项目条目已更新: {project_id} -> {project_name}")
+            except Exception as db_err:
+                logger.error(f"[索引] 数据库写入失败: {db_err}")
+
+        # ── 2. 写入 JSON 文件（备份）──
         index_file = doc_manager.config.projects_base_folder / 'projects_index.json'
         logger.info(f"[索引] 更新项目索引: {index_file}")
         
