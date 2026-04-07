@@ -391,7 +391,7 @@ def preview_document(doc_id):
                     # 启动后台任务转换完整PDF
                     from app.services.task_service import task_service
                     try:
-                        task_service.start_pdf_conversion_task(doc_id, file_path, cache_key)
+                        task_service.start_pdf_conversion_task(file_path, doc_id, cache_key)
                     except Exception as e:
                         pass
                     
@@ -423,7 +423,14 @@ def preview_document(doc_id):
         
     except Exception as e:
         import traceback
+        error_traceback = traceback.format_exc()
         traceback.print_exc()
+        # 写入 werkzeug logger 方便远程服务器排查
+        try:
+            import logging
+            logging.getLogger('werkzeug').error(f"[preview_document] doc_id={doc_id}\n{error_traceback}")
+        except Exception:
+            pass
         return jsonify({'status': 'error', 'message': f'启动预览失败: {str(e)}'}), 500
 
 @document_bp.route('/preview-local/<doc_id>', methods=['GET'])

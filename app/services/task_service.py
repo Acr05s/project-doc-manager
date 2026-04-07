@@ -351,12 +351,13 @@ class TaskService:
             'message': '异常检查任务已启动'
         }
     
-    def start_pdf_conversion_task(self, file_path: str, doc_id: str) -> Dict[str, Any]:
+    def start_pdf_conversion_task(self, file_path: str, doc_id: str, cache_key: str = None) -> Dict[str, Any]:
         """启动PDF转换任务
         
         Args:
             file_path: 源文件路径
             doc_id: 文档ID
+            cache_key: 缓存键（可选，用于PDF转换缓存标识）
             
         Returns:
             Dict: 任务信息
@@ -364,6 +365,9 @@ class TaskService:
         from src.services.pdf_conversion_service import PDFConversionService
         from pathlib import Path
         import os
+        
+        # 使用 cache_key 作为转换标识，如果没有则回退到 doc_id
+        conversion_key = cache_key or doc_id
         
         # 创建任务
         task_id = str(uuid.uuid4())
@@ -400,15 +404,15 @@ class TaskService:
                 self.tasks_store[task_id]['message'] = '正在转换PDF...'
                 self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
                 
-                # 执行转换
-                pdf_path = pdf_service.convert_to_pdf(file_path, doc_id)
+                # 执行转换（使用 conversion_key 作为缓存标识）
+                pdf_path = pdf_service.convert_to_pdf(file_path, conversion_key)
                 
                 # 保存转换记录（标记为完整转换）
                 file_mtime = os.path.getmtime(file_path)
-                pdf_conversion_record.add_record(doc_id, pdf_path, file_path)
-                if doc_id in pdf_conversion_record.records:
-                    pdf_conversion_record.records[doc_id]['file_mtime'] = file_mtime
-                    pdf_conversion_record.records[doc_id]['is_complete'] = True
+                pdf_conversion_record.add_record(conversion_key, pdf_path, file_path)
+                if conversion_key in pdf_conversion_record.records:
+                    pdf_conversion_record.records[conversion_key]['file_mtime'] = file_mtime
+                    pdf_conversion_record.records[conversion_key]['is_complete'] = True
                     pdf_conversion_record._save_records()
                 
                 # 更新进度
@@ -422,7 +426,8 @@ class TaskService:
                 self.tasks_store[task_id]['message'] = 'PDF转换完成'
                 self.tasks_store[task_id]['result'] = {
                     'pdf_path': pdf_path,
-                    'doc_id': doc_id
+                    'doc_id': doc_id,
+                    'conversion_key': conversion_key
                 }
                 self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
                 self._save_tasks()

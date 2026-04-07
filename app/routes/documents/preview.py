@@ -247,8 +247,15 @@ def view_document(doc_id):
         
     except Exception as e:
         import traceback
+        error_traceback = traceback.format_exc()
         print(f"[view_document] 错误: {e}")
-        print(traceback.format_exc())
+        print(error_traceback)
+        # 将完整堆栈写入日志文件，方便排查服务器端问题
+        try:
+            import logging
+            logging.getLogger('werkzeug').error(f"[view_document] doc_id={doc_id}\n{error_traceback}")
+        except Exception:
+            pass
         return jsonify({'status': 'error', 'message': f'查看失败: {str(e)}'}), 500
 
 
@@ -856,7 +863,7 @@ def start_progressive_preview(doc_id):
                     # 使用任务服务启动后台转换
                     try:
                         from app.services.task_service import task_service
-                        task_service.start_pdf_conversion_task(doc_id, file_path, cache_key)
+                        task_service.start_pdf_conversion_task(file_path, doc_id, cache_key)
                         print(f"[start_progressive_preview] 已启动后台完整转换任务")
                     except Exception as e:
                         print(f"[start_progressive_preview] 启动后台任务失败: {e}")
@@ -921,8 +928,15 @@ def start_progressive_preview(doc_id):
         
     except Exception as e:
         import traceback
+        error_traceback = traceback.format_exc()
         print(f"[start_progressive_preview] 错误: {e}")
-        print(traceback.format_exc())
+        print(error_traceback)
+        # 将完整堆栈写入日志文件，方便排查服务器端问题
+        try:
+            import logging
+            logging.getLogger('werkzeug').error(f"[start_progressive_preview] doc_id={doc_id}\n{error_traceback}")
+        except Exception:
+            pass
         return jsonify({'status': 'error', 'message': f'启动预览失败: {str(e)}'}), 500
 
 

@@ -33,7 +33,6 @@
     "flask",
     "pandas",
     "openpyxl",
-    "python-magic",
     "opencv-python",
     "pytesseract",
     "Pillow",
