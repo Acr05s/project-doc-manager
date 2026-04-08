@@ -448,17 +448,13 @@ class ZipMatcher:
             
             # 计算相对路径（相对于项目的uploads目录）
             relative_path = str(source_path)
-            directory = ''
+            # ZIP 自动匹配的文件，directory 统一设置为 '/'，不保留 ZIP 内部的目录结构
+            directory = '/'
             if project_name:
                 project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
                 try:
                     # 计算相对路径
                     rel_to_uploads = str(source_path.relative_to(project_uploads_dir))
-                    # 提取目录信息，与document_uploader.py保持一致
-                    rel_path_parts = Path(rel_to_uploads).parts
-                    if len(rel_path_parts) > 1:
-                        # 如果文件在子目录中，取第一个目录作为directory
-                        directory = rel_path_parts[0]
                     # 统一规范化：{项目名}/uploads/...
                     projects_base = project_uploads_dir.parent.parent  # projects_base_folder
                     relative_path = normalize_file_path(
@@ -472,7 +468,6 @@ class ZipMatcher:
                         str(source_path),
                         project_name
                     )
-                    directory = ''
             
             # 添加到项目配置的uploaded_docs字段
             if 'documents' not in project_config:
