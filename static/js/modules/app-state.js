@@ -10,7 +10,8 @@ export let appState = {
     currentDocument: null,
     documents: {},
     zipSelectedFile: null,       // 从ZIP中选择的单个文件（兼容旧代码）
-    zipSelectedFiles: [],        // 从ZIP中选择的多个文件数组 [{path, name}]
+    zipSelectedFiles: [],        // 从ZIP中选择的多个文件数组 [{path, name, source_dir, rel_dir}]
+    zipRootDirectory: '',        // 用户选择的根目录（从此目录开始保存路径层级）
     currentZipPackagePath: '',   // 当前选中的ZIP包路径
     currentZipPackageName: '',   // 当前选中的ZIP包名称
     filterOptions: {             // 筛选选项

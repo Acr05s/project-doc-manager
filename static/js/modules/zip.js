@@ -163,6 +163,13 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
         const countBadge = totalCount > 0
             ? `<span class="dir-count-badge" style="color:#5a7fa8;font-size:11px;font-weight:normal;">(${selectedCount}/${totalCount})</span>`
             : '';
+        
+        // 检查是否当前是根目录
+        const isRootDir = appState.zipRootDirectory === dirPath;
+        const rootBtnStyle = isRootDir 
+            ? 'background:#28a745;color:white;' 
+            : 'background:#fff;border:1px solid #28a745;color:#28a745;';
+        const rootBtnText = isRootDir ? '✓ 已设为根目录' : '设为根目录';
 
         html += `
             <div class="directory-group" data-dir-group="${escapedDirPath}" style="margin-left:${indent}px; margin-bottom:4px;">
@@ -178,6 +185,11 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
                            onclick="event.stopPropagation();" />
                     <span class="dir-name-label" style="flex:1;">📁 ${dirNameHtml}</span>
                     ${countBadge}
+                    <button class="set-root-btn" data-dir="${escapedDirPath}"
+                            style="${rootBtnStyle}padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;"
+                            onclick="event.stopPropagation(); window.setZipRootDirectory('${escapedDirPath}');">
+                        ${rootBtnText}
+                    </button>
                 </div>
                 <div class="directory-files zip-dir-children" data-dir-files="${escapedDirPath}" style="display:block;">
                     ${renderDirTreeHtml(childDir, keyword, depth + 1, dirPath)}
@@ -441,11 +453,25 @@ export function handleZipFileSelect(e) {
     }
     
     if (checkbox.checked) {
+        // 计算相对于根目录的路径
+        const rootDir = appState.zipRootDirectory;
+        let relDir = '';
+        if (rootDir && sourceDir.startsWith(rootDir)) {
+            relDir = sourceDir.substring(rootDir.length).replace(/^\//, '');
+        } else {
+            relDir = sourceDir;
+        }
+        
         // 添加到选中列表（带目录信息）
         item.classList.add('selected');
         item.style.background = '#e3f2fd';
         if (!appState.zipSelectedFiles.some(f => f.path === filePath)) {
-            appState.zipSelectedFiles.push({ path: filePath, name: fileName, source_dir: sourceDir });
+            appState.zipSelectedFiles.push({ 
+                path: filePath, 
+                name: fileName, 
+                source_dir: sourceDir,
+                rel_dir: relDir  // 相对于根目录的路径
+            });
         }
     } else {
         // 从选中列表移除
@@ -703,6 +729,17 @@ export async function handleZipArchive() {
         
         for (const file of appState.zipSelectedFiles) {
             try {
+                // 计算保存的目录：如果有根目录，使用相对路径；否则使用原始路径
+                const rootDir = appState.zipRootDirectory;
+                let saveDirectory = '/';
+                if (rootDir && file.source_dir) {
+                    // 从根目录开始计算相对路径
+                    const relPath = file.source_dir.substring(rootDir.length).replace(/^\//, '');
+                    saveDirectory = relPath || '/';
+                } else if (file.source_dir) {
+                    saveDirectory = file.source_dir;
+                }
+                
                 const response = await fetch('/api/documents/archive-from-zip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -711,7 +748,7 @@ export async function handleZipArchive() {
                         cycle: appState.currentCycle,
                         source_path: file.path,
                         doc_name: appState.currentDocument,
-                        source_dir: file.source_dir || ''  // 携带目录信息
+                        source_dir: saveDirectory  // 保存相对于根目录的路径
                     })
                 });
                 
@@ -1185,4 +1222,83 @@ export function fixZipSelectionIssue() {
     });
 }
 
+/**
+ * 设置ZIP文件的根目录
+ * 从此目录开始保存路径层级结构
+ * @param {string} dirPath - 目录路径
+ */
+window.setZipRootDirectory = function(dirPath) {
+    appState.zipRootDirectory = dirPath;
+    console.log('[ZIP根目录] 已设置为:', dirPath);
+    
+    // 更新所有"设为根目录"按钮的样式
+    document.querySelectorAll('.set-root-btn').forEach(btn => {
+        const btnDir = btn.dataset.dir;
+        if (btnDir === dirPath) {
+            btn.style.cssText = 'background:#28a745;color:white;padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;';
+            btn.textContent = '✓ 已设为根目录';
+        } else {
+            btn.style.cssText = 'background:#fff;border:1px solid #28a745;color:#28a745;padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;';
+            btn.textContent = '设为根目录';
+        }
+    });
+    
+    // 更新已选中文件的相对路径
+    updateSelectedFilesRelativePath();
+    
+    showNotification('已设置根目录: ' + dirPath, 'success');
+};
+
+/**
+ * 计算相对于根目录的路径
+ * @param {string} fullPath - 完整路径
+ * @param {string} rootDir - 根目录
+ * @returns {string} 相对路径
+ */
+function getRelativePathFromRoot(fullPath, rootDir) {
+    if (!rootDir) return '';
+    
+    // 确保路径格式一致（使用正斜杠）
+    const normalizedPath = fullPath.replace(/\\/g, '/');
+    const normalizedRoot = rootDir.replace(/\\/g, '/');
+    
+    if (normalizedPath.startsWith(normalizedRoot + '/')) {
+        return normalizedPath.substring(normalizedRoot.length + 1);
+    }
+    return '';
+}
+
+/**
+ * 更新已选中文件的相对路径信息
+ */
+function updateSelectedFilesRelativePath() {
+    const rootDir = appState.zipRootDirectory;
+    if (!rootDir) return;
+    
+    appState.zipSelectedFiles.forEach(file => {
+        // 计算相对于根目录的路径
+        file.rel_dir = getRelativePathFromRoot(file.path, rootDir);
+        console.log('[ZIP路径更新]', file.path, '->', file.rel_dir);
+    });
+}
+
+/**
+ * 获取文件的目录信息（用于保存到数据库）
+ * @param {string} filePath - 文件路径
+ * @returns {string} 目录信息
+ */
+export function getFileDirectoryForSave(filePath) {
+    const rootDir = appState.zipRootDirectory;
+    if (!rootDir) return '/';
+    
+    const relPath = getRelativePathFromRoot(filePath, rootDir);
+    if (!relPath) return '/';
+    
+    // 提取文件所在的目录（不包含文件名）
+    const lastSlashIndex = relPath.lastIndexOf('/');
+    if (lastSlashIndex > 0) {
+        return relPath.substring(0, lastSlashIndex);
+    }
+    return '/';
+}
 
