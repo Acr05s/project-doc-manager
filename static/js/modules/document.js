@@ -3621,11 +3621,9 @@ export async function loadMaintainDocumentsList(cycle, docName) {
             console.log('从本地配置获取的文档:', documents);
         }
         
-        // 限制文档数量，避免显示60个文件
-        if (documents.length > 20) {
-            documents = documents.slice(0, 20);
-            console.log('限制文档数量为20个');
-        }
+        // 移除文档数量限制，显示所有文档
+        console.log('显示所有文档，共', documents.length, '个');
+
         
         const documentsList = document.getElementById('documentsList');
         const docCount = document.getElementById('docCount');

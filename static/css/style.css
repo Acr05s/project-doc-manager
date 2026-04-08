@@ -1392,12 +1392,40 @@ body {
 }
 
 .documents-table-container {
-    max-height: 600px;
+    max-height: 800px;
     overflow-y: auto;
     margin-bottom: 20px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     position: relative;
+}
+
+/* 文档内容缩进和展开/收起功能 */
+.document-content {
+    position: relative;
+    transition: max-height 0.3s ease;
+    overflow: hidden;
+}
+
+.document-content.collapsed {
+    max-height: 80px;
+}
+
+.document-content.expanded {
+    max-height: 500px;
+}
+
+.document-toggle {
+    cursor: pointer;
+    color: var(--primary-color);
+    font-size: 12px;
+    text-decoration: underline;
+    margin-top: 5px;
+    display: inline-block;
+}
+
+.document-toggle:hover {
+    color: var(--primary-hover);
 }
 
 .documents-table {
