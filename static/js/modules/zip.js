@@ -167,8 +167,8 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
         // 检查是否当前是根目录
         const isRootDir = appState.zipRootDirectory === dirPath;
         const rootBtnStyle = isRootDir 
-            ? 'background:#28a745;color:white;' 
-            : 'background:#fff;border:1px solid #28a745;color:#28a745;';
+            ? 'background:#28a745 !important;color:white !important;border:1px solid #28a745 !important;' 
+            : 'background:#fff !important;border:1px solid #28a745 !important;color:#28a745 !important;';
         const rootBtnText = isRootDir ? '✓ 已设为根目录' : '设为根目录';
 
         html += `
@@ -177,16 +177,16 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
                      style="display:flex;align-items:center;gap:6px;padding:5px 10px;
                             background:linear-gradient(135deg,#e8f0fe,#f0f5ff);
                             border:1px solid #d0ddf5;border-radius:5px;
-                            cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;">
+                            cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;position:relative;">
                     <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;">▼</span>
                     <input type="checkbox" class="zip-dir-checkbox" data-dir="${escapedDirPath}"
                            ${dirChecked ? 'checked' : ''}
                            style="cursor:pointer;flex-shrink:0;"
                            onclick="event.stopPropagation();" />
-                    <span class="dir-name-label" style="flex:1;">📁 ${dirNameHtml}</span>
+                    <span class="dir-name-label" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📁 ${dirNameHtml}</span>
                     ${countBadge}
                     <button class="set-root-btn" data-dir="${escapedDirPath}"
-                            style="${rootBtnStyle}padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;"
+                            style="${rootBtnStyle}padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0;margin-left:8px;display:inline-block;min-width:80px;"
                             onclick="event.stopPropagation(); window.setZipRootDirectory('${escapedDirPath}');">
                         ${rootBtnText}
                     </button>
