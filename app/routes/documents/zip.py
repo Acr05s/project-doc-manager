@@ -289,6 +289,9 @@ def start_zip_match():
                         
                         print(f"[ZIP匹配] ZIP记录文件路径: {zip_uploads_file}", flush=True)
                         
+                        # 确保项目目录存在
+                        zip_uploads_file.parent.mkdir(parents=True, exist_ok=True)
+                        
                         # 生成唯一ID
                         zip_id = str(uuid.uuid4())[:8]
                         

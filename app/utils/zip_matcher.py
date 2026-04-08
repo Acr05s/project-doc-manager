@@ -519,7 +519,7 @@ class ZipMatcher:
                 # 添加到documents_db（内存缓存）
                 from app.utils.document_manager import get_manager
                 doc_manager = get_manager()
-                doc_manager.documents_db[doc_id] = {
+                doc_info_dict = {
                     'cycle': cycle,
                     'doc_name': doc_name,
                     'filename': source_path.name,
@@ -540,6 +540,29 @@ class ZipMatcher:
                     'file_size': source_path.stat().st_size,
                     'archived': True  # 设置归档状态
                 }
+                doc_manager.documents_db[doc_id] = doc_info_dict
+                
+                # 同时写入 documents.db（持久化，服务重启后不丢失）
+                if project_name:
+                    try:
+                        from app.utils.db_manager import get_project_documents_db
+                        proj_db = get_project_documents_db(project_name)
+                        proj_db.add_document(
+                            doc_id=doc_id,
+                            project_id='',
+                            project_name=project_name,
+                            cycle=cycle,
+                            doc_name=doc_name,
+                            file_path=relative_path,
+                            file_size=source_path.stat().st_size,
+                            file_type=source_path.suffix.lower(),
+                            original_filename=source_path.name,
+                            directory=directory,
+                            source=f'ZIP导入: {zip_dir_name}'
+                        )
+                        logger.info(f"[ZIP归档] 文档已写入 documents.db: {doc_id}")
+                    except Exception as db_err:
+                        logger.warning(f"[ZIP归档] 写入 documents.db 失败（不影响主流程）: {db_err}")
             
             return source_path
             
