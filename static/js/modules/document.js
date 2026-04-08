@@ -1369,8 +1369,10 @@ async function loadProgressivePreview(docId, fileExt) {
                 // 显示第一页PDF，并添加提示
                 previewBody.innerHTML = `
                     <div style="position: relative; width: 100%; height: 80vh;">
-                        <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" 
-                            style="width: 100%; height: 100%; border: none;"></iframe>
+                        <div class="preview-content preview-landscape">
+                            <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" 
+                                style="width: 100%; height: 100%; border: none;"></iframe>
+                        </div>
                         <div id="pdfProgressHint" style="position: absolute; top: 10px; right: 10px; 
                             background: rgba(255,255,255,0.95); padding: 10px 16px; border-radius: 6px; 
                             box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 13px; color: #666;
@@ -1403,8 +1405,10 @@ async function loadProgressivePreview(docId, fileExt) {
                         // 延迟后切换到完整PDF
                         setTimeout(() => {
                             previewBody.innerHTML = `
-                                <iframe src="${fullPreviewUrl}" class="preview-iframe" frameborder="0" 
-                                    style="width: 100%; height: 80vh; border: none;"></iframe>
+                                <div class="preview-content preview-landscape">
+                                    <iframe src="${fullPreviewUrl}" class="preview-iframe" frameborder="0" 
+                                        style="width: 100%; height: 80vh; border: none;"></iframe>
+                                </div>
                             `;
                         }, 1500);
                     } else if (checkCount >= maxChecks) {
@@ -1431,8 +1435,10 @@ async function loadProgressivePreview(docId, fileExt) {
                 } else {
                     // 使用隐藏 iframe + onload 检测，防止 PDF URL 返回 JSON 错误时直接显示原文
                     previewBody.innerHTML = `
-                        <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" 
-                            style="width: 100%; height: 80vh; border: none;"></iframe>
+                        <div class="preview-content preview-landscape">
+                            <iframe src="${viewUrl}" class="preview-iframe" frameborder="0" 
+                                style="width: 100%; height: 80vh; border: none;"></iframe>
+                        </div>
                         <div id="iframeLoadChecker" style="display:none;"></div>
                     `;
                     // 检测 iframe 是否加载了 JSON 错误页面
