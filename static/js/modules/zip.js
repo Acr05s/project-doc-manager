@@ -174,19 +174,19 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
         html += `
             <div class="directory-group" data-dir-group="${escapedDirPath}" style="margin-left:${indent}px; margin-bottom:4px;">
                 <div class="directory-header zip-dir-row" data-dir="${escapedDirPath}"
-                     style="display:flex;align-items:center;gap:6px;padding:5px 10px;
+                     style="display:flex;align-items:center;gap:4px;padding:5px 8px;
                             background:linear-gradient(135deg,#e8f0fe,#f0f5ff);
                             border:1px solid #d0ddf5;border-radius:5px;
-                            cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;position:relative;">
-                    <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;">▼</span>
+                            cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;flex-wrap:nowrap;">
+                    <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;flex-shrink:0;">▼</span>
                     <input type="checkbox" class="zip-dir-checkbox" data-dir="${escapedDirPath}"
                            ${dirChecked ? 'checked' : ''}
                            style="cursor:pointer;flex-shrink:0;"
                            onclick="event.stopPropagation();" />
-                    <span class="dir-name-label" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📁 ${dirNameHtml}</span>
+                    <span class="dir-name-label" style="flex:1;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">📁 ${dirNameHtml}</span>
                     ${countBadge}
                     <button class="set-root-btn" data-dir="${escapedDirPath}"
-                            style="${rootBtnStyle}padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0;margin-left:8px;display:inline-block;min-width:80px;"
+                            style="${rootBtnStyle}padding:2px 6px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;white-space:nowrap;"
                             onclick="event.stopPropagation(); window.setZipRootDirectory('${escapedDirPath}');">
                         ${rootBtnText}
                     </button>
