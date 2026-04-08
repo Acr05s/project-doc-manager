@@ -2230,8 +2230,7 @@ def search_zip_files():
                 'used_by': used_by   # 被哪些文档使用
             })
 
-            if len(results) >= 300:
-                break
+            # 移除文件数量限制，显示所有匹配的文件
 
         return jsonify({'status': 'success', 'files': results, 'total': len(results)})
     except Exception as e:

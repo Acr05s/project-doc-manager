@@ -748,8 +748,15 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     </div>
                                 ` : '';
                                 
+                                // 如果文件较多，添加展开/收起功能
+                                const maxFilesToShow = 10;
+                                const totalFiles = directoryDocs.length;
+                                const hasMoreFiles = totalFiles > maxFilesToShow;
+                                const filesToShow = hasMoreFiles ? directoryDocs.slice(0, maxFilesToShow) : directoryDocs;
+                                const expandId = `expand-${cycle}-${doc.name}-${directory.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                                
                                 // 生成该目录下的文件列表
-                                const filesHtml = directoryDocs.map(d => {
+                                const renderFileRow = (d, isHidden = false) => {
                                     // 辅助函数：获取字段值（支持带下划线前缀）
                                     const getField = (name) => d[name] !== undefined ? d[name] : d[`_${name}`];
                                     
@@ -938,9 +945,23 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         ${attrParts.length > 0 ? `<span class="doc-attrs" style="margin-left: 8px;">${attrParts.join(' ')}</span>` : ''}
                                         ${missingHtml}
                                     </div>`;
-                                }).join('');
+                                };
                                 
-                                return directoryTitleHtml + filesHtml;
+                                // 渲染可见文件
+                                const visibleFilesHtml = filesToShow.map(d => renderFileRow(d)).join('');
+                                
+                                // 渲染隐藏文件（如果有）
+                                const hiddenFilesHtml = hasMoreFiles ? `
+                                    <div id="${expandId}-hidden" class="hidden-files" style="display: none;">
+                                        ${directoryDocs.slice(maxFilesToShow).map(d => renderFileRow(d)).join('')}
+                                    </div>
+                                    <div class="expand-toggle" style="margin: 8px 0 8px 20px; padding: 6px 12px; background: #e3f2fd; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: #1976d2; font-size: 13px; font-weight: 500;" onclick="toggleFileExpand('${expandId}')">
+                                        <span id="${expandId}-icon">▼</span>
+                                        <span id="${expandId}-text">展开更多 ${totalFiles - maxFilesToShow} 个文件</span>
+                                    </div>
+                                ` : '';
+                                
+                                return directoryTitleHtml + visibleFilesHtml + hiddenFilesHtml;
                             }).join('')
                             : '<span class="doc-no-files">暂无文件</span>';
 
@@ -1060,6 +1081,29 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     `;
     
     elements.contentArea.innerHTML = html;
+}
+
+/**
+ * 切换文件列表的展开/收起状态
+ * @param {string} expandId - 展开区域的ID
+ */
+window.toggleFileExpand = function(expandId) {
+    const hiddenDiv = document.getElementById(`${expandId}-hidden`);
+    const icon = document.getElementById(`${expandId}-icon`);
+    const text = document.getElementById(`${expandId}-text`);
+    
+    if (hiddenDiv && icon && text) {
+        const isHidden = hiddenDiv.style.display === 'none';
+        if (isHidden) {
+            hiddenDiv.style.display = 'block';
+            icon.textContent = '▲';
+            text.textContent = text.textContent.replace('展开', '收起').replace('个文件', '个文件');
+        } else {
+            hiddenDiv.style.display = 'none';
+            icon.textContent = '▼';
+            text.textContent = text.textContent.replace('收起', '展开');
+        }
+    }
 }
 
 /**
