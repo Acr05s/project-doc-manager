@@ -1612,7 +1612,7 @@ def select_files():
                 'source': 'select',
                 'file_size': file_path.stat().st_size,
                 'doc_id': doc_id,
-                'directory': source_dir if source_dir else '/',  # 目录：默认根目录
+                'directory': '/',  # 从ZIP选择的文件不保留目录结构，统一放到根目录
                 'custom_attrs': custom_attributes if 'custom_attributes' in dir() else {}  # 自定义属性
             }
             
@@ -2672,7 +2672,7 @@ def archive_from_zip():
             'detected_seal': detected_seal,
             'seal_confidence': 0.0,
             'file_size': dest_path.stat().st_size,
-            'directory': source_dir if source_dir else '/',  # 目录：默认根目录
+            'directory': '/',  # 从ZIP选择的文件不保留目录结构，统一放到根目录
             'custom_attrs': {}  # 自定义属性（归档时不携带）
         }
 
@@ -2706,7 +2706,7 @@ def archive_from_zip():
                     'upload_time': datetime.now().isoformat(),
                     'source': 'zip',
                     'doc_id': doc_id,
-                    'directory': source_dir if source_dir else '/',  # 目录：默认根目录
+                    'directory': '/',  # 从ZIP选择的文件不保留目录结构，统一放到根目录
                     'custom_attrs': {}  # 自定义属性（归档时不携带）
                 })
                 
