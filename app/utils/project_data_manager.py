@@ -297,7 +297,12 @@ class ProjectDataManager:
             return False
     
     def load_documents_index(self, project_name: str) -> Dict[str, Any]:
-        """加载文档索引（优先从数据库读取，质量检测后决定是否回退）
+        """加载文档索引（优先从 projects_index.db 读取，回退到 documents.db 和 JSON 文件）
+        
+        读取优先级：
+        1. projects_index.db 的 project_configs 表（config_type='documents_index'）—— save_full_config 的写入目标
+        2. 项目 documents.db 的 documents 表 —— 单条文档操作的写入目标
+        3. JSON 文件 —— 兼容旧数据
         
         Args:
             project_name: 项目名称
@@ -305,7 +310,27 @@ class ProjectDataManager:
         Returns:
             Dict: 文档索引数据
         """
-        # 1. 尝试从数据库加载
+        # 0. 尝试从 projects_index.db 的 project_configs 表加载
+        #    这是 save_full_config 写入 documents_index 的位置，数据最全
+        index_db = self._get_index_db()
+        if index_db:
+            try:
+                db_project = index_db.get_project_by_name(project_name)
+                if db_project:
+                    project_id = db_project['id']
+                    stored_index = self._db_load_config(project_id, 'documents_index')
+                    if stored_index and 'documents' in stored_index:
+                        docs_dict = stored_index['documents']
+                        if docs_dict:  # 非空
+                            logger.info(f"从 projects_index.db 加载了 {len(docs_dict)} 个文档: {project_name}")
+                            return {
+                                'documents': docs_dict,
+                                'updated_time': stored_index.get('updated_time', datetime.now().isoformat())
+                            }
+            except Exception as e:
+                logger.warning(f"从 projects_index.db 加载 documents_index 失败: {e}")
+        
+        # 1. 尝试从 documents.db 加载
         db = self._get_project_db(project_name)
         if db is not None:
             try:
@@ -327,7 +352,7 @@ class ProjectDataManager:
                             f"回退到 documents.db: {project_name}"
                         )
                     else:
-                        logger.info(f"从数据库加载了 {len(documents_dict)} 个文档: {project_name}")
+                        logger.info(f"从 documents.db 加载了 {len(documents_dict)} 个文档: {project_name}")
                         return {
                             'documents': documents_dict,
                             'updated_time': datetime.now().isoformat()

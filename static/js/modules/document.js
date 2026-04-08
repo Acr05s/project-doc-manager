@@ -788,7 +788,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
                                     
                                     // 显示自定义属性 - 同时显示已完成和未完成的
-                                    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id']);
+                                    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
                                     
                                     // 获取文档要求中的自定义属性（用于对比）
                                     const cycleDocs = appState.projectConfig?.documents?.[cycle];
@@ -3671,11 +3671,58 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                                             const docId = doc.doc_id || doc.id || `${doc.cycle || doc.cycle_key || 'unknown'}_${doc.doc_name || doc.name || 'unknown'}_${doc.upload_time || doc.filename || Date.now()}`;
                                             const zipInfo = doc.source === 'zip' ? (doc.zip_name || doc.zip_file || 'ZIP导入') : '';
                                             const zipPath = doc.zip_path || doc.rel_path || '';
+
+                                            // 构建附加属性状态标签（复用主页面的逻辑）
+                                            const getField = (name) => doc[name] !== undefined ? doc[name] : doc[`_${name}`];
+                                            const attrParts = [];
+                                            const aDocDate = getField('doc_date');
+                                            const aSigner = getField('signer');
+                                            const aPartyASigner = getField('party_a_signer');
+                                            const aPartyBSigner = getField('party_b_signer');
+                                            const aSignDate = getField('sign_date');
+                                            const aNoSignature = getField('no_signature');
+                                            const aPartyASeal = getField('party_a_seal');
+                                            const aPartyBSeal = getField('party_b_seal');
+                                            const aHasSealMarked = getField('has_seal_marked') || getField('has_seal');
+                                            const aNoSeal = getField('no_seal');
+                                            const aOtherSeal = getField('other_seal');
+                                            const aNotInvolved = getField('not_involved');
+
+                                            if (aDocDate) attrParts.push(`📅${aDocDate}`);
+                                            if (aSigner) attrParts.push(`✍️${aSigner}`);
+                                            if (aPartyASigner) attrParts.push(`🏢甲:${aPartyASigner}`);
+                                            if (aPartyBSigner) attrParts.push(`🏭乙:${aPartyBSigner}`);
+                                            if (aSignDate) attrParts.push(`📆${aSignDate}`);
+                                            if (aNoSignature) attrParts.push('❌不签字');
+                                            if (aPartyASeal) attrParts.push('🏢甲方盖章');
+                                            if (aPartyBSeal) attrParts.push('🏭乙方盖章');
+                                            if (aHasSealMarked) attrParts.push('🔖');
+                                            if (aNoSeal) attrParts.push('❌不盖章');
+                                            if (aOtherSeal) attrParts.push(`📍${aOtherSeal}`);
+                                            if (aNotInvolved) attrParts.push('🚫本次不涉及');
+
+                                            // 显示自定义属性
+                                            const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
+                                            const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+                                            customDefs.forEach(attrDef => {
+                                                const value = getField(attrDef.id);
+                                                const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
+                                                if (isCompleted) {
+                                                    if (attrDef.type === 'checkbox') {
+                                                        attrParts.push(`📌${attrDef.name}`);
+                                                    } else {
+                                                        attrParts.push(`📌${attrDef.name}: ${value}`);
+                                                    }
+                                                }
+                                            });
+                                            const attrStr = attrParts.length > 0 ? attrParts.join(' ') : '';
+
                                             return `
                                                 <div class="document-item" style="margin-bottom: 8px; padding: 10px; background: #fafafa; border-radius: 4px; border: 1px solid #eee;">
                                                     <input type="checkbox" class="document-checkbox" data-doc-id="${docId}">
                                                     <div class="document-info" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
                                                         <span class="document-name" onclick="previewDocument('${docId}')" style="cursor: pointer; color: #1890ff;">${doc.original_filename || doc.filename || '未知文件名'}</span>
+                                                        ${attrStr ? `<div class="document-attrs" style="font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; line-height: 1.6;">${attrStr}</div>` : ''}
                                                         <div class="document-meta" style="font-size: 12px; color: #666; display: flex; gap: 15px; flex-wrap: wrap;">
                                                             ${zipInfo ? `<span class="document-zip" title="来源: ${zipInfo}${zipPath ? ' - ' + zipPath : ''}">
                                                                 📦 ${zipInfo}${zipPath ? ' (' + zipPath + ')' : ''}
