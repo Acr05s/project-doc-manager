@@ -500,7 +500,8 @@ class ZipMatcher:
             zip_dir_name = Path(zip_dir).name if zip_dir else '未知目录'
             
             if not duplicate:
-                project_config['documents'][cycle]['uploaded_docs'].append({
+                # 构建文档信息字典
+                doc_info = {
                     'doc_name': doc_name,
                     'filename': source_path.name,
                     'original_filename': source_path.name,
@@ -513,8 +514,13 @@ class ZipMatcher:
                     'upload_time': datetime.now().isoformat(),
                     'source': f'ZIP导入: {zip_dir_name}',
                     'doc_id': doc_id,
-                    'archived': True  # 设置归档状态
-                })
+                    'archived': True,  # 设置归档状态
+                    'cycle': cycle,  # 确保 cycle 字段存在
+                    'directory': directory or '/',  # 确保 directory 字段存在
+                    'file_size': source_path.stat().st_size  # 确保 file_size 字段存在
+                }
+                
+                project_config['documents'][cycle]['uploaded_docs'].append(doc_info)
                 
                 # 添加到documents_db（内存缓存）
                 from app.utils.document_manager import get_manager
@@ -538,7 +544,9 @@ class ZipMatcher:
                     'upload_time': datetime.now().isoformat(),
                     'source': f'ZIP导入: {zip_dir_name}',
                     'file_size': source_path.stat().st_size,
-                    'archived': True  # 设置归档状态
+                    'archived': True,  # 设置归档状态
+                    'directory': directory or '/',
+                    'doc_id': doc_id  # 确保 doc_id 字段存在
                 }
                 doc_manager.documents_db[doc_id] = doc_info_dict
                 
@@ -563,6 +571,18 @@ class ZipMatcher:
                         logger.info(f"[ZIP归档] 文档已写入 documents.db: {doc_id}")
                     except Exception as db_err:
                         logger.warning(f"[ZIP归档] 写入 documents.db 失败（不影响主流程）: {db_err}")
+                
+                # 同时写入 documents_index.json（额外的持久化保障）
+                if project_name:
+                    try:
+                        from app.utils.project_data_manager import ProjectDataManager
+                        from app.utils.base import get_config
+                        cfg = get_config()
+                        data_manager = ProjectDataManager(cfg)
+                        data_manager.add_document_to_index(project_name, doc_id, doc_info_dict)
+                        logger.info(f"[ZIP归档] 文档已写入 documents_index.json: {doc_id}")
+                    except Exception as idx_err:
+                        logger.warning(f"[ZIP归档] 写入 documents_index.json 失败（不影响主流程）: {idx_err}")
             
             return source_path
             

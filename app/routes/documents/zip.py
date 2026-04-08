@@ -279,8 +279,67 @@ def start_zip_match():
                 if result['status'] == 'success':
                     # 保存项目配置（包含匹配结果）
                     print(f"[ZIP匹配] 保存项目配置")
+                    print(f"[ZIP匹配] 项目配置中的 documents 键: {list(project_config.get('documents', {}).keys())}")
+                    
+                    # 统计上传的文档数量
+                    total_uploaded = 0
+                    for cycle, cycle_info in project_config.get('documents', {}).items():
+                        if isinstance(cycle_info, dict) and 'uploaded_docs' in cycle_info:
+                            uploaded_count = len(cycle_info['uploaded_docs'])
+                            total_uploaded += uploaded_count
+                            print(f"[ZIP匹配] 周期 {cycle}: {uploaded_count} 个已上传文档")
+                    print(f"[ZIP匹配] 总共 {total_uploaded} 个已上传文档")
+                    
+                    # 确保数据同步到所有存储位置
+                    try:
+                        from app.utils.project_data_manager import ProjectDataManager
+                        from app.utils.base import get_config
+                        cfg = get_config()
+                        data_manager = ProjectDataManager(cfg)
+                        
+                        # 直接将匹配结果中的文档保存到数据库
+                        archived_files = result.get('archived_files', [])
+                        for af in archived_files:
+                            try:
+                                cycle = af.get('cycle')
+                                doc_name = af.get('doc_name')
+                                target_path = af.get('target', '')
+                                source_path = af.get('source', '')
+                                
+                                if cycle and doc_name and target_path:
+                                    # 生成文档ID
+                                    from datetime import datetime
+                                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                    doc_id = f"{cycle}_{doc_name}_{timestamp}"
+                                    
+                                    # 写入 documents.db
+                                    from app.utils.db_manager import get_project_documents_db
+                                    proj_db = get_project_documents_db(project_name)
+                                    proj_db.add_document(
+                                        doc_id=doc_id,
+                                        project_id='',
+                                        project_name=project_name,
+                                        cycle=cycle,
+                                        doc_name=doc_name,
+                                        file_path=target_path,
+                                        file_size=0,
+                                        file_type=Path(target_path).suffix.lower(),
+                                        original_filename=Path(source_path).name,
+                                        directory='/',
+                                        source=f'ZIP导入: {Path(zip_path).name}'
+                                    )
+                                    logger.info(f"[ZIP匹配] 文档已同步到 documents.db: {doc_id}")
+                            except Exception as sync_err:
+                                logger.warning(f"[ZIP匹配] 同步文档到数据库失败: {sync_err}")
+                    except Exception as e:
+                        logger.warning(f"[ZIP匹配] 数据同步过程出错: {e}")
+                    
                     save_result = doc_manager.save_project(project_config)
                     print(f"[ZIP匹配] 项目配置保存结果: {save_result}")
+                    
+                    # 验证保存是否成功
+                    if save_result.get('status') != 'success':
+                        logger.error(f"[ZIP匹配] 项目配置保存失败: {save_result}")
                     
                     # 添加ZIP上传记录
                     try:

@@ -330,26 +330,38 @@ class ProjectDataManager:
             except Exception as e:
                 logger.warning(f"从 projects_index.db 加载 documents_index 失败: {e}")
         
-        # 1. 尝试从 documents.db 加载
+        # 1. 尝试从项目的 documents.db 加载
         db = self._get_project_db(project_name)
         if db is not None:
             try:
                 docs = db.get_documents(project_id='')
                 if docs:
-                    documents_dict = {doc['doc_id']: doc for doc in docs}
+                    documents_dict = {}
+                    for doc in docs:
+                        # 确保 doc_id 存在
+                        doc_id = doc.get('doc_id')
+                        if not doc_id:
+                            # 如果没有 doc_id，尝试从其他字段生成
+                            doc_id = f"{doc.get('cycle', 'unknown')}_{doc.get('doc_name', 'unknown')}_{doc.get('upload_time', '')}"
+                            doc['doc_id'] = doc_id
+                        documents_dict[doc_id] = doc
                     
-                    # 数据质量检测：documents.db 没有 file_name 列，改用 file_path 前缀检测
-                    # documents_index 损坏时 file_path 格式如 'mn7edg7k5...\\10、运维\\xxx.docx'（反斜杠+无 uploads/）
-                    # documents.db 正确时 file_path 格式如 'uploads/mn7edg7k5.../10、运维/xxx.docx'（正斜杠+有 uploads/）
-                    bad_path_count = sum(1 for d in documents_dict.values() if not d.get('file_path', '').startswith('uploads/'))
+                    # 数据质量检测：检查 file_path 是否有效
+                    # 有效的路径格式：{项目名}/uploads/... 或 uploads/...
+                    def _is_valid_file_path(fp):
+                        if not fp:
+                            return False
+                        fp = fp.replace('\\', '/')
+                        return 'uploads/' in fp or fp.startswith(project_name + '/')
+                    
+                    bad_path_count = sum(1 for d in documents_dict.values() if not _is_valid_file_path(d.get('file_path', '')))
                     total = len(documents_dict)
                     bad_ratio = bad_path_count / total if total > 0 else 0
                     
                     if bad_ratio > 0.5:
-                        # 数据损坏率超过 50%，回退到 documents.db
                         logger.warning(
                             f"documents_index 数据损坏率 {bad_ratio:.0%}（{bad_path_count}/{total} file_path 格式错误），"
-                            f"回退到 documents.db: {project_name}"
+                            f"跳过 documents.db 数据: {project_name}"
                         )
                     else:
                         logger.info(f"从 documents.db 加载了 {len(documents_dict)} 个文档: {project_name}")
@@ -358,21 +370,7 @@ class ProjectDataManager:
                             'updated_time': datetime.now().isoformat()
                         }
             except Exception as db_err:
-                logger.warning(f"从数据库加载失败，回退到JSON: {db_err}")
-        
-        # 2. 回退到 documents.db（各项目的独立数据库，更可靠）
-        if db is not None:
-            try:
-                docs = db.get_documents(project_id='')
-                if docs:
-                    documents_dict = {doc['doc_id']: doc for doc in docs}
-                    logger.info(f"从 documents.db 加载了 {len(documents_dict)} 个文档: {project_name}")
-                    return {
-                        'documents': documents_dict,
-                        'updated_time': datetime.now().isoformat()
-                    }
-            except Exception as db_fallback_err:
-                logger.warning(f"从 documents.db 加载失败: {db_fallback_err}")
+                logger.warning(f"从数据库加载失败: {db_err}")
         
         # 3. 回退到JSON文件（最后兜底）
         try:
