@@ -4262,6 +4262,7 @@ function showReportModal(reportData) {
                                                                                     if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
                                                                                     return null;
                                                                                 };
+                                                                                if (!hasSignRequirement) return '';
                                                                                 const hasNoSign = getDocValue('no_signature');
                                                                                 const hasSigner = getDocValue('signer') || getDocValue('party_a_signer') || getDocValue('party_b_signer');
                                                                                 if (hasNoSign) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无签字</span>';
