@@ -1051,7 +1051,9 @@ def get_cycle_progress():
                         completed_count += 1
                     else:
                         # 有要求时，检查签名和盖章
-                        has_signer = any(d.get('signer') for d in uploaded_docs)
+                        has_signer = any(d.get('signer') or d.get('party_a_signer') or d.get('party_b_signer') for d in uploaded_docs)
+                        has_party_a_signer = any(d.get('party_a_signer') or d.get('signer') for d in uploaded_docs)
+                        has_party_b_signer = any(d.get('party_b_signer') or d.get('signer') for d in uploaded_docs)
                         has_party_a_seal = any(d.get('party_a_seal') for d in uploaded_docs)
                         has_party_b_seal = any(d.get('party_b_seal') for d in uploaded_docs)
                         has_seal = any(d.get('has_seal_marked') or d.get('has_seal') or d.get('party_a_seal') or d.get('party_b_seal') for d in uploaded_docs)
@@ -1073,11 +1075,11 @@ def get_cycle_progress():
                                 met_requirements += 1
                         if require_party_a_signer:
                             total_requirements += 1
-                            if has_signer:
+                            if has_party_a_signer:
                                 met_requirements += 1
                         if require_party_b_signer:
                             total_requirements += 1
-                            if has_signer:
+                            if has_party_b_signer:
                                 met_requirements += 1
                         if require_owner_signer:
                             total_requirements += 1

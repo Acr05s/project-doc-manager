@@ -3964,7 +3964,7 @@ export async function generateReport() {
                                     if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
                                     return null;
                                 };
-                                return getDocValue('signer') || getDocValue('no_signature');
+                                return getDocValue('signer') || getDocValue('party_a_signer') || getDocValue('party_b_signer') || getDocValue('no_signature');
                             });
                             if (hasSigned) signedTypeCount++;
                         }
@@ -4263,7 +4263,7 @@ function showReportModal(reportData) {
                                                                                     return null;
                                                                                 };
                                                                                 const hasNoSign = getDocValue('no_signature');
-                                                                                const hasSigner = getDocValue('signer');
+                                                                                const hasSigner = getDocValue('signer') || getDocValue('party_a_signer') || getDocValue('party_b_signer');
                                                                                 if (hasNoSign) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无签字</span>';
                                                                                 if (hasSigner) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有签字</span>';
                                                                                 return '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无签字</span>';
