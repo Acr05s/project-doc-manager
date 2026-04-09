@@ -167,8 +167,8 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
         // 检查是否当前是根目录
         const isRootDir = appState.zipRootDirectory === dirPath;
         const rootBtnStyle = isRootDir 
-            ? 'background:#28a745 !important;color:white !important;border:1px solid #28a745 !important;' 
-            : 'background:#fff !important;border:1px solid #28a745 !important;color:#28a745 !important;';
+            ? 'background:#ff4444 !important;color:white !important;border:2px solid #cc0000 !important;' 
+            : 'background:#ffcccc !important;border:2px solid #ff4444 !important;color:#cc0000 !important;';
         const rootBtnText = isRootDir ? '✓ 已设为根目录' : '设为根目录';
 
         html += `
@@ -186,7 +186,7 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
                     <span class="dir-name-label" style="flex:1;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">📁 ${dirNameHtml}</span>
                     ${countBadge}
                     <button class="set-root-btn" data-dir="${escapedDirPath}"
-                            style="${rootBtnStyle}padding:2px 6px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;white-space:nowrap;"
+                            style="${rootBtnStyle}padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.2);font-weight:bold;"
                             onclick="event.stopPropagation(); window.setZipRootDirectory('${escapedDirPath}');">
                         ${rootBtnText}
                     </button>
