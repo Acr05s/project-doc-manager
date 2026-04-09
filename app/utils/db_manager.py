@@ -364,6 +364,20 @@ class ProjectsIndexDB(DatabaseManager):
         conn.execute('CREATE INDEX IF NOT EXISTS idx_config_project ON project_configs(project_id)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_config_type ON project_configs(config_type)')
 
+        # 项目统计信息全局视图表（从各项目 documents.db 同步汇总）
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS project_stats (
+                project_id TEXT PRIMARY KEY,
+                project_name TEXT NOT NULL,
+                total_docs INTEGER DEFAULT 0,
+                archived_docs INTEGER DEFAULT 0,
+                not_involved_docs INTEGER DEFAULT 0,
+                total_file_size INTEGER DEFAULT 0,
+                last_sync_time TEXT,
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
         # PDF转换缓存记录表
         conn.execute('''
             CREATE TABLE IF NOT EXISTS pdf_conversions (
@@ -763,6 +777,178 @@ class ProjectsIndexDB(DatabaseManager):
         return {
             'projects': projects,
             'zip_uploads': zip_uploads
+        }
+
+    # ==================== 项目统计信息同步 ====================
+
+    def sync_project_stats(self, project_id: str, project_name: str = None) -> bool:
+        """同步指定项目的统计信息到全局视图表
+        
+        从项目的 documents.db 读取统计信息，汇总后写入 project_stats 表
+        
+        Args:
+            project_id: 项目ID
+            project_name: 项目名称（可选，不传则从 projects 表查询）
+        
+        Returns:
+            bool: 是否同步成功
+        """
+        try:
+            # 获取项目名称
+            if project_name is None:
+                project = self.get_project(project_id)
+                if not project:
+                    print(f"[SyncStats] 项目不存在: {project_id}")
+                    return False
+                project_name = project.get('name')
+
+            # 获取项目文档数据库路径
+            from .base import get_config
+            config = get_config()
+            projects_base = config.get('projects_base_folder', 'projects')
+            doc_db_path = os.path.join(projects_base, project_name, 'data', 'db', 'documents.db')
+
+            # 如果项目数据库不存在，记录为0
+            if not os.path.exists(doc_db_path):
+                sql = '''
+                    INSERT INTO project_stats (project_id, project_name, total_docs, archived_docs, 
+                        not_involved_docs, total_file_size, last_sync_time)
+                    VALUES (?, ?, 0, 0, 0, 0, ?)
+                    ON CONFLICT(project_id) DO UPDATE SET
+                        total_docs = 0,
+                        archived_docs = 0,
+                        not_involved_docs = 0,
+                        total_file_size = 0,
+                        last_sync_time = excluded.last_sync_time
+                '''
+                self.execute_write(sql, (project_id, project_name, datetime.now().isoformat()))
+                return True
+
+            # 从项目数据库读取统计信息
+            try:
+                conn = sqlite3.connect(doc_db_path, timeout=5.0)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT 
+                        COUNT(*) as total_docs,
+                        SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) as archived_docs,
+                        SUM(CASE WHEN status = 'not_involved' THEN 1 ELSE 0 END) as not_involved_docs,
+                        SUM(COALESCE(file_size, 0)) as total_file_size
+                    FROM documents
+                ''')
+                row = cursor.fetchone()
+                conn.close()
+
+                stats = {
+                    'total_docs': row['total_docs'] or 0,
+                    'archived_docs': row['archived_docs'] or 0,
+                    'not_involved_docs': row['not_involved_docs'] or 0,
+                    'total_file_size': row['total_file_size'] or 0
+                }
+            except Exception as e:
+                print(f"[SyncStats] 读取项目数据库失败 {project_name}: {e}")
+                # 记录为0，避免重复报错
+                stats = {'total_docs': 0, 'archived_docs': 0, 'not_involved_docs': 0, 'total_file_size': 0}
+
+            # 更新全局视图表
+            sql = '''
+                INSERT INTO project_stats (project_id, project_name, total_docs, archived_docs, 
+                    not_involved_docs, total_file_size, last_sync_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id) DO UPDATE SET
+                    project_name = excluded.project_name,
+                    total_docs = excluded.total_docs,
+                    archived_docs = excluded.archived_docs,
+                    not_involved_docs = excluded.not_involved_docs,
+                    total_file_size = excluded.total_file_size,
+                    last_sync_time = excluded.last_sync_time
+            '''
+            self.execute_write(sql, (
+                project_id, project_name,
+                stats['total_docs'], stats['archived_docs'],
+                stats['not_involved_docs'], stats['total_file_size'],
+                datetime.now().isoformat()
+            ))
+            return True
+
+        except Exception as e:
+            print(f"[SyncStats] 同步项目统计失败 {project_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def sync_all_project_stats(self) -> Dict[str, int]:
+        """同步所有项目的统计信息
+        
+        Returns:
+            Dict: {'success': 成功数, 'failed': 失败数}
+        """
+        projects = self.list_projects(include_deleted=False)
+        success = 0
+        failed = 0
+
+        for project in projects:
+            project_id = project.get('id')
+            project_name = project.get('name')
+            if self.sync_project_stats(project_id, project_name):
+                success += 1
+            else:
+                failed += 1
+
+        print(f"[SyncStats] 同步完成: {success} 成功, {failed} 失败")
+        return {'success': success, 'failed': failed}
+
+    def get_project_stats(self, project_id: str = None) -> Union[Dict, List[Dict]]:
+        """获取项目统计信息
+        
+        Args:
+            project_id: 项目ID（None则返回所有项目统计）
+        
+        Returns:
+            Dict 或 List[Dict]: 项目统计信息
+        """
+        if project_id:
+            sql = 'SELECT * FROM project_stats WHERE project_id = ?'
+            results = self.execute(sql, (project_id,))
+            return results[0] if results else None
+        else:
+            sql = '''
+                SELECT s.*, p.created_time, p.description 
+                FROM project_stats s
+                LEFT JOIN projects p ON s.project_id = p.id
+                ORDER BY s.total_docs DESC
+            '''
+            return self.execute(sql)
+
+    def get_global_stats(self) -> Dict:
+        """获取全局统计信息
+        
+        Returns:
+            Dict: 所有项目的汇总统计
+        """
+        sql = '''
+            SELECT 
+                COUNT(DISTINCT project_id) as project_count,
+                SUM(total_docs) as total_docs,
+                SUM(archived_docs) as archived_docs,
+                SUM(not_involved_docs) as not_involved_docs,
+                SUM(total_file_size) as total_file_size
+            FROM project_stats
+        '''
+        results = self.execute(sql)
+        if results:
+            row = results[0]
+            return {
+                'project_count': row['project_count'] or 0,
+                'total_docs': row['total_docs'] or 0,
+                'archived_docs': row['archived_docs'] or 0,
+                'not_involved_docs': row['not_involved_docs'] or 0,
+                'total_file_size': row['total_file_size'] or 0,
+                'total_file_size_mb': round((row['total_file_size'] or 0) / (1024 * 1024), 2)
+            }
+        return {
+            'project_count': 0, 'total_docs': 0, 'archived_docs': 0,
+            'not_involved_docs': 0, 'total_file_size': 0, 'total_file_size_mb': 0
         }
 
 

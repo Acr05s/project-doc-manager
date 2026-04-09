@@ -2004,3 +2004,72 @@ def download_package(project_id, task_id):
         import traceback
         traceback.print_exc()
         return jsonify({'status': 'error', 'message': f'下载失败: {str(e)}'}), 500
+
+
+# ========== 项目统计信息 API ==========
+
+@project_bp.route('/stats/sync', methods=['POST'])
+def sync_all_project_stats():
+    """同步所有项目的统计信息"""
+    try:
+        from app.utils.db_manager import get_projects_index_db
+        db = get_projects_index_db()
+        result = db.sync_all_project_stats()
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/stats/sync', methods=['POST'])
+def sync_project_stats(project_id):
+    """同步指定项目的统计信息"""
+    try:
+        from app.utils.db_manager import get_projects_index_db
+        db = get_projects_index_db()
+        success = db.sync_project_stats(project_id)
+        if success:
+            stats = db.get_project_stats(project_id)
+            return jsonify({'status': 'success', 'data': stats})
+        else:
+            return jsonify({'status': 'error', 'message': '同步失败'}), 500
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/stats', methods=['GET'])
+def get_all_project_stats():
+    """获取所有项目的统计信息"""
+    try:
+        from app.utils.db_manager import get_projects_index_db
+        db = get_projects_index_db()
+        stats = db.get_project_stats()
+        return jsonify({'status': 'success', 'data': stats})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/stats', methods=['GET'])
+def get_project_stats(project_id):
+    """获取指定项目的统计信息"""
+    try:
+        from app.utils.db_manager import get_projects_index_db
+        db = get_projects_index_db()
+        stats = db.get_project_stats(project_id)
+        if stats:
+            return jsonify({'status': 'success', 'data': stats})
+        else:
+            return jsonify({'status': 'error', 'message': '项目统计不存在'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/stats/global', methods=['GET'])
+def get_global_stats():
+    """获取全局统计信息"""
+    try:
+        from app.utils.db_manager import get_projects_index_db
+        db = get_projects_index_db()
+        stats = db.get_global_stats()
+        return jsonify({'status': 'success', 'data': stats})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
