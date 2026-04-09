@@ -2601,7 +2601,8 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                 const totalCount = allInDir.length;
                 const selCount = allInDir.filter(f => appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === f.path)).length;
                 const dirChecked = totalCount > 0 && selCount === totalCount;
-                const isRoot = appState.zipRootDirectory === dir.path;
+                const rootDirs = appState.zipRootDirectories || [];
+                const isRoot = rootDirs.includes(dir.path);
                 const rootBtnStyle = isRoot
                     ? 'background:#28a745;color:white;border:1px solid #1e7e34;'
                     : 'background:#fff;border:1px solid #28a745;color:#28a745;';
@@ -2771,7 +2772,7 @@ async function handleSelectArchive() {
         showLoading(true);
         
         // 为每个文件补充目录信息（source_dir），供后端打包时建立子目录
-        const rootDir = appState.zipRootDirectory || '';
+        const rootDirs = (appState.zipRootDirectories || []).slice().sort((a, b) => b.length - a.length); // 最长的优先
         const filesWithDir = selectedFiles.map(file => {
             // 优先使用 appState 中已存的 source_dir，DOM 只作备用
             let sourceDir = file.source_dir;
@@ -2779,13 +2780,18 @@ async function handleSelectArchive() {
                 const itemEl = document.querySelector(`#zipFilesList .zip-file-item[data-path="${CSS.escape(file.path)}"]`);
                 sourceDir = itemEl ? (itemEl.dataset.dir || '') : '';
             }
-            // 如果设置了根目录，截取相对路径（去掉根目录前缀）
-            if (rootDir && sourceDir) {
-                const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
-                if (sourceDir === rootDir) {
-                    sourceDir = '';  // 文件直接在根目录下，source_dir 为空（不建子目录）
-                } else if (sourceDir.startsWith(rootPrefix)) {
-                    sourceDir = sourceDir.slice(rootPrefix.length);  // 去掉根目录前缀
+            // 找到文件所属的最深选中目录，去掉前缀保留相对路径
+            if (rootDirs.length > 0 && sourceDir !== undefined) {
+                for (const rootDir of rootDirs) {
+                    if (!rootDir) continue;
+                    const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
+                    if (sourceDir === rootDir) {
+                        sourceDir = '';  // 文件直接在该目录下
+                        break;
+                    } else if (sourceDir.startsWith(rootPrefix)) {
+                        sourceDir = sourceDir.slice(rootPrefix.length);
+                        break;
+                    }
                 }
             }
             return { ...file, source_dir: sourceDir || '' };
@@ -2842,7 +2848,7 @@ export function openUploadModal(cycle, docName) {
     
     appState.currentCycle = cycle;
     appState.currentDocument = docName;
-    appState.zipRootDirectory = '';  // 每次打开弹窗重置根目录选择
+    appState.zipRootDirectories = [];  // 每次打开弹窗重置根目录选择
     
     console.log('[openUploadModal] 更新appState:', { currentCycle: appState.currentCycle, currentDocument: appState.currentDocument });
     
@@ -4789,14 +4795,20 @@ if (typeof window !== 'undefined') {
     window.formatDateInput = formatDateInput;
     window.openMaintainModal = openMaintainModal;
     window.autoSearchFiles = autoSearchFiles;  // HTML 中 oninput 调用
-    // 选择文档弹窗中的"选为上传目录"按钮
+    // 选择文档弹窗中的"选为上传目录"按钮（支持多选，点击切换）
     window.setSelectRootDirectory = function(dirPath) {
-        appState.zipRootDirectory = dirPath;
+        if (!appState.zipRootDirectories) appState.zipRootDirectories = [];
+        const idx = appState.zipRootDirectories.indexOf(dirPath);
+        if (idx >= 0) {
+            appState.zipRootDirectories.splice(idx, 1);  // 已选中 → 取消
+        } else {
+            appState.zipRootDirectories.push(dirPath);   // 未选中 → 选中
+        }
         // 更新所有按钮样式
         const listEl = document.getElementById('zipFilesList');
         if (listEl) {
             listEl.querySelectorAll('.set-root-btn').forEach(btn => {
-                const isThis = btn.dataset.dir === dirPath;
+                const isThis = appState.zipRootDirectories.includes(btn.dataset.dir);
                 btn.style.cssText = isThis
                     ? 'background:#28a745;color:white;border:1px solid #1e7e34;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;'
                     : 'background:#fff;border:1px solid #28a745;color:#28a745;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;';
