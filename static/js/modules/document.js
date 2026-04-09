@@ -828,10 +828,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 attrParts.push(`<span style="color: #dc3545;">✗${attrDef.name}</span>`);
                                             }
                                         } else if (isCompleted) {
-                                            // 非要求但已完成
-                                            if (attrDef.type === 'checkbox') {
-                                                attrParts.push(`📌${attrDef.name}`);
-                                            } else {
+                                            // 非要求但已完成：checkbox 类型不显示（纯勾选无额外信息），仅显示有值的文本类型
+                                            if (attrDef.type !== 'checkbox') {
                                                 attrParts.push(`📌${attrDef.name}: ${value}`);
                                             }
                                         }
@@ -2786,7 +2784,9 @@ async function handleSelectArchive() {
                     if (!rootDir) continue;
                     const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
                     if (sourceDir === rootDir) {
-                        sourceDir = '';  // 文件直接在该目录下
+                        // 文件直接在该根目录下，用根目录最后一级名称作为分组标识
+                        const parts = rootDir.split('/');
+                        sourceDir = parts[parts.length - 1] || rootDir;
                         break;
                     } else if (sourceDir.startsWith(rootPrefix)) {
                         sourceDir = sourceDir.slice(rootPrefix.length);
