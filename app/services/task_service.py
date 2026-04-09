@@ -508,15 +508,35 @@ class TaskService:
                     self._save_tasks()
                     return
                 
-                # 执行转换
+                # 执行转换（在线程内顺序执行，复用 COM 实例）
+                from src.services.pdf_conversion_service import PDFConversionService
+                pdf_service = PDFConversionService()
+                preview_temp_dir = Path('uploads/temp/preview')
+                preview_temp_dir.mkdir(parents=True, exist_ok=True)
+                pdf_service.set_preview_temp_dir(str(preview_temp_dir))
+                
                 converted_count = 0
                 for i, (file_path, doc_id) in enumerate(files_to_convert):
                     if self.tasks_store[task_id]['status'] == 'cancelled':
                         break
                     
                     try:
-                        # 启动单个转换任务
-                        self.start_pdf_conversion_task(file_path, doc_id)
+                        # 检查文件是否存在
+                        if not os.path.exists(file_path):
+                            print(f'转换文件失败，文件不存在: {file_path}')
+                            continue
+                        
+                        # 检查缓存
+                        from src.services.pdf_conversion_record import pdf_conversion_record
+                        file_mtime = os.path.getmtime(file_path)
+                        cache_key = f"{doc_id}_{int(file_mtime)}"
+                        cached = pdf_conversion_record.get_record(cache_key)
+                        if cached and cached.get('pdf_path') and os.path.exists(cached.get('pdf_path', '')):
+                            converted_count += 1
+                            continue
+                        
+                        # 直接在线程内转换（复用 COM 实例）
+                        pdf_service.convert_to_pdf(file_path, doc_id)
                         converted_count += 1
                     except Exception as e:
                         print(f'转换文件失败 {file_path}: {e}')

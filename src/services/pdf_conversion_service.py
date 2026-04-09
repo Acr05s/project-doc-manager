@@ -8,10 +8,12 @@
 1. 优先使用LibreOffice，跨平台，速度快
 2. Windows无LibreOffice时自动回退到 Office COM 接口（comtypes）
 3. COM方案支持所有Office格式，包括旧版 .doc/.xls/.ppt
+4. COM 实例复用，避免每个文件都启动新的 Office 进程
 """
 
 import os
 import platform
+import threading
 from pathlib import Path
 import tempfile
 import subprocess
@@ -181,7 +183,11 @@ class PDFConversionService:
             raise Exception(f"LibreOffice错误: {e.stderr}")
     
     def _convert_with_com(self, input_path, output_path, ext):
-        """使用COM转换（Windows备选，需要Office）"""
+        """使用COM转换（Windows备选，需要Office）
+        
+        复用 Word/Excel/PowerPoint 单例实例，避免每个文件都启动新进程。
+        使用线程锁保证 COM 调用的线程安全。
+        """
         import comtypes.client
         import pythoncom
         
@@ -189,44 +195,193 @@ class PDFConversionService:
         input_path = os.path.abspath(str(input_path))
         output_path = os.path.abspath(str(output_path))
         
-        app = None
+        # 初始化 COM（每个线程都需要初始化一次）
+        pythoncom.CoInitialize()
+        
         try:
-            pythoncom.CoInitialize()
-            
             if ext in ['.doc', '.docx']:
-                app = comtypes.client.CreateObject('Word.Application')
-                app.Visible = False
-                doc = app.Documents.Open(input_path)
-                doc.SaveAs(output_path, FileFormat=17)
-                doc.Close()
-                app.Quit()
-                
-            elif ext in ['.xls', '.xlsx']:
-                app = comtypes.client.CreateObject('Excel.Application')
-                app.Visible = False
-                wb = app.Workbooks.Open(input_path)
-                wb.ExportAsFixedFormat(0, output_path)
-                wb.Close()
-                app.Quit()
-                
-            elif ext in ['.ppt', '.pptx']:
-                app = comtypes.client.CreateObject('PowerPoint.Application')
-                app.Visible = False
-                pres = app.Presentations.Open(input_path)
-                pres.SaveAs(output_path, 32)
-                pres.Close()
-                app.Quit()
-                
-        finally:
-            if app:
+                app = _get_word_app()
                 try:
-                    app.Quit()
-                except:
-                    pass
+                    doc = app.Documents.Open(input_path, ReadOnly=True, Visible=False)
+                    try:
+                        doc.SaveAs(output_path, FileFormat=17)
+                    finally:
+                        doc.Close(SaveChanges=0)
+                except Exception as doc_err:
+                    # 文档打开/保存失败，回收这个实例并抛出异常
+                    print(f"[COM] Word 文档操作失败: {doc_err}")
+                    _release_word_app(force=True)
+                    raise
+            elif ext in ['.xls', '.xlsx']:
+                app = _get_excel_app()
+                try:
+                    wb = app.Workbooks.Open(input_path, ReadOnly=True)
+                    try:
+                        wb.ExportAsFixedFormat(0, output_path)
+                    finally:
+                        wb.Close(SaveChanges=0)
+                except Exception as wb_err:
+                    print(f"[COM] Excel 工作簿操作失败: {wb_err}")
+                    _release_excel_app(force=True)
+                    raise
+            elif ext in ['.ppt', '.pptx']:
+                app = _get_ppt_app()
+                try:
+                    pres = app.Presentations.Open(input_path, ReadOnly=True, WithWindow=False)
+                    try:
+                        pres.SaveAs(output_path, 32)
+                    finally:
+                        pres.Close()
+                except Exception as pres_err:
+                    print(f"[COM] PowerPoint 演示文稿操作失败: {pres_err}")
+                    _release_ppt_app(force=True)
+                    raise
+        finally:
+            pythoncom.CoUninitialize()
+
+
+# ============================================================================
+# COM 单例管理（进程级别复用 Office 实例）
+# ============================================================================
+
+_com_lock = threading.Lock()
+
+# Word 单例
+_word_app = None
+_word_lock = threading.Lock()
+_word_init_thread = None  # 哪个线程初始化的，只有同线程才能用
+
+# Excel 单例
+_excel_app = None
+_excel_lock = threading.Lock()
+_excel_init_thread = None
+
+# PowerPoint 单例
+_ppt_app = None
+_ppt_lock = threading.Lock()
+_ppt_init_thread = None
+
+
+def _get_word_app():
+    """获取或创建 Word COM 单例（线程安全）"""
+    global _word_app, _word_init_thread
+    import comtypes.client
+    
+    with _word_lock:
+        # 如果不是同一线程初始化的，需要回收重建
+        if _word_app is not None and _word_init_thread != threading.current_thread():
+            _release_word_app(force=True)
+        
+        if _word_app is None:
+            print("[COM] 创建新的 Word.Application 实例")
+            _word_app = comtypes.client.CreateObject('Word.Application')
+            _word_app.Visible = False
+            _word_app.DisplayAlerts = 0  # 关闭警告弹窗
+            _word_init_thread = threading.current_thread()
+        return _word_app
+
+
+def _release_word_app(force=False):
+    """释放 Word COM 实例"""
+    global _word_app, _word_init_thread
+    with _word_lock:
+        if _word_app is not None:
             try:
-                pythoncom.CoUninitialize()
+                _word_app.Quit()
             except:
                 pass
+            _word_app = None
+            _word_init_thread = None
+            if force:
+                # 强制杀死残留的 WINWORD.EXE 进程
+                _kill_process('WINWORD.EXE')
+            print("[COM] Word.Application 实例已释放")
+
+
+def _get_excel_app():
+    """获取或创建 Excel COM 单例（线程安全）"""
+    global _excel_app, _excel_init_thread
+    import comtypes.client
+    
+    with _excel_lock:
+        if _excel_app is not None and _excel_init_thread != threading.current_thread():
+            _release_excel_app(force=True)
+        
+        if _excel_app is None:
+            print("[COM] 创建新的 Excel.Application 实例")
+            _excel_app = comtypes.client.CreateObject('Excel.Application')
+            _excel_app.Visible = False
+            _excel_app.DisplayAlerts = False
+            _excel_init_thread = threading.current_thread()
+        return _excel_app
+
+
+def _release_excel_app(force=False):
+    """释放 Excel COM 实例"""
+    global _excel_app, _excel_init_thread
+    with _excel_lock:
+        if _excel_app is not None:
+            try:
+                _excel_app.Quit()
+            except:
+                pass
+            _excel_app = None
+            _excel_init_thread = None
+            if force:
+                _kill_process('EXCEL.EXE')
+            print("[COM] Excel.Application 实例已释放")
+
+
+def _get_ppt_app():
+    """获取或创建 PowerPoint COM 单例（线程安全）"""
+    global _ppt_app, _ppt_init_thread
+    import comtypes.client
+    
+    with _ppt_lock:
+        if _ppt_app is not None and _ppt_init_thread != threading.current_thread():
+            _release_ppt_app(force=True)
+        
+        if _ppt_app is None:
+            print("[COM] 创建新的 PowerPoint.Application 实例")
+            _ppt_app = comtypes.client.CreateObject('PowerPoint.Application')
+            _ppt_app.Visible = False  # PowerPoint 可能不支持 Visible=False，忽略错误
+            _ppt_init_thread = threading.current_thread()
+        return _ppt_app
+
+
+def _release_ppt_app(force=False):
+    """释放 PowerPoint COM 实例"""
+    global _ppt_app, _ppt_init_thread
+    with _ppt_lock:
+        if _ppt_app is not None:
+            try:
+                _ppt_app.Quit()
+            except:
+                pass
+            _ppt_app = None
+            _ppt_init_thread = None
+            if force:
+                _kill_process('POWERPNT.EXE')
+            print("[COM] PowerPoint.Application 实例已释放")
+
+
+def _kill_process(process_name):
+    """强制终止指定进程（Windows）"""
+    if platform.system() != 'Windows':
+        return
+    try:
+        import subprocess
+        subprocess.run(['taskkill', '/F', '/IM', process_name],
+                      capture_output=True, timeout=10)
+    except Exception as e:
+        print(f"[COM] 终止进程 {process_name} 失败: {e}")
+
+
+def release_all_com_apps():
+    """释放所有 COM 实例（用于应用关闭时清理）"""
+    _release_word_app()
+    _release_excel_app()
+    _release_ppt_app()
     
     def convert_first_page_fast(self, input_path, output_path):
         """快速转换文档的第一页（用于大文件预览）
