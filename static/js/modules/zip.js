@@ -167,29 +167,37 @@ function renderDirTreeHtml(treeNode, keyword, depth, parentDir) {
         // 检查是否当前是根目录
         const isRootDir = appState.zipRootDirectory === dirPath;
         const rootBtnStyle = isRootDir 
-            ? 'background:#ff4444 !important;color:white !important;border:2px solid #cc0000 !important;' 
-            : 'background:#ffcccc !important;border:2px solid #ff4444 !important;color:#cc0000 !important;';
+            ? 'background:#28a745;color:white;border:1px solid #1e7e34;' 
+            : 'background:#fff;border:1px solid #28a745;color:#28a745;';
         const rootBtnText = isRootDir ? '✓ 已设为根目录' : '设为根目录';
+        
+        // 为目录标题添加更明显的样式，确保按钮能被看到
+        const directoryHeaderStyle = 'display:flex;align-items:center;gap:4px;padding:8px 12px;'
+            + 'background:linear-gradient(135deg,#e8f0fe,#f0f5ff);'
+            + 'border:1px solid #d0ddf5;border-radius:5px;'
+            + 'cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;'
+            + 'flex-wrap:wrap;min-height:40px;'
 
         html += `
             <div class="directory-group" data-dir-group="${escapedDirPath}" style="margin-left:${indent}px; margin-bottom:4px;">
                 <div class="directory-header zip-dir-row" data-dir="${escapedDirPath}"
-                     style="display:flex;align-items:center;gap:4px;padding:5px 8px;
-                            background:linear-gradient(135deg,#e8f0fe,#f0f5ff);
-                            border:1px solid #d0ddf5;border-radius:5px;
-                            cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;flex-wrap:nowrap;">
-                    <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;flex-shrink:0;">▼</span>
-                    <input type="checkbox" class="zip-dir-checkbox" data-dir="${escapedDirPath}"
-                           ${dirChecked ? 'checked' : ''}
-                           style="cursor:pointer;flex-shrink:0;"
-                           onclick="event.stopPropagation();" />
-                    <span class="dir-name-label" style="flex:1;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">📁 ${dirNameHtml}</span>
-                    ${countBadge}
-                    <button class="set-root-btn" data-dir="${escapedDirPath}"
-                            style="${rootBtnStyle}padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.2);font-weight:bold;"
-                            onclick="event.stopPropagation(); window.setZipRootDirectory('${escapedDirPath}');">
-                        ${rootBtnText}
-                    </button>
+                     style="${directoryHeaderStyle}">
+                    <div style="flex:1;display:flex;align-items:center;gap:4px;">
+                        <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;flex-shrink:0;">▼</span>
+                        <input type="checkbox" class="zip-dir-checkbox" data-dir="${escapedDirPath}"
+                               ${dirChecked ? 'checked' : ''}
+                               style="cursor:pointer;flex-shrink:0;"
+                               onclick="event.stopPropagation();" />
+                        <span class="dir-name-label" style="flex:1;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">📁 ${dirNameHtml}</span>
+                        ${countBadge}
+                    </div>
+                    <div style="flex-shrink:0;">
+                        <button class="set-root-btn" data-dir="${escapedDirPath}"
+                                style="${rootBtnStyle}padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0;white-space:nowrap;font-weight:bold;display:inline-block;visibility:visible;"
+                                onclick="event.stopPropagation(); window.setZipRootDirectory('${escapedDirPath}');">
+                            ${rootBtnText}
+                        </button>
+                    </div>
                 </div>
                 <div class="directory-files zip-dir-children" data-dir-files="${escapedDirPath}" style="display:block;">
                     ${renderDirTreeHtml(childDir, keyword, depth + 1, dirPath)}
@@ -1235,10 +1243,10 @@ window.setZipRootDirectory = function(dirPath) {
     document.querySelectorAll('.set-root-btn').forEach(btn => {
         const btnDir = btn.dataset.dir;
         if (btnDir === dirPath) {
-            btn.style.cssText = 'background:#28a745;color:white;padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;';
+            btn.style.cssText = 'background:#28a745;color:white;border:1px solid #1e7e34;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0;white-space:nowrap;font-weight:bold;display:inline-block;visibility:visible;';
             btn.textContent = '✓ 已设为根目录';
         } else {
-            btn.style.cssText = 'background:#fff;border:1px solid #28a745;color:#28a745;padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;';
+            btn.style.cssText = 'background:#fff;border:1px solid #28a745;color:#28a745;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0;white-space:nowrap;font-weight:bold;display:inline-block;visibility:visible;';
             btn.textContent = '设为根目录';
         }
     });

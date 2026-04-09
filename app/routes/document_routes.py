@@ -2705,7 +2705,7 @@ def archive_from_zip():
                     'upload_time': datetime.now().isoformat(),
                     'source': 'zip',
                     'doc_id': doc_id,
-                    'directory': source_dir if source_dir else '/'  # 使用前端传递的目录信息
+                    'directory': source_dir if source_dir else '/',  # 使用前端传递的目录信息
                     'custom_attrs': {}  # 自定义属性（归档时不携带）
                 })
                 
