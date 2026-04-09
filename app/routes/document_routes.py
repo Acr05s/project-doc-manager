@@ -2671,7 +2671,7 @@ def archive_from_zip():
             'detected_seal': detected_seal,
             'seal_confidence': 0.0,
             'file_size': dest_path.stat().st_size,
-            'directory': '/',  # 从ZIP选择的文件不保留目录结构，统一放到根目录
+            'directory': source_dir if source_dir else '/',  # 使用前端传递的目录信息
             'custom_attrs': {}  # 自定义属性（归档时不携带）
         }
 
