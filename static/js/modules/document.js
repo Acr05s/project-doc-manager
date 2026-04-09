@@ -384,8 +384,11 @@ export async function handleReplaceDocument(e) {
 
 /**
  * 处理文档删除
+ * @param {string} docId - 文档ID
+ * @param {string} cycle - 周期（可选，用于刷新维护弹窗列表）
+ * @param {string} docName - 文档名称（可选，用于刷新维护弹窗列表）
  */
-export async function handleDeleteDocument(docId) {
+export async function handleDeleteDocument(docId, cycle, docName) {
     showConfirmModal(
         '确认删除',
         '确定要删除这个文档吗？此操作不可恢复。',
@@ -410,8 +413,14 @@ export async function handleDeleteDocument(docId) {
                     
                     // 刷新文档列表
                     await renderCycleDocuments(appState.currentCycle);
-                    // 刷新维护页面的文档列表
-                    await loadMaintainDocuments();
+                    // 刷新维护页面的文档列表（使用传入的 cycle/docName 或 appState 中的值）
+                    const refreshCycle = cycle || appState.currentCycle;
+                    const refreshDocName = docName || appState.currentDocument;
+                    if (refreshCycle && refreshDocName) {
+                        await loadMaintainDocumentsList(refreshCycle, refreshDocName);
+                    } else {
+                        await loadMaintainDocuments();
+                    }
                 } else {
                     showNotification('删除失败: ' + result.message, 'error');
                 }
@@ -3788,9 +3797,8 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                                                 const value = getField(attrDef.id);
                                                 const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
                                                 if (isCompleted) {
-                                                    if (attrDef.type === 'checkbox') {
-                                                        attrParts.push(`📌${attrDef.name}`);
-                                                    } else {
+                                                    // 只显示有值的文本类型自定义属性，checkbox类型不显示（纯勾选无额外信息）
+                                                    if (attrDef.type !== 'checkbox') {
                                                         attrParts.push(`📌${attrDef.name}: ${value}`);
                                                     }
                                                 }
@@ -3811,7 +3819,7 @@ export async function loadMaintainDocumentsList(cycle, docName) {
                                                     </div>
                                                     <div class="document-actions">
                                                         <button class="btn btn-sm btn-success" onclick="openEditModal('${docId}', '${cycle}', '${docName}')">编辑</button>
-                                                        <button class="btn btn-sm btn-danger" onclick="handleDeleteDocument('${docId}')">删除</button>
+                                                        <button class="btn btn-sm btn-danger" onclick="handleDeleteDocument('${docId}', '${cycle}', '${docName}')">删除</button>
                                                     </div>
                                                 </div>
                                             `;
