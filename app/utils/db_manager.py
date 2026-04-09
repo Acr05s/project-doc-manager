@@ -15,7 +15,7 @@ import sys
 import sqlite3
 import threading
 import tempfile
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, Union
 from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime
