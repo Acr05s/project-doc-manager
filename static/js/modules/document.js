@@ -466,6 +466,11 @@ function analyzeRequirementStatus(attributes, docsList) {
     
     for (const [key, value] of Object.entries(attributes)) {
         if (value === true && !predefinedKeys.has(key)) {
+            // 跳过系统字段 custom_attrs
+            if (key === 'custom_attrs') {
+                continue;
+            }
+            
             // 优先从自定义属性定义中获取显示名称
             const customDef = customDefs.find(def => def.id === key);
             let displayName;
@@ -2596,6 +2601,11 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                 const totalCount = allInDir.length;
                 const selCount = allInDir.filter(f => appState.zipSelectedFiles && appState.zipSelectedFiles.some(sf => sf.path === f.path)).length;
                 const dirChecked = totalCount > 0 && selCount === totalCount;
+                const isRoot = appState.zipRootDirectory === dir.path;
+                const rootBtnStyle = isRoot
+                    ? 'background:#28a745;color:white;border:1px solid #1e7e34;'
+                    : 'background:#fff;border:1px solid #28a745;color:#28a745;';
+                const rootBtnText = isRoot ? '✓ 已选为目录' : '选为上传目录';
                 html += `
                 <div class="directory-group" data-dir-group="${escaped}" style="margin-left:${indent}px;margin-bottom:4px;">
                     <div class="directory-header zip-dir-row" data-dir="${escaped}"
@@ -2610,6 +2620,11 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                                onclick="event.stopPropagation();" />
                         <span style="flex:1;">📁 ${escHtml(dir.name)}</span>
                         <span style="color:#5a7fa8;font-size:11px;font-weight:normal;">(${selCount}/${totalCount})</span>
+                        <button class="set-root-btn" data-dir="${escaped}"
+                                style="${rootBtnStyle}padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;"
+                                onclick="event.stopPropagation(); window.setSelectRootDirectory('${escaped}');">
+                            ${rootBtnText}
+                        </button>
                     </div>
                     <div class="zip-dir-children" data-dir-files="${escaped}" style="display:block;">
                         ${renderTree(dir, depth + 1)}
@@ -2756,12 +2771,22 @@ async function handleSelectArchive() {
         showLoading(true);
         
         // 为每个文件补充目录信息（source_dir），供后端打包时建立子目录
+        const rootDir = appState.zipRootDirectory || '';
         const filesWithDir = selectedFiles.map(file => {
             // 优先使用 appState 中已存的 source_dir，DOM 只作备用
             let sourceDir = file.source_dir;
             if (sourceDir === undefined) {
                 const itemEl = document.querySelector(`#zipFilesList .zip-file-item[data-path="${CSS.escape(file.path)}"]`);
                 sourceDir = itemEl ? (itemEl.dataset.dir || '') : '';
+            }
+            // 如果设置了根目录，截取相对路径（去掉根目录前缀）
+            if (rootDir && sourceDir) {
+                const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
+                if (sourceDir === rootDir) {
+                    sourceDir = '';  // 文件直接在根目录下，source_dir 为空（不建子目录）
+                } else if (sourceDir.startsWith(rootPrefix)) {
+                    sourceDir = sourceDir.slice(rootPrefix.length);  // 去掉根目录前缀
+                }
             }
             return { ...file, source_dir: sourceDir || '' };
         });
@@ -2817,6 +2842,7 @@ export function openUploadModal(cycle, docName) {
     
     appState.currentCycle = cycle;
     appState.currentDocument = docName;
+    appState.zipRootDirectory = '';  // 每次打开弹窗重置根目录选择
     
     console.log('[openUploadModal] 更新appState:', { currentCycle: appState.currentCycle, currentDocument: appState.currentDocument });
     
@@ -4763,6 +4789,21 @@ if (typeof window !== 'undefined') {
     window.formatDateInput = formatDateInput;
     window.openMaintainModal = openMaintainModal;
     window.autoSearchFiles = autoSearchFiles;  // HTML 中 oninput 调用
+    // 选择文档弹窗中的"选为上传目录"按钮
+    window.setSelectRootDirectory = function(dirPath) {
+        appState.zipRootDirectory = dirPath;
+        // 更新所有按钮样式
+        const listEl = document.getElementById('zipFilesList');
+        if (listEl) {
+            listEl.querySelectorAll('.set-root-btn').forEach(btn => {
+                const isThis = btn.dataset.dir === dirPath;
+                btn.style.cssText = isThis
+                    ? 'background:#28a745;color:white;border:1px solid #1e7e34;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;'
+                    : 'background:#fff;border:1px solid #28a745;color:#28a745;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;';
+                btn.textContent = isThis ? '✓ 已选为目录' : '选为上传目录';
+            });
+        }
+    };
     // 暴露文档操作函数（供内联onclick调用）
     window.openEditModal = openEditModal;
     window.handleDeleteDocument = handleDeleteDocument;
