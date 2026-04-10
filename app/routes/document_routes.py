@@ -2218,12 +2218,29 @@ def search_zip_files():
             # 计算相对目录（去掉文件名部分）
             rel_dir_parts = rel_str.split('/')[:-1]
             rel_dir = '/'.join(rel_dir_parts) if rel_dir_parts else ''
+            
+            # 截断临时目录前缀（如 tmpxxx_yyy）
+            import re
+            dir_parts = rel_dir.split('/')
+            real_start_idx = 0
+            for i, part in enumerate(dir_parts):
+                # 临时目录格式：tmp + 随机字符 + _ + 时间戳
+                if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
+                    real_start_idx = i
+                    break
+            # 截取从真实目录开始的部分
+            meaningful_parts = dir_parts[real_start_idx:]
+            rel_dir = '/'.join(meaningful_parts)
+            # 同步更新 rel_path
+            rel_path_parts = rel_str.split('/')
+            meaningful_path_parts = rel_path_parts[real_start_idx:]
+            rel_str = '/'.join(meaningful_path_parts)
 
             results.append({
                 'name': file_path.name,
                 'path': str(file_path),
                 'rel_path': rel_str,
-                'rel_dir': rel_dir,   # 文件所在的相对目录路径
+                'rel_dir': rel_dir,   # 文件所在的相对目录路径（已截断临时目录前缀）
                 'size': file_path.stat().st_size,
                 'ext': file_path.suffix.lower(),
                 'archived': is_archived,
@@ -2595,7 +2612,9 @@ def archive_from_zip():
         
         data = request.get_json()
         if not data:
-            return jsonify({'status': 'error', 'message': '没有收到数据'}), 400
+            return jsonify({'status': 'error', 'message': '没有收到数据'}), 400)
+        
+        print('[archive_from-zip] DEBUG keys=%s root_dir=%r src_dir=%r' % (list(data.keys()), data.get('root_directory','MISSING'), data.get('source_dir','MISSING')))
 
         source_path = data.get('source_path')
         cycle = data.get('cycle')
@@ -2611,6 +2630,7 @@ def archive_from_zip():
         other_seal = data.get('other_seal', '')
         project_id = data.get('project_id')
         source_dir = data.get('source_dir', '')  # 携带的目录信息
+        root_directory = data.get('root_directory', '')  # ZIP归档时选择的根目录
 
         if not all([source_path, cycle, doc_name]):
             return jsonify({'status': 'error', 'message': '参数不完整：需要source_path、cycle、doc_name'}), 400
@@ -2672,6 +2692,7 @@ def archive_from_zip():
             'seal_confidence': 0.0,
             'file_size': dest_path.stat().st_size,
             'directory': source_dir if source_dir else '/',  # 使用前端传递的目录信息
+            'root_directory': root_directory,  # ZIP归档时选择的根目录
             'custom_attrs': {}  # 自定义属性（归档时不携带）
         }
 
@@ -2706,11 +2727,33 @@ def archive_from_zip():
                     'source': 'zip',
                     'doc_id': doc_id,
                     'directory': source_dir if source_dir else '/',  # 使用前端传递的目录信息
+                    'root_directory': root_directory,  # ZIP归档时选择的根目录
                     'custom_attrs': {}  # 自定义属性（归档时不携带）
                 })
                 
                 # 保存项目配置
                 doc_manager._save_project(project_id, project_config)
+
+        # 持久化到 documents.db（确保 root_directory 等字段不丢失）
+        try:
+            from app.utils.db_manager import get_doc_db
+            doc_db = get_doc_db(project_id or _proj_name_for_norm or '')
+            if doc_db:
+                doc_db.add_document(
+                    doc_id=doc_id,
+                    project_id=project_id or '',
+                    project_name=_proj_name_for_norm or '',
+                    cycle=cycle,
+                    doc_name=doc_name,
+                    file_path=_norm_path,
+                    file_size=dest_path.stat().st_size,
+                    original_filename=source_file.name,
+                    directory=source_dir if source_dir else '/',
+                    source='zip',
+                    root_directory=root_directory
+                )
+        except Exception as db_err:
+            print(f'[archive_from_zip] 保存到documents.db失败（非致命）: {db_err}')
 
         doc_manager.log_operation('从ZIP归档文档', f'{cycle}/{doc_name} <- {source_file.name}',
                                    project=project_id)

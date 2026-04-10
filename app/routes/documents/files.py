@@ -367,6 +367,9 @@ def select_files():
             else:
                 directory = '/'
             
+            # 获取根目录（用于显示和打包时截取路径）
+            root_dir = file_info.get('root_dir') or data.get('root_directory', '')
+            
             relative_path = str(file_path)
             if project_name:
                 # 获取项目上传目录
@@ -400,11 +403,30 @@ def select_files():
                 'file_size': file_path.stat().st_size,
                 'doc_id': doc_id,
                 'directory': directory if directory else '/',  # 目录：默认根目录
+                'root_directory': root_dir,  # 根目录，用于显示和打包时截取路径
                 'custom_attrs': {}  # 自定义属性（选择归档时不携带）
             }
             
-            # 添加到documents_db
+            # 添加到documents_db（内存）
             doc_manager.documents_db[doc_id] = doc_metadata
+            
+            # 同时持久化到 documents.db（确保 root_directory 等字段不会丢失）
+            try:
+                doc_manager.add_document(
+                    doc_id=doc_id,
+                    project_id=project_id,
+                    project_name=project_name,
+                    cycle=cycle,
+                    doc_name=doc_name,
+                    file_path=file_path_relative,
+                    file_size=file_path.stat().st_size,
+                    original_filename=original_name,
+                    directory=directory or '/',
+                    source='select',
+                    root_directory=root_dir
+                )
+            except Exception as db_err:
+                print(f'[归档] 保存到documents.db失败（非致命）: {db_err}')
             
             # 保存到项目配置中
             project_result = doc_manager.load_project(project_id)

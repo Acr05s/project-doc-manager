@@ -1882,6 +1882,13 @@ function switchMainTab(tabName) {
         const tabContent = document.getElementById(tabId);
         if (tabContent) tabContent.style.display = 'block';
         
+        // 如果切换到上传/选择文档标签页，确保子标签页事件已绑定
+        if (tabName === 'upload-select') {
+            if (typeof initUploadMethodTabs === 'function') {
+                initUploadMethodTabs();
+            }
+        }
+        
         // 如果切换到维护标签页，更新已选择文档列表
         if (tabName === 'maintain') {
             updateSelectedDocumentsList();

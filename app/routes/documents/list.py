@@ -36,6 +36,63 @@ def list_documents():
                 # 确保文档有 directory 字段（使用 '/' 作为根目录默认值）
                 if 'directory' not in doc or not doc['directory']:
                     doc['directory'] = doc.get('category') or '/'
+                # 处理显示路径：
+                # - 有 root_directory → 从该目录开始截取显示
+                # - 无 root_directory → 尝试去掉临时目录前缀
+                root_dir = doc.get('root_directory', '') or ''
+                dir_value = doc.get('directory', '/')
+
+                if dir_value and dir_value != '/':
+                    clean_dir = dir_value.lstrip('/')
+                    
+                    if root_dir:
+                        # 先去除 root_directory 的临时目录前缀
+                        import re
+                        root_parts = root_dir.lstrip('/').split('/')
+                        root_start_idx = 0
+                        for i, part in enumerate(root_parts):
+                            if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
+                                root_start_idx = i
+                                break
+                        clean_root = '/'.join(root_parts[root_start_idx:])
+                        
+                        # 获取 root_directory 的父目录（第一级）
+                        root_parent = root_parts[root_start_idx] if root_start_idx < len(root_parts) else ''
+                        
+                        if clean_root and root_parent:
+                            # 从 root_directory 的父级开始查找
+                            parent_idx = clean_dir.find(root_parent)
+                            if parent_idx >= 0:
+                                # 从父级开始截取，包含 root_directory 及其子目录
+                                doc['display_directory'] = '/' + clean_dir[parent_idx:]
+                            else:
+                                # 找不到父级，从完整路径开始
+                                doc['display_directory'] = '/' + clean_dir
+                        elif clean_root:
+                            # 只有一级目录，从该目录开始
+                            root_idx = clean_dir.find(clean_root)
+                            if root_idx >= 0:
+                                doc['display_directory'] = '/' + clean_dir[root_idx:]
+                            else:
+                                doc['display_directory'] = '/' + clean_dir
+                        else:
+                            doc['display_directory'] = '/' + clean_dir
+                    else:
+                        # 无 root_directory，尝试识别并去掉临时目录前缀
+                        import re
+                        parts = clean_dir.split('/')
+                        real_start_idx = 0
+                        for i, part in enumerate(parts):
+                            # 临时目录格式：tmp + 随机字符 + _ + 时间戳
+                            if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
+                                real_start_idx = i
+                                break
+                        # 截取从真实目录开始的部分
+                        meaningful_parts = parts[real_start_idx:]
+                        clean_dir = '/'.join(meaningful_parts)
+                        doc['display_directory'] = '/' + clean_dir if not clean_dir.startswith('/') else clean_dir
+                else:
+                    doc['display_directory'] = dir_value if dir_value else '/'
                 unique_docs.append(doc)
         
         docs = unique_docs

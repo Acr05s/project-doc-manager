@@ -462,27 +462,28 @@ export function handleZipFileSelect(e) {
     
     if (checkbox.checked) {
         // 计算相对于根目录的路径
+        // 注意：rootDir 是树节点中的相对路径（如 "9项目运维"），sourceDir 也是相对路径（如 "9项目运维/9.1故障应急预案"）
+        // filePath 是绝对路径，不能直接与 rootDir 比较，应该用 sourceDir 来截取
         const rootDir = appState.zipRootDirectory;
         let relDir = '';
-        if (rootDir) {
-            // 计算完整的相对路径（包含文件名）
-            const normalizedPath = filePath.replace(/\\/g, '/');
+        if (rootDir && sourceDir) {
+            // 用相对路径 sourceDir 去掉 rootDir 前缀，得到相对于根目录的目录
+            const normalizedSourceDir = sourceDir.replace(/\\/g, '/');
             const normalizedRoot = rootDir.replace(/\\/g, '/');
             
-            if (normalizedPath.startsWith(normalizedRoot + '/')) {
-                const relPath = normalizedPath.substring(normalizedRoot.length + 1);
-                // 提取目录路径（不包含文件名）
-                const lastSlashIndex = relPath.lastIndexOf('/');
-                if (lastSlashIndex > -1) {
-                    relDir = relPath.substring(0, lastSlashIndex);
-                } else {
-                    relDir = ''; // 文件直接在根目录下
-                }
+            if (normalizedSourceDir === normalizedRoot) {
+                // 文件就在根目录下，无子目录
+                relDir = '';
+            } else if (normalizedSourceDir.startsWith(normalizedRoot + '/')) {
+                // 文件在根目录的某子目录下
+                relDir = normalizedSourceDir.substring(normalizedRoot.length + 1);
             } else {
-                relDir = sourceDir; // 不在根目录下，使用完整目录路径
+                // sourceDir 不是以 rootDir 开头（理论上不应该发生）
+                relDir = sourceDir;
             }
-        } else {
-            relDir = sourceDir; // 没有设置根目录，使用完整目录路径
+        } else if (!rootDir) {
+            // 没有设置根目录，使用原始目录路径
+            relDir = sourceDir;
         }
         
         // 打印调试信息
@@ -766,18 +767,18 @@ export async function handleZipArchive() {
                     saveDirectory = file.rel_dir;
                 } else if (file.source_dir) {
                     // 没有设置根目录，但文件有目录信息
-                    // 尝试提取有意义的目录名（跳过看起来像随机ID的顶层目录）
-                    const dirParts = file.source_dir.split('/');
-                    // 过滤掉看起来像随机ID的部分（10位以上字母数字混合，可能包含下划线）
-                    const meaningfulParts = dirParts.filter(part => {
-                        // 如果部分包含看起来像随机ID的子串（如 tmpxgccahbx_20260408152038）
-                        // 匹配：10位以上字母数字，或 字母数字_日期时间 格式
-                        if (/^[a-z0-9]{10,}$/i.test(part) || /^[a-z0-9]+_\d{8,}$/i.test(part)) {
-                            return false;
-                        }
-                        return true;
-                    });
-                    saveDirectory = meaningfulParts.join('/');
+                    // 使用用户设置的根目录来截取相对路径
+                    const rootDir = appState.zipRootDirectory;
+                    if (rootDir && file.source_dir.startsWith(rootDir)) {
+                        // 从根目录开始截取后面的路径
+                        const afterRoot = file.source_dir.slice(rootDir.length);
+                        // 去掉开头的 '/'
+                        saveDirectory = afterRoot.startsWith('/') ? afterRoot.slice(1) : afterRoot;
+                    } else {
+                        // 没有设置根目录，直接使用原始目录（可能包含ZIP解压后的顶层目录名）
+                        // 用户可以通过"设为根目录"功能来优化显示
+                        saveDirectory = file.source_dir;
+                    }
                 }
                 // 没有目录信息时 saveDirectory 为空，后端 directory 将为 /
                 
@@ -795,7 +796,8 @@ export async function handleZipArchive() {
                         cycle: appState.currentCycle,
                         source_path: file.path,
                         doc_name: appState.currentDocument,
-                        source_dir: saveDirectory  // 有根目录时传相对路径，否则为空（directory=/）
+                        source_dir: saveDirectory,  // 有根目录时传相对路径，否则为空
+                        root_directory: appState.zipRootDirectory || ''  // ZIP归档时选择的根目录
                     })
                 });
                 

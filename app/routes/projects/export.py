@@ -101,8 +101,34 @@ def package_project(project_id):
                         directory = doc.get('directory', '')
                         filename = doc.get('filename', Path(file_path).name)
                         
+                        # 处理目录路径：与显示逻辑保持一致
+                        # 如果有 root_directory，从 root_directory 的父级开始截取
+                        root_dir = doc.get('root_directory', '')
+                        if root_dir and directory and directory != '/':
+                            dir_value = directory.lstrip('/')
+                            # 先去除 root_directory 的临时目录前缀
+                            import re
+                            root_parts = root_dir.lstrip('/').split('/')
+                            root_start_idx = 0
+                            for i, part in enumerate(root_parts):
+                                if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
+                                    root_start_idx = i
+                                    break
+                            clean_root = '/'.join(root_parts[root_start_idx:])
+                            # 获取 root_directory 的父目录（第一级）
+                            root_parent = root_parts[root_start_idx] if root_start_idx < len(root_parts) else ''
+                            
+                            if clean_root and root_parent:
+                                # 从父级开始查找
+                                parent_idx = dir_value.find(root_parent)
+                                if parent_idx >= 0:
+                                    # 从父级开始截取
+                                    dir_value = dir_value[parent_idx:]
+                                    directory = '/' + dir_value
+                                # 否则保持原样
+                        
                         # 构建归档路径
-                        if directory:
+                        if directory and directory != '/':
                             # 有子目录：项目名/周期名/文档类型/子目录/文件名
                             arcname = f"{project_name}/{cycle}/{doc_name}/{directory}/{filename}"
                         else:

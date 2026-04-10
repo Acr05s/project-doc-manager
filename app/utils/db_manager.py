@@ -1040,7 +1040,8 @@ class ProjectDocumentsDB(DatabaseManager):
                 doc_date TEXT,
                 sign_date TEXT,
                 directory TEXT,
-                source TEXT
+                source TEXT,
+                root_directory TEXT
             )
         ''')
 
@@ -1058,7 +1059,8 @@ class ProjectDocumentsDB(DatabaseManager):
             'sign_date': 'TEXT',
             'directory': 'TEXT DEFAULT "/"',
             'source': 'TEXT',
-            'custom_attrs': 'TEXT'  # JSON格式存储自定义属性
+            'custom_attrs': 'TEXT',  # JSON格式存储自定义属性
+            'root_directory': 'TEXT'  # ZIP归档时选择的根目录，用于显示截断
         }
         for col_name, col_type in new_columns.items():
             if col_name not in existing_columns:
@@ -1085,7 +1087,7 @@ class ProjectDocumentsDB(DatabaseManager):
                       party_a_signer: str = None, party_b_signer: str = None,
                       doc_date: str = None, sign_date: str = None,
                       directory: str = '/', source: str = None,
-                      custom_attrs: Dict = None) -> bool:
+                      custom_attrs: Dict = None, root_directory: str = '') -> bool:
         """添加文档"""
         import json
         
@@ -1103,8 +1105,9 @@ class ProjectDocumentsDB(DatabaseManager):
                                    upload_time, status, archived,
                                    has_seal, party_a_seal, party_b_seal, no_seal,
                                    no_signature, party_a_signer, party_b_signer,
-                                   doc_date, sign_date, directory, source, custom_attrs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   doc_date, sign_date, directory, source, custom_attrs,
+                                   root_directory)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         try:
             self.execute_insert(sql, (doc_id, project_id, project_name, cycle, doc_name,
@@ -1113,7 +1116,8 @@ class ProjectDocumentsDB(DatabaseManager):
                                        has_seal, party_a_seal, party_b_seal, no_seal,
                                        no_signature, party_a_signer or '', party_b_signer or '',
                                        doc_date or '', sign_date or '',
-                                       directory or '/', source or '', json.dumps(custom_attrs, ensure_ascii=False)))
+                                       directory or '/', source or '', json.dumps(custom_attrs, ensure_ascii=False),
+                                       root_directory or ''))
             return True
         except sqlite3.IntegrityError:
             # 文档已存在，更新
@@ -1150,6 +1154,9 @@ class ProjectDocumentsDB(DatabaseManager):
             # 确保 directory 有默认值
             if not doc.get('directory'):
                 doc['directory'] = '/'
+            # 确保 root_directory 有默认值（空字符串等同于 '/'，表示不截断）
+            if not doc.get('root_directory'):
+                doc['root_directory'] = ''
             return doc
         return None
 
@@ -1190,6 +1197,9 @@ class ProjectDocumentsDB(DatabaseManager):
             # 确保 directory 有默认值
             if not doc.get('directory'):
                 doc['directory'] = '/'
+            # 确保 root_directory 有默认值（空字符串等同于 '/'，表示不截断）
+            if not doc.get('root_directory'):
+                doc['root_directory'] = ''
         
         return results
 
@@ -1201,7 +1211,8 @@ class ProjectDocumentsDB(DatabaseManager):
             # 盖章和签字字段
             'has_seal', 'party_a_seal', 'party_b_seal', 'no_seal',
             'no_signature', 'party_a_signer', 'party_b_signer',
-            'doc_date', 'sign_date', 'directory', 'source'
+            'doc_date', 'sign_date', 'directory', 'source',
+            'root_directory'
         ]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         

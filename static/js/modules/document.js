@@ -253,7 +253,9 @@ export async function handleEditDocument(e) {
         'editNoSeal': 'no_seal',
         'editOtherSeal': 'other_seal',
         'editNotInvolved': 'not_involved',  // 本次项目不涉及
-        'editRemark': 'notes'  // 备注
+        'editRemark': 'notes',  // 备注
+        'editDirectory': 'directory',  // 所属目录
+        'editRootDirectory': 'root_directory'  // 显示根目录
     };
     
     // 动态收集表单数据
@@ -728,255 +730,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         // 检查是否已归档
                         const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
                         
-                        // 按目录分组文档
-                        const docsByDirectory = {};
-                        docsList.forEach(d => {
-                            const directory = d.directory || '无目录';
-                            if (!docsByDirectory[directory]) {
-                                docsByDirectory[directory] = [];
-                            }
-                            docsByDirectory[directory].push(d);
-                        });
-                        
-                        // 对目录进行排序，确保 '/' 目录在最前面，然后是其他目录，最后是'无目录'
-                        const sortedDirectories = Object.entries(docsByDirectory).sort(([dirA], [dirB]) => {
-                            // '/' 目录放最前面
-                            if (dirA === '/') return -1;
-                            if (dirB === '/') return 1;
-                            // '无目录' 放最后面
-                            if (dirA === '无目录') return 1;
-                            if (dirB === '无目录') return -1;
-                            // 其他目录按字母排序
-                            return dirA.localeCompare(dirB);
-                        });
-                        
-                        // 生成文件列表，按目录分组显示
-                        const fileListHtml = docsList.length > 0 ? 
-                            sortedDirectories.map(([directory, directoryDocs]) => {
-                                // 生成目录标题
-                                const directoryTitleHtml = (directory !== '无目录' && directory !== '/' && directory !== '') ? `
-                                    <div class="doc-directory-title" style="margin: 10px 0 5px 0; padding: 8px; background: #f1f5f9; border-radius: 4px; font-weight: bold; display: flex; align-items: center; gap: 8px;">
-                                        <span style="font-size: 16px;">📁</span>
-                                        <span>${directory}</span>
-                                        <span style="font-size: 12px; color: #64748b; font-weight: normal;">(${directoryDocs.length}个文件)</span>
-                                    </div>
-                                ` : '';
-                                
-                                // 如果文件较多，添加展开/收起功能
-                                const maxFilesToShow = 10;
-                                const totalFiles = directoryDocs.length;
-                                const hasMoreFiles = totalFiles > maxFilesToShow;
-                                const filesToShow = hasMoreFiles ? directoryDocs.slice(0, maxFilesToShow) : directoryDocs;
-                                const expandId = `expand-${cycle}-${doc.name}-${directory.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                                
-                                // 生成该目录下的文件列表
-                                const renderFileRow = (d, isHidden = false) => {
-                                    // 辅助函数：获取字段值（支持带下划线前缀）
-                                    const getField = (name) => d[name] !== undefined ? d[name] : d[`_${name}`];
-                                    
-                                    const attrParts = [];
-                                    const docDate = getField('doc_date');
-                                    const signer = getField('signer');
-                                    const partyASigner = getField('party_a_signer');
-                                    const partyBSigner = getField('party_b_signer');
-                                    const signDate = getField('sign_date');
-                                    const noSignature = getField('no_signature');
-                                    const partyASeal = getField('party_a_seal');
-                                    const partyBSeal = getField('party_b_seal');
-                                    const hasSealMarked = getField('has_seal_marked') || getField('has_seal');
-                                    const noSeal = getField('no_seal');
-                                    const otherSeal = getField('other_seal');
-                                    
-                                    if (docDate) attrParts.push(`📅${formatDateToMonth(docDate)}`);
-                                    if (signer) attrParts.push(`✍️${signer}`);
-                                    if (partyASigner) attrParts.push(`🏢甲:${partyASigner}`);
-                                    if (partyBSigner) attrParts.push(`🏭乙:${partyBSigner}`);
-                                    if (signDate) attrParts.push(`📆${formatDateToMonth(signDate)}`);
-                                    if (noSignature) attrParts.push('❌不签字');
-                                    if (partyASeal) attrParts.push('🏢甲方盖章');
-                                    if (partyBSeal) attrParts.push('🏭乙方盖章');
-                                    if (hasSealMarked) attrParts.push('🔖');
-                                    if (noSeal) attrParts.push('❌不盖章');
-                                    if (otherSeal) attrParts.push(`📍${otherSeal}`);
-                                    // 辅助函数：获取字段值（支持带下划线前缀）
-                                    const getDocValue = (fieldName) => {
-                                        if (d[fieldName] !== undefined) return d[fieldName];
-                                        if (d[`_${fieldName}`] !== undefined) return d[`_${fieldName}`];
-                                        return null;
-                                    };
-                                    
-                                    // 显示本次项目不涉及状态
-                                    if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
-                                    
-                                    // 显示自定义属性 - 同时显示已完成和未完成的
-                                    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
-                                    
-                                    // 获取文档要求中的自定义属性（用于对比）
-                                    const cycleDocs = appState.projectConfig?.documents?.[cycle];
-                                    const docInfo = cycleDocs?.required_docs?.find(rd => rd.name === doc.name);
-                                    const requiredCustomAttrs = docInfo?.attributes || {};
-                                    
-                                    // 优先使用 custom_attribute_definitions 显示自定义属性
-                                    const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
-                                    customDefs.forEach(attrDef => {
-                                        // 检查是否是要求的属性
-                                        const isRequired = requiredCustomAttrs[attrDef.id] === true;
-                                        const value = getDocValue(attrDef.id);
-                                        const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
-                                        
-                                        if (isRequired) {
-                                            if (isCompleted) {
-                                                // 已完成 - 绿色标记
-                                                if (attrDef.type === 'checkbox') {
-                                                    attrParts.push(`<span style="color: #28a745;">✓${attrDef.name}</span>`);
-                                                } else {
-                                                    attrParts.push(`<span style="color: #28a745;">✓${attrDef.name}: ${value}</span>`);
-                                                }
-                                            } else {
-                                                // 未完成 - 红色标记
-                                                attrParts.push(`<span style="color: #dc3545;">✗${attrDef.name}</span>`);
-                                            }
-                                        } else if (isCompleted) {
-                                            // 非要求但已完成：checkbox 类型不显示（纯勾选无额外信息），仅显示有值的文本类型
-                                            if (attrDef.type !== 'checkbox') {
-                                                attrParts.push(`📌${attrDef.name}: ${value}`);
-                                            }
-                                        }
-                                    });
-                                    
-                                    // 辅助函数：生成友好的显示名称
-                                    const getFriendlyDisplayName = (key) => {
-                                        const match = key.match(/^custom_\d+_(.+)$/);
-                                        if (match) {
-                                            return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                                        }
-                                        return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                                    };
-                                    
-                                    // 遍历文档对象的所有字段，找出不在 custom_attribute_definitions 中的自定义属性
-                                    for (const [key, value] of Object.entries(d)) {
-                                        const isKnownCustom = customDefs.some(def => def.id === key);
-                                        if (!predefinedFields.has(key) && 
-                                            !key.startsWith('_') && 
-                                            !isKnownCustom &&
-                                            value !== undefined && 
-                                            value !== null && 
-                                            value !== '' &&
-                                            typeof value === 'string') {
-                                            // 为自定义属性生成显示名称
-                                            const displayName = getFriendlyDisplayName(key);
-                                            attrParts.push(`📌${displayName}: ${value}`);
-                                        }
-                                    }
-                                    
-                                    // 检查带下划线前缀的自定义属性
-                                    for (const [key, value] of Object.entries(d)) {
-                                        const actualKey = key.substring(1);
-                                        const isKnownCustom = customDefs.some(def => def.id === actualKey);
-                                        if (key.startsWith('_') && 
-                                            !predefinedFields.has(actualKey) && 
-                                            !isKnownCustom &&
-                                            value !== undefined && 
-                                            value !== null && 
-                                            value !== '' &&
-                                            typeof value === 'string') {
-                                            const displayName = getFriendlyDisplayName(actualKey);
-                                            attrParts.push(`📌${displayName}: ${value}`);
-                                        }
-                                    }
-
-                                    
-                                    // 检查文件是否满足要求（支持带下划线前缀的字段名）
-                                    const requirement = doc.requirement || '';
-                                    let missingRequirements = [];
-                                    
-                                    const hasSigner = getDocValue('signer');
-                                    const hasNoSignature = getDocValue('no_signature');
-                                    const hasPartyASigner = getDocValue('party_a_signer');
-                                    const hasPartyBSigner = getDocValue('party_b_signer');
-                                    const hasPartyASeal = getDocValue('party_a_seal');
-                                    const hasPartyBSeal = getDocValue('party_b_seal');
-                                    const hasHasSealMarked = getDocValue('has_seal_marked') || getDocValue('has_seal');
-                                    const hasNoSeal = getDocValue('no_seal');
-                                    const hasDocDate = getDocValue('doc_date');
-                                    const hasSignDate = getDocValue('sign_date');
-                                    
-                                    // 检查签字要求（分别检查甲方签字和乙方签字）
-                                    const hasPartyASignReq = requirement.includes('甲方签字');
-                                    const hasPartyBSignReq = requirement.includes('乙方签字');
-                                    const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
-                                    
-                                    // 检查甲方签字
-                                    if (hasPartyASignReq && !hasPartyASigner && !hasNoSignature) {
-                                        missingRequirements.push('甲方签字');
-                                    }
-                                    // 检查乙方签字
-                                    if (hasPartyBSignReq && !hasPartyBSigner && !hasNoSignature) {
-                                        missingRequirements.push('乙方签字');
-                                    }
-                                    // 检查通用签字
-                                    if (hasGeneralSignReq && !hasSigner && !hasNoSignature) {
-                                        missingRequirements.push('签字');
-                                    }
-                                    
-                                    // 检查盖章要求（避免重复）
-                                    const hasSealRequirement = requirement.includes('乙方盖章') || requirement.includes('甲方盖章') || requirement.includes('盖章');
-                                    if (hasSealRequirement && !hasHasSealMarked && !hasPartyASeal && !hasPartyBSeal && !hasNoSeal) {
-                                        if (requirement.includes('乙方盖章') && requirement.includes('甲方盖章')) {
-                                            missingRequirements.push('甲乙方盖章');
-                                        } else if (requirement.includes('乙方盖章')) {
-                                            missingRequirements.push('乙方盖章');
-                                        } else if (requirement.includes('甲方盖章')) {
-                                            missingRequirements.push('甲方盖章');
-                                        } else if (requirement.includes('盖章')) {
-                                            missingRequirements.push('盖章');
-                                        }
-                                    }
-                                    
-                                    // 检查日期要求（避免重复）
-                                    if (requirement.includes('文档日期') && !hasDocDate) {
-                                        missingRequirements.push('文档日期');
-                                    }
-                                    if (requirement.includes('签字日期') && !hasSignDate) {
-                                        missingRequirements.push('签字日期');
-                                    }
-                                    
-                                    // 生成缺失要求的提示
-                                    const missingHtml = missingRequirements.length > 0 ? `
-                                        <span class="missing-requirements" title="缺失要求：${missingRequirements.join('、')}">
-                                            ⚠️${missingRequirements.join('、')}
-                                        </span>
-                                    ` : '';
-                                    
-                                    return `<div class="doc-file-row" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: 20px;">
-                                        <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
-                                              title="点击预览文件" 
-                                              style="cursor: pointer; text-decoration: underline;">
-                                            ${d.original_filename || d.filename || '未知文件名'}
-                                        </span>
-                                        ${attrParts.length > 0 ? `<span class="doc-attrs" style="margin-left: 8px;">${attrParts.join(' ')}</span>` : ''}
-                                        ${missingHtml}
-                                    </div>`;
-                                };
-                                
-                                // 渲染可见文件
-                                const visibleFilesHtml = filesToShow.map(d => renderFileRow(d)).join('');
-                                
-                                // 渲染隐藏文件（如果有）
-                                const hiddenFilesHtml = hasMoreFiles ? `
-                                    <div id="${expandId}-hidden" class="hidden-files" style="display: none;">
-                                        ${directoryDocs.slice(maxFilesToShow).map(d => renderFileRow(d)).join('')}
-                                    </div>
-                                    <div class="expand-toggle" style="margin: 8px 0 8px 20px; padding: 6px 12px; background: #e3f2fd; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: #1976d2; font-size: 13px; font-weight: 500;" onclick="toggleFileExpand('${expandId}')">
-                                        <span id="${expandId}-icon">▼</span>
-                                        <span id="${expandId}-text">展开更多 ${totalFiles - maxFilesToShow} 个文件</span>
-                                    </div>
-                                ` : '';
-                                
-                                return directoryTitleHtml + visibleFilesHtml + hiddenFilesHtml;
-                            }).join('')
+                        // 构建文档树形目录结构
+                        const fileListHtml = docsList.length > 0
+                            ? renderMainDocTree(docsList, cycle, doc)
                             : '<span class="doc-no-files">暂无文件</span>';
-
+                        
 
                         
                         // 分析要求并计算每个要求的完成状态
@@ -1093,6 +851,23 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     `;
     
     elements.contentArea.innerHTML = html;
+    
+    // 绑定主页面文档树形目录的折叠/展开事件
+    // 注意：使用 Array.from + find 代替 querySelector，避免路径含中文/括号等特殊字符时选择器失效
+    document.querySelectorAll('.main-doc-dir-header').forEach(header => {
+        header.addEventListener('click', function(e) {
+            if (e.target.tagName === 'SPAN' && e.target.classList.contains('dir-toggle-icon') || e.type === 'ignore') return;
+            const dirPath = this.dataset.dir;
+            const children = Array.from(document.querySelectorAll('.main-doc-dir-children'))
+                .find(el => el.dataset.dirFiles === dirPath);
+            const icon = this.querySelector('.dir-toggle-icon');
+            if (children) {
+                const isHidden = children.style.display === 'none';
+                children.style.display = isHidden ? 'block' : 'none';
+                if (icon) icon.textContent = isHidden ? '▼' : '▶';
+            }
+        });
+    });
 }
 
 /**
@@ -2613,7 +2388,7 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                 const rootBtnStyle = isRoot
                     ? 'background:#28a745;color:white;border:1px solid #1e7e34;'
                     : 'background:#fff;border:1px solid #28a745;color:#28a745;';
-                const rootBtnText = isRoot ? '✓ 已选为目录' : '选为上传目录';
+                const rootBtnText = isRoot ? '✓ 从此开始记录' : '从此开始记录目录';
                 html += `
                 <div class="directory-group" data-dir-group="${escaped}" style="margin-left:${indent}px;margin-bottom:4px;">
                     <div class="directory-header zip-dir-row" data-dir="${escaped}"
@@ -2628,9 +2403,9 @@ export function displaySelectedFiles(files, noMatchHint = '') {
                                onclick="event.stopPropagation();" />
                         <span style="flex:1;">📁 ${escHtml(dir.name)}</span>
                         <span style="color:#5a7fa8;font-size:11px;font-weight:normal;">(${selCount}/${totalCount})</span>
-                        <button class="set-root-btn" data-dir="${escaped}"
+                        <button class="set-root-btn" data-dir="${dir.path}"
                                 style="${rootBtnStyle}padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;"
-                                onclick="event.stopPropagation(); window.setSelectRootDirectory('${escaped}');">
+                                onclick="event.stopPropagation(); window.setSelectRootDirectory('${dir.path.replace(/'/g, "\\'")}');">
                             ${rootBtnText}
                         </button>
                     </div>
@@ -2827,7 +2602,8 @@ async function handleSelectArchive() {
                 project_name: appState.projectConfig.name,
                 cycle: appState.currentCycle,
                 doc_name: appState.currentDocument,
-                files: filesWithDir
+                files: filesWithDir,
+                root_directory: hasRootDir ? rootDirs[0] : ''  // 传递选中的根目录
             })
         });
         
@@ -3197,6 +2973,25 @@ function generateDynamicEditForm(doc, cycle, docName) {
         rowHtml += '</tr>';
         formHtml += rowHtml;
     }
+    
+    // 所属目录行（支持移动/新建目录）
+    const currentDir = doc.directory || doc.category || '/';
+    const currentRootDir = doc.root_directory || '';
+    formHtml += `
+        <tr>
+            <td class="label-cell"><label>所属目录</label></td>
+            <td class="input-cell" colspan="3">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="editDirectory" placeholder="输入或选择目录路径" value="${currentDir}" style="flex: 1;">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="pickEditDirectory()">选择</button>
+                </div>
+                <div style="margin-top: 4px; font-size: 12px; color: #666;">
+                    显示根目录（可选，设为空则显示完整路径）:
+                    <input type="text" id="editRootDirectory" placeholder="留空则不截断" value="${currentRootDir}" style="width: 60%; margin-left: 4px;">
+                </div>
+            </td>
+        </tr>
+    `;
     
     // 备注行
     // 备注字段可能存储在不同名称的字段中（大小写不敏感）
@@ -3639,6 +3434,191 @@ function formatDateToMonth(dateString) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+/**
+ * 主页面文档树形目录渲染（与ZIP列表风格一致，支持折叠展开）
+ */
+function renderMainDocTree(docsList, cycle, docInfo) {
+    // 构建树
+    const treeRoot = { name: '', path: '', children: {}, files: [] };
+    
+    for (const d of docsList) {
+        // 使用 display_directory（后端已根据 root_directory 做过路径截取）
+        const dir = d.display_directory || d.directory || '/';
+        const dirPath = dir === '/' ? '' : dir;
+        const parts = dirPath ? dirPath.split('/').filter(Boolean) : [];
+        
+        let node = treeRoot;
+        let currentPath = '';
+        for (const part of parts) {
+            currentPath = currentPath ? currentPath + '/' + part : part;
+            if (!node.children[part]) {
+                node.children[part] = { name: part, path: currentPath, children: {}, files: [] };
+            }
+            node = node.children[part];
+        }
+        node.files.push(d);
+    }
+    
+    // 目录头部样式
+    const dirHeaderStyle = 'display:flex;align-items:center;gap:4px;padding:6px 10px;'
+        + 'background:linear-gradient(135deg,#e8f0fe,#f0f5ff);'
+        + 'border:1px solid #d0ddf5;border-radius:5px;'
+        + 'cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;margin-top:6px;';
+    
+    // 递归渲染节点
+    function renderNode(node, depth) {
+        const indent = depth * 16;
+        let html = '';
+        
+        // 排序子目录
+        const childDirs = Object.values(node.children).sort((a, b) =>
+            a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+        );
+        
+        // 渲染子目录（可折叠）
+        for (const dirNode of childDirs) {
+            const totalCount = countFiles(dirNode);
+            const escapedDirPath = escapeAttr(dirNode.path);
+            
+            html += `
+                <div style="margin-left:${indent}px;margin-bottom:2px;">
+                    <div class="main-doc-dir-header" data-dir="${escapedDirPath}" style="${dirHeaderStyle}">
+                        <span class="dir-toggle-icon" style="font-size:11px;transition:transform 0.18s;display:inline-block;min-width:12px;flex-shrink:0;">▼</span>
+                        <span style="font-size:13px;">📁</span>
+                        <span style="font-size:12px;flex:1;">${escapeHtml(dirNode.name)}</span>
+                        <span style="color:#888;font-size:11px;flex-shrink:0;">(${totalCount})</span>
+                    </div>
+                    <div class="main-doc-dir-children" data-dir-files="${escapedDirPath}" style="display:block;">
+                        ${renderNode(dirNode, depth + 1)}
+                    </div>
+                </div>`;
+        }
+        
+        // 排序并渲染当前层文件
+        const sortedFiles = node.files.sort((a, b) => {
+            const na = a.original_filename || a.filename || '';
+            const nb = b.original_filename || b.filename || '';
+            return na.localeCompare(nb, 'zh-CN', { numeric: true, sensitivity: 'base' });
+        });
+        
+        for (const d of sortedFiles) {
+            html += renderMainFileRow(d, cycle, docInfo, depth);
+        }
+        
+        return html;
+    }
+    
+    return `<div class="main-doc-tree">${renderNode(treeRoot, 0)}</div>`;
+}
+
+// 统计目录下所有文件数
+function countFiles(node) {
+    let c = node.files.length;
+    for (const child of Object.values(node.children)) {
+        c += countFiles(child);
+    }
+    return c;
+}
+
+// 转义HTML属性值
+function escapeAttr(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// 渲染主页面单个文档行（保留原有的属性显示和缺失要求检查）
+function renderMainFileRow(d, cycle, docInfo, depth = 0) {
+    const getField = (name) => d[name] !== undefined ? d[name] : d[`_${name}`];
+    const getDocValue = (fieldName) => {
+        if (d[fieldName] !== undefined) return d[fieldName];
+        if (d[`_${fieldName}`] !== undefined) return d[`_${fieldName}`];
+        return null;
+    };
+    const indent = depth * 16 + 20; // 基础20px + 每级目录16px缩进
+    
+    const attrParts = [];
+    const fields = ['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date',
+        'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal',
+        'no_seal', 'other_seal'];
+    const fieldLabels = ['📅', '✍️', '🏢甲:', '🏭乙:', '📆'];
+    
+    const docDate = getField('doc_date');
+    const signer = getField('signer');
+    const partyASigner = getField('party_a_signer');
+    const partyBSigner = getField('party_b_signer');
+    const signDate = getField('sign_date');
+    const noSignature = getField('no_signature');
+    const partyASeal = getField('party_a_seal');
+    const partyBSeal = getField('party_b_seal');
+    const hasSealMarked = getField('has_seal_marked') || getField('has_seal');
+    const noSeal = getField('no_seal');
+    const otherSeal = getField('other_seal');
+    
+    if (docDate) attrParts.push(`📅${formatDateToMonth(docDate)}`);
+    if (signer) attrParts.push(`✍️${signer}`);
+    if (partyASigner) attrParts.push(`🏢甲:${partyASigner}`);
+    if (partyBSigner) attrParts.push(`🏭乙:${partyBSigner}`);
+    if (signDate) attrParts.push(`📆${formatDateToMonth(signDate)}`);
+    if (noSignature) attrParts.push('❌不签字');
+    if (partyASeal) attrParts.push('🏢甲方盖章');
+    if (partyBSeal) attrParts.push('🏭乙方盖章');
+    if (hasSealMarked) attrParts.push('🔖');
+    if (noSeal) attrParts.push('❌不盖章');
+    if (otherSeal) attrParts.push(`📍${otherSeal}`);
+    if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
+    
+    // 自定义属性
+    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
+    const cycleDocs = appState.projectConfig?.documents?.[cycle];
+    const currentDocInfo = cycleDocs?.required_docs?.find(rd => rd.name === docInfo.name);
+    const requiredCustomAttrs = currentDocInfo?.attributes || {};
+    const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+    customDefs.forEach(attrDef => {
+        const isRequired = requiredCustomAttrs[attrDef.id] === true;
+        const value = getDocValue(attrDef.id);
+        const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
+        if (isRequired) {
+            if (isCompleted) {
+                attrParts.push(`<span style="color: #28a745;">✓${attrDef.name}${attrDef.type !== 'checkbox' ? ': ' + value : ''}</span>`);
+            } else {
+                attrParts.push(`<span style="color: #dc3545;">✗${attrDef.name}</span>`);
+            }
+        } else if (isCompleted && attrDef.type !== 'checkbox') {
+            attrParts.push(`📌${attrDef.name}: ${value}`);
+        }
+    });
+    
+    // 缺失要求检查
+    const requirement = docInfo.requirement || '';
+    let missingRequirements = [];
+    
+    if (requirement.includes('甲方签字') && !getDocValue('party_a_signer') && !getDocValue('no_signature')) missingRequirements.push('甲方签字');
+    if (requirement.includes('乙方签字') && !getDocValue('party_b_signer') && !getDocValue('no_signature')) missingRequirements.push('乙方签字');
+    if (requirement.includes('签字') && !requirement.includes('甲方签字') && !requirement.includes('乙方签字') && !getDocValue('signer') && !getDocValue('no_signature')) missingRequirements.push('签字');
+    
+    if ((requirement.includes('盖章') || requirement.includes('甲方盖章') || requirement.includes('乙方盖章')) && !hasSealMarked && !partyASeal && !partyBSeal && !noSeal) {
+        if (requirement.includes('甲方盖章') && requirement.includes('乙方盖章')) missingRequirements.push('甲乙方盖章');
+        else if (requirement.includes('乙方盖章')) missingRequirements.push('乙方盖章');
+        else if (requirement.includes('甲方盖章')) missingRequirements.push('甲方盖章');
+        else if (requirement.includes('盖章')) missingRequirements.push('盖章');
+    }
+    if (requirement.includes('文档日期') && !getDocValue('doc_date')) missingRequirements.push('文档日期');
+    if (requirement.includes('签字日期') && !getDocValue('sign_date')) missingRequirements.push('签字日期');
+    
+    const missingHtml = missingRequirements.length > 0
+        ? `<span title="缺失要求：${missingRequirements.join('、')}">⚠️${missingRequirements.join('、')}</span>` : '';
+    
+    return `<div class="doc-file-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:${indent}px;padding:3px 0;">
+        <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
+              title="${escapeAttr(d.original_filename || d.filename || '')}"
+              style="cursor:pointer;text-decoration:underline;color:#1890ff;font-size:13px;">
+            📄 ${escapeHtml(d.original_filename || d.filename || '未知文件名')}
+        </span>
+        ${attrParts.length > 0 ? `<span class="doc-attrs" style="margin-left:6px;font-size:12px;">${attrParts.join(' ')}</span>` : ''}
+        ${missingHtml}
+    </div>`;
+}
+
 
 
 /**
@@ -3740,107 +3720,23 @@ export async function loadMaintainDocumentsList(cycle, docName) {
             if (documents.length === 0) {
                 documentsList.innerHTML = '<p class="placeholder">暂无已上传文档</p>';
             } else {
-                // 按目录分组
-                const groupedDocs = documents.reduce((groups, doc) => {
-                    const dir = doc.directory || '/';
-                    if (!groups[dir]) groups[dir] = [];
-                    groups[dir].push(doc);
-                    return groups;
-                }, {});
+                // 构建文档树形目录结构
+                documentsList.innerHTML = renderDocumentsTree(documents, cycle, docName);
                 
-                // 对目录进行排序，确保 '/' 目录在最前面
-                const sortedDirectories = Object.entries(groupedDocs).sort(([dirA], [dirB]) => {
-                    if (dirA === '/') return -1; // '/' 目录放最前面
-                    if (dirB === '/') return 1;
-                    return dirA.localeCompare(dirB); // 其他目录按字母排序
+                // 绑定目录折叠事件
+                document.querySelectorAll('.doc-dir-header').forEach(header => {
+                    header.addEventListener('click', function(e) {
+                        if (e.target.type === 'checkbox' || e.target.tagName === 'BUTTON') return;
+                        const dirPath = this.dataset.dir;
+                        const children = document.querySelector(`.doc-dir-children[data-dir-files="${dirPath}"]`);
+                        const icon = this.querySelector('.dir-toggle-icon');
+                        if (children) {
+                            const isHidden = children.style.display === 'none';
+                            children.style.display = isHidden ? 'block' : 'none';
+                            if (icon) icon.textContent = isHidden ? '▼' : '▶';
+                        }
+                    });
                 });
-                
-                documentsList.innerHTML = `
-                    <div class="documents-tree">
-                        ${sortedDirectories.map(([directory, docs]) => {
-                            const directoryDisplay = directory === '/' ? '/' : `/${directory}`;
-                            return `
-                                <div class="directory-group" style="margin-bottom: 15px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
-                                    <div class="directory-header" style="background: #f5f5f5; padding: 10px 15px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 10px;">
-                                        <span style="font-size: 18px;">📁</span>
-                                        <span class="directory-name" style="font-weight: 600; color: #333;">${directoryDisplay}</span>
-                                        <span class="directory-count" style="color: #666; font-size: 12px;">(${docs.length}个文件)</span>
-                                    </div>
-                                    <div class="directory-files" style="padding: 10px;">
-                                        ${docs.map(doc => {
-                                            const docId = doc.doc_id || doc.id || `${doc.cycle || doc.cycle_key || 'unknown'}_${doc.doc_name || doc.name || 'unknown'}_${doc.upload_time || doc.filename || Date.now()}`;
-                                            const zipInfo = doc.source === 'zip' ? (doc.zip_name || doc.zip_file || 'ZIP导入') : '';
-                                            const zipPath = doc.zip_path || doc.rel_path || '';
-
-                                            // 构建附加属性状态标签（复用主页面的逻辑）
-                                            const getField = (name) => doc[name] !== undefined ? doc[name] : doc[`_${name}`];
-                                            const attrParts = [];
-                                            const aDocDate = getField('doc_date');
-                                            const aSigner = getField('signer');
-                                            const aPartyASigner = getField('party_a_signer');
-                                            const aPartyBSigner = getField('party_b_signer');
-                                            const aSignDate = getField('sign_date');
-                                            const aNoSignature = getField('no_signature');
-                                            const aPartyASeal = getField('party_a_seal');
-                                            const aPartyBSeal = getField('party_b_seal');
-                                            const aHasSealMarked = getField('has_seal_marked') || getField('has_seal');
-                                            const aNoSeal = getField('no_seal');
-                                            const aOtherSeal = getField('other_seal');
-                                            const aNotInvolved = getField('not_involved');
-
-                                            if (aDocDate) attrParts.push(`📅${aDocDate}`);
-                                            if (aSigner) attrParts.push(`✍️${aSigner}`);
-                                            if (aPartyASigner) attrParts.push(`🏢甲:${aPartyASigner}`);
-                                            if (aPartyBSigner) attrParts.push(`🏭乙:${aPartyBSigner}`);
-                                            if (aSignDate) attrParts.push(`📆${aSignDate}`);
-                                            if (aNoSignature) attrParts.push('❌不签字');
-                                            if (aPartyASeal) attrParts.push('🏢甲方盖章');
-                                            if (aPartyBSeal) attrParts.push('🏭乙方盖章');
-                                            if (aHasSealMarked) attrParts.push('🔖');
-                                            if (aNoSeal) attrParts.push('❌不盖章');
-                                            if (aOtherSeal) attrParts.push(`📍${aOtherSeal}`);
-                                            if (aNotInvolved) attrParts.push('🚫本次不涉及');
-
-                                            // 显示自定义属性
-                                            const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
-                                            const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
-                                            customDefs.forEach(attrDef => {
-                                                const value = getField(attrDef.id);
-                                                const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
-                                                if (isCompleted) {
-                                                    // 只显示有值的文本类型自定义属性，checkbox类型不显示（纯勾选无额外信息）
-                                                    if (attrDef.type !== 'checkbox') {
-                                                        attrParts.push(`📌${attrDef.name}: ${value}`);
-                                                    }
-                                                }
-                                            });
-                                            const attrStr = attrParts.length > 0 ? attrParts.join(' ') : '';
-
-                                            return `
-                                                <div class="document-item" style="margin-bottom: 8px; padding: 10px; background: #fafafa; border-radius: 4px; border: 1px solid #eee;">
-                                                    <input type="checkbox" class="document-checkbox" data-doc-id="${docId}">
-                                                    <div class="document-info" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
-                                                        <span class="document-name" onclick="previewDocument('${docId}')" style="cursor: pointer; color: #1890ff;">${doc.original_filename || doc.filename || '未知文件名'}</span>
-                                                        ${attrStr ? `<div class="document-attrs" style="font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; line-height: 1.6;">${attrStr}</div>` : ''}
-                                                        <div class="document-meta" style="font-size: 12px; color: #666; display: flex; gap: 15px; flex-wrap: wrap;">
-                                                            ${zipInfo ? `<span class="document-zip" title="来源: ${zipInfo}${zipPath ? ' - ' + zipPath : ''}">
-                                                                📦 ${zipInfo}${zipPath ? ' (' + zipPath + ')' : ''}
-                                                            </span>` : ''}
-                                                        </div>
-                                                    </div>
-                                                    <div class="document-actions">
-                                                        <button class="btn btn-sm btn-success" onclick="openEditModal('${docId}', '${cycle}', '${docName}')">编辑</button>
-                                                        <button class="btn btn-sm btn-danger" onclick="handleDeleteDocument('${docId}', '${cycle}', '${docName}')">删除</button>
-                                                    </div>
-                                                </div>
-                                            `;
-                                        }).join('')}
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                `;
                 
                 // 添加复选框事件
                 document.querySelectorAll('.document-checkbox').forEach(checkbox => {
@@ -3885,6 +3781,140 @@ export async function loadMaintainDocumentsList(cycle, docName) {
             documentsList.innerHTML = '<p class="placeholder">加载文档失败，请重试</p>';
         }
     }
+}
+
+/**
+ * 渲染文档树形目录结构（支持折叠展开，与ZIP列表风格一致）
+ */
+function renderDocumentsTree(documents, cycle, docName) {
+    // 构建目录树结构
+    const treeRoot = { name: '', path: '', children: {}, files: [] };
+    
+    for (const doc of documents) {
+        const dir = doc.directory || '/';
+        const dirPath = dir === '/' ? '' : dir;
+        // 按路径分隔符拆分，构建层级
+        const parts = dirPath ? dirPath.split('/').filter(Boolean) : [];
+        
+        let node = treeRoot;
+        let currentPath = '';
+        for (const part of parts) {
+            currentPath = currentPath ? currentPath + '/' + part : part;
+            if (!node.children[part]) {
+                node.children[part] = { name: part, path: currentPath, children: {}, files: [] };
+            }
+            node = node.children[part];
+        }
+        node.files.push(doc);
+    }
+    
+    // 目录头部样式（参考ZIP列表风格）
+    const dirHeaderStyle = 'display:flex;align-items:center;gap:4px;padding:7px 12px;'
+        + 'background:linear-gradient(135deg,#e8f0fe,#f0f5ff);'
+        + 'border:1px solid #d0ddf5;border-radius:5px;'
+        + 'cursor:pointer;user-select:none;font-weight:600;color:#2c3e50;';
+    
+    // 递归渲染
+    function renderNode(node, depth) {
+        const indent = depth * 18;
+        let html = '';
+        
+        // 排序子目录
+        const childDirs = Object.values(node.children).sort((a, b) =>
+            a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+        );
+        
+        // 渲染子目录
+        for (const dirNode of childDirs) {
+            const totalCount = countAllFiles(dirNode);
+            const escapedDirPath = escapeAttr(dirNode.path);
+            
+            html += `
+                <div class="doc-directory-group" style="margin-left:${indent}px;margin-bottom:4px;">
+                    <div class="doc-dir-header" data-dir="${escapedDirPath}" style="${dirHeaderStyle}">
+                        <span class="dir-toggle-icon" style="font-size:12px;transition:transform 0.18s;display:inline-block;min-width:14px;flex-shrink:0;">▼</span>
+                        <span style="font-size:14px;">📁</span>
+                        <span class="dir-name-label" style="flex:1;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">${escapeHtml(dirNode.name)}</span>
+                        <span style="color:#888;font-size:11px;flex-shrink:0;">(${totalCount})</span>
+                    </div>
+                    <div class="doc-dir-children" data-dir-files="${escapedDirPath}" style="display:block;">
+                        ${renderNode(dirNode, depth + 1)}
+                    </div>
+                </div>`;
+        }
+        
+        // 渲染当前目录下的文件
+        const sortedFiles = node.files.sort((a, b) => {
+            const na = a.original_filename || a.filename || '';
+            const nb = b.original_filename || b.filename || '';
+            return na.localeCompare(nb, 'zh-CN', { numeric: true, sensitivity: 'base' });
+        });
+        
+        for (const doc of sortedFiles) {
+            html += renderDocItem(doc, cycle, docName, indent);
+        }
+        
+        return html;
+    }
+    
+    return `<div class="documents-tree-container">${renderNode(treeRoot, 0)}</div>`;
+}
+
+// 统计目录下所有文件数量
+function countAllFiles(node) {
+    let count = node.files.length;
+    for (const child of Object.values(node.children)) {
+        count += countAllFiles(child);
+    }
+    return count;
+}
+
+// 渲染单个文档项
+function renderDocItem(doc, cycle, docName, indent) {
+    const docId = doc.doc_id || doc.id || `${doc.cycle || 'unknown'}_${doc.doc_name || doc.name || 'unknown'}_${Date.now()}`;
+    const zipInfo = doc.source === 'zip' ? (doc.zip_name || doc.zip_file || 'ZIP导入') : '';
+    const zipPath = doc.zip_path || doc.rel_path || '';
+
+    const getField = (name) => doc[name] !== undefined ? doc[name] : doc[`_${name}`];
+    const attrParts = [];
+    const fields = ['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date',
+        'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal',
+        'no_seal', 'other_seal', 'not_involved'];
+    const labels = ['📅', '✍️', '🏢甲:', '🏭乙:', '📆', '❌不签字', '🏢甲方盖章',
+        '🏭乙方盖章', '🔖', '', '❌不盖章', '📍', '🚫本次不涉及'];
+    
+    for (let i = 0; i < fields.length; i++) {
+        const val = getField(fields[i]);
+        if (val) attrParts.push(labels[i] + (labels[i].match(/[📅✍️🏢🏭📆📍]/) ? val : ''));
+    }
+
+    // 自定义属性
+    const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+    customDefs.forEach(attrDef => {
+        const value = getField(attrDef.id);
+        const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
+        if (isCompleted && attrDef.type !== 'checkbox') {
+            attrParts.push(`📌${attrDef.name}: ${value}`);
+        }
+    });
+    const attrStr = attrParts.join(' ');
+
+    return `
+        <div class="document-item" style="margin-left:${indent + 16}px;padding:4px 8px;margin-bottom:2px;border-radius:4px;
+                display:flex;align-items:center;gap:8px;background:#fafafa;">
+            <input type="checkbox" class="document-checkbox" data-doc-id="${docId}" style="flex-shrink:0;" />
+            <div style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;">
+                <span class="document-name" onclick="previewDocument('${docId}')"
+                      style="cursor:pointer;color:#1890ff;font-size:13px;line-height:1.4;word-break:break-all;"
+                      title="${escapeAttr(doc.original_filename || doc.filename || '')}">📄 ${escapeHtml(doc.original_filename || doc.filename || '未知文件名')}</span>
+                ${attrStr ? `<div style="font-size:11px;display:flex;gap:6px;flex-wrap:wrap;line-height:1.5;color:#555;">${attrStr}</div>` : ''}
+                ${zipInfo ? `<span style="font-size:11px;color:#888;" title="来源: ${zipInfo}${zipPath ? ' - ' + zipPath : ''}">📦 ${zipInfo}${zipPath ? '(' + zipPath + ')' : ''}</span>` : ''}
+            </div>
+            <div style="flex-shrink:0;display:flex;gap:4px;">
+                <button class="btn btn-sm btn-success" onclick="openEditModal('${docId}','${cycle}','${docName}')" style="padding:2px 8px;font-size:11px;">编辑</button>
+                <button class="btn btn-sm btn-danger" onclick="handleDeleteDocument('${docId}','${cycle}','${docName}')" style="padding:2px 8px;font-size:11px;">删除</button>
+            </div>
+        </div>`;
 }
 
 /**
@@ -4302,10 +4332,10 @@ function showReportModal(reportData) {
                                     const docs = docsByType[typeName];
                                     if (!docs) return '';
                                     
-                                    // 按目录分组文档
+                                    // 按目录分组文档（使用 display_directory 保持与主页面一致）
                                     const docsByDirectory = {};
                                     docs.forEach(doc => {
-                                        const directory = doc.directory || '/';
+                                        const directory = doc.display_directory || doc.directory || '/';
                                         if (!docsByDirectory[directory]) docsByDirectory[directory] = [];
                                         docsByDirectory[directory].push(doc);
                                     });
@@ -4814,7 +4844,44 @@ if (typeof window !== 'undefined') {
     window.formatDateInput = formatDateInput;
     window.openMaintainModal = openMaintainModal;
     window.autoSearchFiles = autoSearchFiles;  // HTML 中 oninput 调用
-    // 选择文档弹窗中的"选为上传目录"按钮（支持多选，点击切换）
+    // 编辑表单中选择目录按钮
+    window.pickEditDirectory = async function() {
+        // 收集已存在的目录
+        let existingDirectories = new Set();
+        if (appState.projectConfig && appState.currentCycle) {
+            const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
+            if (cycleDocs && cycleDocs.uploaded_docs) {
+                cycleDocs.uploaded_docs.forEach(doc => {
+                    if (doc.directory) existingDirectories.add(doc.directory);
+                });
+            }
+            if (cycleDocs && cycleDocs.categories) {
+                for (const docName in cycleDocs.categories) {
+                    if (cycleDocs.categories[docName]) {
+                        cycleDocs.categories[docName].forEach(cat => existingDirectories.add(cat));
+                    }
+                }
+            }
+        }
+        try {
+            const { getCycleDocuments } = await import('./api.js');
+            const docs = await getCycleDocuments(appState.currentCycle);
+            if (docs && Array.isArray(docs)) {
+                docs.forEach(doc => {
+                    if (doc.directory) existingDirectories.add(doc.directory);
+                });
+            }
+        } catch(e) { /* ignore */ }
+
+        const dirsArray = Array.from(existingDirectories).sort();
+        showDirectorySelectModal('选择目录', dirsArray, (directory) => {
+            if (directory) {
+                const dirInput = document.getElementById('editDirectory');
+                if (dirInput) dirInput.value = directory;
+            }
+        });
+    };
+    // 选择文档弹窗中的"从此开始记录目录"按钮（支持多选，点击切换）
     window.setSelectRootDirectory = function(dirPath) {
         if (!appState.zipRootDirectories) appState.zipRootDirectories = [];
         const idx = appState.zipRootDirectories.indexOf(dirPath);
@@ -4831,7 +4898,7 @@ if (typeof window !== 'undefined') {
                 btn.style.cssText = isThis
                     ? 'background:#28a745;color:white;border:1px solid #1e7e34;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;'
                     : 'background:#fff;border:1px solid #28a745;color:#28a745;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:bold;flex-shrink:0;';
-                btn.textContent = isThis ? '✓ 已选为目录' : '选为上传目录';
+                btn.textContent = isThis ? '✓ 从此开始记录' : '从此开始记录目录';
             });
         }
     };
@@ -4841,6 +4908,7 @@ if (typeof window !== 'undefined') {
     window.unarchiveDocument = unarchiveDocument;
     window.openUploadModal = openUploadModal;
     window.batchArchiveCycle = batchArchiveCycle;
+    window.initUploadMethodTabs = initUploadMethodTabs;
 }
 
 /**
