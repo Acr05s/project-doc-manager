@@ -737,16 +737,23 @@ export async function handleZipArchive() {
         
         for (const file of appState.zipSelectedFiles) {
             try {
-                // 计算保存的目录：如果有根目录，使用相对路径；否则使用原始路径
+                // 计算保存的目录：如果有根目录，使用相对路径；否则不传目录（directory=/）
                 const rootDir = appState.zipRootDirectory;
-                let saveDirectory = '/';
+                let saveDirectory = '';
                 if (rootDir && file.source_dir) {
                     // 从根目录开始计算相对路径
-                    const relPath = file.source_dir.substring(rootDir.length).replace(/^\//, '');
-                    saveDirectory = relPath || '/';
-                } else if (file.source_dir) {
-                    saveDirectory = file.source_dir;
+                    const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
+                    if (file.source_dir === rootDir) {
+                        // 文件直接在该根目录下，用根目录最后一级名称作为分组标识
+                        const parts = rootDir.split('/');
+                        saveDirectory = parts[parts.length - 1] || '';
+                    } else if (file.source_dir.startsWith(rootPrefix)) {
+                        saveDirectory = file.source_dir.slice(rootPrefix.length);
+                    } else {
+                        saveDirectory = '';
+                    }
                 }
+                // 没有根目录时 saveDirectory 为空，后端 directory 将为 /
                 
                 const response = await fetch('/api/documents/archive-from-zip', {
                     method: 'POST',
@@ -756,7 +763,7 @@ export async function handleZipArchive() {
                         cycle: appState.currentCycle,
                         source_path: file.path,
                         doc_name: appState.currentDocument,
-                        source_dir: saveDirectory  // 保存相对于根目录的路径
+                        source_dir: saveDirectory  // 有根目录时传相对路径，否则为空（directory=/）
                     })
                 });
                 

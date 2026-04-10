@@ -2780,6 +2780,7 @@ async function handleSelectArchive() {
         
         // 为每个文件补充目录信息（source_dir），供后端打包时建立子目录
         const rootDirs = (appState.zipRootDirectories || []).slice().sort((a, b) => b.length - a.length); // 最长的优先
+        const hasRootDir = rootDirs.some(d => d); // 是否选择了根目录
         const filesWithDir = selectedFiles.map(file => {
             // 优先使用 appState 中已存的 source_dir，DOM 只作备用
             let sourceDir = file.source_dir;
@@ -2788,7 +2789,8 @@ async function handleSelectArchive() {
                 sourceDir = itemEl ? (itemEl.dataset.dir || '') : '';
             }
             // 找到文件所属的最深选中目录，去掉前缀保留相对路径
-            if (rootDirs.length > 0 && sourceDir !== undefined) {
+            if (hasRootDir && sourceDir !== undefined) {
+                let matched = false;
                 for (const rootDir of rootDirs) {
                     if (!rootDir) continue;
                     const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
@@ -2796,14 +2798,23 @@ async function handleSelectArchive() {
                         // 文件直接在该根目录下，用根目录最后一级名称作为分组标识
                         const parts = rootDir.split('/');
                         sourceDir = parts[parts.length - 1] || rootDir;
+                        matched = true;
                         break;
                     } else if (sourceDir.startsWith(rootPrefix)) {
                         sourceDir = sourceDir.slice(rootPrefix.length);
+                        matched = true;
                         break;
                     }
                 }
+                // 如果文件不在任何已选根目录下，也不传目录信息
+                if (!matched) {
+                    sourceDir = '';
+                }
+            } else if (!hasRootDir) {
+                // 没有选择根目录时，不传目录信息（directory 将为 /）
+                sourceDir = '';
             }
-            return { ...file, source_dir: sourceDir || '' };
+            return { ...file, source_dir: sourceDir };
         });
         
         const response = await fetch('/api/documents/files/select', {
