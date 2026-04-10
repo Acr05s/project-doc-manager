@@ -583,46 +583,6 @@ class DocumentManager:
 
             logger.info(f"[DEBUG] 文档名称映射: {doc_name_mapping}")
 
-            # 同步更新 documents_index.json 中的 doc_name
-            if doc_name_mapping:
-                data_dir = project_folder / 'data'
-                index_file = data_dir / 'documents_index.json'
-                
-                if index_file.exists():
-                    try:
-                        with open(index_file, 'r', encoding='utf-8') as f:
-                            doc_index = json.load(f)
-                        
-                        documents = doc_index.get('documents', {})
-                        updated_count = 0
-                        
-                        for doc_id, doc_info in documents.items():
-                            cycle = doc_info.get('cycle', '')
-                            doc_name = doc_info.get('doc_name', '')
-                            mapping_key = (project_name, cycle, doc_name)
-                            
-                            if mapping_key in doc_name_mapping:
-                                old_name = doc_info['doc_name']
-                                doc_info['doc_name'] = doc_name_mapping[mapping_key]
-                                updated_count += 1
-                                logger.info(f"[DEBUG] 更新文档名称: {old_name} -> {doc_info['doc_name']}")
-                        
-                        if updated_count > 0:
-                            # 备份原文件
-                            backup_file = data_dir / 'documents_index_backup.json'
-                            with open(backup_file, 'w', encoding='utf-8') as f:
-                                json.dump(doc_index, f, ensure_ascii=False, indent=2)
-                            
-                            # 保存更新后的文件
-                            with open(index_file, 'w', encoding='utf-8') as f:
-                                json.dump(doc_index, f, ensure_ascii=False, indent=2)
-                            
-                            logger.info(f"[DEBUG] 已更新 {updated_count} 个文档名称")
-                    except Exception as e:
-                        logger.error(f"[DEBUG] 更新文档索引失败: {e}")
-                        import traceback
-                        logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
-
             # 将需求配置复制到项目目录
             target_file = project_folder / 'requirements.json'
             config_to_save = {

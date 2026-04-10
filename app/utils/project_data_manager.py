@@ -284,14 +284,7 @@ class ProjectDataManager:
                     logger.warning(f"保存到数据库失败，回退到JSON: {db_err}")
                     db_success = False
             
-            # 2. 保存到JSON文件（保持向后兼容）
-            json_file_manager.write_json(
-                str(self._get_documents_index_path(project_name)),
-                documents
-            )
-            logger.info(f"文档索引已保存到JSON: {project_name}")
-            
-            return json_success and db_success
+            return db_success
         except Exception as e:
             logger.error(f"保存文档索引失败: {e}")
             return False
@@ -372,15 +365,8 @@ class ProjectDataManager:
             except Exception as db_err:
                 logger.warning(f"从数据库加载失败: {db_err}")
         
-        # 3. 回退到JSON文件（最后兜底）
-        try:
-            data = json_file_manager.read_json(
-                str(self._get_documents_index_path(project_name))
-            )
-            return data or {'documents': {}, 'updated_time': datetime.now().isoformat()}
-        except Exception as e:
-            logger.error(f"加载文档索引失败: {e}")
-            return {'documents': {}, 'updated_time': datetime.now().isoformat()}
+        # 3. 无数据时返回空
+        return {'documents': {}, 'updated_time': datetime.now().isoformat()}
     
     def add_document_to_index(self, project_name: str, doc_id: str, doc_info: Dict[str, Any]) -> bool:
         """添加文档到索引

@@ -567,7 +567,7 @@ class ZipMatcher:
                     except Exception as db_err:
                         logger.warning(f"[ZIP归档] 写入 documents.db 失败（不影响主流程）: {db_err}")
                 
-                # 同时写入 documents_index.json（额外的持久化保障）
+                # 同时写入 projects_index.db（通过 add_document_to_index）
                 if project_name:
                     try:
                         from app.utils.project_data_manager import ProjectDataManager
@@ -575,9 +575,9 @@ class ZipMatcher:
                         cfg = get_config()
                         data_manager = ProjectDataManager(cfg)
                         data_manager.add_document_to_index(project_name, doc_id, doc_info_dict)
-                        logger.info(f"[ZIP归档] 文档已写入 documents_index.json: {doc_id}")
+                        logger.info(f"[ZIP归档] 文档索引已更新: {doc_id}")
                     except Exception as idx_err:
-                        logger.warning(f"[ZIP归档] 写入 documents_index.json 失败（不影响主流程）: {idx_err}")
+                        logger.warning(f"[ZIP归档] 更新文档索引失败（不影响主流程）: {idx_err}")
             
             return source_path
             
