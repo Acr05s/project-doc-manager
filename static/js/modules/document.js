@@ -5760,6 +5760,17 @@ export async function handleBatchDelete() {
                 
                 if (successCount > 0) {
                     showNotification(`成功删除 ${successCount} 个文档`, 'success');
+                    // 重新加载项目配置，确保 appState.projectConfig 是最新的
+                    if (appState.currentProjectId) {
+                        try {
+                            const updatedProject = await loadProject(appState.currentProjectId);
+                            if (updatedProject) {
+                                appState.projectConfig = updatedProject;
+                            }
+                        } catch (e) {
+                            console.error('重新加载项目配置失败:', e);
+                        }
+                    }
                     // 刷新文档列表
                     if (appState.currentCycle && appState.currentDocument) {
                         await loadUploadedDocuments(appState.currentCycle, appState.currentDocument);

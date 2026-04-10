@@ -315,6 +315,10 @@ class ProjectDataManager:
                     if stored_index and 'documents' in stored_index:
                         docs_dict = stored_index['documents']
                         if docs_dict:  # 非空
+                            # 确保每个文档的 directory 字段有默认值
+                            for doc_id, doc_info in docs_dict.items():
+                                if not doc_info.get('directory'):
+                                    doc_info['directory'] = '/'
                             logger.info(f"从 projects_index.db 加载了 {len(docs_dict)} 个文档: {project_name}")
                             return {
                                 'documents': docs_dict,
@@ -1036,6 +1040,9 @@ class ProjectDataManager:
                             doc_copy = dict(doc)
                             if doc_copy.get('file_path'):
                                 doc_copy['file_path'] = normalize_file_path(doc_copy['file_path'], project_name)
+                            # 确保 directory 字段有默认值
+                            if not doc_copy.get('directory'):
+                                doc_copy['directory'] = '/'
                             doc_index['documents'][doc_id] = doc_copy
             db_success = self._db_save_config(project_id, 'documents_index', doc_index)
             if db_success:

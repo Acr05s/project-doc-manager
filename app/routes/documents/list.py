@@ -33,9 +33,9 @@ def list_documents():
                 # 确保文档有 id 字段（总是使用 doc_id 覆盖，确保正确性）
                 if doc_id:
                     doc['id'] = doc_id
-                # 确保文档有 directory 字段
-                if 'directory' not in doc:
-                    doc['directory'] = doc.get('category') or ''
+                # 确保文档有 directory 字段（使用 '/' 作为根目录默认值）
+                if 'directory' not in doc or not doc['directory']:
+                    doc['directory'] = doc.get('category') or '/'
                 unique_docs.append(doc)
         
         docs = unique_docs

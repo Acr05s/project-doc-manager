@@ -359,8 +359,14 @@ def select_files():
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             doc_id = f"{cycle}_{doc_name}_{timestamp}_{len(results)}"
             
-            # 提取目录信息 - 手动选择的文件使用根目录 '/'，不显示具体子目录
-            directory = '/'
+            # 提取目录信息 - 优先使用前端传递的 source_dir
+            source_dir = file_info.get('source_dir', '')
+            if source_dir:
+                # 使用前端传递的相对路径作为 directory
+                directory = source_dir if source_dir.startswith('/') else '/' + source_dir
+            else:
+                directory = '/'
+            
             relative_path = str(file_path)
             if project_name:
                 # 获取项目上传目录

@@ -464,11 +464,33 @@ export function handleZipFileSelect(e) {
         // 计算相对于根目录的路径
         const rootDir = appState.zipRootDirectory;
         let relDir = '';
-        if (rootDir && sourceDir.startsWith(rootDir)) {
-            relDir = sourceDir.substring(rootDir.length).replace(/^\//, '');
+        if (rootDir) {
+            // 计算完整的相对路径（包含文件名）
+            const normalizedPath = filePath.replace(/\\/g, '/');
+            const normalizedRoot = rootDir.replace(/\\/g, '/');
+            
+            if (normalizedPath.startsWith(normalizedRoot + '/')) {
+                const relPath = normalizedPath.substring(normalizedRoot.length + 1);
+                // 提取目录路径（不包含文件名）
+                const lastSlashIndex = relPath.lastIndexOf('/');
+                if (lastSlashIndex > -1) {
+                    relDir = relPath.substring(0, lastSlashIndex);
+                } else {
+                    relDir = ''; // 文件直接在根目录下
+                }
+            } else {
+                relDir = sourceDir; // 不在根目录下，使用完整目录路径
+            }
         } else {
-            relDir = sourceDir;
+            relDir = sourceDir; // 没有设置根目录，使用完整目录路径
         }
+        
+        // 打印调试信息
+        console.log('[ZIP选择] 文件:', fileName);
+        console.log('[ZIP选择] filePath:', filePath);
+        console.log('[ZIP选择] sourceDir:', sourceDir);
+        console.log('[ZIP选择] rootDir:', rootDir);
+        console.log('[ZIP选择] relDir:', relDir);
         
         // 添加到选中列表（带目录信息）
         item.classList.add('selected');
@@ -738,25 +760,32 @@ export async function handleZipArchive() {
         for (const file of appState.zipSelectedFiles) {
             try {
                 // 计算保存的目录
-                const rootDir = appState.zipRootDirectory;
                 let saveDirectory = '';
-                if (rootDir && file.source_dir) {
-                    // 从根目录开始计算相对路径
-                    const rootPrefix = rootDir.endsWith('/') ? rootDir : rootDir + '/';
-                    if (file.source_dir === rootDir) {
-                        // 文件直接在该根目录下，用根目录最后一级名称作为分组标识
-                        const parts = rootDir.split('/');
-                        saveDirectory = parts[parts.length - 1] || '';
-                    } else if (file.source_dir.startsWith(rootPrefix)) {
-                        saveDirectory = file.source_dir.slice(rootPrefix.length);
-                    } else {
-                        saveDirectory = file.source_dir; // 使用原始目录
-                    }
+                if (file.rel_dir) {
+                    // 使用已经计算好的相对于根目录的路径
+                    saveDirectory = file.rel_dir;
                 } else if (file.source_dir) {
-                    // 没有设置根目录，但文件有目录信息，使用原始目录
-                    saveDirectory = file.source_dir;
+                    // 没有设置根目录，但文件有目录信息
+                    // 尝试提取有意义的目录名（跳过看起来像随机ID的顶层目录）
+                    const dirParts = file.source_dir.split('/');
+                    // 过滤掉看起来像随机ID的部分（10位以上字母数字混合，可能包含下划线）
+                    const meaningfulParts = dirParts.filter(part => {
+                        // 如果部分包含看起来像随机ID的子串（如 tmpxgccahbx_20260408152038）
+                        // 匹配：10位以上字母数字，或 字母数字_日期时间 格式
+                        if (/^[a-z0-9]{10,}$/i.test(part) || /^[a-z0-9]+_\d{8,}$/i.test(part)) {
+                            return false;
+                        }
+                        return true;
+                    });
+                    saveDirectory = meaningfulParts.join('/');
                 }
                 // 没有目录信息时 saveDirectory 为空，后端 directory 将为 /
+                
+                // 打印调试信息
+                console.log('[ZIP归档] 文件:', file.name);
+                console.log('[ZIP归档] file.rel_dir:', file.rel_dir);
+                console.log('[ZIP归档] file.source_dir:', file.source_dir);
+                console.log('[ZIP归档] saveDirectory:', saveDirectory);
                 
                 const response = await fetch('/api/documents/archive-from-zip', {
                     method: 'POST',
@@ -1294,9 +1323,20 @@ function updateSelectedFilesRelativePath() {
     if (!rootDir) return;
     
     appState.zipSelectedFiles.forEach(file => {
-        // 计算相对于根目录的路径
-        file.rel_dir = getRelativePathFromRoot(file.path, rootDir);
-        console.log('[ZIP路径更新]', file.path, '->', file.rel_dir);
+        // 计算相对于根目录的完整路径（包含文件名）
+        const relPath = getRelativePathFromRoot(file.path, rootDir);
+        
+        // 提取目录路径（不包含文件名）
+        const lastSlashIndex = relPath.lastIndexOf('/');
+        if (lastSlashIndex > -1) {
+            file.rel_dir = relPath.substring(0, lastSlashIndex);
+            file.source_dir = relPath.substring(0, lastSlashIndex);
+        } else {
+            file.rel_dir = ''; // 文件直接在根目录下
+            file.source_dir = ''; // 文件直接在根目录下
+        }
+        
+        console.log('[ZIP路径更新]', file.path, '-> rel_dir:', file.rel_dir, 'source_dir:', file.source_dir);
     });
 }
 
