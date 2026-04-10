@@ -737,7 +737,7 @@ export async function handleZipArchive() {
         
         for (const file of appState.zipSelectedFiles) {
             try {
-                // 计算保存的目录：如果有根目录，使用相对路径；否则不传目录（directory=/）
+                // 计算保存的目录
                 const rootDir = appState.zipRootDirectory;
                 let saveDirectory = '';
                 if (rootDir && file.source_dir) {
@@ -750,10 +750,13 @@ export async function handleZipArchive() {
                     } else if (file.source_dir.startsWith(rootPrefix)) {
                         saveDirectory = file.source_dir.slice(rootPrefix.length);
                     } else {
-                        saveDirectory = '';
+                        saveDirectory = file.source_dir; // 使用原始目录
                     }
+                } else if (file.source_dir) {
+                    // 没有设置根目录，但文件有目录信息，使用原始目录
+                    saveDirectory = file.source_dir;
                 }
-                // 没有根目录时 saveDirectory 为空，后端 directory 将为 /
+                // 没有目录信息时 saveDirectory 为空，后端 directory 将为 /
                 
                 const response = await fetch('/api/documents/archive-from-zip', {
                     method: 'POST',
