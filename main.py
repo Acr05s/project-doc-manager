@@ -81,27 +81,6 @@ def create_app(config: Optional[Dict] = None) -> Flask:
         from flask import render_template
         return render_template('test.html')
     
-    # 认证状态检查路由
-    @app.route('/api/auth/status')
-    def check_auth_status():
-        """检查认证状态"""
-        from flask_login import current_user
-        from flask import jsonify
-        if current_user.is_authenticated:
-            return jsonify({
-                'status': 'success',
-                'user': {
-                    'id': current_user.id,
-                    'username': current_user.username,
-                    'role': current_user.role
-                }
-            })
-        else:
-            return jsonify({
-                'status': 'success',
-                'user': None
-            })
-    
     # 初始化认证路由（在其他蓝图之前注册）
     from app.routes.auth_routes import init_auth_routes
     init_auth_routes(app)

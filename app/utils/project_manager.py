@@ -292,7 +292,7 @@ class ProjectManager:
             project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
             
             # 确定项目状态：承建单位普通用户创建的项目需要审批
-            status = 'pending' if creator_role == 'contractor' else 'approved'
+            status = 'pending' if creator_role == self.ROLE_CONTRACTOR else 'approved'
 
             # 创建项目配置
             project_config = {
@@ -1555,6 +1555,12 @@ class ProjectManager:
             logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             return {'status': 'error', 'message': str(e)}
     
+    # 角色常量定义
+    ROLE_ADMIN = 'admin'
+    ROLE_PMO = 'pmo'
+    ROLE_PROJECT_ADMIN = 'project_admin'
+    ROLE_CONTRACTOR = 'contractor'
+    
     def get_user_accessible_projects(self, user_id: int, user_role: str, user_organization: str = '') -> List[Dict[str, Any]]:
         """获取用户可访问的项目
         
@@ -1573,12 +1579,14 @@ class ProjectManager:
             accessible_projects = []
             
             # 管理员、PMO、项目经理可以访问所有项目（包括 pending）
-            if user_role in ('admin', 'pmo', 'project_admin'):
+            if user_role in (self.ROLE_ADMIN, self.ROLE_PMO, self.ROLE_PROJECT_ADMIN):
                 projects = self.list_all()
                 # 补充状态信息
                 for proj in projects:
                     config = self.load(proj['id'])
-                    proj['status'] = config.get('status', 'approved') if config else 'approved'
+                    if not config:
+                        continue
+                    proj['status'] = config.get('status', 'approved')
                 return projects
             
             # 遍历所有项目
@@ -1592,9 +1600,14 @@ class ProjectManager:
                 creator_id = config.get('creator_id')
                 is_creator = creator_id == user_id
                 
-                # contractor 只能看到 approved 项目，以及自己创建的 pending 项目
+                # contractor 权限逻辑
                 if user_role == 'contractor':
-                    if status == 'approved' or (status == 'pending' and is_creator):
+                    # contractor 可以看到：
+                    # 1. 所有已批准（approved）的项目（无论所属组织）
+                    # 2. 自己创建的项目（无论状态）
+                    # 3. 属于自己组织的项目（无论状态）
+                    is_related = is_creator or (user_organization and config.get('party_b') == user_organization)
+                    if status == 'approved' or is_related:
                         accessible_projects.append({
                             'id': project_id,
                             'name': info.get('name', ''),

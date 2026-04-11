@@ -64,17 +64,17 @@ def create_project():
 @project_bp.route('/<project_id>', methods=['GET'])
 def get_project(project_id):
     """获取项目详情"""
+    from flask_login import current_user
+    
+    # 检查用户是否已登录
+    if not current_user.is_authenticated:
+        return jsonify({'status': 'error', 'message': '请先登录'}), 401
+    
     try:
-        from flask_login import current_user
-        
-        # 检查用户是否已登录
-        if not current_user.is_authenticated:
-            return jsonify({'status': 'error', 'message': '请先登录'}), 401
-        
         # 检查用户是否有权限访问该项目
         user_id = int(current_user.id)
         user_role = current_user.role
-        user_organization = ''  # 这里可以从用户信息中获取组织信息
+        user_organization = current_user.organization if hasattr(current_user, 'organization') else ''
         
         # 获取用户可访问的项目列表
         accessible_projects = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
@@ -1143,7 +1143,7 @@ def get_accessible_projects():
         # 获取用户信息
         user_id = int(current_user.id)
         user_role = current_user.role
-        user_organization = ''  # 这里可以从用户信息中获取组织信息
+        user_organization = current_user.organization if hasattr(current_user, 'organization') else ''
         
         # 获取可访问的项目
         result = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
