@@ -15,7 +15,7 @@
 ## 1. 项目概述
 
 **项目名称**: 项目文档管理中心  
-**版本**: v2.1.0  
+**版本**: v2.6.0  
 **技术栈**: Flask + Vanilla JavaScript + JSON文件存储  
 **设计模式**: 组合模式 (Composite Pattern)
 
@@ -181,9 +181,15 @@ project_doc_manager/
 │       │   └── documents_archived.json  # 归档文档
 │       └── versions/                # 版本备份
 │
-└── uploads/                         # 上传文件存储
-    ├── temp_chunks/                 # 分片上传临时文件
-    └── tasks/                       # 任务状态文件
+├── uploads/                         # 上传文件存储
+│   ├── temp_chunks/                 # 分片上传临时文件
+│   └── tasks/                       # 任务状态文件
+│
+└── tools/                           # 工具代码
+    ├── diagnostics/                 # 诊断工具
+    ├── cleanup/                     # 清理工具
+    ├── fix/                         # 修复工具
+    └── test/                        # 测试工具
 ```
 
 ---
@@ -870,5 +876,5 @@ export async function loadProjectsList() {
 ---
 
 **文档版本**: v1.0  
-**最后更新**: 2026-03-29  
+**最后更新**: 2026-04-11  
 **作者**: AI Assistant

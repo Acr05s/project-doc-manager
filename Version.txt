@@ -1,40 +1,19 @@
-2.5.0
+2.6.0
 
 更新内容：
 
-1. PDF 转换重构
-   - 去掉 docx2pdf 依赖，改用 comtypes 直接调用 Office COM
-   - COM 方案支持所有 Office 格式（.doc/.docx/.xls/.xlsx/.ppt/.pptx）
-   - 修复 .doc 文件转换报 "Package not found" 的问题
-   - 转换逻辑按平台分支：Windows 优先 COM，Linux/Ubuntu 优先 LibreOffice
-   - convert_to_pdf 入口统一用 os.path.abspath() 确保绝对路径
+1. 工具代码整理
+   - 将诊断和测试工具代码移动到 tools 目录
+   - 清理过时的诊断代码
+   - 优化 tools 目录结构，按功能分类：diagnostics、cleanup、fix、test
 
-2. 预览修复
-   - document.js previewDocument 添加 filename 默认值防御性检查
-   - 修复服务重启后文档预览报"文档不存在"的问题
+2. 文档更新
+   - 重新生成产品文档、使用手册和 README
+   - 添加工具代码使用说明
+   - 优化文档结构和内容
 
-3. 项目导入修复
-   - 修复导入包预览时 requirements.json 路径错误（增加 config/ 子目录查找）
-   - 修复导入后自动打开项目失败（ensure_project_index 增加数据库双写）
+3. 版本更新
+   - 版本号升级到 v2.6.0
+   - 更新更新日志
 
-3. 项目导入后前端刷新优化
-   - 导入项目后先刷新模态框列表+主界面下拉列表
-   - 关闭模态框后再自动打开新导入的项目
-   - 解决导入后项目列表中看不到新项目的问题
-
-版本号: 2026040714
-
-4. 导入项目后数据缓存修复
-   - import_from_preview 完成后主动将完整配置同步到数据库
-   - 解决导入后切换周期数据时有时无的问题
-   - 根因：load_full_config 优先从数据库读 requirements，但导入时未写入数据库
-
-版本号: 2026040715
-
-5. PDF转换任务参数修复 + 预览错误日志增强
-   - 修复 start_pdf_conversion_task 函数签名与调用处参数顺序/数量不匹配
-     （函数原签名只有2个参数，调用处传了3个且顺序反了）
-   - 新增 cache_key 参数，支持大文件预览时的缓存标识传递
-   - 增强预览路由错误日志：记录完整 traceback 到日志文件，便于排查服务器端问题
-
-版本号: 2026040716
+版本号: 2026041101

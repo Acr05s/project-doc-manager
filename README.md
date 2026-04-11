@@ -1,4 +1,4 @@
-# 项目文档管理中心 v2.5.0 📁
+# 项目文档管理中心 v2.6.0 📁
 
 一个功能完整的项目全生命周期文档管理系统，支持文档收集、版本管理、自动签字/盖章识别、ZIP批量导入、项目打包导出等功能。
 
@@ -320,6 +320,133 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 }
 ```
 
+## 🛠️ 工具代码
+
+### 工具目录结构
+
+```
+tools/
+├── diagnostics/  # 诊断工具
+├── cleanup/      # 清理工具
+├── fix/          # 修复工具
+└── test/         # 测试工具
+```
+
+### 诊断工具 (diagnostics/)
+
+- **check_config.py**: 检查项目配置文件
+  ```bash
+  python tools/diagnostics/check_config.py [项目名称]
+  ```
+
+- **check_uploaded.py**: 检查已上传的文档信息
+  ```bash
+  python tools/diagnostics/check_uploaded.py <project_id>
+  ```
+
+- **debug_list.py**: 调试文档列表
+  ```bash
+  python tools/diagnostics/debug_list.py <project_id> [cycle] [doc_name]
+  ```
+
+- **diagnose_db.py**: 数据库诊断工具
+  ```bash
+  python tools/diagnostics/diagnose_db.py <项目名称>
+  ```
+
+- **diagnose_is_error.py**: 诊断错误
+  ```bash
+  python tools/diagnostics/diagnose_is_error.py
+  ```
+
+- **diagnose_packaging.py**: 诊断打包问题
+  ```bash
+  python tools/diagnostics/diagnose_packaging.py
+  ```
+
+- **diagnose_zip_upload.py**: 诊断ZIP上传问题
+  ```bash
+  python tools/diagnostics/diagnose_zip_upload.py
+  ```
+
+- **quick_diagnose.py**: 快速诊断工具
+  ```bash
+  python tools/diagnostics/quick_diagnose.py
+  ```
+
+### 清理工具 (cleanup/)
+
+- **cleanup_duplicates.py**: 清理重复文档
+  ```bash
+  python tools/cleanup/cleanup_duplicates.py
+  ```
+
+- **cleanup_requirements.py**: 清理需求文件
+  ```bash
+  python tools/cleanup/cleanup_requirements.py
+  ```
+
+### 修复工具 (fix/)
+
+- **fix_directory.py**: 修复目录结构
+  ```bash
+  python tools/fix/fix_directory.py
+  ```
+
+- **fix_project_dirs.py**: 修复项目目录
+  ```bash
+  python tools/fix/fix_project_dirs.py
+  ```
+
+- **reset_directory.py**: 重置目录结构
+  ```bash
+  python tools/fix/reset_directory.py
+  ```
+
+### 测试工具 (test/)
+
+- **test_duplicate_cleanup.py**: 测试重复清理
+  ```bash
+  python tools/test/test_duplicate_cleanup.py
+  ```
+
+- **test_file_paths.py**: 测试文件路径
+  ```bash
+  python tools/test/test_file_paths.py
+  ```
+
+### 根目录工具
+
+- **check_db3.py**: 检查数据库
+  ```bash
+  python tools/check_db3.py <project_id>
+  ```
+
+- **check_depth.py**: 检查目录深度
+  ```bash
+  python tools/check_depth.py
+  ```
+
+- **check_directory_display.py**: 检查目录显示
+  ```bash
+  python tools/check_directory_display.py
+  ```
+
+- **check_long_dirs.py**: 检查长目录名
+  ```bash
+  python tools/check_long_dirs.py
+  ```
+
+- **init_project_stats.py**: 初始化项目统计
+  ```bash
+  python tools/init_project_stats.py
+  ```
+
+- **migrate_to_db.py**: 数据迁移到数据库
+  ```bash
+  python tools/migrate_to_db.py
+  ```
+
 ## 📚 更多文档
 
 - [技术文档](docs/PROJECT_DOCUMENTATION.md) - 详细架构和API说明
@@ -327,6 +454,14 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 - [快速开始](docs/QUICK_START.md) - 5分钟上手指南
 
 ## 📝 更新日志
+
+### v2.6.0
+- 工具代码整理：将诊断和测试工具代码移动到 tools 目录
+- 清理过时的诊断代码
+- 优化 tools 目录结构，按功能分类：diagnostics、cleanup、fix、test
+- 修复工具代码中的硬编码问题
+- 更新 README.md，添加工具代码使用说明
+- 版本号升级到 v2.6.0
 
 ### v2.5.0
 - 重构 PDF 转换服务：去掉 docx2pdf 依赖，改用 comtypes 直接调用 Office COM
@@ -362,7 +497,7 @@ venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.c
 
 ---
 
-**版本**: v2.5.0  
-**最后更新**: 2026年4月7日
+**版本**: v2.6.0  
+**最后更新**: 2026年4月11日
 **Python**: 3.8+  
 **支持**: Windows 10/11, Ubuntu, macOS

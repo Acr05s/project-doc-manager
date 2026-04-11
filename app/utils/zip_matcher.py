@@ -212,10 +212,13 @@ class ZipMatcher:
             for info in zf.infolist():
                 member = info.filename
                 
-                # 跳过目录和隐藏文件
+                # 跳过目录、隐藏文件和Word缓存文件
                 if member.endswith('/') or '/' in member and member.split('/')[0].startswith('.'):
                     continue
                 if member.startswith('.'):
+                    continue
+                # 跳过Word缓存文件（以~$开头）
+                if member.startswith('~$'):
                     continue
                 
                 # 尝试解码文件名（处理乱码）
@@ -250,7 +253,7 @@ class ZipMatcher:
         
         for ext in self.ALLOWED_EXTS:
             for file_path in directory.rglob(f'*{ext}'):
-                if file_path.is_file() and not file_path.name.startswith('.'):
+                if file_path.is_file() and not file_path.name.startswith('.') and not file_path.name.startswith('~$'):
                     # 计算文件哈希
                     file_hash = self._calculate_file_hash(file_path)
                     

@@ -17,7 +17,7 @@ from pathlib import Path
 from datetime import datetime
 
 # 项目基础路径
-PROJECTS_BASE = Path(__file__).parent.parent / "projects"
+PROJECTS_BASE = Path(__file__).parent.parent.parent / "projects"
 
 
 def load_json(filepath):

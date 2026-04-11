@@ -32,7 +32,8 @@ from pathlib import Path
 from datetime import datetime
 
 # 添加项目根目录到路径
-sys.path.insert(0, str(Path(__file__).parent))
+script_dir = Path(__file__).parent
+sys.path.insert(0, str(script_dir))
 
 from app.utils.db_manager import get_projects_index_db, get_project_documents_db
 
