@@ -50,6 +50,14 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     from app.services.task_service import task_service
     task_service.set_doc_manager(doc_manager)
     
+    # 初始化认证模块
+    from app.auth import init_auth
+    init_auth(app)
+    
+    # 初始化认证路由
+    from app.routes.auth_routes import init_auth_routes
+    init_auth_routes(app)
+    
     # 初始化路由
     from app.routes.main_routes import main_bp, init_doc_manager as init_main_manager
     from app.routes.projects import project_bp, init_doc_manager as init_project_manager

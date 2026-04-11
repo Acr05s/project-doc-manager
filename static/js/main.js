@@ -69,7 +69,15 @@ function closeVersionModal() {
 }
 
 // 当DOM加载完成后初始化应用
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    // 初始化认证模块
+    try {
+        const { initAuth } = await import('./modules/auth.js');
+        await initAuth();
+    } catch (error) {
+        console.error('初始化认证模块失败:', error);
+    }
+    
     initApp();
     
     // 加载版本信息
@@ -79,6 +87,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const projectTitle = document.getElementById('projectTitle');
     if (projectTitle) {
         projectTitle.addEventListener('click', async function() {
+            // 检查是否已登录
+            const { hasRole } = await import('./modules/auth.js');
+            if (!hasRole(['admin', 'pmo', 'project_admin', 'contractor'])) {
+                const { openLoginModal } = await import('./modules/auth.js');
+                openLoginModal();
+                return;
+            }
+            
             // 检查是否有当前打开的项目
             const appState = (await import('./modules/app-state.js')).appState;
             const { showNotification, showLoading } = await import('./modules/ui.js');
