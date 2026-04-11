@@ -3,10 +3,13 @@
  */
 
 // 认证状态：null 表示尚未确定
-let authState = {
+export let authState = {
     isAuthenticated: null,
-    user: null
+    user: null,
+    needsApproval: false
 };
+
+let authResolveCallback = null;
 
 /**
  * 检查用户是否已登录
@@ -15,16 +18,18 @@ export async function checkAuthStatus() {
     try {
         const response = await fetch('/api/auth/status');
         const result = await response.json();
-        
+
         if (result.status === 'success' && result.user) {
             authState.isAuthenticated = true;
             authState.user = result.user;
+            authState.needsApproval = result.user.status === 'pending';
             updateAuthUI();
             updateRoleBasedUI();
             return true;
         } else {
             authState.isAuthenticated = false;
             authState.user = null;
+            authState.needsApproval = false;
             updateAuthUI();
             updateRoleBasedUI();
             return false;
@@ -33,6 +38,7 @@ export async function checkAuthStatus() {
         console.error('检查认证状态失败:', error);
         authState.isAuthenticated = false;
         authState.user = null;
+        authState.needsApproval = false;
         updateAuthUI();
         updateRoleBasedUI();
         return false;
@@ -51,15 +57,20 @@ export async function login(username, password) {
             },
             body: JSON.stringify({ username, password })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.status === 'success') {
             authState.isAuthenticated = true;
             authState.user = result.user;
+            authState.needsApproval = !!result.needs_approval;
             updateAuthUI();
             updateRoleBasedUI();
-            return { success: true, message: result.message };
+            if (authResolveCallback) {
+                authResolveCallback();
+                authResolveCallback = null;
+            }
+            return { success: true, message: result.message, needsApproval: !!result.needs_approval };
         } else {
             return { success: false, message: result.message };
         }
@@ -113,7 +124,6 @@ function updateAuthUI() {
     }
     
     if (authState.isAuthenticated) {
-        // 显示用户信息和注销按钮
         const roleMap = {
             'admin': '管理员',
             'pmo': 'PMO',
@@ -122,16 +132,44 @@ function updateAuthUI() {
         };
         const roleLabel = roleMap[authState.user.role] || authState.user.role;
         authContainer.innerHTML = `
-            <div class="auth-info" style="display: flex; align-items: center; gap: 8px;">
-                <span class="user-role" style="font-size: 12px; color: #28a745; font-weight: bold;">${roleLabel}</span>
-                <span class="username" style="font-size: 12px; color: #333;">${authState.user.username}</span>
-                <button id="logoutBtn" class="btn btn-sm btn-outline-danger" style="padding: 4px 10px; font-size: 12px;">注销</button>
+            <div class="dropdown" id="userProfileDropdown" style="position:relative;display:inline-block;">
+                <button class="dropdown-toggle" type="button" id="userProfileBtn" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+                    <span class="user-role" style="font-size:12px;color:#a8e6cf;font-weight:bold;">${roleLabel}</span>
+                    <span class="username" style="font-size:12px;color:#fff;">${authState.user.username}</span>
+                    <span style="font-size:10px;">▼</span>
+                </button>
+                <div class="dropdown-menu" id="userProfileMenu" style="display:none;position:absolute;right:0;top:110%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:120px;z-index:9999;">
+                    <a href="#" class="dropdown-item" id="profileMenuItem" style="display:block;padding:8px 12px;font-size:13px;color:#333;text-decoration:none;">⚙️ 个人设置</a>
+                    <a href="#" class="dropdown-item" id="logoutMenuItem" style="display:block;padding:8px 12px;font-size:13px;color:#333;text-decoration:none;">🚪 注销</a>
+                </div>
             </div>
         `;
-        
-        const logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', async () => {
+
+        const userProfileBtn = document.getElementById('userProfileBtn');
+        const userProfileMenu = document.getElementById('userProfileMenu');
+        if (userProfileBtn && userProfileMenu) {
+            userProfileBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isShown = userProfileMenu.style.display === 'block';
+                userProfileMenu.style.display = isShown ? 'none' : 'block';
+            });
+            document.addEventListener('click', () => {
+                userProfileMenu.style.display = 'none';
+            });
+        }
+
+        const profileMenuItem = document.getElementById('profileMenuItem');
+        if (profileMenuItem) {
+            profileMenuItem.addEventListener('click', (e) => {
+                e.preventDefault();
+                import('./profile.js').then(m => m.openProfileModal());
+            });
+        }
+
+        const logoutMenuItem = document.getElementById('logoutMenuItem');
+        if (logoutMenuItem) {
+            logoutMenuItem.addEventListener('click', async (e) => {
+                e.preventDefault();
                 const result = await logout();
                 if (result.success) {
                     showNotification('已注销', 'success');
@@ -141,7 +179,13 @@ function updateAuthUI() {
                 }
             });
         }
+        
+        const msgBtn = document.getElementById('messageCenterBtn');
+        if (msgBtn) msgBtn.style.display = 'flex';
     } else {
+        // 隐藏消息中心按钮
+        const msgBtn = document.getElementById('messageCenterBtn');
+        if (msgBtn) msgBtn.style.display = 'none';
         // 显示登录按钮
         authContainer.innerHTML = `
             <div class="auth-info" style="display: flex; align-items: center; gap: 8px;">
@@ -166,31 +210,148 @@ export function updateRoleBasedUI() {
     const isAdmin = role === 'admin' || role === 'pmo';
     const isProjectAdmin = role === 'project_admin';
     const isContractor = role === 'contractor';
-    
+    const isPending = authState.user?.status === 'pending';
+
+    // 消息中心按钮
+    const msgBtn = document.getElementById('messageCenterBtn');
+    if (msgBtn) {
+        msgBtn.style.display = authState.isAuthenticated ? 'flex' : 'none';
+    }
+
+    // 待审核用户隐藏所有功能菜单
+    if (isPending) {
+        const menusToHide = ['documentRequirementsMenu', 'generateReportBtn', 'packageProjectBtn', 'acceptanceMenu', 'systemManagementMenu', 'backToDashboardBtn'];
+        menusToHide.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        return;
+    }
+
     // 顶部功能菜单
     const documentRequirementsMenu = document.getElementById('documentRequirementsMenu');
     const generateReportBtn = document.getElementById('generateReportBtn');
     const packageProjectBtn = document.getElementById('packageProjectBtn');
     const acceptanceMenu = document.getElementById('acceptanceMenu');
-    
+
     if (isContractor) {
         // 承建单位普通用户：隐藏高级功能
         if (documentRequirementsMenu) documentRequirementsMenu.style.display = 'none';
         if (generateReportBtn) generateReportBtn.style.display = 'none';
         if (packageProjectBtn) packageProjectBtn.style.display = 'none';
         if (acceptanceMenu) acceptanceMenu.style.display = 'none';
-    } else {
-        // 管理员、PMO、项目经理：显示所有功能（当有项目选中时由 showProjectButtons 控制）
-        // 这里先保持现有逻辑，不主动显示，避免覆盖 hideProjectButtons
+    }
+    
+    // 系统管理菜单
+    const canSeeSystemMenu = isAdmin || isProjectAdmin || isContractor;
+    const systemManagementMenu = document.getElementById('systemManagementMenu');
+    if (systemManagementMenu) {
+        systemManagementMenu.style.display = canSeeSystemMenu ? 'inline-block' : 'none';
+    }
+
+    const systemManagementDropdown = document.getElementById('systemManagementDropdown');
+    if (systemManagementDropdown) {
+        const existingSysSettings = document.getElementById('systemSettingsMenuItem');
+        const existingUserApproval = document.getElementById('userApprovalBtn');
+        const existingUserMgmt = document.getElementById('userManagementMenuItem');
+        const existingOrgMgmt = document.getElementById('orgManagementMenuItem');
+        const existingProjectMgmt = document.getElementById('projectManagementMenuItem');
+        const existingLogMgmt = document.getElementById('logManagementMenuItem');
+
+        if (!canSeeSystemMenu) {
+            if (existingSysSettings) existingSysSettings.remove();
+            if (existingUserApproval) existingUserApproval.remove();
+            if (existingUserMgmt) existingUserMgmt.remove();
+            if (existingOrgMgmt) existingOrgMgmt.remove();
+            if (existingProjectMgmt) existingProjectMgmt.remove();
+            if (existingLogMgmt) existingLogMgmt.remove();
+        } else {
+            if (isAdmin) {
+                // admin 保留系统设置和用户审核（已在 HTML 中静态存在）
+            } else if (isProjectAdmin) {
+                // 项目经理：移除系统设置，保留用户审核和日志管理
+                if (existingSysSettings) existingSysSettings.remove();
+            } else {
+                // 普通用户：只保留日志管理
+                if (existingSysSettings) existingSysSettings.remove();
+                if (existingUserApproval) existingUserApproval.remove();
+            }
+
+            if (isAdmin) {
+                if (!existingUserMgmt) {
+                    const userMgmtA = document.createElement('a');
+                    userMgmtA.href = '#';
+                    userMgmtA.className = 'dropdown-item';
+                    userMgmtA.id = 'userManagementMenuItem';
+                    userMgmtA.textContent = '👤 用户管理';
+                    systemManagementDropdown.appendChild(userMgmtA);
+                }
+
+                if (!existingOrgMgmt) {
+                    const orgMgmtA = document.createElement('a');
+                    orgMgmtA.href = '#';
+                    orgMgmtA.className = 'dropdown-item';
+                    orgMgmtA.id = 'orgManagementMenuItem';
+                    orgMgmtA.textContent = '🏢 承建单位管理';
+                    systemManagementDropdown.appendChild(orgMgmtA);
+                }
+
+                if (!existingProjectMgmt) {
+                    const projectMgmtA = document.createElement('a');
+                    projectMgmtA.href = '#';
+                    projectMgmtA.className = 'dropdown-item';
+                    projectMgmtA.id = 'projectManagementMenuItem';
+                    projectMgmtA.textContent = '📁 项目管理';
+                    systemManagementDropdown.appendChild(projectMgmtA);
+                }
+            } else {
+                if (existingUserMgmt) existingUserMgmt.remove();
+                if (existingOrgMgmt) existingOrgMgmt.remove();
+                if (existingProjectMgmt) existingProjectMgmt.remove();
+            }
+
+            if (!existingLogMgmt) {
+                const logMgmtA = document.createElement('a');
+                logMgmtA.href = '#';
+                logMgmtA.className = 'dropdown-item';
+                logMgmtA.id = 'logManagementMenuItem';
+                logMgmtA.textContent = '📋 日志管理';
+                systemManagementDropdown.appendChild(logMgmtA);
+            }
+        }
+
+        // 使用事件委托绑定菜单项点击，避免动态元素绑定失效
+        if (!systemManagementDropdown._hasClickDelegate) {
+            systemManagementDropdown._hasClickDelegate = true;
+            systemManagementDropdown.addEventListener('click', (e) => {
+                const item = e.target.closest('.dropdown-item');
+                if (!item) return;
+                e.preventDefault();
+                systemManagementDropdown.classList.remove('show');
+                switch (item.id) {
+                    case 'userApprovalBtn':
+                        import('./user-approval.js').then(m => m.openUserApprovalModal());
+                        break;
+                    case 'userManagementMenuItem':
+                        import('./admin.js').then(m => m.openUserManagementModal());
+                        break;
+                    case 'orgManagementMenuItem':
+                        import('./admin.js').then(m => m.openOrgManagementModal());
+                        break;
+                    case 'projectManagementMenuItem':
+                        import('./admin.js').then(m => m.openProjectManagementModal());
+                        break;
+                    case 'logManagementMenuItem':
+                        import('./admin.js').then(m => m.openLogManagementModal());
+                        break;
+                }
+            });
+        }
     }
     
     // 项目选择模态框中的权限控制
-    const systemSettingsBtn = document.getElementById('systemSettingsBtn');
     const deletedProjectsSection = document.querySelector('.deleted-projects-section');
     
-    if (systemSettingsBtn) {
-        systemSettingsBtn.style.display = (isAdmin || isProjectAdmin) ? 'inline-block' : 'none';
-    }
     if (deletedProjectsSection) {
         deletedProjectsSection.style.display = (isAdmin || isProjectAdmin) ? 'block' : 'none';
     }
@@ -216,7 +377,6 @@ export function openLoginModal() {
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">登录</h5>
-                    <button type="button" class="close" onclick="document.getElementById('loginModal').remove()">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div id="loginMessage" class="alert alert-danger" style="display: none;"></div>
@@ -262,14 +422,6 @@ export function openLoginModal() {
             }
         });
     }
-    
-    // 点击模态框外部关闭
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-            document.body.style.overflow = 'auto';
-        }
-    });
 }
 
 /**
@@ -294,11 +446,11 @@ export function getCurrentUser() {
 
 /**
  * 初始化认证模块
+ * 如果用户未登录，会自动弹出登录框并等待登录成功后 resolve
  */
-export async function initAuth() {
+export function initAuth() {
     console.log('开始初始化认证模块');
     
-    // 初始状态设为未知，避免闪烁显示登录按钮
     authState.isAuthenticated = null;
     authState.user = null;
     
@@ -319,19 +471,29 @@ export async function initAuth() {
         document.body.appendChild(authContainer);
     }
     
-    // 先显示加载状态
     updateAuthUI();
     
-    // 异步检查认证状态，拿到结果后再更新UI
-    try {
-        await checkAuthStatus();
-    } catch (error) {
-        console.error('检查认证状态失败:', error);
-        authState.isAuthenticated = false;
-        authState.user = null;
-        updateAuthUI();
-        updateRoleBasedUI();
-    }
+    return new Promise(async (resolve, reject) => {
+        try {
+            const isAuth = await checkAuthStatus();
+            if (isAuth) {
+                resolve();
+                return;
+            }
+            
+            // 未登录：无论是否主页，都跳转到独立登录页面
+            const currentUrl = window.location.pathname + window.location.search;
+            const loginUrl = '/login?next=' + encodeURIComponent(currentUrl);
+            window.location.href = loginUrl;
+        } catch (error) {
+            console.error('检查认证状态失败:', error);
+            authState.isAuthenticated = false;
+            authState.user = null;
+            updateAuthUI();
+            updateRoleBasedUI();
+            reject(error);
+        }
+    });
 }
 
 // 辅助函数：显示通知

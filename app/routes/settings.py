@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import urllib.request
 import urllib.error
+from datetime import datetime, timedelta, timezone
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -25,7 +26,9 @@ def load_settings():
         'system_name': '项目文档管理中心',
         'version': '1.0.0',
         'author': '项目验收团队',
-        'description': '项目全生命周期文档管理系统'
+        'description': '项目全生命周期文档管理系统',
+        'log_retention_days': 30,
+        'timezone': 'Asia/Shanghai'
     }
     
     # 优先从plugin.json读取
@@ -100,6 +103,37 @@ def get_local_version():
     return settings.get('version', '1.0.0')
 
 
+def get_system_timezone():
+    """获取当前系统设置的时区"""
+    settings = load_settings()
+    tz_name = settings.get('timezone', 'Asia/Shanghai')
+    # 不引入 pytz，用标准库处理常见时区
+    tz_map = {
+        'Asia/Shanghai': timezone(timedelta(hours=8)),
+        'Asia/Hong_Kong': timezone(timedelta(hours=8)),
+        'Asia/Taipei': timezone(timedelta(hours=8)),
+        'Asia/Tokyo': timezone(timedelta(hours=9)),
+        'Asia/Seoul': timezone(timedelta(hours=9)),
+        'Asia/Singapore': timezone(timedelta(hours=8)),
+        'Asia/Bangkok': timezone(timedelta(hours=7)),
+        'Asia/Dubai': timezone(timedelta(hours=4)),
+        'Europe/London': timezone(timedelta(hours=0)),
+        'Europe/Paris': timezone(timedelta(hours=1)),
+        'Europe/Berlin': timezone(timedelta(hours=1)),
+        'America/New_York': timezone(timedelta(hours=-5)),
+        'America/Los_Angeles': timezone(timedelta(hours=-8)),
+        'America/Chicago': timezone(timedelta(hours=-6)),
+        'Australia/Sydney': timezone(timedelta(hours=11)),
+        'UTC': timezone.utc,
+    }
+    return tz_map.get(tz_name, timezone(timedelta(hours=8)))
+
+
+def now_with_timezone():
+    """获取配置时区的当前时间"""
+    return datetime.now(get_system_timezone())
+
+
 def check_github_update():
     """检查GitHub上的最新版本"""
     try:
@@ -164,7 +198,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)

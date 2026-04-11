@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - 项目文档管理中心</title>
+    <title>项目文档管理中心</title>
     <style>
         * {
             margin: 0;
@@ -11,146 +11,579 @@
             box-sizing: border-box;
         }
         
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f5f5f5;
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+        }
+        
+        #universe {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+            z-index: 0;
+        }
+        
+        .auth-container {
+            position: relative;
+            z-index: 10;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            padding: 20px;
         }
         
-        .login-container {
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        .auth-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
             padding: 40px;
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+            animation: floatIn 0.8s ease-out;
         }
         
-        h1 {
+        @keyframes floatIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .auth-header {
             text-align: center;
-            color: #333;
-            margin-bottom: 30px;
+            margin-bottom: 28px;
+        }
+        
+        .auth-header h1 {
+            color: #fff;
+            font-size: 26px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+        }
+        
+        .auth-header p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+        }
+        
+        .auth-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 4px;
+            border-radius: 10px;
+        }
+        
+        .auth-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+        }
+        
+        .auth-tab.active {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .auth-form {
+            display: none;
+        }
+        
+        .auth-form.active {
+            display: block;
         }
         
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
         
-        label {
+        .form-group label {
             display: block;
-            margin-bottom: 8px;
-            color: #666;
+            margin-bottom: 6px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 13px;
         }
         
-        input {
+        .form-group input,
+        .form-group select {
             width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 16px;
-        }
-        
-        input:focus {
+            padding: 12px 14px;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 14px;
             outline: none;
-            border-color: #4CAF50;
+            transition: border-color 0.3s;
         }
         
-        button {
-            width: 100%;
-            padding: 12px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-size: 16px;
+        .form-group input::placeholder {
+            color: rgba(255, 255, 255, 0.35);
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: rgba(100, 180, 255, 0.5);
+        }
+        
+        .form-group select option {
+            background: #1b2735;
+            color: #fff;
+        }
+        
+        .org-mode {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .org-mode label {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 13px;
             cursor: pointer;
+            transition: all 0.2s;
         }
         
-        button:hover {
-            background-color: #45a049;
+        .org-mode input[type="radio"] {
+            accent-color: #64b4ff;
         }
         
-        .error-message {
-            background-color: #ffebee;
-            color: #c62828;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
+        .org-mode label:has(input:checked) {
+            border-color: rgba(100, 180, 255, 0.5);
+            color: #fff;
+            background: rgba(100, 180, 255, 0.1);
+        }
+        
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 6px;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35);
+        }
+        
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 13px;
             text-align: center;
+            display: none;
         }
         
-        .success-message {
-            background-color: #e8f5e8;
-            color: #2e7d32;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
+        .message.error {
+            background: rgba(220, 53, 69, 0.15);
+            color: #ff9aa2;
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+        
+        .message.success {
+            background: rgba(40, 167, 69, 0.15);
+            color: #a8e6cf;
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+        
+        .hint {
+            margin-top: 16px;
             text-align: center;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.4);
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <h1>项目文档管理中心</h1>
-        
-        <div id="message" class="error-message" style="display: none;"></div>
-        
-        <form id="login-form">
-            <div class="form-group">
-                <label for="username">用户名</label>
-                <input type="text" id="username" name="username" required>
+    <canvas id="universe"></canvas>
+    
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>项目文档管理中心</h1>
+                <p>Document Management Center</p>
             </div>
             
-            <div class="form-group">
-                <label for="password">密码</label>
-                <input type="password" id="password" name="password" required>
+            <div class="auth-tabs">
+                <button class="auth-tab active" data-tab="login">登录</button>
+                <button class="auth-tab" data-tab="register">注册</button>
             </div>
             
-            <button type="submit">登录</button>
-        </form>
+            <div id="message" class="message"></div>
+            
+            <!-- 登录表单 -->
+            <form id="login-form" class="auth-form active">
+                <div class="form-group">
+                    <label for="login-username">用户名</label>
+                    <input type="text" id="login-username" placeholder="请输入用户名" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">密码</label>
+                    <input type="password" id="login-password" placeholder="请输入密码" required>
+                </div>
+                <button type="submit" class="btn-primary">登 录</button>
+            </form>
+            
+            <!-- 注册表单 -->
+            <form id="register-form" class="auth-form">
+                <div class="form-group">
+                    <label for="reg-username">用户名</label>
+                    <input type="text" id="reg-username" placeholder="设置用户名" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">密码</label>
+                    <input type="password" id="reg-password" placeholder="设置密码（至少6位）" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="reg-password-confirm">确认密码</label>
+                    <input type="password" id="reg-password-confirm" placeholder="再次输入密码" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="reg-email">邮箱（可选，用于接收审核结果通知）</label>
+                    <input type="email" id="reg-email" placeholder="your@email.com">
+                </div>
+                
+                <div class="form-group">
+                    <label>注册角色</label>
+                    <div class="org-mode">
+                        <label>
+                            <input type="radio" name="reg_role" value="contractor" checked>
+                            普通用户
+                        </label>
+                        <label>
+                            <input type="radio" name="reg_role" value="pmo">
+                            PMO成员
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group" id="org-select-group">
+                    <label>承建单位</label>
+                    <div class="org-mode">
+                        <label>
+                            <input type="radio" name="org_mode" value="existing" checked>
+                            选择已有
+                        </label>
+                        <label>
+                            <input type="radio" name="org_mode" value="new">
+                            新建单位
+                        </label>
+                    </div>
+                    <select id="reg-organization-select">
+                        <option value="">-- 加载中 --</option>
+                    </select>
+                    <input type="text" id="reg-organization-input" placeholder="输入新建承建单位名称" style="display:none; margin-top:8px;">
+                </div>
+
+                <button type="submit" class="btn-primary">注 册</button>
+                <div class="hint" id="reg-hint">
+                    选择已有单位需该单位管理员审核<br>
+                    新建单位需 PMO 审核，通过后将获得项目经理权限
+                </div>
+            </form>
+        </div>
     </div>
     
     <script>
-        document.getElementById('login-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            const messageDiv = document.getElementById('message');
-            
-            messageDiv.style.display = 'none';
-            
-            fetch('/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ username, password })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    messageDiv.className = 'success-message';
-                    messageDiv.textContent = data.message;
-                    messageDiv.style.display = 'block';
-                    // 登录成功后跳转到首页
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 1000);
-                } else {
-                    messageDiv.className = 'error-message';
-                    messageDiv.textContent = data.message;
-                    messageDiv.style.display = 'block';
-                }
-            })
-            .catch(error => {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = '登录失败，请稍后重试';
-                messageDiv.style.display = 'block';
+        // ==================== 宇宙背景动画 ====================
+        const canvas = document.getElementById('universe');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+        
+        const stars = [];
+        const shootingStars = [];
+        
+        for (let i = 0; i < 200; i++) {
+            stars.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                radius: Math.random() * 1.5,
+                alpha: Math.random(),
+                speed: 0.2 + Math.random() * 0.3
             });
+        }
+        
+        function createShootingStar() {
+            shootingStars.push({
+                x: Math.random() * width,
+                y: Math.random() * height * 0.5,
+                length: 80 + Math.random() * 80,
+                speed: 8 + Math.random() * 6,
+                angle: Math.PI / 4 + (Math.random() - 0.5) * 0.2,
+                life: 1,
+                decay: 0.015 + Math.random() * 0.01
+            });
+        }
+        
+        setInterval(() => {
+            if (Math.random() < 0.3) createShootingStar();
+        }, 2000);
+        
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+            
+            // 绘制星星
+            stars.forEach(star => {
+                star.y += star.speed;
+                if (star.y > height) {
+                    star.y = 0;
+                    star.x = Math.random() * width;
+                }
+                star.alpha += (Math.random() - 0.5) * 0.05;
+                if (star.alpha < 0.2) star.alpha = 0.2;
+                if (star.alpha > 1) star.alpha = 1;
+                
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha})`;
+                ctx.fill();
+            });
+            
+            // 绘制流星
+            for (let i = shootingStars.length - 1; i >= 0; i--) {
+                const s = shootingStars[i];
+                const dx = Math.cos(s.angle) * s.speed;
+                const dy = Math.sin(s.angle) * s.speed;
+                
+                const gradient = ctx.createLinearGradient(s.x, s.y, s.x - dx * 3, s.y - dy * 3);
+                gradient.addColorStop(0, `rgba(255,255,255,${s.life})`);
+                gradient.addColorStop(1, 'rgba(255,255,255,0)');
+                
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(s.x - Math.cos(s.angle) * s.length, s.y - Math.sin(s.angle) * s.length);
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                s.x += dx;
+                s.y += dy;
+                s.life -= s.decay;
+                
+                if (s.life <= 0 || s.x > width + 200 || s.y > height + 200) {
+                    shootingStars.splice(i, 1);
+                }
+            }
+            
+            requestAnimationFrame(draw);
+        }
+        draw();
+        
+        // ==================== 标签切换 ====================
+        const tabs = document.querySelectorAll('.auth-tab');
+        const forms = document.querySelectorAll('.auth-form');
+        
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                forms.forEach(f => f.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab + '-form').classList.add('active');
+                hideMessage();
+            });
+        });
+        
+        function showMessage(text, type) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = 'message ' + type;
+            msg.style.display = 'block';
+        }
+        
+        function hideMessage() {
+            const msg = document.getElementById('message');
+            msg.style.display = 'none';
+        }
+        
+        // ==================== 加载承建单位列表 ====================
+        const orgSelect = document.getElementById('reg-organization-select');
+        const orgInput = document.getElementById('reg-organization-input');
+        const orgRadios = document.querySelectorAll('input[name="org_mode"]');
+        
+        async function loadOrganizations() {
+            try {
+                const res = await fetch('/organizations');
+                const data = await res.json();
+                orgSelect.innerHTML = '<option value="">-- 请选择承建单位 --</option>';
+                if (data.status === 'success' && data.organizations) {
+                    data.organizations.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name;
+                        orgSelect.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                orgSelect.innerHTML = '<option value="">加载失败</option>';
+            }
+        }
+        loadOrganizations();
+        
+        orgRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.value === 'existing' && radio.checked) {
+                    orgSelect.style.display = 'block';
+                    orgInput.style.display = 'none';
+                    orgInput.removeAttribute('required');
+                    orgSelect.setAttribute('required', 'required');
+                } else if (radio.value === 'new' && radio.checked) {
+                    orgSelect.style.display = 'none';
+                    orgInput.style.display = 'block';
+                    orgSelect.removeAttribute('required');
+                    orgInput.setAttribute('required', 'required');
+                }
+            });
+        });
+
+        // 注册角色切换
+        const roleRadios = document.querySelectorAll('input[name="reg_role"]');
+        const orgSelectGroup = document.getElementById('org-select-group');
+        const regHint = document.getElementById('reg-hint');
+        roleRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.value === 'pmo' && radio.checked) {
+                    orgSelectGroup.style.display = 'none';
+                    orgSelect.removeAttribute('required');
+                    orgInput.removeAttribute('required');
+                    regHint.innerHTML = '注册为 PMO 成员需系统管理员审核';
+                } else {
+                    orgSelectGroup.style.display = 'block';
+                    orgSelect.setAttribute('required', 'required');
+                    regHint.innerHTML = '选择已有单位需该单位管理员审核<br>新建单位需 PMO 审核，通过后将获得项目经理权限';
+                }
+            });
+        });
+        
+        // ==================== 登录 ====================
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideMessage();
+            
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    showMessage(data.message, 'success');
+                    setTimeout(() => {
+                        const next = new URLSearchParams(window.location.search).get('next') || '/';
+                        window.location.href = next;
+                    }, 800);
+                } else {
+                    showMessage(data.message, 'error');
+                }
+            } catch (err) {
+                showMessage('请求失败，请稍后重试', 'error');
+            }
+        });
+        
+        // ==================== 注册 ====================
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideMessage();
+            
+            const username = document.getElementById('reg-username').value.trim();
+            const password = document.getElementById('reg-password').value;
+            const passwordConfirm = document.getElementById('reg-password-confirm').value;
+            const email = document.getElementById('reg-email').value.trim();
+            const regRole = document.querySelector('input[name="reg_role"]:checked').value;
+            const orgMode = document.querySelector('input[name="org_mode"]:checked').value;
+            const organization = orgMode === 'existing' ? orgSelect.value : orgInput.value.trim();
+
+            if (regRole !== 'pmo' && !organization) {
+                showMessage('请选择或输入承建单位', 'error');
+                return;
+            }
+
+            if (password !== passwordConfirm) {
+                showMessage('两次输入的密码不一致', 'error');
+                return;
+            }
+
+            const payload = {username, password, password_confirm: passwordConfirm, email, role: regRole};
+            if (regRole !== 'pmo') {
+                payload.organization = organization;
+                payload.org_mode = orgMode;
+            }
+
+            try {
+                const res = await fetch('/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    showMessage(data.message, 'success');
+                    document.getElementById('register-form').reset();
+                    orgSelectGroup.style.display = 'block';
+                    orgSelect.style.display = 'block';
+                    orgInput.style.display = 'none';
+                    regHint.innerHTML = '选择已有单位需该单位管理员审核<br>新建单位需 PMO 审核，通过后将获得项目经理权限';
+                    setTimeout(() => {
+                        const next = new URLSearchParams(window.location.search).get('next') || '/';
+                        window.location.href = next;
+                    }, data.needs_approval ? 800 : 1500);
+                } else {
+                    showMessage(data.message, 'error');
+                }
+            } catch (err) {
+                showMessage('请求失败，请稍后重试', 'error');
+            }
         });
     </script>
 </body>

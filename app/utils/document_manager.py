@@ -428,6 +428,11 @@ class DocumentManager:
             return self.projects.save(project_id, project_config)
         return {'status': 'error', 'message': '项目管理模块不可用'}
     
+    def update_project(self, project_id: str, project_config: Dict) -> Dict:
+        """更新项目配置（兼容接口）"""
+        project_config['id'] = project_id
+        return self.save_project(project_config)
+    
     def delete_project(self, project_id: str, permanent: bool = False) -> Dict:
         """删除项目（软删除）"""
         if self.projects:

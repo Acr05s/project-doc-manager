@@ -2,8 +2,87 @@
  * 主应用入口 - 使用ES6模块
  */
 
-import { initApp } from './modules/index.js';
+import { initApp, backToDashboard, sendApproverMessage } from './modules/index.js';
 import { unlockCurrentProject, appState } from './modules/app-state.js';
+import { openEditProjectModal, closeEditProjectModal } from './modules/project.js';
+import { openAuditConfirmModal, closeAuditConfirmModal } from './modules/user-approval.js';
+import {
+    openProfileModal, closeProfileModal, switchProfileTab,
+    saveProfileEmail, changeProfilePassword, deactivateAccount
+} from './modules/profile.js';
+import {
+    openUserManagementModal, closeUserManagementModal, loadUserManagementList,
+    resetUserPassword, toggleUserStatus, deleteUser,
+    toggleSelectAllUsers, batchUpdateUserRoles, batchUpdateUserStatus, batchDeleteUsers,
+    openOrgManagementModal, closeOrgManagementModal, loadOrgManagementList,
+    openOrgEditModal, closeOrgEditModal, saveOrganization, deleteOrganization,
+    toggleSelectAllOrgs, batchDeleteOrganizations,
+    openProjectManagementModal, closeProjectManagementModal, loadProjectManagementList,
+    toggleSelectAllProjects, batchUpdateProjectPartyB, batchUpdateProjectStatus, batchDeleteProjects,
+    openProjectTransferFromMgmt, closeProjectBatchTransferModal, submitProjectBatchTransfer,
+    deleteSingleProject,
+    openLogManagementModal, closeLogManagementModal, loadLogManagementList, loadMoreLogs
+} from './modules/admin.js';
+import {
+    openTransferProjectModal, closeTransferProjectModal, submitProjectTransfer
+} from './modules/project.js';
+
+// 将返回看板函数挂载到全局
+if (typeof window !== 'undefined') {
+    window.backToDashboard = backToDashboard;
+    window.openEditProjectModal = openEditProjectModal;
+    window.closeEditProjectModal = closeEditProjectModal;
+    window.openAuditConfirmModal = openAuditConfirmModal;
+    window.closeAuditConfirmModal = closeAuditConfirmModal;
+    // profile
+    window.openProfileModal = openProfileModal;
+    window.closeProfileModal = closeProfileModal;
+    window.switchProfileTab = switchProfileTab;
+    window.saveProfileEmail = saveProfileEmail;
+    window.changeProfilePassword = changeProfilePassword;
+    window.deactivateAccount = deactivateAccount;
+    // admin
+    window.openUserManagementModal = openUserManagementModal;
+    window.closeUserManagementModal = closeUserManagementModal;
+    window.loadUserManagementList = loadUserManagementList;
+    window.resetUserPassword = resetUserPassword;
+    window.toggleUserStatus = toggleUserStatus;
+    window.deleteUser = deleteUser;
+    window.toggleSelectAllUsers = toggleSelectAllUsers;
+    window.batchUpdateUserRoles = batchUpdateUserRoles;
+    window.batchUpdateUserStatus = batchUpdateUserStatus;
+    window.batchDeleteUsers = batchDeleteUsers;
+    window.openOrgManagementModal = openOrgManagementModal;
+    window.closeOrgManagementModal = closeOrgManagementModal;
+    window.loadOrgManagementList = loadOrgManagementList;
+    window.openOrgEditModal = openOrgEditModal;
+    window.closeOrgEditModal = closeOrgEditModal;
+    window.saveOrganization = saveOrganization;
+    window.deleteOrganization = deleteOrganization;
+    window.toggleSelectAllOrgs = toggleSelectAllOrgs;
+    window.batchDeleteOrganizations = batchDeleteOrganizations;
+    window.openProjectManagementModal = openProjectManagementModal;
+    window.closeProjectManagementModal = closeProjectManagementModal;
+    window.loadProjectManagementList = loadProjectManagementList;
+    window.toggleSelectAllProjects = toggleSelectAllProjects;
+    window.batchUpdateProjectPartyB = batchUpdateProjectPartyB;
+    window.batchUpdateProjectStatus = batchUpdateProjectStatus;
+    window.batchDeleteProjects = batchDeleteProjects;
+    window.openProjectTransferFromMgmt = openProjectTransferFromMgmt;
+    window.closeProjectBatchTransferModal = closeProjectBatchTransferModal;
+    window.submitProjectBatchTransfer = submitProjectBatchTransfer;
+    window.deleteSingleProject = deleteSingleProject;
+    window.openLogManagementModal = openLogManagementModal;
+    window.closeLogManagementModal = closeLogManagementModal;
+    window.loadLogManagementList = loadLogManagementList;
+    window.loadMoreLogs = loadMoreLogs;
+    // project transfer
+    window.openTransferProjectModal = openTransferProjectModal;
+    window.closeTransferProjectModal = closeTransferProjectModal;
+    window.submitProjectTransfer = submitProjectTransfer;
+    // pending approval
+    window.sendApproverMessage = sendApproverMessage;
+}
 
 // 页面关闭或刷新时解锁项目
 window.addEventListener('beforeunload', async () => {
@@ -85,6 +164,8 @@ document.addEventListener('DOMContentLoaded', function() {
         initApp();
         loadVersionInfo();
     });
+    
+    // 系统管理下拉菜单事件已统一在 auth.js 中通过事件委托绑定
     
     // 添加项目标题点击事件
     const projectTitle = document.getElementById('projectTitle');
@@ -352,6 +433,31 @@ window.handleSoftDeleteProject = function(projectId, projectName) {
 window.handleApproveProject = function(projectId) {
     import('./modules/project.js').then(module => {
         module.handleApproveProject(projectId);
+    });
+};
+
+// 用户审核相关
+window.openUserApprovalModal = function() {
+    import('./modules/user-approval.js').then(module => {
+        module.openUserApprovalModal();
+    });
+};
+
+window.closeUserApprovalModal = function() {
+    import('./modules/user-approval.js').then(module => {
+        module.closeUserApprovalModal();
+    });
+};
+
+window.handleApproveUserAccount = function(userId) {
+    import('./modules/user-approval.js').then(module => {
+        module.handleApproveUserAccount(userId);
+    });
+};
+
+window.handleRejectUserAccount = function(userId) {
+    import('./modules/user-approval.js').then(module => {
+        module.handleRejectUserAccount(userId);
     });
 };
 

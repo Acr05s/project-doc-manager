@@ -241,6 +241,44 @@ class ProjectManager:
         except Exception as e:
             logger.error(f"更新项目状态失败: {e}")
             return False
+
+    def batch_update_projects(self, project_ids: List[str], updates: Dict[str, Any]) -> Dict[str, Any]:
+        """批量更新项目配置字段"""
+        success_count = 0
+        failed = []
+        for project_id in project_ids:
+            try:
+                config = self.load(project_id)
+                if not config:
+                    failed.append(project_id)
+                    continue
+                for key, value in updates.items():
+                    if value is not None:
+                        config[key] = value
+                self.save(project_id, config)
+                success_count += 1
+            except Exception as e:
+                logger.error(f"批量更新项目失败 {project_id}: {e}")
+                failed.append(project_id)
+        return {'status': 'success', 'success_count': success_count, 'failed': failed}
+
+    def batch_update_project_status(self, project_ids: List[str], status: str) -> Dict[str, Any]:
+        """批量更新项目审批状态（approved/pending/disabled）"""
+        success_count = 0
+        failed = []
+        for project_id in project_ids:
+            try:
+                config = self.load(project_id)
+                if not config:
+                    failed.append(project_id)
+                    continue
+                config['status'] = status
+                self.save(project_id, config)
+                success_count += 1
+            except Exception as e:
+                logger.error(f"批量更新项目状态失败 {project_id}: {e}")
+                failed.append(project_id)
+        return {'status': 'success', 'success_count': success_count, 'failed': failed}
     
     def get_project_status(self, project_id: str) -> Dict[str, Any]:
         """获取项目状态字段
@@ -293,6 +331,10 @@ class ProjectManager:
             
             # 确定项目状态：承建单位普通用户创建的项目需要审批
             status = 'pending' if creator_role == self.ROLE_CONTRACTOR else 'approved'
+
+            # 默认归属 PMO 组织
+            if not party_b:
+                party_b = 'PMO'
 
             # 创建项目配置
             project_config = {
@@ -1600,12 +1642,8 @@ class ProjectManager:
                 creator_id = config.get('creator_id')
                 is_creator = creator_id == user_id
                 
-                # contractor 权限逻辑
-                if user_role == 'contractor':
-                    # contractor 可以看到：
-                    # 1. 所有已批准（approved）的项目（无论所属组织）
-                    # 2. 自己创建的项目（无论状态）
-                    # 3. 属于自己组织的项目（无论状态）
+                # contractor 权限逻辑：可以看到已批准的项目和与自己相关的项目
+                if user_role == self.ROLE_CONTRACTOR:
                     is_related = is_creator or (user_organization and config.get('party_b') == user_organization)
                     if status == 'approved' or is_related:
                         accessible_projects.append({
@@ -1617,7 +1655,7 @@ class ProjectManager:
                             'status': status
                         })
                     continue
-                
+
                 # 其他角色（兼容旧逻辑）
                 if is_creator:
                     accessible_projects.append({
@@ -1629,7 +1667,7 @@ class ProjectManager:
                         'status': status
                     })
                     continue
-                
+
                 if user_organization and config.get('party_b') == user_organization:
                     accessible_projects.append({
                         'id': project_id,

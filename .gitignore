@@ -64,3 +64,6 @@ temp_test_*
 *.bak
 *.cache
 .playwright-mcp/
+
+# Backup directories
+backup_*/

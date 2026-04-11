@@ -38,13 +38,14 @@ body {
     color: white;
     padding: 12px 20px;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     box-shadow: var(--shadow);
     flex-wrap: nowrap;
     overflow-x: visible;
     position: relative;
     z-index: 100;
+    gap: 16px;
 }
 
 .header-left {
@@ -60,6 +61,11 @@ body {
     gap: 6px;
     flex-wrap: nowrap;
     align-items: center;
+}
+
+/* 功能菜单区域与用户信息区域之间的间距 */
+.header-right > #systemManagementMenu {
+    margin-left: 16px;
 }
 
 /* 认证容器样式 */
@@ -884,13 +890,13 @@ body {
     width: 100%;
     height: 100%;
     background: rgba(0,0,0,0.5);
-    z-index: 9999;
+    z-index: 10001;
     justify-content: center;
     align-items: center;
 }
 
 .modal.show {
-    display: flex;
+    display: flex !important;
 }
 
 /* 确认弹窗要显示在最上层 */

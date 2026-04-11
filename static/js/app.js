@@ -469,10 +469,11 @@ function setupEventListeners() {
     }
 
     // 系统设置
-    const systemSettingsBtn = document.getElementById('systemSettingsBtn');
+    const systemSettingsMenuItem = document.getElementById('systemSettingsMenuItem');
     const systemSettingsModal = document.getElementById('systemSettingsModal');
-    if (systemSettingsBtn && systemSettingsModal) {
-        systemSettingsBtn.addEventListener('click', () => {
+    if (systemSettingsMenuItem && systemSettingsModal) {
+        systemSettingsMenuItem.addEventListener('click', (e) => {
+            e.preventDefault();
             loadSystemSettings();
             openModal(systemSettingsModal);
         });
@@ -5826,11 +5827,15 @@ async function loadSystemSettings() {
             const systemVersion = document.getElementById('systemVersion');
             const systemAuthor = document.getElementById('systemAuthor');
             const currentVersionDisplay = document.getElementById('currentVersionDisplay');
+            const fastPreviewThreshold = document.getElementById('fastPreviewThreshold');
+            const emailNotificationEnabled = document.getElementById('emailNotificationEnabled');
             
             if (systemName) systemName.value = settings.system_name || '';
             if (systemVersion) systemVersion.value = settings.version || '';
             if (systemAuthor) systemAuthor.value = settings.author || '';
             if (currentVersionDisplay) currentVersionDisplay.textContent = settings.current_version || '-';
+            if (fastPreviewThreshold) fastPreviewThreshold.value = settings.fast_preview_threshold || 5;
+            if (emailNotificationEnabled) emailNotificationEnabled.checked = !!settings.email_notification_enabled;
         }
     } catch (error) {
         console.error('加载系统设置失败:', error);
@@ -5846,10 +5851,22 @@ async function saveSystemSettings() {
         const systemName = document.getElementById('systemName');
         const systemAuthor = document.getElementById('systemAuthor');
         
+        const fastPreviewThreshold = document.getElementById('fastPreviewThreshold');
+        const emailNotificationEnabled = document.getElementById('emailNotificationEnabled');
+        
         const settings = {
             system_name: systemName ? systemName.value : '',
             author: systemAuthor ? systemAuthor.value : ''
         };
+        
+        if (fastPreviewThreshold) {
+            const thresholdValue = parseInt(fastPreviewThreshold.value, 10);
+            settings.fast_preview_threshold = isNaN(thresholdValue) || thresholdValue < 1 ? 5 : thresholdValue;
+        }
+        
+        if (emailNotificationEnabled) {
+            settings.email_notification_enabled = emailNotificationEnabled.checked;
+        }
         
         const response = await fetch('/api/settings', {
             method: 'POST',

@@ -16,7 +16,10 @@ def check_auth_status():
             'user': {
                 'id': current_user.id,
                 'username': current_user.username,
-                'role': current_user.role
+                'role': current_user.role,
+                'organization': getattr(current_user, 'organization', None),
+                'status': getattr(current_user, 'status', 'active'),
+                'email': getattr(current_user, 'email', None)
             }
         })
     else:

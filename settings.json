@@ -1,7 +1,8 @@
 {
-  "system_name": "IT项目验资资料管理平台",
+  "system_name": "项目资料管理平台1",
   "version": "1.0.0",
   "author": "项目验收小组",
   "description": "项目全生命周期文档管理系统",
-  "fast_preview_threshold": 15
+  "fast_preview_threshold": 5,
+  "email_notification_enabled": true
 }

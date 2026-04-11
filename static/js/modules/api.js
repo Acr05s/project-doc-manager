@@ -5,6 +5,120 @@
 import { appState } from './app-state.js';
 
 /**
+ * 获取看板统计数据
+ */
+export async function getDashboardStats() {
+    try {
+        const response = await fetch('/api/projects/dashboard');
+        return await response.json();
+    } catch (error) {
+        console.error('获取看板数据失败:', error);
+        return { status: 'error', message: '获取看板数据失败' };
+    }
+}
+
+/**
+ * 获取报表类型列表
+ */
+export async function getReportTypes() {
+    try {
+        const response = await fetch('/api/projects/reports/types');
+        return await response.json();
+    } catch (error) {
+        console.error('获取报表类型失败:', error);
+        return { status: 'error', message: '获取报表类型失败' };
+    }
+}
+
+/**
+ * 获取指定类型报表数据
+ */
+export async function getReportData(reportType) {
+    try {
+        const response = await fetch(`/api/projects/reports/data?type=${encodeURIComponent(reportType)}`);
+        return await response.json();
+    } catch (error) {
+        console.error('获取报表数据失败:', error);
+        return { status: 'error', message: '获取报表数据失败' };
+    }
+}
+
+/**
+ * 获取消息列表
+ */
+export async function getMessages(isRead, limit = 50, offset = 0) {
+    try {
+        let url = `/api/messages/list?limit=${limit}&offset=${offset}`;
+        if (isRead !== undefined && isRead !== null) {
+            url += `&is_read=${isRead}`;
+        }
+        const response = await fetch(url);
+        return await response.json();
+    } catch (error) {
+        console.error('获取消息列表失败:', error);
+        return { status: 'error', message: '获取消息列表失败' };
+    }
+}
+
+/**
+ * 获取未读消息数量
+ */
+export async function getUnreadMessageCount() {
+    try {
+        const response = await fetch('/api/messages/unread-count');
+        return await response.json();
+    } catch (error) {
+        console.error('获取未读消息数量失败:', error);
+        return { status: 'error', count: 0 };
+    }
+}
+
+/**
+ * 标记消息为已读
+ */
+export async function markMessageAsRead(messageId) {
+    try {
+        const response = await fetch(`/api/messages/read/${messageId}`, {
+            method: 'POST'
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('标记消息已读失败:', error);
+        return { status: 'error', message: '标记失败' };
+    }
+}
+
+/**
+ * 标记所有消息为已读
+ */
+export async function markAllMessagesAsRead() {
+    try {
+        const response = await fetch('/api/messages/read-all', {
+            method: 'POST'
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('标记全部已读失败:', error);
+        return { status: 'error', message: '标记失败' };
+    }
+}
+
+/**
+ * 删除消息
+ */
+export async function deleteMessage(messageId) {
+    try {
+        const response = await fetch(`/api/messages/${messageId}`, {
+            method: 'DELETE'
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('删除消息失败:', error);
+        return { status: 'error', message: '删除失败' };
+    }
+}
+
+/**
  * 加载项目列表
  */
 export async function loadProjectsList() {
@@ -56,6 +170,232 @@ export async function approveProject(projectId) {
     } catch (error) {
         console.error('审批项目失败:', error);
         return { status: 'error', message: '审批请求失败' };
+    }
+}
+
+/**
+ * 获取待审核用户列表
+ */
+export async function getPendingUsers() {
+    try {
+        const response = await fetch('/pending-users');
+        return await response.json();
+    } catch (error) {
+        console.error('获取待审核用户失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+/**
+ * 审核通过用户
+ */
+export async function approveUserAccount(userId) {
+    try {
+        const response = await fetch('/approve-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('审核用户失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+/**
+ * 拒绝用户
+ */
+export async function rejectUserAccount(userId) {
+    try {
+        const response = await fetch('/reject-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('拒绝用户失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function initiateProjectTransfer(projectId, toOrg) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/transfer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to_org: toOrg })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('发起项目移交失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function respondProjectTransfer(transferId, action) {
+    try {
+        const response = await fetch('/api/projects/transfer/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transfer_id: transferId, action })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('响应项目移交失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function sendMessageToApprovers(content) {
+    try {
+        const response = await fetch('/api/messages/send-to-approvers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('发送消息失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function updateUserRole(userId, newRole) {
+    try {
+        const response = await fetch(`/api/admin/users/${userId}/role`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_role: newRole })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('更新角色失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function fetchAllProjects() {
+    try {
+        const response = await fetch('/api/projects/all');
+        return await response.json();
+    } catch (error) {
+        console.error('获取项目列表失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchDeleteProjects(projectIds) {
+    try {
+        const response = await fetch('/api/projects/batch/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_ids: projectIds })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量删除项目失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchUpdateProjects(projectIds, updates) {
+    try {
+        const response = await fetch('/api/projects/batch/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_ids: projectIds, updates })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量更新项目失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchUpdateProjectStatus(projectIds, status) {
+    try {
+        const response = await fetch('/api/projects/batch/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_ids: projectIds, status })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量更新项目状态失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchDeleteUsers(userIds) {
+    try {
+        const response = await fetch('/api/admin/users/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_ids: userIds })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量删除用户失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchUpdateUserRoles(userIds, newRole) {
+    try {
+        const response = await fetch('/api/admin/users/batch-role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_ids: userIds, new_role: newRole })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量更新用户角色失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchUpdateUserStatus(userIds, newStatus) {
+    try {
+        const response = await fetch('/api/admin/users/batch-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_ids: userIds, new_status: newStatus })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量更新用户状态失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function batchDeleteOrganizations(names) {
+    try {
+        const response = await fetch('/api/admin/organizations/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ names })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量删除承建单位失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function fetchAdminLogs(params = {}) {
+    try {
+        const query = new URLSearchParams();
+        if (params.limit) query.set('limit', params.limit);
+        if (params.offset) query.set('offset', params.offset);
+        if (params.type) query.set('type', params.type);
+        if (params.username) query.set('username', params.username);
+        const response = await fetch(`/api/admin/logs?${query.toString()}`);
+        return await response.json();
+    } catch (error) {
+        console.error('获取日志失败:', error);
+        return { status: 'error', message: '请求失败' };
     }
 }
 

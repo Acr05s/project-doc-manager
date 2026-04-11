@@ -2,7 +2,7 @@
 
 from flask import Blueprint
 from .utils import init_doc_manager
-from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, delete_project
+from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
@@ -22,9 +22,18 @@ project_bp.route('/list', methods=['GET'])(list_projects)
 project_bp.route('/create', methods=['POST'])(create_project)
 project_bp.route('/accessible', methods=['GET'])(get_accessible_projects)
 project_bp.route('/approve', methods=['POST'])(approve_project)
+project_bp.route('/dashboard', methods=['GET'])(get_dashboard_stats)
+project_bp.route('/reports/types', methods=['GET'])(get_report_types)
+project_bp.route('/reports/data', methods=['GET'])(get_report_data)
 project_bp.route('/<project_id>', methods=['GET'])(get_project)
 project_bp.route('/<project_id>', methods=['PUT'])(update_project)
 project_bp.route('/<project_id>', methods=['DELETE'])(delete_project)
+project_bp.route('/<project_id>/transfer', methods=['POST'])(initiate_project_transfer)
+project_bp.route('/transfer/respond', methods=['POST'])(respond_project_transfer)
+project_bp.route('/batch/delete', methods=['POST'])(batch_delete_projects)
+project_bp.route('/batch/update', methods=['POST'])(batch_update_projects)
+project_bp.route('/batch/status', methods=['POST'])(batch_update_project_status)
+project_bp.route('/all', methods=['GET'])(list_all_projects)
 project_bp.route('/load', methods=['POST'])(load_project_config)
 project_bp.route('/<project_id>/apply-requirements', methods=['POST'])(apply_requirements_to_project_route)
 project_bp.route('/requirements/list', methods=['GET'])(list_requirements_configs)

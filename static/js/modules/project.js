@@ -7,7 +7,7 @@
 import { appState, elements, initSession, unlockCurrentProject } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
 import { getCurrentUser } from './auth.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, cleanInvalidFiles, previewImportPackage, importFromPreview, approveProject } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, cleanInvalidFiles, previewImportPackage, importFromPreview, approveProject, initiateProjectTransfer } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -200,6 +200,10 @@ export async function selectProject(projectId) {
             };
         }
         
+        // 显示返回看板按钮
+        const backBtn = document.getElementById('backToDashboardBtn');
+        if (backBtn) backBtn.style.display = '';
+        
         showProjectButtons();
         
         // 更新删除需求按钮状态
@@ -274,6 +278,111 @@ export async function handleCreateProject(e) {
     } catch (error) {
         console.error('创建项目失败:', error);
         showNotification('创建项目失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * 打开编辑项目弹窗
+ */
+export async function openEditProjectModal(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}`);
+        const result = await response.json();
+        if (result.status !== 'success' || !result.project) {
+            showNotification('加载项目信息失败', 'error');
+            return;
+        }
+        
+        const project = result.project;
+        document.getElementById('editProjectId').value = project.id;
+        document.getElementById('editProjectName').value = project.name || '';
+        document.getElementById('editProjectPartyA').value = project.party_a || '';
+        document.getElementById('editProjectPartyB').value = project.party_b || '';
+        document.getElementById('editProjectSupervisor').value = project.supervisor || '';
+        document.getElementById('editProjectManager').value = project.manager || '';
+        document.getElementById('editProjectDuration').value = project.duration || '';
+        document.getElementById('editProjectDesc').value = project.description || '';
+        
+        const modal = document.getElementById('editProjectModal');
+        if (modal) {
+            modal.classList.add('show');
+            modal.style.display = 'flex';
+        }
+    } catch (error) {
+        console.error('打开编辑项目弹窗失败:', error);
+        showNotification('加载项目信息失败', 'error');
+    }
+}
+
+/**
+ * 关闭编辑项目弹窗
+ */
+export function closeEditProjectModal() {
+    const modal = document.getElementById('editProjectModal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * 处理保存编辑项目
+ */
+export async function handleEditProjectSave(e) {
+    e.preventDefault();
+    
+    const projectId = document.getElementById('editProjectId').value;
+    const projectName = document.getElementById('editProjectName').value;
+    const partyA = document.getElementById('editProjectPartyA').value;
+    const partyB = document.getElementById('editProjectPartyB').value;
+    const supervisor = document.getElementById('editProjectSupervisor').value;
+    const manager = document.getElementById('editProjectManager').value;
+    const duration = document.getElementById('editProjectDuration').value;
+    const projectDescription = document.getElementById('editProjectDesc').value;
+    
+    if (!projectName) {
+        showNotification('请输入项目名称', 'error');
+        return;
+    }
+    
+    showLoading(true);
+    try {
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: projectName,
+                description: projectDescription,
+                party_a: partyA,
+                party_b: partyB,
+                supervisor: supervisor,
+                manager: manager,
+                duration: duration
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showNotification('项目信息更新成功', 'success');
+            closeEditProjectModal();
+            // 刷新项目列表
+            await loadProjectSelectList();
+            // 如果当前打开的就是该项目，刷新显示
+            if (appState.currentProjectId === projectId) {
+                const project = await loadProject(projectId);
+                appState.projectConfig = project;
+                const nameEl = document.getElementById('currentProjectName');
+                if (nameEl) nameEl.textContent = project.name || '未命名项目';
+            }
+        } else {
+            showNotification('保存失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('保存项目信息失败:', error);
+        showNotification('保存失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
@@ -3411,6 +3520,7 @@ async function loadProjectSelectList() {
             let actionsHtml = `
                 <div class="project-actions-btns">
                     <button class="btn btn-primary btn-sm" onclick="handleOpenProject('${project.id}')">打开</button>
+                    <button class="btn btn-info btn-sm" onclick="openEditProjectModal('${project.id}')">编辑</button>
             `;
             
             // 待审批项目，项目经理/管理员显示审批按钮
@@ -3734,3 +3844,83 @@ function escapeHtml(text) {
 }
 
 
+
+
+/**
+ * 打开项目所有权移交弹窗
+ */
+export async function openTransferProjectModal() {
+    const projectId = document.getElementById('editProjectId')?.value;
+    const currentPartyB = document.getElementById('editProjectPartyB')?.value || '';
+    if (!projectId) {
+        showNotification('请先选择要移交的项目', 'error');
+        return;
+    }
+
+    document.getElementById('transferProjectId').value = projectId;
+    document.getElementById('transferFromOrg').value = currentPartyB || '（无）';
+
+    // 加载承建单位列表
+    const toSelect = document.getElementById('transferToOrg');
+    toSelect.innerHTML = '<option value="">-- 请选择 --</option>';
+    try {
+        const response = await fetch('/organizations');
+        const result = await response.json();
+        if (result.status === 'success' && Array.isArray(result.organizations)) {
+            result.organizations.forEach(org => {
+                if (org === currentPartyB) return; // 排除当前单位
+                const opt = document.createElement('option');
+                opt.value = org;
+                opt.textContent = org;
+                toSelect.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.error('加载承建单位列表失败:', err);
+    }
+
+    const modal = document.getElementById('transferProjectModal');
+    if (modal) {
+        modal.classList.add('show');
+        modal.style.display = 'block';
+    }
+}
+
+/**
+ * 关闭项目所有权移交弹窗
+ */
+export function closeTransferProjectModal() {
+    const modal = document.getElementById('transferProjectModal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * 提交项目所有权移交申请
+ */
+export async function submitProjectTransfer() {
+    const projectId = document.getElementById('transferProjectId').value;
+    const toOrg = document.getElementById('transferToOrg').value;
+    if (!toOrg) {
+        showNotification('请选择目标承建单位', 'error');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const result = await initiateProjectTransfer(projectId, toOrg);
+        if (result.status === 'success') {
+            showNotification(result.message, 'success');
+            closeTransferProjectModal();
+            closeEditProjectModal();
+        } else {
+            showNotification(result.message || '移交失败', 'error');
+        }
+    } catch (err) {
+        showNotification('网络错误，请稍后重试', 'error');
+    } finally {
+        showLoading(false);
+    }
+}

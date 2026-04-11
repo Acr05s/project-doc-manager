@@ -45,6 +45,22 @@ import { handleSaveTemplate } from './requirement-editor.js';
 export function setupEventListeners() {
     console.log('设置事件监听器...');
 
+    // 系统管理下拉菜单
+    const systemManagementBtn = document.getElementById('systemManagementBtn');
+    const systemManagementDropdown = document.getElementById('systemManagementDropdown');
+    if (systemManagementBtn && systemManagementDropdown) {
+        systemManagementBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            systemManagementDropdown.classList.toggle('show');
+        });
+        document.addEventListener('click', (e) => {
+            if (!systemManagementBtn.contains(e.target) && !systemManagementDropdown.contains(e.target)) {
+                systemManagementDropdown.classList.remove('show');
+            }
+        });
+    }
+
     // 文档需求下拉菜单
     const docReqBtn = document.getElementById('documentRequirementsBtn');
     const docReqDropdown = document.getElementById('documentRequirementsDropdown');
@@ -143,6 +159,16 @@ export function setupEventListeners() {
     const newProjectForm = document.getElementById('newProjectForm');
     if (newProjectForm) {
         newProjectForm.addEventListener('submit', handleCreateProject);
+    }
+    
+    // 编辑项目表单提交
+    const editProjectForm = document.getElementById('editProjectForm');
+    if (editProjectForm) {
+        editProjectForm.addEventListener('submit', (e) => {
+            import('./project.js').then(({ handleEditProjectSave }) => {
+                handleEditProjectSave(e);
+            });
+        });
     }
 
     // 加载项目配置（Excel）
@@ -958,10 +984,11 @@ export function setupEventListeners() {
     }
 
     // 系统设置按钮
-    const systemSettingsBtn = document.getElementById('systemSettingsBtn');
+    const systemSettingsMenuItem = document.getElementById('systemSettingsMenuItem');
     const systemSettingsModal = document.getElementById('systemSettingsModal');
-    if (systemSettingsBtn && systemSettingsModal) {
-        systemSettingsBtn.addEventListener('click', () => {
+    if (systemSettingsMenuItem && systemSettingsModal) {
+        systemSettingsMenuItem.addEventListener('click', (e) => {
+            e.preventDefault();
             loadSystemSettings();
             openModal(systemSettingsModal);
         });
@@ -1061,6 +1088,21 @@ async function loadSystemSettings() {
                 const thresholdMB = settings.fast_preview_threshold || 5;
                 fastPreviewThreshold.value = thresholdMB;
             }
+            
+            const emailNotificationEnabled = document.getElementById('emailNotificationEnabled');
+            if (emailNotificationEnabled) {
+                emailNotificationEnabled.checked = !!settings.email_notification_enabled;
+            }
+
+            const logRetentionDays = document.getElementById('logRetentionDays');
+            if (logRetentionDays) {
+                logRetentionDays.value = settings.log_retention_days || 30;
+            }
+
+            const systemTimezone = document.getElementById('systemTimezone');
+            if (systemTimezone) {
+                systemTimezone.value = settings.timezone || 'Asia/Shanghai';
+            }
         }
     } catch (error) {
         console.error('加载系统设置失败:', error);
@@ -1088,6 +1130,22 @@ async function saveSystemSettings() {
             settings.fast_preview_threshold = isNaN(thresholdValue) || thresholdValue < 1 ? 5 : thresholdValue;
         }
         
+        const emailNotificationEnabled = document.getElementById('emailNotificationEnabled');
+        if (emailNotificationEnabled) {
+            settings.email_notification_enabled = emailNotificationEnabled.checked;
+        }
+
+        const logRetentionDays = document.getElementById('logRetentionDays');
+        if (logRetentionDays) {
+            const daysValue = parseInt(logRetentionDays.value, 10);
+            settings.log_retention_days = isNaN(daysValue) || daysValue < 1 ? 30 : daysValue;
+        }
+
+        const systemTimezone = document.getElementById('systemTimezone');
+        if (systemTimezone) {
+            settings.timezone = systemTimezone.value || 'Asia/Shanghai';
+        }
+
         const response = await fetch('/api/settings', {
             method: 'POST',
             headers: {
@@ -1111,6 +1169,56 @@ async function saveSystemSettings() {
     } catch (error) {
         console.error('保存系统设置失败:', error);
         showNotification('保存设置失败', 'error');
+    }
+}
+
+/**
+ * 立即归档旧日志
+ */
+async function archiveLogsNow() {
+    if (!confirm('确定要立即归档超过保留天数的日志吗？')) return;
+    try {
+        const response = await fetch('/api/admin/logs/archive', { method: 'POST' });
+        const result = await response.json();
+        if (result.status === 'success') {
+            showNotification(result.message || '归档完成', 'success');
+        } else {
+            showNotification('归档失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('归档日志失败:', error);
+        showNotification('归档请求失败', 'error');
+    }
+}
+
+/**
+ * 导入日志文件
+ */
+async function importLogsFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (!confirm(`确定要导入日志文件 "${file.name}" 吗？`)) {
+        input.value = '';
+        return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const response = await fetch('/api/admin/logs/import', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+        if (result.status === 'success') {
+            showNotification(result.message || '导入成功', 'success');
+        } else {
+            showNotification('导入失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('导入日志失败:', error);
+        showNotification('导入请求失败', 'error');
+    } finally {
+        input.value = '';
     }
 }
 
@@ -1941,4 +2049,10 @@ export function refreshAfterCleanup() {
             module.renderCycleDocuments(appState.currentCycle);
         });
     }
+}
+
+// 将日志归档/导入函数挂载到全局，供 HTML onclick 调用
+if (typeof window !== 'undefined') {
+    window.archiveLogsNow = archiveLogsNow;
+    window.importLogsFile = importLogsFile;
 }

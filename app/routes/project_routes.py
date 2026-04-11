@@ -44,15 +44,19 @@ def create_project():
         supervisor = data.get('supervisor', '')
         manager = data.get('manager', '')
         duration = data.get('duration', '')
-        
+
         if not name:
             return jsonify({'status': 'error', 'message': '项目名称不能为空'}), 400
-        
+
+        # 默认归属 PMO 组织
+        if not party_b:
+            party_b = 'PMO'
+
         # 获取创建者信息
         creator_id = int(current_user.id) if current_user.is_authenticated else None
         creator_username = current_user.username if current_user.is_authenticated else None
-        
-        result = doc_manager.create_project(name, description, 
+
+        result = doc_manager.create_project(name, description,
                                           party_a=party_a, party_b=party_b,
                                           supervisor=supervisor, manager=manager,
                                           duration=duration,

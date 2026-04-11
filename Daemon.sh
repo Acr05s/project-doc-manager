@@ -46,6 +46,7 @@ show_help() {
     echo "  disable     Remove system service"
     echo "  service     View service status"
     echo "  install-lo  Install LibreOffice headless (for Office→PDF preview)"
+    echo "  reset-admin Reset administrator password"
     echo "  help        Show this help message"
     echo ""
     echo "Options:"
@@ -648,6 +649,82 @@ cmd_disable_service() {
     echo -e "${YELLOW}The service will no longer auto-start on boot.${NC}"
 }
 
+# 重置管理员密码
+cmd_reset_admin() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}  Reset Administrator Password${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    
+    DB_FILE="$APP_DIR/data/users.db"
+    if [ ! -f "$DB_FILE" ]; then
+        echo -e "${RED}[ERROR] Database not found: $DB_FILE${NC}"
+        exit 1
+    fi
+    
+    # 提示输入新密码
+    read -sp "Enter new admin password: " NEW_PASS
+    echo ""
+    read -sp "Confirm new admin password: " NEW_PASS_CONFIRM
+    echo ""
+    
+    if [ "$NEW_PASS" != "$NEW_PASS_CONFIRM" ]; then
+        echo -e "${RED}[ERROR] Passwords do not match!${NC}"
+        exit 1
+    fi
+    
+    if [ -z "$NEW_PASS" ]; then
+        echo -e "${RED}[ERROR] Password cannot be empty!${NC}"
+        exit 1
+    fi
+    
+    setup_venv
+    
+    # 使用虚拟环境 Python 生成密码 hash 并更新数据库
+    # 使用环境变量传递密码，避免shell注入
+    export NEW_PASS="$NEW_PASS"
+    "$PYTHON_BIN" << 'EOF'
+import sqlite3
+import sys
+import os
+from werkzeug.security import generate_password_hash
+
+db_path = "$DB_FILE"
+password = os.environ.get('NEW_PASS', '')
+
+try:
+    password_hash = generate_password_hash(password)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # 先尝试更新 role='admin' 的用户
+    cursor.execute("UPDATE users SET password_hash = ? WHERE role = 'admin'", (password_hash,))
+    if cursor.rowcount == 0:
+        # 如果没有 role='admin' 的用户，尝试更新 username='admin'
+        cursor.execute("UPDATE users SET password_hash = ? WHERE username = 'admin'", (password_hash,))
+    
+    conn.commit()
+    updated = cursor.rowcount
+    conn.close()
+    
+    if updated > 0:
+        print(f"[OK] Updated {updated} admin user(s) successfully.")
+    else:
+        print("[WARN] No admin user found. Please check the database.")
+        sys.exit(1)
+except Exception as e:
+    print(f"[ERROR] {e}")
+    sys.exit(1)
+EOF
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}[OK] Admin password has been reset successfully!${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to reset admin password.${NC}"
+        exit 1
+    fi
+}
+
 # 查看服务状态
 cmd_service_status() {
     SERVICE_NAME="doc-manager"
@@ -676,7 +753,7 @@ COMMAND="start"
 MIRROR_FLAG=""
 while [[ $# -gt 0 ]]; do
     case $1 in
-        start|install|restart|stop|status|logs|log|upgrade|enable|disable|service|help)
+        start|install|restart|stop|status|logs|log|upgrade|enable|disable|service|reset-admin|help)
             COMMAND="$1"
             shift
             ;;
@@ -744,6 +821,9 @@ case $COMMAND in
         ;;
     install-lo|install-libreoffice)
         cmd_install_libreoffice
+        ;;
+    reset-admin)
+        cmd_reset_admin
         ;;
     help)
         show_help
