@@ -22,8 +22,15 @@ BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
 # Flask应用初始化
 def create_app(config: Optional[Dict] = None) -> Flask:
     """创建Flask应用"""
+    # 打印模板目录路径，用于调试
+    import os
+    template_dir = os.path.join(BASE_DIR, 'templates')
+    print(f"Template directory: {template_dir}")
+    print(f"Template directory exists: {os.path.exists(template_dir)}")
+    print(f"Test.html exists: {os.path.exists(os.path.join(template_dir, 'test.html'))}")
+    
     app = Flask(__name__, 
-                template_folder='templates',
+                template_folder=template_dir,
                 static_folder='static')
     
     # 添加CORS支持
@@ -54,10 +61,6 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     from app.auth import init_auth
     init_auth(app)
     
-    # 初始化认证路由
-    from app.routes.auth_routes import init_auth_routes
-    init_auth_routes(app)
-    
     # 初始化路由
     from app.routes.main_routes import main_bp, init_doc_manager as init_main_manager
     from app.routes.projects import project_bp, init_doc_manager as init_project_manager
@@ -70,6 +73,38 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     init_main_manager(doc_manager)
     init_project_manager(doc_manager)
     init_document_manager(doc_manager)
+    
+    # 测试页面路由
+    @app.route('/test')
+    def test_page():
+        """测试页面"""
+        from flask import render_template
+        return render_template('test.html')
+    
+    # 认证状态检查路由
+    @app.route('/api/auth/status')
+    def check_auth_status():
+        """检查认证状态"""
+        from flask_login import current_user
+        from flask import jsonify
+        if current_user.is_authenticated:
+            return jsonify({
+                'status': 'success',
+                'user': {
+                    'id': current_user.id,
+                    'username': current_user.username,
+                    'role': current_user.role
+                }
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'user': None
+            })
+    
+    # 初始化认证路由（在其他蓝图之前注册）
+    from app.routes.auth_routes import init_auth_routes
+    init_auth_routes(app)
     
     # 注册蓝图
     app.register_blueprint(main_bp)

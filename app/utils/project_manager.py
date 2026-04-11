@@ -270,7 +270,8 @@ class ProjectManager:
               requirements_file: Optional[str] = None,
               party_a: str = '', party_b: str = '',
               supervisor: str = '', manager: str = '',
-              duration: str = '') -> Dict[str, Any]:
+              duration: str = '', creator_id: int = None,
+              creator_username: str = '', creator_role: str = '') -> Dict[str, Any]:
         """创建新项目
         
         Args:
@@ -290,6 +291,9 @@ class ProjectManager:
             # 生成项目ID
             project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
             
+            # 确定项目状态：承建单位普通用户创建的项目需要审批
+            status = 'pending' if creator_role == 'contractor' else 'approved'
+
             # 创建项目配置
             project_config = {
                 'id': project_id,
@@ -302,6 +306,12 @@ class ProjectManager:
                 'duration': duration,
                 'created_time': datetime.now().isoformat(),
                 'updated_time': datetime.now().isoformat(),
+                'creator_id': creator_id,
+                'creator_username': creator_username,
+                'creator_role': creator_role,
+                'status': status,
+                'approver_id': None,
+                'approved_time': None,
                 'cycles': [],
                 'documents': {}
             }
@@ -327,7 +337,7 @@ class ProjectManager:
             }
             self._save_projects_index()
             
-            logger.info(f"项目创建成功: {name} (ID: {project_id})")
+            logger.info(f"项目创建成功: {name} (ID: {project_id}, status: {status})")
             
             return {
                 'status': 'success',
@@ -337,6 +347,38 @@ class ProjectManager:
             
         except Exception as e:
             logger.error(f"创建项目失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
+    def approve_project(self, project_id: str, approver_id: int) -> Dict[str, Any]:
+        """审批项目（将 pending 状态改为 approved）
+        
+        Args:
+            project_id: 项目ID
+            approver_id: 审批人用户ID
+            
+        Returns:
+            Dict: 审批结果
+        """
+        try:
+            config = self.load(project_id)
+            if not config:
+                return {'status': 'error', 'message': '项目不存在'}
+            
+            if config.get('status') != 'pending':
+                return {'status': 'error', 'message': '该项目无需审批或已审批'}
+            
+            config['status'] = 'approved'
+            config['approver_id'] = approver_id
+            config['approved_time'] = datetime.now().isoformat()
+            config['updated_time'] = datetime.now().isoformat()
+            
+            self._save_project_config(project_id, config)
+            
+            logger.info(f"项目审批通过: {project_id}, 审批人: {approver_id}")
+            return {'status': 'success', 'message': '项目审批通过'}
+            
+        except Exception as e:
+            logger.error(f"审批项目失败: {e}")
             return {'status': 'error', 'message': str(e)}
     
     def _save_project_config(self, project_id: str, config: Dict[str, Any]):
@@ -1512,3 +1554,82 @@ class ProjectManager:
             import traceback
             logger.error(f"[DEBUG] 错误堆栈: {traceback.format_exc()}")
             return {'status': 'error', 'message': str(e)}
+    
+    def get_user_accessible_projects(self, user_id: int, user_role: str, user_organization: str = '') -> List[Dict[str, Any]]:
+        """获取用户可访问的项目
+        
+        Args:
+            user_id: 用户ID
+            user_role: 用户角色
+            user_organization: 用户所属组织（如承建单位名称）
+            
+        Returns:
+            List[Dict]: 可访问的项目列表
+        """
+        try:
+            # 每次都从文件重新读取索引，确保多 worker 之间数据一致
+            self._load_projects_index()
+            
+            accessible_projects = []
+            
+            # 管理员、PMO、项目经理可以访问所有项目（包括 pending）
+            if user_role in ('admin', 'pmo', 'project_admin'):
+                projects = self.list_all()
+                # 补充状态信息
+                for proj in projects:
+                    config = self.load(proj['id'])
+                    proj['status'] = config.get('status', 'approved') if config else 'approved'
+                return projects
+            
+            # 遍历所有项目
+            for project_id, info in self.projects_db.items():
+                # 加载项目配置以获取详细信息
+                config = self.load(project_id)
+                if not config:
+                    continue
+                
+                status = config.get('status', 'approved')
+                creator_id = config.get('creator_id')
+                is_creator = creator_id == user_id
+                
+                # contractor 只能看到 approved 项目，以及自己创建的 pending 项目
+                if user_role == 'contractor':
+                    if status == 'approved' or (status == 'pending' and is_creator):
+                        accessible_projects.append({
+                            'id': project_id,
+                            'name': info.get('name', ''),
+                            'description': info.get('description', ''),
+                            'created_time': info.get('created_time', ''),
+                            'updated_time': info.get('updated_time', ''),
+                            'status': status
+                        })
+                    continue
+                
+                # 其他角色（兼容旧逻辑）
+                if is_creator:
+                    accessible_projects.append({
+                        'id': project_id,
+                        'name': info.get('name', ''),
+                        'description': info.get('description', ''),
+                        'created_time': info.get('created_time', ''),
+                        'updated_time': info.get('updated_time', ''),
+                        'status': status
+                    })
+                    continue
+                
+                if user_organization and config.get('party_b') == user_organization:
+                    accessible_projects.append({
+                        'id': project_id,
+                        'name': info.get('name', ''),
+                        'description': info.get('description', ''),
+                        'created_time': info.get('created_time', ''),
+                        'updated_time': info.get('updated_time', ''),
+                        'status': status
+                    })
+                    continue
+            
+            return accessible_projects
+            
+        except Exception as e:
+            logger.error(f"获取用户可访问项目失败: {e}")
+            return []

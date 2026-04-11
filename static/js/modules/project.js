@@ -6,7 +6,8 @@
 
 import { appState, elements, initSession, unlockCurrentProject } from './app-state.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, openModal, closeModal } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, cleanInvalidFiles, previewImportPackage, importFromPreview } from './api.js';
+import { getCurrentUser } from './auth.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, getTaskStatus, getPackageDownloadUrl, cancelTask, importPackage, confirmAcceptance, downloadPackage, getDeletedProjects, restoreProject, applyRequirementsToProject, listRequirementsConfigs, loadZipRecords as apiLoadZipRecords, addZipRecord, deleteZipRecord as apiDeleteZipRecord, uploadProjectChunk, mergeProjectChunks, verifyProjectFiles, cleanInvalidFiles, previewImportPackage, importFromPreview, approveProject } from './api.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { renderCycleDocuments } from './document.js';
 
@@ -3299,6 +3300,9 @@ export async function handleImportPackageInModal(e) {
  * 显示项目按钮
  */
 export function showProjectButtons() {
+    const user = getCurrentUser();
+    const isContractor = user && user.role === 'contractor';
+    
     const menus = [
         'documentRequirementsMenu', 'documentManagementMenu', 
         'acceptanceMenu'
@@ -3306,12 +3310,19 @@ export function showProjectButtons() {
     
     menus.forEach(menuId => {
         const menu = document.getElementById(menuId);
-        if (menu) menu.style.display = 'inline-block';
+        if (!menu) return;
+        if (isContractor && (menuId === 'documentRequirementsMenu' || menuId === 'acceptanceMenu')) {
+            menu.style.display = 'none';
+        } else {
+            menu.style.display = 'inline-block';
+        }
     });
     
     // 显示备份项目按钮
     const packageProjectBtn = document.getElementById('packageProjectBtn');
-    if (packageProjectBtn) packageProjectBtn.style.display = 'inline-block';
+    if (packageProjectBtn) {
+        packageProjectBtn.style.display = isContractor ? 'none' : 'inline-block';
+    }
 }
 
 /**
@@ -3373,6 +3384,8 @@ async function loadProjectSelectList() {
     
     try {
         const projects = await loadProjectsList();
+        const user = getCurrentUser();
+        const canApprove = user && (user.role === 'admin' || user.role === 'pmo' || user.role === 'project_admin');
         
         // 更新标题显示项目数量
         if (countTitle) {
@@ -3391,17 +3404,28 @@ async function loadProjectSelectList() {
             const item = document.createElement('div');
             item.className = 'project-item';
             
-            // 检查项目状态
-            const status = await checkProjectStatus(project.id);
+            // 检查项目状态（打包状态）
+            const packStatus = await checkProjectStatus(project.id);
+            const isPending = project.status === 'pending';
             
             let actionsHtml = `
                 <div class="project-actions-btns">
                     <button class="btn btn-primary btn-sm" onclick="handleOpenProject('${project.id}')">打开</button>
-                    <button class="btn btn-warning btn-sm" onclick="handleSoftDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>
             `;
             
+            // 待审批项目，项目经理/管理员显示审批按钮
+            if (isPending && canApprove) {
+                actionsHtml += `<button class="btn btn-success btn-sm" onclick="handleApproveProject('${project.id}')">审批通过</button>`;
+            }
+            
+            // 删除按钮（管理员/PMO/项目经理始终显示；普通用户仅对自己创建的待审批项目显示）
+            const canDelete = user && (user.role === 'admin' || user.role === 'pmo' || user.role === 'project_admin' || project.creator_id === user.id);
+            if (canDelete) {
+                actionsHtml += `<button class="btn btn-warning btn-sm" onclick="handleSoftDeleteProject('${project.id}', '${escapeHtml(project.name)}')">删除</button>`;
+            }
+            
             // 如果项目正在打包中，添加清除打包状态按钮
-            if (status.packaging) {
+            if (packStatus.packaging) {
                 actionsHtml += `
                     <button class="btn btn-warning btn-sm" onclick="handleClearPackaging('${project.id}')">清除打包状态</button>
                 `;
@@ -3410,9 +3434,12 @@ async function loadProjectSelectList() {
             actionsHtml += `</div>`;
             
             const index = projects.indexOf(project);
+            const pendingBadge = isPending ? '<span style="color: #ff9800; font-size: 12px; margin-left: 8px; font-weight: bold;">(待审批)</span>' : '';
+            const packagingBadge = packStatus.packaging ? '<span style="color: orange; font-size: 12px; margin-left: 8px;">(打包中)</span>' : '';
+            
             item.innerHTML = `
                 <div class="project-info">
-                    <div class="project-name"><span class="project-index">${index + 1}.</span> ${escapeHtml(project.name)} ${status.packaging ? '<span style="color: orange; font-size: 12px; margin-left: 8px;">(打包中)</span>' : ''}</div>
+                    <div class="project-name"><span class="project-index">${index + 1}.</span> ${escapeHtml(project.name)} ${pendingBadge} ${packagingBadge}</div>
                     <div class="project-meta">创建时间: ${formatDateTime(project.created_time)}</div>
                 </div>
                 ${actionsHtml}
@@ -3473,6 +3500,30 @@ async function loadDeletedProjectsList() {
 /**
  * 处理打开项目
  */
+/**
+ * 处理审批项目
+ */
+export async function handleApproveProject(projectId) {
+    try {
+        const result = await approveProject(projectId);
+        if (result.status === 'success') {
+            showNotification('项目审批通过', 'success');
+            // 刷新项目列表
+            await loadProjectSelectList();
+            // 如果当前打开的就是该项目，也刷新一下配置
+            if (appState.currentProjectId === projectId) {
+                const project = await loadProject(projectId);
+                appState.projectConfig = project;
+            }
+        } else {
+            showNotification('审批失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('审批项目失败:', error);
+        showNotification('审批请求失败', 'error');
+    }
+}
+
 export async function handleOpenProject(projectId) {
     // 检查项目是否正在打包中
     if (appState.isPackaging && appState.packagingProjectId === projectId) {

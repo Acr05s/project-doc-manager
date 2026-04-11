@@ -179,7 +179,7 @@ def init_auth(app):
     # 添加请求钩子，检查IP黑名单
     @app.before_request
     def before_request():
-        # 排除登录路由
-        if request.endpoint not in ['auth.login', 'static']:
+        # 排除登录路由和认证状态检查路由
+        if request.endpoint not in ['auth.login', 'auth_routes.check_auth_status', 'static']:
             if check_ip_blacklist():
                 return jsonify({'status': 'error', 'message': 'IP地址已被限制访问'}), 403

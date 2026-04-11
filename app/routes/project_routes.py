@@ -34,6 +34,8 @@ def list_projects():
 def create_project():
     """创建新项目"""
     try:
+        from flask_login import current_user
+        
         data = request.get_json()
         name = data.get('name')
         description = data.get('description', '')
@@ -46,10 +48,15 @@ def create_project():
         if not name:
             return jsonify({'status': 'error', 'message': '项目名称不能为空'}), 400
         
+        # 获取创建者信息
+        creator_id = int(current_user.id) if current_user.is_authenticated else None
+        creator_username = current_user.username if current_user.is_authenticated else None
+        
         result = doc_manager.create_project(name, description, 
                                           party_a=party_a, party_b=party_b,
                                           supervisor=supervisor, manager=manager,
-                                          duration=duration)
+                                          duration=duration,
+                                          creator_id=creator_id, creator_username=creator_username)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -58,6 +65,25 @@ def create_project():
 def get_project(project_id):
     """获取项目详情"""
     try:
+        from flask_login import current_user
+        
+        # 检查用户是否已登录
+        if not current_user.is_authenticated:
+            return jsonify({'status': 'error', 'message': '请先登录'}), 401
+        
+        # 检查用户是否有权限访问该项目
+        user_id = int(current_user.id)
+        user_role = current_user.role
+        user_organization = ''  # 这里可以从用户信息中获取组织信息
+        
+        # 获取用户可访问的项目列表
+        accessible_projects = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
+        accessible_project_ids = [proj['id'] for proj in accessible_projects]
+        
+        # 检查当前项目是否在可访问列表中
+        if project_id not in accessible_project_ids:
+            return jsonify({'status': 'error', 'message': '无权限访问该项目'}), 403
+        
         result = doc_manager.load_project(project_id)
         return jsonify(result)
     except Exception as e:
@@ -1102,6 +1128,27 @@ def verify_acceptance(project_id):
             'verification': verification
         })
 
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@project_bp.route('/accessible', methods=['GET'])
+def get_accessible_projects():
+    """获取用户可访问的项目列表"""
+    try:
+        from flask_login import current_user
+        
+        if not current_user.is_authenticated:
+            return jsonify([])
+        
+        # 获取用户信息
+        user_id = int(current_user.id)
+        user_role = current_user.role
+        user_organization = ''  # 这里可以从用户信息中获取组织信息
+        
+        # 获取可访问的项目
+        result = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
+        return jsonify(result)
+        
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

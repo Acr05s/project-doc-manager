@@ -89,53 +89,75 @@ function renderCycleEditor(cycles, documents) {
  * 添加新周期
  */
 export function addNewCycle() {
-    const cycleName = prompt('请输入周期名称：');
-    if (!cycleName || !cycleName.trim()) return;
-    
-    const config = appState.projectConfig;
-    if (!config.cycles) config.cycles = [];
-    if (!config.documents) config.documents = {};
-    
-    if (config.cycles.includes(cycleName.trim())) {
-        showNotification('周期名称已存在', 'error');
-        return;
-    }
-    
-    config.cycles.push(cycleName.trim());
-    config.documents[cycleName.trim()] = {
-        required_docs: [],
-        uploaded_docs: []
-    };
-    
-    renderCycleEditor(config.cycles, config.documents);
-    showNotification('周期添加成功', 'success');
+    showInputModal(
+        '添加新周期',
+        [{
+            label: '周期名称',
+            key: 'cycleName',
+            value: '',
+            placeholder: '请输入周期名称'
+        }],
+        (result) => {
+            const cycleName = result.cycleName;
+            if (!cycleName || !cycleName.trim()) return;
+            
+            const config = appState.projectConfig;
+            if (!config.cycles) config.cycles = [];
+            if (!config.documents) config.documents = {};
+            
+            if (config.cycles.includes(cycleName.trim())) {
+                showNotification('周期名称已存在', 'error');
+                return;
+            }
+            
+            config.cycles.push(cycleName.trim());
+            config.documents[cycleName.trim()] = {
+                required_docs: [],
+                uploaded_docs: []
+            };
+            
+            renderCycleEditor(config.cycles, config.documents);
+            showNotification('周期添加成功', 'success');
+        }
+    );
 }
 
 /**
  * 编辑周期名称
  */
 window.editCycle = function(oldCycle) {
-    const newCycle = prompt('请输入新的周期名称：', oldCycle);
-    if (!newCycle || !newCycle.trim() || newCycle.trim() === oldCycle) return;
-    
-    const config = appState.projectConfig;
-    if (config.cycles.includes(newCycle.trim())) {
-        showNotification('周期名称已存在', 'error');
-        return;
-    }
-    
-    // 更新周期名称
-    const index = config.cycles.indexOf(oldCycle);
-    config.cycles[index] = newCycle.trim();
-    
-    // 更新文档映射
-    if (config.documents[oldCycle]) {
-        config.documents[newCycle.trim()] = config.documents[oldCycle];
-        delete config.documents[oldCycle];
-    }
-    
-    renderCycleEditor(config.cycles, config.documents);
-    showNotification('周期修改成功', 'success');
+    showInputModal(
+        '编辑周期名称',
+        [{
+            label: '新周期名称',
+            key: 'newCycle',
+            value: oldCycle,
+            placeholder: '请输入新的周期名称'
+        }],
+        (result) => {
+            const newCycle = result.newCycle;
+            if (!newCycle || !newCycle.trim() || newCycle.trim() === oldCycle) return;
+            
+            const config = appState.projectConfig;
+            if (config.cycles.includes(newCycle.trim())) {
+                showNotification('周期名称已存在', 'error');
+                return;
+            }
+            
+            // 更新周期名称
+            const index = config.cycles.indexOf(oldCycle);
+            config.cycles[index] = newCycle.trim();
+            
+            // 更新文档映射
+            if (config.documents[oldCycle]) {
+                config.documents[newCycle.trim()] = config.documents[oldCycle];
+                delete config.documents[oldCycle];
+            }
+            
+            renderCycleEditor(config.cycles, config.documents);
+            showNotification('周期修改成功', 'success');
+        }
+    );
 };
 
 /**

@@ -69,19 +69,22 @@ function closeVersionModal() {
 }
 
 // 当DOM加载完成后初始化应用
-document.addEventListener('DOMContentLoaded', async function() {
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM加载完成，开始初始化应用');
+    
     // 初始化认证模块
-    try {
-        const { initAuth } = await import('./modules/auth.js');
-        await initAuth();
-    } catch (error) {
+    import('./modules/auth.js').then(module => {
+        console.log('加载auth模块成功');
+        return module.initAuth();
+    }).then(() => {
+        console.log('认证模块初始化完成');
+        initApp();
+        loadVersionInfo();
+    }).catch(error => {
         console.error('初始化认证模块失败:', error);
-    }
-    
-    initApp();
-    
-    // 加载版本信息
-    loadVersionInfo();
+        initApp();
+        loadVersionInfo();
+    });
     
     // 添加项目标题点击事件
     const projectTitle = document.getElementById('projectTitle');
@@ -343,6 +346,12 @@ window.handleClearPackaging = function(projectId) {
 window.handleSoftDeleteProject = function(projectId, projectName) {
     import('./modules/project.js').then(module => {
         module.handleSoftDeleteProject(projectId, projectName);
+    });
+};
+
+window.handleApproveProject = function(projectId) {
+    import('./modules/project.js').then(module => {
+        module.handleApproveProject(projectId);
     });
 };
 

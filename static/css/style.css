@@ -62,6 +62,49 @@ body {
     align-items: center;
 }
 
+/* 认证容器样式 */
+.auth-container {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+    z-index: 1000;
+}
+
+.auth-container .btn {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.auth-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.user-role {
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: white;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.username {
+    color: white;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.auth-info .btn {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
 .header h1 {
     font-size: 18px;
     white-space: nowrap;

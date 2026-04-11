@@ -3,6 +3,7 @@
  */
 
 import { appState, elements } from './app-state.js';
+import { getCurrentUser } from './auth.js';
 import { 
     handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, 
     handleSaveProject, handleClearRequirements, updateClearRequirementsBtnState,
@@ -1713,6 +1714,9 @@ export function updateSelectedDocumentsList() {
  * 显示项目按钮
  */
 export function showProjectButtons() {
+    const user = getCurrentUser();
+    const isContractor = user && user.role === 'contractor';
+    
     const menus = [
         'documentRequirementsMenu', 'documentManagementMenu', 
         'acceptanceMenu'
@@ -1720,16 +1724,26 @@ export function showProjectButtons() {
     
     menus.forEach(menuId => {
         const menu = document.getElementById(menuId);
-        if (menu) menu.style.display = 'inline-block';
+        if (!menu) return;
+        // contractor 不显示文档需求和验收菜单
+        if (isContractor && (menuId === 'documentRequirementsMenu' || menuId === 'acceptanceMenu')) {
+            menu.style.display = 'none';
+        } else {
+            menu.style.display = 'inline-block';
+        }
     });
     
     // 显示生成报告按钮
     const generateReportBtn = document.getElementById('generateReportBtn');
-    if (generateReportBtn) generateReportBtn.style.display = 'inline-block';
+    if (generateReportBtn) {
+        generateReportBtn.style.display = isContractor ? 'none' : 'inline-block';
+    }
     
     // 显示备份项目按钮
     const packageProjectBtn = document.getElementById('packageProjectBtn');
-    if (packageProjectBtn) packageProjectBtn.style.display = 'inline-block';
+    if (packageProjectBtn) {
+        packageProjectBtn.style.display = isContractor ? 'none' : 'inline-block';
+    }
 }
 
 /**

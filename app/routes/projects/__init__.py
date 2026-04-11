@@ -2,7 +2,7 @@
 
 from flask import Blueprint
 from .utils import init_doc_manager
-from .basic import list_projects, create_project, get_project, update_project, delete_project
+from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, delete_project
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
@@ -20,6 +20,8 @@ project_bp = Blueprint('project', __name__)
 # 注册路由
 project_bp.route('/list', methods=['GET'])(list_projects)
 project_bp.route('/create', methods=['POST'])(create_project)
+project_bp.route('/accessible', methods=['GET'])(get_accessible_projects)
+project_bp.route('/approve', methods=['POST'])(approve_project)
 project_bp.route('/<project_id>', methods=['GET'])(get_project)
 project_bp.route('/<project_id>', methods=['PUT'])(update_project)
 project_bp.route('/<project_id>', methods=['DELETE'])(delete_project)

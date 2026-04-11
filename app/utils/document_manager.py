@@ -317,15 +317,23 @@ class DocumentManager:
             return self.projects.list_all()
         return []
     
+    def get_user_accessible_projects(self, user_id: int, user_role: str, user_organization: str = '') -> List[Dict]:
+        """获取用户可访问的项目列表"""
+        if self.projects:
+            return self.projects.get_user_accessible_projects(user_id, user_role, user_organization)
+        return []
+    
     def create_project(self, name: str, description: str = '',
                       requirements_file: Optional[str] = None,
                       party_a: str = '', party_b: str = '',
                       supervisor: str = '', manager: str = '',
-                      duration: str = '') -> Dict:
+                      duration: str = '', creator_id: int = None,
+                      creator_username: str = '', creator_role: str = '') -> Dict:
         """创建项目"""
         if self.projects:
             return self.projects.create(name, description, requirements_file,
-                                       party_a, party_b, supervisor, manager, duration)
+                                       party_a, party_b, supervisor, manager, duration,
+                                       creator_id, creator_username, creator_role)
         return {'status': 'error', 'message': '项目管理模块不可用'}
     
     def import_project_json(self, project_config: Dict, new_name: str = None) -> Dict:

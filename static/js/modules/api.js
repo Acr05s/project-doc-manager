@@ -9,25 +9,53 @@ import { appState } from './app-state.js';
  */
 export async function loadProjectsList() {
     try {
-        const response = await fetch('/api/projects/list');
-        const result = await response.json();
+        // 检查用户认证状态
+        const { authState } = await import('./auth.js');
         
-        // 检查响应格式，兼容不同的API返回格式
-        if (Array.isArray(result)) {
-            // 直接返回数组的格式（如 Flask 直接返回 list）
-            return result;
-        } else if (result.projects) {
-            // 直接返回projects数组的格式
-            return result.projects;
-        } else if (result.status === 'success' && result.data && result.data.projects) {
-            // 包含status和data的格式
-            return result.data.projects;
+        if (authState.isAuthenticated && authState.user) {
+            // 已登录用户，获取可访问的项目
+            const response = await fetch('/api/projects/accessible');
+            const result = await response.json();
+            
+            // 检查响应格式，兼容不同的API返回格式
+            if (Array.isArray(result)) {
+                // 直接返回数组的格式（如 Flask 直接返回 list）
+                return result;
+            } else if (result.projects) {
+                // 直接返回projects数组的格式
+                return result.projects;
+            } else if (result.status === 'success' && result.data && result.data.projects) {
+                // 包含status和data的格式
+                return result.data.projects;
+            } else {
+                return [];
+            }
         } else {
+            // 未登录用户，返回空列表
             return [];
         }
     } catch (error) {
         console.error('加载项目列表失败:', error);
         return [];
+    }
+}
+
+/**
+ * 审批项目
+ */
+export async function approveProject(projectId) {
+    try {
+        const response = await fetch('/api/projects/approve', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ project_id: projectId })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('审批项目失败:', error);
+        return { status: 'error', message: '审批请求失败' };
     }
 }
 

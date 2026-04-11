@@ -14,7 +14,10 @@ def init_doc_manager(manager):
     global doc_manager
     doc_manager = manager
 
+from flask_login import login_required
+
 @main_bp.route('/')
+@login_required
 def index():
     """主页"""
     return render_template('index.html')
