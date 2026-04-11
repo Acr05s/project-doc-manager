@@ -6,14 +6,29 @@
 import json
 import logging
 import zipfile
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 from .base import DocumentConfig, setup_logging, ensure_dir
 from .folder_manager import FolderManager
 from .document_list import DocumentListManager
 
 logger = setup_logging(__name__)
+
+# 打包日志文件路径
+PACKAGE_LOG_FILE = Path('logs/package_debug.log')
+
+def log_package(msg):
+    """记录打包日志到文件"""
+    try:
+        PACKAGE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(PACKAGE_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'[{timestamp}] {msg}\n')
+    except Exception as e:
+        print(f'[log_package error] {e}')
 
 
 class ExportManager:
@@ -50,6 +65,25 @@ class ExportManager:
             doc_list = self.doc_list_manager.load(project_name)
             if not doc_list:
                 return {'status': 'error', 'message': '文档清单不存在'}
+            
+            # 从数据库加载完整的文档信息（包含 directory 和 root_directory）
+            from ..routes.documents.list import list_documents as get_list_docs
+            from flask import current_app
+            
+            all_docs_with_metadata = []
+            try:
+                with current_app.test_request_context():
+                    response = get_list_docs()
+                    if hasattr(response, 'get_json'):
+                        list_result = response.get_json()
+                    else:
+                        import json
+                        list_result = json.loads(response.data)
+                    if list_result.get('status') == 'success':
+                        all_docs_with_metadata = list_result.get('data', [])
+                        log_package(f'[export] Loaded {len(all_docs_with_metadata)} docs from database')
+            except Exception as e:
+                log_package(f'[export] Failed to load from database: {e}')
             
             # 确定输出路径
             if not output_path:
@@ -99,8 +133,38 @@ class ExportManager:
                                 })
                                 continue
                             
+                            # 从数据库获取的完整信息中查找当前文件的目录信息
+                            directory = ''
+                            root_dir = ''
+                            orig_dir = ''
+                            for db_doc in all_docs_with_metadata:
+                                if db_doc.get('filename') == filename or db_doc.get('original_filename') == filename:
+                                    if db_doc.get('cycle') == cycle_name and db_doc.get('doc_name') == doc_name:
+                                        # 优先使用 display_directory（已与前端显示逻辑对齐）
+                                        directory = db_doc.get('display_directory', '') or db_doc.get('directory', '')
+                                        root_dir = db_doc.get('root_directory', '')
+                                        orig_dir = db_doc.get('directory', '')
+                                        break
+                            
+                            # 兼容老数据：如果 display_directory 为空且没有 root_directory，清理 directory 中的临时目录前缀
+                            if directory and directory != '/' and not root_dir:
+                                dir_value = directory.lstrip('/')
+                                parts = dir_value.split('/')
+                                real_start_idx = 0
+                                for i, part in enumerate(parts):
+                                    if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
+                                        real_start_idx = i
+                                        break
+                                meaningful_parts = parts[real_start_idx:]
+                                directory = '/' + '/'.join(meaningful_parts) if meaningful_parts else '/'
+                            
+                            log_package(f'[export] {cycle_name}/{doc_name} | db_dir: {orig_dir} | final_dir: {directory} | root: {root_dir} | file: {filename}')
+                            
                             # 添加到ZIP
-                            arcname = f"{cycle_name}/{doc_name}/{filename}"
+                            if directory and directory != '/':
+                                arcname = f"{cycle_name}/{doc_name}/{directory}/{filename}"
+                            else:
+                                arcname = f"{cycle_name}/{doc_name}/{filename}"
                             zipf.write(file_path, arcname)
                             exported_files.append({
                                 'cycle': cycle_name,
@@ -112,9 +176,13 @@ class ExportManager:
             # 统计信息
             total_size = sum(f['size'] for f in exported_files)
             
+            # 生成下载文件名
+            download_name = f"{project_name}_{datetime.now().strftime('%Y%m%d')}.zip"
+            
             result = {
                 'status': 'success',
-                'output_path': str(output_path),
+                'package_path': str(output_path),
+                'download_name': download_name,
                 'total_files': len(exported_files),
                 'total_size': total_size,
                 'files': exported_files,

@@ -2,7 +2,22 @@
 
 from flask import request, jsonify
 from datetime import datetime
+from pathlib import Path
+import os
 from .utils import get_doc_manager
+
+# 打包日志文件路径
+PACKAGE_LOG_FILE = Path('logs/package_debug.log')
+
+def log_package(msg):
+    """记录打包日志到文件"""
+    try:
+        PACKAGE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(PACKAGE_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'[{timestamp}] {msg}\n')
+    except Exception as e:
+        print(f'[log_package error] {e}')
 
 
 def confirm_cycle_acceptance(project_id):
@@ -307,10 +322,13 @@ def download_project_package(project_id):
         project_config = project_result['project']
         project_name = project_config.get('name', '项目文档')
 
+        log_package(f'[acceptance] 开始打包项目: {project_name}')
+
         # 创建内存 ZIP
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
             added_count = 0
+            debug_dirs = set()
 
             for cycle, doc_data in project_config.get('documents', {}).items():
                 uploaded_docs = doc_data.get('uploaded_docs', [])
@@ -319,18 +337,42 @@ def download_project_package(project_id):
                     if file_path and Path(file_path).exists():
                         # 构建目录结构：项目名/周期名/文档类型/子目录/文档
                         doc_name = doc_meta.get('doc_name', '未知')
-                        directory = doc_meta.get('directory', '')
+                        directory = doc_meta.get('directory', '') or '/'
+                        root_dir = doc_meta.get('root_directory', '')
+                        
+                        # 与前端显示逻辑保持一致
+                        if root_dir:
+                            # 有 root_directory 时，directory 已经是相对于根目录的路径
+                            effective_dir = directory if directory != '/' else ''
+                        else:
+                            # 清理临时目录前缀（与 list.py 逻辑一致）
+                            import re
+                            dir_value = directory.lstrip('/')
+                            parts = dir_value.split('/')
+                            real_start_idx = 0
+                            for i, part in enumerate(parts):
+                                if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
+                                    real_start_idx = i
+                                    break
+                            meaningful_parts = parts[real_start_idx:]
+                            effective_dir = '/' + '/'.join(meaningful_parts) if meaningful_parts else '/'
+                            if effective_dir == '/':
+                                effective_dir = ''
+                        
+                        debug_dirs.add(effective_dir or '/')
                         
                         # 构建归档路径
-                        if directory:
-                            # 有子目录：项目名/周期名/文档类型/子目录/文件名
-                            archive_path = f"{project_name}/{cycle}/{doc_name}/{directory}/{doc_meta.get('filename', Path(file_path).name)}"
+                        if effective_dir and effective_dir != '/':
+                            dir_path = effective_dir.lstrip('/')
+                            archive_path = f"{cycle}/{doc_name}/{dir_path}/{doc_meta.get('filename', Path(file_path).name)}"
                         else:
-                            # 无子目录：项目名/周期名/文档类型/文件名
-                            archive_path = f"{project_name}/{cycle}/{doc_name}/{doc_meta.get('filename', Path(file_path).name)}"
+                            # 无子目录：周期名/文档类型/文件名
+                            archive_path = f"{cycle}/{doc_name}/{doc_meta.get('filename', Path(file_path).name)}"
                         
                         zipf.write(file_path, archive_path)
                         added_count += 1
+
+            log_package(f'[acceptance] 打包完成: {added_count}个文件, 目录: {sorted(debug_dirs)}')
 
             # 如果没有文件，也添加一个说明文件
             if added_count == 0:

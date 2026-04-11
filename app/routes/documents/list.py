@@ -46,37 +46,9 @@ def list_documents():
                     clean_dir = dir_value.lstrip('/')
                     
                     if root_dir:
-                        # 先去除 root_directory 的临时目录前缀
-                        import re
-                        root_parts = root_dir.lstrip('/').split('/')
-                        root_start_idx = 0
-                        for i, part in enumerate(root_parts):
-                            if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
-                                root_start_idx = i
-                                break
-                        clean_root = '/'.join(root_parts[root_start_idx:])
-                        
-                        # 获取 root_directory 的父目录（第一级）
-                        root_parent = root_parts[root_start_idx] if root_start_idx < len(root_parts) else ''
-                        
-                        if clean_root and root_parent:
-                            # 从 root_directory 的父级开始查找
-                            parent_idx = clean_dir.find(root_parent)
-                            if parent_idx >= 0:
-                                # 从父级开始截取，包含 root_directory 及其子目录
-                                doc['display_directory'] = '/' + clean_dir[parent_idx:]
-                            else:
-                                # 找不到父级，从完整路径开始
-                                doc['display_directory'] = '/' + clean_dir
-                        elif clean_root:
-                            # 只有一级目录，从该目录开始
-                            root_idx = clean_dir.find(clean_root)
-                            if root_idx >= 0:
-                                doc['display_directory'] = '/' + clean_dir[root_idx:]
-                            else:
-                                doc['display_directory'] = '/' + clean_dir
-                        else:
-                            doc['display_directory'] = '/' + clean_dir
+                        # 用户已选择根目录（"从此开始记录"），directory 已经是相对于根目录的路径
+                        # 因此 display_directory 直接使用 directory 即可，不要再拼接根目录本身
+                        doc['display_directory'] = '/' + clean_dir
                     else:
                         # 无 root_directory，尝试识别并去掉临时目录前缀
                         import re

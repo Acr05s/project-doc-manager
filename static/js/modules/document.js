@@ -4332,12 +4332,33 @@ function showReportModal(reportData) {
                                     const docs = docsByType[typeName];
                                     if (!docs) return '';
                                     
-                                    // 按目录分组文档（使用 display_directory 保持与主页面一致）
-                                    const docsByDirectory = {};
+                                    // 按层级目录分组文档（与前端显示逻辑一致）
+                                    const docsByHierarchy = {};
                                     docs.forEach(doc => {
-                                        const directory = doc.display_directory || doc.directory || '/';
-                                        if (!docsByDirectory[directory]) docsByDirectory[directory] = [];
-                                        docsByDirectory[directory].push(doc);
+                                        let effectiveDir = doc.display_directory || doc.directory || '/';
+                                        
+                                        // 兼容老数据：如果 display_directory 为空且没有 root_directory，清理临时目录前缀
+                                        if (!doc.display_directory && !doc.root_directory) {
+                                            const dirValue = effectiveDir.replace(/^\//, '');
+                                            const parts = dirValue.split('/');
+                                            let realStartIdx = 0;
+                                            for (let i = 0; i < parts.length; i++) {
+                                                if (!/^tmp[a-z0-9]+_\d{14,}$/i.test(parts[i])) {
+                                                    realStartIdx = i;
+                                                    break;
+                                                }
+                                            }
+                                            const meaningfulParts = parts.slice(realStartIdx);
+                                            effectiveDir = meaningfulParts.length > 0 ? '/' + meaningfulParts.join('/') : '/';
+                                        }
+                                        
+                                        const parts = effectiveDir === '/' ? [] : effectiveDir.split('/').filter(Boolean);
+                                        const mainDir = parts[0] || '';
+                                        const subPath = parts.slice(1).join('/') || '';
+                                        
+                                        if (!docsByHierarchy[mainDir]) docsByHierarchy[mainDir] = {};
+                                        if (!docsByHierarchy[mainDir][subPath]) docsByHierarchy[mainDir][subPath] = [];
+                                        docsByHierarchy[mainDir][subPath].push(doc);
                                     });
                                     
                                     // 获取该文档类型的要求
@@ -4347,79 +4368,102 @@ function showReportModal(reportData) {
                                     const hasSealRequirement = requirement.includes('盖章') || requirement.includes('章');
                                     const docIndex = docConfig?._originalIndex || (typeIndex + 1);
                                     
+                                    // 辅助函数：渲染文件表格
+                                    const renderDocTable = (dirDocs, dirLabel, indent) => `
+                                        <div style="${indent ? 'margin-left: 20px; margin-bottom: 8px;' : 'margin-bottom: 8px;'}">
+                                            <div style="font-size: 13px; font-weight: 500; color: #6c757d; margin-bottom: 5px;">
+                                                📁 ${dirLabel} (${dirDocs.length}个文件)
+                                            </div>
+                                            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                                <thead>
+                                                    <tr style="background: #f8f9fa;">
+                                                        <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left; width: 50px;">序号</th>
+                                                        <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
+                                                        <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
+                                                        <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${dirDocs.map((doc, fileIndex) => `
+                                                        <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
+                                                            <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
+                                                            <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
+                                                                ${doc.original_filename || doc.filename} 
+                                                                ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}
+                                                                ${(() => {
+                                                                    const note = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || doc.Remark || doc.Note || doc.NOTES || doc.REMARK || doc.REMARKS || '';
+                                                                    return note ? `<span style="color: #ff6600; font-size: 12px; margin-left: 8px; font-weight: 600; background: #fff7e6; padding: 2px 6px; border-radius: 4px; border: 1px solid #ffd591;">💬 ${note}</span>` : '';
+                                                                })()}
+                                                            </td>
+                                                            <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
+                                                            <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
+                                                                ${(() => {
+                                                                    const getDocValue = (fieldName) => {
+                                                                        if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                        if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
+                                                                        if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
+                                                                        return null;
+                                                                    };
+                                                                    if (!hasSignRequirement) return '';
+                                                                    const hasNoSign = getDocValue('no_signature');
+                                                                    const hasSigner = getDocValue('signer') || getDocValue('party_a_signer') || getDocValue('party_b_signer');
+                                                                    if (hasNoSign) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无签字</span>';
+                                                                    if (hasSigner) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有签字</span>';
+                                                                    return '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无签字</span>';
+                                                                })()}
+                                                                ${(() => {
+                                                                    if (!hasSealRequirement) return '';
+                                                                    const getDocValue = (fieldName) => {
+                                                                        if (doc[fieldName] !== undefined) return doc[fieldName];
+                                                                        if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
+                                                                        return null;
+                                                                    };
+                                                                    const hasNoSeal = getDocValue('no_seal');
+                                                                    const hasSeal = getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal');
+                                                                    if (hasNoSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无盖章</span>';
+                                                                    if (hasSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有盖章</span>';
+                                                                    return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无盖章</span>';
+                                                                })()}
+                                                                ${doc.archived ? ((hasSignRequirement || hasSealRequirement) ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #1890ff; font-size: 12px; font-weight: 500;">✓ 已归档</span>' : ''}
+                                                            </td>
+                                                        </tr>
+                                                    `).join('')}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    `;
+                                    
                                     return `
                                         <div style="margin-bottom: 20px;">
                                             <h6 style="margin: 10px 0 8px; color: #495057; font-size: 14px; font-weight: 600; background: #e9ecef; padding: 6px 10px; border-radius: 4px;">
                                                 ${docIndex}. 📄 ${typeName} (${docs.length}个文件)
                                             </h6>
-                                            ${Object.entries(docsByDirectory).map(([directory, dirDocs]) => {
-                                                const dirName = directory === '/' ? '根目录' : directory;
-                                                return `
-                                                    <div style="margin-left: 20px; margin-top: 10px;">
-                                                        <div style="font-size: 13px; font-weight: 500; color: #6c757d; margin-bottom: 5px;">
-                                                            📁 ${dirName} (${dirDocs.length}个文件)
+                                            <div style="margin-left: 20px; margin-top: 10px;">
+                                                ${Object.entries(docsByHierarchy).map(([mainDir, subGroups]) => {
+                                                    if (mainDir === '') {
+                                                        // 根目录文件
+                                                        const rootDocs = subGroups[''] || [];
+                                                        if (rootDocs.length === 0) return '';
+                                                        return renderDocTable(rootDocs, '根目录', false);
+                                                    }
+                                                    
+                                                    const totalFiles = Object.values(subGroups).reduce((sum, arr) => sum + arr.length, 0);
+                                                    const subGroupHtml = Object.entries(subGroups).map(([subPath, subDocs]) => {
+                                                        const dirLabel = subPath || '根目录';
+                                                        return renderDocTable(subDocs, dirLabel, true);
+                                                    }).join('');
+                                                    
+                                                    return `
+                                                        <div style="margin-bottom: 10px;">
+                                                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 5px;">
+                                                                📁 ${mainDir} (${totalFiles}个文件)
+                                                            </div>
+                                                            ${subGroupHtml}
                                                         </div>
-                                                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-                                                            <thead>
-                                                                <tr style="background: #f8f9fa;">
-                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left; width: 50px;">序号</th>
-                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">文件名</th>
-                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">上传时间</th>
-                                                                    <th style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: left;">状态</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                ${dirDocs.map((doc, fileIndex) => `
-                                                                    <tr ${doc.archived ? 'style="background-color: #e6f7ff;"' : ''}>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6; text-align: center;">${fileIndex + 1}</td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
-                                                                            ${doc.original_filename || doc.filename} 
-                                                                            ${doc.archived ? '<span style="color: #1890ff; font-size: 11px; margin-left: 8px;">（已归档）</span>' : ''}
-                                                                            ${(() => {
-                                                                                const note = doc.notes || doc.note || doc.doc_note || doc.remark || doc.remarks || doc.Remark || doc.Note || doc.NOTES || doc.REMARK || doc.REMARKS || '';
-                                                                                return note ? `<span style="color: #ff6600; font-size: 12px; margin-left: 8px; font-weight: 600; background: #fff7e6; padding: 2px 6px; border-radius: 4px; border: 1px solid #ffd591;">💬 ${note}</span>` : '';
-                                                                            })()}
-                                                                        </td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">${doc.upload_time ? new Date(doc.upload_time).toLocaleString() : '未知'}</td>
-                                                                        <td style="padding: 6px 8px; border: 1px solid #dee2e6;">
-                                                                            ${(() => {
-                                                                                const getDocValue = (fieldName) => {
-                                                                                    // 检查多个可能的属性来源
-                                                                                    if (doc[fieldName] !== undefined) return doc[fieldName];
-                                                                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
-                                                                                    if (doc.attributes && doc.attributes[fieldName] !== undefined) return doc.attributes[fieldName];
-                                                                                    if (doc.extra_attributes && doc.extra_attributes[fieldName] !== undefined) return doc.extra_attributes[fieldName];
-                                                                                    return null;
-                                                                                };
-                                                                                if (!hasSignRequirement) return '';
-                                                                                const hasNoSign = getDocValue('no_signature');
-                                                                                const hasSigner = getDocValue('signer') || getDocValue('party_a_signer') || getDocValue('party_b_signer');
-                                                                                if (hasNoSign) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无签字</span>';
-                                                                                if (hasSigner) return '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有签字</span>';
-                                                                                return '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无签字</span>';
-                                                                            })()}
-                                                                            ${(() => {
-                                                                                if (!hasSealRequirement) return '';
-                                                                                const getDocValue = (fieldName) => {
-                                                                                    if (doc[fieldName] !== undefined) return doc[fieldName];
-                                                                                    if (doc[`_${fieldName}`] !== undefined) return doc[`_${fieldName}`];
-                                                                                    return null;
-                                                                                };
-                                                                                const hasNoSeal = getDocValue('no_seal');
-                                                                                const hasSeal = getDocValue('has_seal_marked') || getDocValue('has_seal') || getDocValue('party_a_seal') || getDocValue('party_b_seal');
-                                                                                if (hasNoSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 无盖章</span>';
-                                                                                if (hasSeal) return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #52c41a; font-size: 12px; font-weight: 500;">✓ 有盖章</span>';
-                                                                                return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无盖章</span>';
-                                                                            })()}
-                                                                            ${doc.archived ? ((hasSignRequirement || hasSealRequirement) ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #1890ff; font-size: 12px; font-weight: 500;">✓ 已归档</span>' : ''}
-                                                                        </td>
-                                                                    </tr>
-                                                                `).join('')}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                `;
-                                            }).join('')}
+                                                    `;
+                                                }).join('')}
+                                            </div>
                                         </div>
                                     `;
                                 }).join('');

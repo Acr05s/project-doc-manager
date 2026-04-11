@@ -6,12 +6,26 @@ import json
 import uuid
 import shutil
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-from flask import request, jsonify, make_response
+from flask import request, jsonify, make_response, current_app
 from .utils import get_doc_manager
 
 logger = logging.getLogger(__name__)
+
+# 打包日志文件路径
+PACKAGE_LOG_FILE = Path('logs/package_debug.log')
+
+def log_package(msg):
+    """记录打包日志到文件"""
+    try:
+        PACKAGE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(PACKAGE_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'[{timestamp}] {msg}\n')
+    except Exception as e:
+        print(f'[log_package error] {e}')
 
 
 def export_project(project_id):
@@ -83,13 +97,25 @@ def package_project(project_id):
             config_json = json.dumps(project_config, ensure_ascii=False, indent=2)
             zip_file.writestr('project_config.json', config_json)
             
-            # 2. 添加文档元数据
-            all_docs = doc_manager.get_documents()
+            # 2. 添加文档元数据（使用 list_documents 获取已计算 display_directory 的文档）
+            from app.routes.documents.list import list_documents as get_list_docs
+            with current_app.test_request_context(f'/api/documents/list?project_id={project_id}'):
+                response = get_list_docs()
+                if hasattr(response, 'get_json'):
+                    list_result = response.get_json()
+                else:
+                    list_result = json.loads(response.data)
+                if list_result.get('status') == 'success':
+                    all_docs = list_result.get('data', [])
+                else:
+                    all_docs = doc_manager.get_documents()
+            
             docs_json = json.dumps(all_docs, ensure_ascii=False, indent=2)
             zip_file.writestr('documents_metadata.json', docs_json)
             
             # 3. 复制文档文件
             copied_count = 0
+            debug_dirs = set()
             for doc in all_docs:
                 file_path = doc.get('file_path')
                 if file_path and Path(file_path).exists():
@@ -98,47 +124,29 @@ def package_project(project_id):
                         project_name = project_config.get('name', 'project')
                         cycle = doc.get('cycle', 'unknown')
                         doc_name = doc.get('doc_name', 'unknown')
-                        directory = doc.get('directory', '')
                         filename = doc.get('filename', Path(file_path).name)
                         
-                        # 处理目录路径：与显示逻辑保持一致
-                        # 如果有 root_directory，从 root_directory 的父级开始截取
-                        root_dir = doc.get('root_directory', '')
-                        if root_dir and directory and directory != '/':
-                            dir_value = directory.lstrip('/')
-                            # 先去除 root_directory 的临时目录前缀
-                            import re
-                            root_parts = root_dir.lstrip('/').split('/')
-                            root_start_idx = 0
-                            for i, part in enumerate(root_parts):
-                                if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
-                                    root_start_idx = i
-                                    break
-                            clean_root = '/'.join(root_parts[root_start_idx:])
-                            # 获取 root_directory 的父目录（第一级）
-                            root_parent = root_parts[root_start_idx] if root_start_idx < len(root_parts) else ''
-                            
-                            if clean_root and root_parent:
-                                # 从父级开始查找
-                                parent_idx = dir_value.find(root_parent)
-                                if parent_idx >= 0:
-                                    # 从父级开始截取
-                                    dir_value = dir_value[parent_idx:]
-                                    directory = '/' + dir_value
-                                # 否则保持原样
+                        # 优先使用 display_directory（已由 list.py 计算好，与显示一致）
+                        directory = doc.get('display_directory', '') or doc.get('directory', '')
+                        debug_dirs.add(directory)
                         
                         # 构建归档路径
                         if directory and directory != '/':
-                            # 有子目录：项目名/周期名/文档类型/子目录/文件名
-                            arcname = f"{project_name}/{cycle}/{doc_name}/{directory}/{filename}"
+                            arcname = f"{cycle}/{doc_name}/{directory}/{filename}"
                         else:
-                            # 无子目录：项目名/周期名/文档类型/文件名
-                            arcname = f"{project_name}/{cycle}/{doc_name}/{filename}"
+                            arcname = f"{cycle}/{doc_name}/{filename}"
                         
                         zip_file.write(file_path, arcname)
                         copied_count += 1
                     except Exception as e:
                         pass
+            
+            # 记录日志
+            log_package(f'Project: {project_name}, Total docs: {len(all_docs)}, Copied: {copied_count}')
+            log_package(f'Directories found: {sorted(debug_dirs)}')
+            # 记录前5个文档的详细信息
+            for doc in all_docs[:5]:
+                log_package(f"  Doc: {doc.get('doc_name')} | dir: {doc.get('directory')} | display_dir: {doc.get('display_directory')} | root: {doc.get('root_directory', 'N/A')}")
         
         # 返回ZIP文件
         zip_buffer.seek(0)
