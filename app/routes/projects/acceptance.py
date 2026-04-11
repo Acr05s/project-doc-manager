@@ -6,18 +6,8 @@ from pathlib import Path
 import os
 from .utils import get_doc_manager
 
-# 打包日志文件路径
-PACKAGE_LOG_FILE = Path('logs/package_debug.log')
-
-def log_package(msg):
-    """记录打包日志到文件"""
-    try:
-        PACKAGE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open(PACKAGE_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f'[{timestamp}] {msg}\n')
-    except Exception as e:
-        print(f'[log_package error] {e}')
+# 导入公共的日志函数
+from app.utils.base import log_package
 
 
 def confirm_cycle_acceptance(project_id):

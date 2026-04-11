@@ -375,3 +375,48 @@ class DocumentListManager:
         """
         from datetime import datetime
         return datetime.now().isoformat()
+    
+    @staticmethod
+    def get_documents_list(doc_manager, cycle=None, doc_name=None, project_id=None):
+        """获取文档列表
+        
+        Args:
+            doc_manager: 文档管理器实例
+            cycle: 周期名称
+            doc_name: 文档名称
+            project_id: 项目ID
+            
+        Returns:
+            List[Dict]: 文档列表
+        """
+        # 首先尝试从内存中获取文档
+        docs = doc_manager.get_documents(cycle, doc_name, project_id)
+        
+        # 如果内存中没有文档，尝试从项目配置中加载
+        if not docs and project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result.get('status') == 'success':
+                project_config = project_result.get('project')
+                if project_config and 'documents' in project_config:
+                    documents = project_config['documents']
+                    # 遍历所有周期
+                    for doc_cycle, cycle_info in documents.items():
+                        # 过滤周期
+                        if cycle and doc_cycle != cycle:
+                            continue
+                        # 检查是否有已上传的文档
+                        if 'uploaded_docs' in cycle_info:
+                            for doc in cycle_info['uploaded_docs']:
+                                # 更灵活的文档名称匹配
+                                doc_doc_name = doc.get('doc_name') or doc.get('name') or doc.get('docName')
+                                # 过滤文档名称
+                                if doc_name and doc_doc_name != doc_name:
+                                    continue
+                                # 确保文档有 ID
+                                doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc_doc_name}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
+                                # 添加到结果列表（先展开 doc，再设置 id，避免 doc 中旧的 id 字段覆盖正确的 doc_id）
+                                doc_copy = dict(doc)
+                                doc_copy['id'] = doc_id
+                                docs.append(doc_copy)
+        
+        return docs

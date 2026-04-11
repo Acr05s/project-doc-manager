@@ -14,18 +14,8 @@ from .utils import get_doc_manager
 
 logger = logging.getLogger(__name__)
 
-# 打包日志文件路径
-PACKAGE_LOG_FILE = Path('logs/package_debug.log')
-
-def log_package(msg):
-    """记录打包日志到文件"""
-    try:
-        PACKAGE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open(PACKAGE_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f'[{timestamp}] {msg}\n')
-    except Exception as e:
-        print(f'[log_package error] {e}')
+# 导入公共的日志函数
+from app.utils.base import log_package
 
 
 def export_project(project_id):
@@ -97,18 +87,9 @@ def package_project(project_id):
             config_json = json.dumps(project_config, ensure_ascii=False, indent=2)
             zip_file.writestr('project_config.json', config_json)
             
-            # 2. 添加文档元数据（使用 list_documents 获取已计算 display_directory 的文档）
-            from app.routes.documents.list import list_documents as get_list_docs
-            with current_app.test_request_context(f'/api/documents/list?project_id={project_id}'):
-                response = get_list_docs()
-                if hasattr(response, 'get_json'):
-                    list_result = response.get_json()
-                else:
-                    list_result = json.loads(response.data)
-                if list_result.get('status') == 'success':
-                    all_docs = list_result.get('data', [])
-                else:
-                    all_docs = doc_manager.get_documents()
+            # 2. 添加文档元数据（使用工具函数获取文档列表）
+            from app.utils.document_list import DocumentListManager
+            all_docs = DocumentListManager.get_documents_list(doc_manager, project_id=project_id)
             
             docs_json = json.dumps(all_docs, ensure_ascii=False, indent=2)
             zip_file.writestr('documents_metadata.json', docs_json)

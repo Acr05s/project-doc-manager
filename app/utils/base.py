@@ -300,3 +300,16 @@ def normalize_file_path(file_path: str, project_name: str, projects_base_folder:
     # 5. 如果是纯文件名或不带项目名的相对路径，补全前缀
     #    假设文件在 uploads 目录下
     return f'{project_name}/uploads/{normalized}'
+
+
+def log_package(msg):
+    """记录打包日志到文件"""
+    try:
+        from datetime import datetime
+        PACKAGE_LOG_FILE = Path('logs/package_debug.log')
+        PACKAGE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(PACKAGE_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'[{timestamp}] {msg}\n')
+    except Exception as e:
+        print(f'[log_package error] {e}')
