@@ -131,11 +131,13 @@ function updateAuthUI() {
             'contractor': '普通用户'
         };
         const roleLabel = roleMap[authState.user.role] || authState.user.role;
+        const orgLabel = authState.user.organization ? authState.user.organization : '';
         authContainer.innerHTML = `
             <div class="dropdown" id="userProfileDropdown" style="position:relative;display:inline-block;">
                 <button class="dropdown-toggle" type="button" id="userProfileBtn" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-                    <span class="user-role" style="font-size:12px;color:#a8e6cf;font-weight:bold;">${roleLabel}</span>
+                    <span class="user-role" style="font-size:11px;color:#fff;font-weight:bold;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:3px;">${roleLabel}</span>
                     <span class="username" style="font-size:12px;color:#fff;">${authState.user.username}</span>
+                    ${orgLabel ? `<span style="font-size:11px;color:rgba(255,255,255,0.75);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${orgLabel}">${orgLabel}</span>` : ''}
                     <span style="font-size:10px;">▼</span>
                 </button>
                 <div class="dropdown-menu" id="userProfileMenu" style="display:none;position:absolute;right:0;top:110%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:120px;z-index:9999;">
@@ -207,7 +209,8 @@ function updateAuthUI() {
  */
 export function updateRoleBasedUI() {
     const role = authState.user?.role;
-    const isAdmin = role === 'admin' || role === 'pmo';
+    const isAdmin = role === 'admin';
+    const isPMO = role === 'pmo';
     const isProjectAdmin = role === 'project_admin';
     const isContractor = role === 'contractor';
     const isPending = authState.user?.status === 'pending';
@@ -220,7 +223,7 @@ export function updateRoleBasedUI() {
 
     // 待审核用户隐藏所有功能菜单
     if (isPending) {
-        const menusToHide = ['documentRequirementsMenu', 'generateReportBtn', 'packageProjectBtn', 'acceptanceMenu', 'systemManagementMenu', 'backToDashboardBtn'];
+        const menusToHide = ['documentRequirementsMenu', 'generateReportBtn', 'packageProjectBtn', 'acceptanceMenu', 'systemManagementBtn', 'backToDashboardBtn'];
         menusToHide.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
@@ -242,11 +245,11 @@ export function updateRoleBasedUI() {
         if (acceptanceMenu) acceptanceMenu.style.display = 'none';
     }
     
-    // 系统管理菜单
-    const canSeeSystemMenu = isAdmin || isProjectAdmin || isContractor;
-    const systemManagementMenu = document.getElementById('systemManagementMenu');
-    if (systemManagementMenu) {
-        systemManagementMenu.style.display = canSeeSystemMenu ? 'inline-block' : 'none';
+    // 系统管理菜单（侧边栏）
+    const canSeeSystemMenu = isAdmin || isPMO || isProjectAdmin;
+    const systemManagementBtn = document.getElementById('systemManagementBtn');
+    if (systemManagementBtn) {
+        systemManagementBtn.style.display = canSeeSystemMenu ? 'inline-block' : 'none';
     }
 
     const systemManagementDropdown = document.getElementById('systemManagementDropdown');
@@ -268,20 +271,60 @@ export function updateRoleBasedUI() {
         } else {
             if (isAdmin) {
                 // admin 保留系统设置和用户审核（已在 HTML 中静态存在）
-            } else if (isProjectAdmin) {
-                // 项目经理：移除系统设置，保留用户审核和日志管理
+            } else if (isPMO) {
+                // PMO：业务管理员，移除系统设置，保留用户审核、用户管理、承建单位管理、项目管理、日志管理
                 if (existingSysSettings) existingSysSettings.remove();
+                if (!existingUserMgmt) {
+                    const userMgmtA = document.createElement('a');
+                    userMgmtA.href = '#';
+                    userMgmtA.className = 'sidebar-menu-item';
+                    userMgmtA.id = 'userManagementMenuItem';
+                    userMgmtA.textContent = '👤 用户管理';
+                    systemManagementDropdown.appendChild(userMgmtA);
+                }
+                if (!existingOrgMgmt) {
+                    const orgMgmtA = document.createElement('a');
+                    orgMgmtA.href = '#';
+                    orgMgmtA.className = 'sidebar-menu-item';
+                    orgMgmtA.id = 'orgManagementMenuItem';
+                    orgMgmtA.textContent = '🏢 承建单位管理';
+                    systemManagementDropdown.appendChild(orgMgmtA);
+                }
+                if (!existingProjectMgmt) {
+                    const projectMgmtA = document.createElement('a');
+                    projectMgmtA.href = '#';
+                    projectMgmtA.className = 'sidebar-menu-item';
+                    projectMgmtA.id = 'projectManagementMenuItem';
+                    projectMgmtA.textContent = '📁 项目管理';
+                    systemManagementDropdown.appendChild(projectMgmtA);
+                }
+            } else if (isProjectAdmin) {
+                // 项目经理：移除系统设置，保留用户审核、项目管理和日志管理
+                if (existingSysSettings) existingSysSettings.remove();
+                if (existingUserMgmt) existingUserMgmt.remove();
+                if (existingOrgMgmt) existingOrgMgmt.remove();
+                if (!existingProjectMgmt) {
+                    const projectMgmtA = document.createElement('a');
+                    projectMgmtA.href = '#';
+                    projectMgmtA.className = 'sidebar-menu-item';
+                    projectMgmtA.id = 'projectManagementMenuItem';
+                    projectMgmtA.textContent = '📁 项目管理';
+                    systemManagementDropdown.appendChild(projectMgmtA);
+                }
             } else {
                 // 普通用户：只保留日志管理
                 if (existingSysSettings) existingSysSettings.remove();
                 if (existingUserApproval) existingUserApproval.remove();
+                if (existingUserMgmt) existingUserMgmt.remove();
+                if (existingOrgMgmt) existingOrgMgmt.remove();
+                if (existingProjectMgmt) existingProjectMgmt.remove();
             }
 
             if (isAdmin) {
                 if (!existingUserMgmt) {
                     const userMgmtA = document.createElement('a');
                     userMgmtA.href = '#';
-                    userMgmtA.className = 'dropdown-item';
+                    userMgmtA.className = 'sidebar-menu-item';
                     userMgmtA.id = 'userManagementMenuItem';
                     userMgmtA.textContent = '👤 用户管理';
                     systemManagementDropdown.appendChild(userMgmtA);
@@ -290,30 +333,17 @@ export function updateRoleBasedUI() {
                 if (!existingOrgMgmt) {
                     const orgMgmtA = document.createElement('a');
                     orgMgmtA.href = '#';
-                    orgMgmtA.className = 'dropdown-item';
+                    orgMgmtA.className = 'sidebar-menu-item';
                     orgMgmtA.id = 'orgManagementMenuItem';
                     orgMgmtA.textContent = '🏢 承建单位管理';
                     systemManagementDropdown.appendChild(orgMgmtA);
                 }
-
-                if (!existingProjectMgmt) {
-                    const projectMgmtA = document.createElement('a');
-                    projectMgmtA.href = '#';
-                    projectMgmtA.className = 'dropdown-item';
-                    projectMgmtA.id = 'projectManagementMenuItem';
-                    projectMgmtA.textContent = '📁 项目管理';
-                    systemManagementDropdown.appendChild(projectMgmtA);
-                }
-            } else {
-                if (existingUserMgmt) existingUserMgmt.remove();
-                if (existingOrgMgmt) existingOrgMgmt.remove();
-                if (existingProjectMgmt) existingProjectMgmt.remove();
             }
 
             if (!existingLogMgmt) {
                 const logMgmtA = document.createElement('a');
                 logMgmtA.href = '#';
-                logMgmtA.className = 'dropdown-item';
+                logMgmtA.className = 'sidebar-menu-item';
                 logMgmtA.id = 'logManagementMenuItem';
                 logMgmtA.textContent = '📋 日志管理';
                 systemManagementDropdown.appendChild(logMgmtA);
@@ -324,10 +354,14 @@ export function updateRoleBasedUI() {
         if (!systemManagementDropdown._hasClickDelegate) {
             systemManagementDropdown._hasClickDelegate = true;
             systemManagementDropdown.addEventListener('click', (e) => {
-                const item = e.target.closest('.dropdown-item');
+                const item = e.target.closest('.sidebar-menu-item');
                 if (!item) return;
                 e.preventDefault();
-                systemManagementDropdown.classList.remove('show');
+                // 关闭侧边栏
+                const sidebar = document.getElementById('operationSidebar');
+                const overlay = document.getElementById('sidebarOverlay');
+                if (sidebar) sidebar.classList.remove('open');
+                if (overlay) overlay.classList.remove('show');
                 switch (item.id) {
                     case 'userApprovalBtn':
                         import('./user-approval.js').then(m => m.openUserApprovalModal());

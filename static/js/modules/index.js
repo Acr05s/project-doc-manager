@@ -5,8 +5,8 @@
 // 导入各个模块
 import { appState, elements, initSession } from './app-state.js';
 import { authState } from './auth.js';
-import { setupEventListeners, initDocModalResizer, showProjectButtons, hideProjectButtons, showNotification, toggleOperationLog, refreshOperationLog, closeConfirmModal, closeInputModal, applySystemSettingsToPage } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDashboardStats, getReportTypes, getReportData, getMessages, getUnreadMessageCount, markMessageAsRead, markAllMessagesAsRead, deleteMessage, respondProjectTransfer, sendMessageToApprovers, getPendingUsers } from './api.js';
+import { setupEventListeners, initDocModalResizer, showProjectButtons, hideProjectButtons, showNotification, toggleOperationLog, refreshOperationLog, closeConfirmModal, showConfirmModal, closeInputModal, applySystemSettingsToPage } from './ui.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDashboardStats, getReportTypes, getReportData, getMessages, getUnreadMessageCount, markMessageAsRead, markAllMessagesAsRead, deleteMessage, respondProjectTransfer, sendMessageToApprovers, getPendingUsers, approveUserAccount, rejectUserAccount } from './api.js';
 import { handleUploadDocument, handleFileSelect, handleEditDocument, handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments, renderCycleDocuments, previewDocument, openUploadModal, openEditModal, archiveDocument, unarchiveDocument, generateReport } from './document.js';
 import { renderProjectsList, selectProject, handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, handleSaveProject, handlePackageProject, handleImportPackage, handleConfirmAcceptance, handleDownloadPackage, handleRematchFileManagement, handleAddCycle, handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, populateProjectManageSelects, populateDocSelect, resetImportPackageModal, openProjectSelectModal, closeProjectSelectModal, handleOpenProject, handleSoftDeleteProject, handleRestoreProject, handlePermanentDeleteProject, toggleDeletedProjects, openNewProjectModal, handlePackageFileSelect, handlePackageFileSelectInModal, handleImportPackageInModal } from './project.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
@@ -499,14 +499,23 @@ async function handleTransferMessageClick(message) {
         await markMessageAsRead(message.id);
         await loadMessages();
     }
-    const action = confirm('是否接受该项目所有权移交？\n\n点击"确定"接受，点击"取消"拒绝。');
-    const result = await respondProjectTransfer(transferId, action ? 'accept' : 'reject');
-    if (result.status === 'success') {
-        showNotification(action ? '已接受移交' : '已拒绝移交', 'success');
-        await loadMessages();
-    } else {
-        showNotification(result.message || '操作失败', 'error');
-    }
+    showConfirmModal('项目移交', '是否接受该项目所有权移交？', async () => {
+        const result = await respondProjectTransfer(transferId, 'accept');
+        if (result.status === 'success') {
+            showNotification('已接受移交', 'success');
+            await loadMessages();
+        } else {
+            showNotification(result.message || '操作失败', 'error');
+        }
+    }, async () => {
+        const result = await respondProjectTransfer(transferId, 'reject');
+        if (result.status === 'success') {
+            showNotification('已拒绝移交', 'success');
+            await loadMessages();
+        } else {
+            showNotification(result.message || '操作失败', 'error');
+        }
+    }, { okText: '接受', cancelText: '拒绝' });
 }
 
 async function handleProjectMessageClick(message) {
@@ -526,6 +535,7 @@ export async function initMessageCenter() {
     if (msgBtn) {
         msgBtn.addEventListener('click', openMessageModal);
     }
+    setInterval(refreshUnreadCount, 30000);
 }
 
 async function refreshUnreadCount() {
@@ -638,6 +648,7 @@ function renderMessageList(messages) {
 
     container.innerHTML = messages.map(m => {
         const isTransfer = m.related_type === 'project_transfer' && !m.is_read;
+        const isUserApproval = m.type === 'approval' && m.related_type === 'user' && !m.is_read;
         const clickable = m.related_type === 'user' || m.related_type === 'project_transfer' || m.related_type === 'project';
         return `
         <div class="message-item ${m.is_read ? 'read' : 'unread'}${clickable ? ' clickable' : ''}" data-id="${m.id}">
@@ -651,7 +662,11 @@ function renderMessageList(messages) {
                     <button class="btn btn-sm btn-success msg-transfer-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">同意接受</button>
                     <button class="btn btn-sm btn-secondary msg-transfer-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
                 ` : ''}
-                ${!m.is_read && !isTransfer ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
+                ${isUserApproval ? `
+                    <button class="btn btn-sm btn-success msg-user-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">审批通过</button>
+                    <button class="btn btn-sm btn-danger msg-user-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
+                ` : ''}
+                ${!m.is_read && !isTransfer && !isUserApproval ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
                 <button class="btn btn-sm btn-secondary msg-del-btn" data-id="${m.id}">删除</button>
             </div>
         </div>
@@ -661,7 +676,7 @@ function renderMessageList(messages) {
     container.querySelectorAll('.msg-read-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const id = parseInt(btn.dataset.id);
+            const id = btn.dataset.id;
             await markMessageAsRead(id);
             await loadMessages();
         });
@@ -670,7 +685,7 @@ function renderMessageList(messages) {
     container.querySelectorAll('.msg-del-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const id = parseInt(btn.dataset.id);
+            const id = btn.dataset.id;
             await deleteMessage(id);
             await loadMessages();
         });
@@ -679,7 +694,7 @@ function renderMessageList(messages) {
     container.querySelectorAll('.msg-transfer-accept-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const id = parseInt(btn.dataset.id);
+            const id = btn.dataset.id;
             const relatedId = btn.dataset.related;
             if (!relatedId) return;
             const result = await respondProjectTransfer(relatedId, 'accept');
@@ -696,7 +711,7 @@ function renderMessageList(messages) {
     container.querySelectorAll('.msg-transfer-reject-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const id = parseInt(btn.dataset.id);
+            const id = btn.dataset.id;
             const relatedId = btn.dataset.related;
             if (!relatedId) return;
             const result = await respondProjectTransfer(relatedId, 'reject');
@@ -709,11 +724,43 @@ function renderMessageList(messages) {
             }
         });
     });
+    container.querySelectorAll('.msg-user-accept-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const relatedId = btn.dataset.related;
+            if (!relatedId) return;
+            const result = await approveUserAccount(relatedId);
+            if (result.status === 'success') {
+                await markMessageAsRead(id);
+                await loadMessages();
+                showNotification('已同意用户审核', 'success');
+            } else {
+                showNotification(result.message || '操作失败', 'error');
+            }
+        });
+    });
+    container.querySelectorAll('.msg-user-reject-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const relatedId = btn.dataset.related;
+            if (!relatedId) return;
+            const result = await rejectUserAccount(relatedId);
+            if (result.status === 'success') {
+                await markMessageAsRead(id);
+                await loadMessages();
+                showNotification('已拒绝用户审核', 'info');
+            } else {
+                showNotification(result.message || '操作失败', 'error');
+            }
+        });
+    });
     // 绑定消息项点击跳转
     container.querySelectorAll('.message-item.clickable').forEach(item => {
         item.addEventListener('click', async (e) => {
             if (e.target.closest('button')) return;
-            const id = parseInt(item.dataset.id);
+            const id = item.dataset.id;
             const m = messagesCache.find(msg => msg.id === id);
             if (!m) return;
             if (m.related_type === 'user') {

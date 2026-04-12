@@ -14,7 +14,7 @@ def check_auth_status():
         return jsonify({
             'status': 'success',
             'user': {
-                'id': current_user.id,
+                'id': getattr(current_user, 'uuid', current_user.id),
                 'username': current_user.username,
                 'role': current_user.role,
                 'organization': getattr(current_user, 'organization', None),

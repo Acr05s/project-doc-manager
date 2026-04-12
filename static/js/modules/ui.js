@@ -45,20 +45,33 @@ import { handleSaveTemplate } from './requirement-editor.js';
 export function setupEventListeners() {
     console.log('设置事件监听器...');
 
-    // 系统管理下拉菜单
+    // 系统管理侧边栏
     const systemManagementBtn = document.getElementById('systemManagementBtn');
-    const systemManagementDropdown = document.getElementById('systemManagementDropdown');
-    if (systemManagementBtn && systemManagementDropdown) {
+    const operationSidebar = document.getElementById('operationSidebar');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+
+    function openSidebar() {
+        if (operationSidebar) operationSidebar.classList.add('open');
+        if (sidebarOverlay) sidebarOverlay.classList.add('show');
+    }
+    function closeSidebar() {
+        if (operationSidebar) operationSidebar.classList.remove('open');
+        if (sidebarOverlay) sidebarOverlay.classList.remove('show');
+    }
+
+    if (systemManagementBtn) {
         systemManagementBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            systemManagementDropdown.classList.toggle('show');
+            openSidebar();
         });
-        document.addEventListener('click', (e) => {
-            if (!systemManagementBtn.contains(e.target) && !systemManagementDropdown.contains(e.target)) {
-                systemManagementDropdown.classList.remove('show');
-            }
-        });
+    }
+    if (closeSidebarBtn) {
+        closeSidebarBtn.addEventListener('click', closeSidebar);
+    }
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', closeSidebar);
     }
 
     // 文档需求下拉菜单
@@ -1176,19 +1189,20 @@ async function saveSystemSettings() {
  * 立即归档旧日志
  */
 async function archiveLogsNow() {
-    if (!confirm('确定要立即归档超过保留天数的日志吗？')) return;
-    try {
-        const response = await fetch('/api/admin/logs/archive', { method: 'POST' });
-        const result = await response.json();
-        if (result.status === 'success') {
-            showNotification(result.message || '归档完成', 'success');
-        } else {
-            showNotification('归档失败: ' + (result.message || '未知错误'), 'error');
+    showConfirmModal('归档日志', '确定要立即归档超过保留天数的日志吗？', async () => {
+        try {
+            const response = await fetch('/api/admin/logs/archive', { method: 'POST' });
+            const result = await response.json();
+            if (result.status === 'success') {
+                showNotification(result.message || '归档完成', 'success');
+            } else {
+                showNotification('归档失败: ' + (result.message || '未知错误'), 'error');
+            }
+        } catch (error) {
+            console.error('归档日志失败:', error);
+            showNotification('归档请求失败', 'error');
         }
-    } catch (error) {
-        console.error('归档日志失败:', error);
-        showNotification('归档请求失败', 'error');
-    }
+    });
 }
 
 /**
@@ -1197,29 +1211,29 @@ async function archiveLogsNow() {
 async function importLogsFile(input) {
     const file = input.files[0];
     if (!file) return;
-    if (!confirm(`确定要导入日志文件 "${file.name}" 吗？`)) {
-        input.value = '';
-        return;
-    }
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-        const response = await fetch('/api/admin/logs/import', {
-            method: 'POST',
-            body: formData
-        });
-        const result = await response.json();
-        if (result.status === 'success') {
-            showNotification(result.message || '导入成功', 'success');
-        } else {
-            showNotification('导入失败: ' + (result.message || '未知错误'), 'error');
+    showConfirmModal('导入日志', `确定要导入日志文件 "${file.name}" 吗？`, async () => {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const response = await fetch('/api/admin/logs/import', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            if (result.status === 'success') {
+                showNotification(result.message || '导入成功', 'success');
+            } else {
+                showNotification('导入失败: ' + (result.message || '未知错误'), 'error');
+            }
+        } catch (error) {
+            console.error('导入日志失败:', error);
+            showNotification('导入请求失败', 'error');
+        } finally {
+            input.value = '';
         }
-    } catch (error) {
-        console.error('导入日志失败:', error);
-        showNotification('导入请求失败', 'error');
-    } finally {
+    }, () => {
         input.value = '';
-    }
+    });
 }
 
 /**
@@ -1460,37 +1474,57 @@ export function showInputModal(title, fields, onConfirm) {
     const titleEl = document.getElementById('inputModalTitle');
     const fieldsEl = document.getElementById('inputModalFields');
     const okBtn = document.getElementById('inputModalOkBtn');
+    const cancelBtn = document.getElementById('inputModalCancelBtn');
 
     titleEl.textContent = title;
 
     // 渲染字段
-    fieldsEl.innerHTML = fields.map(f => `
-        <div class="input-modal-field">
-            <label class="input-modal-label">${f.label}</label>
-            <input type="text" class="input-modal-input" data-key="${f.key}"
-                value="${(f.value || '').replace(/"/g, '&quot;')}"
-                placeholder="${(f.placeholder || '').replace(/"/g, '&quot;')}" />
-        </div>
-    `).join('');
+    fieldsEl.innerHTML = fields.map(f => {
+        if (f.type === 'select' && f.options) {
+            return `
+                <div class="input-modal-field">
+                    <label class="input-modal-label">${f.label}</label>
+                    <select class="input-modal-input" data-key="${f.key}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+                        ${f.placeholder ? `<option value="">${f.placeholder}</option>` : ''}
+                        ${f.options.map(opt => `<option value="${(opt.value || '').replace(/"/g, '&quot;')}">${opt.label || opt.value}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+        }
+        return `
+            <div class="input-modal-field">
+                <label class="input-modal-label">${f.label}</label>
+                <input type="${f.type || 'text'}" class="input-modal-input" data-key="${f.key}"
+                    value="${(f.value || '').replace(/"/g, '&quot;')}"
+                    placeholder="${(f.placeholder || '').replace(/"/g, '&quot;')}" />
+            </div>
+        `;
+    }).join('');
 
     // 聚焦第一个输入框
-    const firstInput = fieldsEl.querySelector('input');
+    const firstInput = fieldsEl.querySelector('input, textarea');
     if (firstInput) setTimeout(() => firstInput.focus(), 80);
 
     // 重绑确认按钮（cloneNode 避免重复事件）
     const newOkBtn = okBtn.cloneNode(true);
+    const newCancelBtn = cancelBtn.cloneNode(true);
     okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
 
     const doConfirm = () => {
         const result = {};
-        fieldsEl.querySelectorAll('input[data-key]').forEach(inp => {
-            result[inp.dataset.key] = inp.value;
+        fieldsEl.querySelectorAll('[data-key]').forEach(el => {
+            result[el.dataset.key] = el.value;
         });
         closeInputModal();
         if (onConfirm) onConfirm(result);
     };
 
     newOkBtn.addEventListener('click', doConfirm);
+    newCancelBtn.addEventListener('click', () => {
+        closeInputModal();
+        if (onConfirm) onConfirm(null);
+    });
 
     // 回车确认
     fieldsEl.addEventListener('keydown', function handler(e) {

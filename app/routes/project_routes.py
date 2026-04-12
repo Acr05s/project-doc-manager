@@ -3,6 +3,9 @@
 import json
 from datetime import datetime
 from flask import Blueprint, request, jsonify
+from flask_login import login_required, current_user
+from werkzeug.security import check_password_hash, generate_password_hash
+from app.models.user import user_manager
 from app.utils.document_manager import DocumentManager
 
 # 使用 get_doc_manager 方式获取 doc_manager
@@ -20,6 +23,28 @@ def init_doc_manager(manager):
     """初始化文档管理器"""
     global doc_manager
     doc_manager = manager
+
+def check_project_access(project_id):
+    """检查用户是否有权限访问指定项目"""
+    if not current_user.is_authenticated:
+        return False, {'status': 'error', 'message': '请先登录'}
+    
+    try:
+        user_id = int(current_user.id)
+        user_role = current_user.role
+        user_organization = current_user.organization if hasattr(current_user, 'organization') else ''
+        
+        # 获取用户可访问的项目列表
+        accessible_projects = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
+        accessible_project_ids = [proj['id'] for proj in accessible_projects]
+        
+        # 检查当前项目是否在可访问列表中
+        if project_id not in accessible_project_ids:
+            return False, {'status': 'error', 'message': '无权限访问该项目'}
+        
+        return True, None
+    except Exception as e:
+        return False, {'status': 'error', 'message': str(e)}
 
 @project_bp.route('/list', methods=['GET'])
 def list_projects():
@@ -68,26 +93,12 @@ def create_project():
 @project_bp.route('/<project_id>', methods=['GET'])
 def get_project(project_id):
     """获取项目详情"""
-    from flask_login import current_user
-    
-    # 检查用户是否已登录
-    if not current_user.is_authenticated:
-        return jsonify({'status': 'error', 'message': '请先登录'}), 401
+    # 检查用户是否有权限访问该项目
+    has_access, error_response = check_project_access(project_id)
+    if not has_access:
+        return jsonify(error_response), 403 if error_response['message'] == '无权限访问该项目' else 401
     
     try:
-        # 检查用户是否有权限访问该项目
-        user_id = int(current_user.id)
-        user_role = current_user.role
-        user_organization = current_user.organization if hasattr(current_user, 'organization') else ''
-        
-        # 获取用户可访问的项目列表
-        accessible_projects = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
-        accessible_project_ids = [proj['id'] for proj in accessible_projects]
-        
-        # 检查当前项目是否在可访问列表中
-        if project_id not in accessible_project_ids:
-            return jsonify({'status': 'error', 'message': '无权限访问该项目'}), 403
-        
         result = doc_manager.load_project(project_id)
         return jsonify(result)
     except Exception as e:
@@ -114,6 +125,74 @@ def update_project(project_id):
         # 保存项目配置
         result = doc_manager.save_project(data)
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@project_bp.route('/<project_id>/archive', methods=['POST'])
+@login_required
+def archive_project_document(project_id):
+    try:
+        data = request.get_json() or {}
+        cycle = (data.get('cycle') or '').strip()
+        doc_name = data.get('doc_name')
+        doc_names = data.get('doc_names')
+        approval_code = data.get('approval_code', '')
+        new_approval_code = data.get('new_approval_code', '')
+
+        if not cycle or not (doc_name or (isinstance(doc_names, list) and len(doc_names) > 0)):
+            return jsonify({'status': 'error', 'message': '归档参数不完整'}), 400
+        if not approval_code:
+            return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
+        if current_user.role not in ('admin', 'pmo', 'project_admin'):
+            return jsonify({'status': 'error', 'message': '权限不足'}), 403
+
+        user = user_manager.get_user_by_id(current_user.id)
+        if not user:
+            return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+
+        if getattr(user, 'approval_code_needs_change', 1) == 1:
+            if not check_password_hash(user.password_hash, approval_code):
+                return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
+            if not new_approval_code:
+                return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 400
+            if len(new_approval_code) < 8 or not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code):
+                return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
+            user_manager.update_approval_code(current_user.id, generate_password_hash(new_approval_code), needs_change=0)
+
+        elif not user.approval_code_hash or not check_password_hash(user.approval_code_hash, approval_code):
+            return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
+
+        # 检查用户是否有权限访问该项目
+        has_access, error_response = check_project_access(project_id)
+        if not has_access:
+            return jsonify(error_response), 403 if error_response['message'] == '无权限访问该项目' else 401
+
+        project_result = doc_manager.load_project(project_id)
+        if project_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': project_result.get('message', '项目加载失败')}), 500
+
+        project_config = project_result.get('project', {})
+        if 'documents' not in project_config or cycle not in project_config['documents']:
+            return jsonify({'status': 'error', 'message': '归档周期不存在'}), 400
+
+        if 'documents_archived' not in project_config:
+            project_config['documents_archived'] = {}
+        if cycle not in project_config['documents_archived']:
+            project_config['documents_archived'][cycle] = {}
+
+        target_names = [doc_name] if doc_name else doc_names
+        for name in target_names:
+            if isinstance(name, str) and name:
+                project_config['documents_archived'][cycle][name] = True
+
+        save_result = doc_manager.save_project(project_config)
+        if save_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': save_result.get('message', '归档保存失败')}), 500
+
+        user_manager.add_operation_log(current_user.id, current_user.username, 'archive_document', project_id, cycle, json.dumps(target_names), request.remote_addr)
+
+        return jsonify({'status': 'success', 'message': '文档归档成功'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -683,7 +762,8 @@ def import_package():
 
         # 生成新的项目ID（如果不是merge模式）
         if conflict_action != 'merge':
-            new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            import uuid as _uuid
+            new_project_id = str(_uuid.uuid4())
             project_config['id'] = new_project_id
             project_config['name'] = final_name
             project_config['created_time'] = datetime.now().isoformat()
@@ -888,8 +968,9 @@ def import_full_package():
                 'original_name': original_name
             }), 200
 
-        # 生成新的项目ID
-        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        # 生成新的项目ID（UUID格式）
+        import uuid as _uuid
+        new_project_id = str(_uuid.uuid4())
         
         # 更新项目配置
         project_config['id'] = new_project_id

@@ -8,7 +8,7 @@ import { openEditProjectModal, closeEditProjectModal } from './modules/project.j
 import { openAuditConfirmModal, closeAuditConfirmModal } from './modules/user-approval.js';
 import {
     openProfileModal, closeProfileModal, switchProfileTab,
-    saveProfileEmail, changeProfilePassword, deactivateAccount
+    saveProfileEmail, changeProfilePassword, changeApprovalCode, deactivateAccount
 } from './modules/profile.js';
 import {
     openUserManagementModal, closeUserManagementModal, loadUserManagementList,
@@ -40,6 +40,7 @@ if (typeof window !== 'undefined') {
     window.switchProfileTab = switchProfileTab;
     window.saveProfileEmail = saveProfileEmail;
     window.changeProfilePassword = changeProfilePassword;
+    window.changeApprovalCode = changeApprovalCode;
     window.deactivateAccount = deactivateAccount;
     // admin
     window.openUserManagementModal = openUserManagementModal;
@@ -319,6 +320,16 @@ window.archiveDocument = function(cycle, docName) {
 window.unarchiveDocument = function(cycle, docName) {
     import('./modules/document.js').then(module => {
         module.unarchiveDocument(cycle, docName);
+    });
+};
+
+window.handleQuickApprove = function(approvalId, action, cycle) {
+    // This is also set via initDocumentEvents; this is a fallback
+    import('./modules/document.js').then(module => {
+        // handleQuickApprove is set via initDocumentEvents on window
+        if (window.handleQuickApprove !== arguments.callee) {
+            window.handleQuickApprove(approvalId, action, cycle);
+        }
     });
 };
 

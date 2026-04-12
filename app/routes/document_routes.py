@@ -2612,7 +2612,7 @@ def archive_from_zip():
         
         data = request.get_json()
         if not data:
-            return jsonify({'status': 'error', 'message': '没有收到数据'}), 400)
+            return jsonify({'status': 'error', 'message': '没有收到数据'}), 400
         
         print('[archive_from-zip] DEBUG keys=%s root_dir=%r src_dir=%r' % (list(data.keys()), data.get('root_directory','MISSING'), data.get('source_dir','MISSING')))
 

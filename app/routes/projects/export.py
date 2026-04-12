@@ -718,8 +718,8 @@ def import_project_merge():
                 is_renamed = True
                 logger.info(f"项目已存在，生成新名称: {project_name}")
         
-        # 生成新项目ID（不作为目录名，仅用于索引）
-        new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        # 生成新项目ID（UUID格式，不作为目录名，仅用于索引）
+        new_project_id = str(uuid.uuid4())
         logger.info(f"[导入] 新项目ID: {new_project_id}, 项目名: {project_name}")
         
         logger.info(f"项目源目录: {project_source_dir}")
@@ -1683,7 +1683,7 @@ def import_from_preview():
                 
             else:
                 # 新建项目（重命名或全新导入）
-                project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                project_id = str(uuid.uuid4())
                 logger.info(f"[导入] 新建项目模式，生成新ID: {project_id}")
                 # 复制整个目录
                 shutil.copytree(str(project_source_dir), str(target_project_dir))

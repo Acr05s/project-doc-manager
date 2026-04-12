@@ -262,6 +262,107 @@ export async function sendMessageToApprovers(content) {
     }
 }
 
+export async function archiveProjectDocuments(projectId, cycle, docNames, approvalCode, newApprovalCode = '') {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cycle,
+                doc_name: docNames && docNames.length === 1 ? docNames[0] : undefined,
+                doc_names: docNames && docNames.length > 1 ? docNames : undefined,
+                approval_code: approvalCode,
+                new_approval_code: newApprovalCode
+            })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('归档文档失败:', error);
+        return { status: 'error', message: '归档请求失败' };
+    }
+}
+
+// ===== 归档审批 API =====
+
+export async function submitArchiveRequest(projectId, cycle, docNames, targetApproverIds) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cycle,
+                doc_names: docNames,
+                target_approver_ids: targetApproverIds
+            })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('提交归档审批失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function getArchiveRequests(projectId, status = null) {
+    try {
+        let url = `/api/projects/${projectId}/archive-requests`;
+        if (status) url += `?status=${status}`;
+        const response = await fetch(url);
+        return await response.json();
+    } catch (error) {
+        console.error('获取归档审批列表失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function approveArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '') {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approval_id: approvalId,
+                approver_id: approverId,
+                approval_code: approvalCode,
+                new_approval_code: newApprovalCode
+            })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('审批归档失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function rejectArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '', rejectReason = '') {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approval_id: approvalId,
+                approver_id: approverId,
+                approval_code: approvalCode,
+                new_approval_code: newApprovalCode,
+                reject_reason: rejectReason
+            })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('驳回归档失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function getArchiveApprovers(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-approvers`);
+        return await response.json();
+    } catch (error) {
+        console.error('获取审批人列表失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
 export async function updateUserRole(userId, newRole) {
     try {
         const response = await fetch(`/api/admin/users/${userId}/role`, {

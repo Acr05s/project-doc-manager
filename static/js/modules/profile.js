@@ -32,10 +32,16 @@ export async function openProfileModal() {
     const profileNewPassword = document.getElementById('profileNewPassword');
     const profileConfirmPassword = document.getElementById('profileConfirmPassword');
     const profileDeactivateConfirm = document.getElementById('profileDeactivateConfirm');
+    const profileCurrentApprovalCode = document.getElementById('profileCurrentApprovalCode');
+    const profileNewApprovalCode = document.getElementById('profileNewApprovalCode');
+    const profileConfirmApprovalCode = document.getElementById('profileConfirmApprovalCode');
     if (profileOldPassword) profileOldPassword.value = '';
     if (profileNewPassword) profileNewPassword.value = '';
     if (profileConfirmPassword) profileConfirmPassword.value = '';
     if (profileDeactivateConfirm) profileDeactivateConfirm.value = '';
+    if (profileCurrentApprovalCode) profileCurrentApprovalCode.value = '';
+    if (profileNewApprovalCode) profileNewApprovalCode.value = '';
+    if (profileConfirmApprovalCode) profileConfirmApprovalCode.value = '';
 
     // 切换到基本信息标签页
     switchProfileTab('profile-basic');
@@ -153,10 +159,62 @@ export async function changeProfilePassword() {
     }
 }
 
+export async function changeApprovalCode() {
+    const currentInput = document.getElementById('profileCurrentApprovalCode');
+    const newInput = document.getElementById('profileNewApprovalCode');
+    const confirmInput = document.getElementById('profileConfirmApprovalCode');
+
+    const current_code = currentInput ? currentInput.value : '';
+    const new_code = newInput ? newInput.value : '';
+    const confirm_code = confirmInput ? confirmInput.value : '';
+
+    if (!current_code || !new_code || !confirm_code) {
+        showProfileNotice('请填写所有字段', 'error');
+        return;
+    }
+
+    if (new_code.length < 8) {
+        showProfileNotice('新审批安全码长度不能少于8位', 'error');
+        return;
+    }
+
+    const hasLetter = /[a-zA-Z]/.test(new_code);
+    const hasDigit = /[0-9]/.test(new_code);
+    if (!hasLetter || !hasDigit) {
+        showProfileNotice('新审批安全码需同时包含字母和数字', 'error');
+        return;
+    }
+
+    if (new_code !== confirm_code) {
+        showProfileNotice('两次输入的新审批安全码不一致', 'error');
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/me/approval-code/change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_code, new_code })
+        });
+        const data = await resp.json();
+        if (data.status === 'success') {
+            showProfileNotice(data.message || '审批安全码修改成功', 'success');
+            if (currentInput) currentInput.value = '';
+            if (newInput) newInput.value = '';
+            if (confirmInput) confirmInput.value = '';
+            closeProfileModal();
+        } else {
+            showProfileNotice(data.message || '修改失败', 'error');
+        }
+    } catch (err) {
+        showProfileNotice('网络错误，请稍后再试', 'error');
+    }
+}
+
 export async function deactivateAccount() {
     const confirmInput = document.getElementById('profileDeactivateConfirm');
     if (!confirmInput || confirmInput.value !== '注销账号') {
-        alert('请输入确认文字');
+        showProfileNotice('请输入确认文字', 'warning');
         return;
     }
 

@@ -3,8 +3,9 @@
  */
 
 import { appState, elements } from './app-state.js';
+import { authState } from './auth.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal } from './ui.js';
-import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject } from './api.js';
+import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 
 // 辅助函数：转义HTML
@@ -621,6 +622,23 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     // 获取已上传的文档
     const uploadedDocs = await getCycleDocuments(cycle);
     
+    // 获取当前周期的待审核归档请求
+    let pendingArchiveMap = {};
+    try {
+        const archiveResult = await getArchiveRequests(appState.currentProjectId, 'pending');
+        if (archiveResult.status === 'success' && archiveResult.requests) {
+            for (const req of archiveResult.requests) {
+                if (req.cycle === cycle && req.status === 'pending') {
+                    for (const docName of (req.doc_names || [])) {
+                        pendingArchiveMap[docName] = req;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('获取归档审批状态失败:', e);
+    }
+    
     // 按文档类型分组
     const docsByName = {};
     for (const doc of uploadedDocs) {
@@ -729,6 +747,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         
                         // 检查是否已归档
                         const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
+                        const pendingRequest = pendingArchiveMap[doc.name];
                         
                         // 构建文档树形目录结构
                         const fileListHtml = docsList.length > 0
@@ -770,10 +789,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
                         const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
                         
-                        // 确定显示的状态标签：优先显示"不涉及"，然后是"已归档"
+                        // 确定显示的状态标签：优先显示"不涉及"，然后是"已归档"，然后是"待审核"
                         const statusTag = isNotInvolved 
                             ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">🚫不涉及</div>`
-                            : (isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : '');
+                            : (isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` 
+                            : (pendingRequest ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #ffc107; color: #333; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">⏳待审核</div>` : ''));
                         
                         // 序号列状态图标
                         let indexStatusIcon = '';
@@ -781,6 +801,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             indexStatusIcon = '<span title="不涉及">🚫</span>';
                         } else if (isArchived) {
                             indexStatusIcon = '<span title="已归档">🗄️</span>';
+                        } else if (pendingRequest) {
+                            indexStatusIcon = '<span title="待审核">⏳</span>';
                         } else if (docsList.length === 0) {
                             indexStatusIcon = '<span title="无文件" style="color: #dc3545;">❌</span>';
                         } else {
@@ -816,24 +838,36 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             <td class="col-action">
                                 <div class="action-buttons">
                                     ${!isArchived ? `
-                                        ${!isNotInvolved ? `
-                                            <button class="btn btn-primary btn-sm" onclick="openUploadModal('${cycle}', '${doc.name}')">
-                                                📁 上传/选择文档
-                                            </button>
-                                            ${docsList.length > 0 ? `
-                                                <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
-                                                    ✏️ 编辑
+                                        ${pendingRequest ? `
+                                            <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ 待审核 (申请人: ${pendingRequest.requester_username || ''})</div>
+                                            ${['admin','pmo','project_admin'].includes(authState.user?.role) ? `
+                                                <button class="btn btn-success btn-sm" onclick="handleQuickApprove(${pendingRequest.id}, 'approve', '${cycle}')">
+                                                    ✅ 审批通过
+                                                </button>
+                                                <button class="btn btn-danger btn-sm" onclick="handleQuickApprove(${pendingRequest.id}, 'reject', '${cycle}')">
+                                                    ❌ 驳回
                                                 </button>
                                             ` : ''}
-                                        ` : ''}
-                                        <button class="btn btn-warning btn-sm" onclick="markDocumentNotInvolved('${cycle}', '${doc.name}')">
-                                            ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
-                                        </button>
-                                        ${!isNotInvolved ? `
-                                            <button class="btn btn-info btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
-                                                📦 确认归档
+                                        ` : `
+                                            ${!isNotInvolved ? `
+                                                <button class="btn btn-primary btn-sm" onclick="openUploadModal('${cycle}', '${doc.name}')">
+                                                    📁 上传/选择文档
+                                                </button>
+                                                ${docsList.length > 0 ? `
+                                                    <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
+                                                        ✏️ 编辑
+                                                    </button>
+                                                ` : ''}
+                                            ` : ''}
+                                            <button class="btn btn-warning btn-sm" onclick="markDocumentNotInvolved('${cycle}', '${doc.name}')">
+                                                ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
                                             </button>
-                                        ` : ''}
+                                            ${!isNotInvolved ? `
+                                                <button class="btn btn-info btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
+                                                    📦 确认归档
+                                                </button>
+                                            ` : ''}
+                                        `}
                                     ` : `
                                         <button class="btn btn-warning btn-sm" onclick="unarchiveDocument('${cycle}', '${doc.name}')">
                                             📤 撤销归档
@@ -3124,6 +3158,185 @@ function checkMissingRequirements(doc, requirement, attributes) {
     return missingRequirements;
 }
 
+async function requestArchiveApproval(cycle, docNames, approvalCode, newApprovalCode = '') {
+    return await archiveProjectDocuments(appState.currentProjectId, cycle, docNames, approvalCode, newApprovalCode);
+}
+
+async function promptApprovalCodeForArchive(message, requireNewCode = false, approvers = null) {
+    return new Promise((resolve) => {
+        const fields = [];
+        if (approvers && approvers.length > 0) {
+            fields.push({
+                label: '选择审批人身份',
+                key: 'approver_id',
+                type: 'select',
+                options: approvers.map(a => ({
+                    value: String(a.id),
+                    label: `${a.username}（${a.role === 'admin' ? '管理员' : a.role === 'pmo' ? 'PMO' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                })),
+                placeholder: '请选择你的身份'
+            });
+        }
+        fields.push(
+            { label: '审批安全码', key: 'approval_code', type: 'password', placeholder: '输入审批安全码' }
+        );
+        if (requireNewCode) {
+            fields.push({ label: '新审批安全码', key: 'new_approval_code', type: 'password', placeholder: '至少8位，包含字母和数字' });
+        }
+        showInputModal(message, fields, resolve);
+    });
+}
+
+/**
+ * 弹出选择审批人的模态框（用于提交归档审核）
+ */
+async function promptSelectApprovers(approvers) {
+    return new Promise((resolve) => {
+        // 构建 checkbox 列表
+        let html = `<div style="margin-bottom:15px;color:#666;font-size:13px;">选择接收归档审批通知的项目经理：</div>`;
+        html += `<div style="max-height:250px;overflow-y:auto;">`;
+        for (const a of approvers) {
+            const roleLabel = a.role === 'admin' ? '管理员' : a.role === 'pmo' ? 'PMO' : '项目经理';
+            const orgLabel = a.organization ? ` - ${a.organization}` : '';
+            html += `<label style="display:flex;align-items:center;padding:6px 8px;border-radius:4px;cursor:pointer;margin-bottom:4px;background:#f8f9fa;">
+                <input type="checkbox" value="${a.id}" checked style="margin-right:8px;"> 
+                <span>${a.username}（${roleLabel}${orgLabel}）</span>
+            </label>`;
+        }
+        html += `</div>`;
+
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:450px;">
+                <div class="modal-header"><h3>选择审批人</h3></div>
+                <div class="modal-body">${html}</div>
+                <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button class="btn btn-secondary" id="approver-cancel-btn">取消</button>
+                    <button class="btn btn-primary" id="approver-confirm-btn">提交审核</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector('#approver-cancel-btn').onclick = () => {
+            modal.remove();
+            resolve(null);
+        };
+        modal.querySelector('#approver-confirm-btn').onclick = () => {
+            const checked = Array.from(modal.querySelectorAll('input[type=checkbox]:checked'))
+                .map(cb => Number(cb.value));
+            modal.remove();
+            resolve(checked);
+        };
+    });
+}
+
+/**
+ * 提交归档审核请求（新流程）
+ */
+async function submitArchiveReview(cycle, docNames) {
+    // 获取可选审批人
+    const approversResult = await getArchiveApprovers(appState.currentProjectId);
+    if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
+        showNotification('未找到可审批的项目经理，请联系管理员', 'error');
+        return { status: 'error', message: '无可用审批人' };
+    }
+
+    // 弹出选择审批人
+    const selectedIds = await promptSelectApprovers(approversResult.approvers);
+    if (!selectedIds || selectedIds.length === 0) {
+        return { status: 'cancelled', message: '未选择审批人' };
+    }
+
+    // 提交审核请求
+    const result = await submitArchiveRequest(appState.currentProjectId, cycle, docNames, selectedIds);
+    return result;
+}
+
+/**
+ * 快速审批归档请求（项目经理在文档页面操作）
+ */
+async function quickApproveArchive(approvalId, action = 'approve') {
+    // 获取可选审批人身份
+    const approversResult = await getArchiveApprovers(appState.currentProjectId);
+    if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
+        showNotification('获取审批人信息失败', 'error');
+        return { status: 'error' };
+    }
+
+    const title = action === 'approve' ? '审批通过 - 请验证身份' : '驳回归档 - 请验证身份';
+    let approvalInput = await promptApprovalCodeForArchive(title, false, approversResult.approvers);
+    if (!approvalInput || !approvalInput.approval_code) {
+        return { status: 'cancelled' };
+    }
+
+    let rejectReason = '';
+    if (action === 'reject') {
+        rejectReason = await new Promise((resolve) => {
+            showInputModal('请输入驳回原因', [
+                { label: '驳回原因', key: 'reason', type: 'text', placeholder: '可选' }
+            ], (val) => resolve(val?.reason || ''));
+        });
+    }
+
+    const approverId = approvalInput.approver_id;
+    const approvalCode = approvalInput.approval_code;
+
+    let result;
+    if (action === 'approve') {
+        result = await approveArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode);
+    } else {
+        result = await rejectArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', rejectReason);
+    }
+
+    // 处理 needs_change
+    if (result.status === 'needs_change') {
+        const updatedInput = await promptApprovalCodeForArchive(
+            '首次使用审批安全码，请输入当前登录密码并设置新审批安全码',
+            true, approversResult.approvers
+        );
+        if (!updatedInput || !updatedInput.approval_code || !updatedInput.new_approval_code) {
+            return { status: 'cancelled' };
+        }
+        if (action === 'approve') {
+            result = await approveArchiveRequest(
+                appState.currentProjectId, approvalId,
+                updatedInput.approver_id, updatedInput.approval_code, updatedInput.new_approval_code
+            );
+        } else {
+            result = await rejectArchiveRequest(
+                appState.currentProjectId, approvalId,
+                updatedInput.approver_id, updatedInput.approval_code, updatedInput.new_approval_code, rejectReason
+            );
+        }
+    }
+
+    return result;
+}
+
+async function ensureArchiveApproval(cycle, docNames) {
+    if (!authState.isAuthenticated || !['project_admin', 'admin', 'pmo'].includes(authState.user?.role)) {
+        showNotification('只有项目经理或管理员才能执行归档操作', 'error');
+        return { status: 'error', message: '权限不足' };
+    }
+
+    let approvalInput = await promptApprovalCodeForArchive('请输入审批安全码以继续归档');
+    if (!approvalInput || !approvalInput.approval_code) {
+        return { status: 'cancelled', message: '未输入审批安全码' };
+    }
+
+    let result = await requestArchiveApproval(cycle, docNames, approvalInput.approval_code);
+    if (result.status === 'needs_change') {
+        const updatedInput = await promptApprovalCodeForArchive('首次使用审批安全码，请输入当前登录密码并设置新审批安全码', true);
+        if (!updatedInput || !updatedInput.approval_code || !updatedInput.new_approval_code) {
+            return { status: 'cancelled', message: '未完成审批安全码重置' };
+        }
+        result = await requestArchiveApproval(cycle, docNames, updatedInput.approval_code, updatedInput.new_approval_code);
+    }
+    return result;
+}
+
 /**
  * 归档文档
  */
@@ -3178,35 +3391,70 @@ export async function archiveDocument(cycle, docName) {
                 return { status: 'cancelled', message: '用户取消归档' };
             }
         }
-        
-        // 标记文档为已归档
-        if (!appState.projectConfig.documents_archived) {
-            appState.projectConfig.documents_archived = {};
-        }
-        if (!appState.projectConfig.documents_archived[cycle]) {
-            appState.projectConfig.documents_archived[cycle] = {};
-        }
-        appState.projectConfig.documents_archived[cycle][docName] = true;
-        
-        // 保存到服务器
-        const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(appState.projectConfig)
-        });
-        
-        if (response.ok) {
-            showNotification('文档归档成功', 'success');
-            // 只刷新当前操作的周期，避免跳转到其他周期
-            await renderCycleDocuments(cycle);
-            // 刷新周期导航栏状态
-            import('./cycle.js').then(module => {
-                module.refreshCycleProgress();
+
+        // 判断用户角色决定归档方式
+        const userRole = authState.user?.role;
+        if (['admin', 'pmo', 'project_admin'].includes(userRole)) {
+            // 项目经理/管理员：可选择直接归档或提交审核
+            const actionChoice = await new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width:420px;">
+                        <div class="modal-header"><h3>选择归档方式</h3></div>
+                        <div class="modal-body">
+                            <p>• <b>直接归档</b>：输入审批安全码立即归档</p>
+                            <p>• <b>提交审核</b>：提交归档审核请求，等待审批</p>
+                        </div>
+                        <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end;">
+                            <button class="btn btn-secondary" id="archive-cancel">取消</button>
+                            <button class="btn btn-info" id="archive-review">提交审核</button>
+                            <button class="btn btn-primary" id="archive-direct">直接归档</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                modal.querySelector('#archive-cancel').onclick = () => { modal.remove(); resolve('cancel'); };
+                modal.querySelector('#archive-review').onclick = () => { modal.remove(); resolve('review'); };
+                modal.querySelector('#archive-direct').onclick = () => { modal.remove(); resolve('direct'); };
             });
-            return { status: 'success' };
+
+            if (actionChoice === 'cancel') {
+                return { status: 'cancelled', message: '用户取消归档' };
+            }
+
+            if (actionChoice === 'direct') {
+                const result = await ensureArchiveApproval(cycle, [docName]);
+                if (result.status !== 'success') {
+                    if (result.status === 'cancelled') { showNotification('归档已取消', 'warning'); return result; }
+                    showNotification(result.message || '归档审批失败', 'error');
+                    return result;
+                }
+                showNotification('文档归档成功', 'success');
+                await renderCycleDocuments(cycle);
+                import('./cycle.js').then(module => { module.refreshCycleProgress(); });
+                return result;
+            }
+
+            // 提交审核
+            const result = await submitArchiveReview(cycle, [docName]);
+            if (result.status === 'success') {
+                showNotification('归档审核请求已提交，等待审批', 'success');
+                await renderCycleDocuments(cycle);
+            } else if (result.status !== 'cancelled') {
+                showNotification(result.message || '提交审核失败', 'error');
+            }
+            return result;
         } else {
-            showNotification('归档失败', 'error');
-            return { status: 'error', message: '归档失败' };
+            // 普通用户：只能提交审核
+            const result = await submitArchiveReview(cycle, [docName]);
+            if (result.status === 'success') {
+                showNotification('归档审核请求已提交，等待项目经理审批', 'success');
+                await renderCycleDocuments(cycle);
+            } else if (result.status !== 'cancelled') {
+                showNotification(result.message || '提交审核失败', 'error');
+            }
+            return result;
         }
     } catch (error) {
         console.error('归档文档失败:', error);
@@ -3310,6 +3558,11 @@ export async function batchArchiveCycle(cycle) {
                 </div>
             </div>`;
         }
+
+        if (docsToArchive.length === 0) {
+            showNotification('当前周期没有满足归档条件的文档类型', 'info');
+            return;
+        }
         
         confirmMessage += '<div style="color: #666; font-size: 12px;">确认要开始一键归档吗？</div>';
         
@@ -3328,51 +3581,81 @@ export async function batchArchiveCycle(cycle) {
             return;
         }
         
-        // 开始批量归档
-        showLoading(true);
-        let successCount = 0;
-        let failCount = 0;
-        
-        // 初始化归档对象
-        if (!appState.projectConfig.documents_archived) {
-            appState.projectConfig.documents_archived = {};
-        }
-        if (!appState.projectConfig.documents_archived[cycle]) {
-            appState.projectConfig.documents_archived[cycle] = {};
-        }
-        
-        // 批量标记归档
-        for (const docName of docsToArchive) {
-            appState.projectConfig.documents_archived[cycle][docName] = true;
-        }
-        
-        // 保存到服务器
-        try {
-            const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(appState.projectConfig)
+        // 判断用户角色决定归档方式
+        const userRole = authState.user?.role;
+
+        if (['admin', 'pmo', 'project_admin'].includes(userRole)) {
+            // 项目经理/管理员：可选择直接归档或提交审核
+            const actionChoice = await new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width:420px;">
+                        <div class="modal-header"><h3>选择批量归档方式</h3></div>
+                        <div class="modal-body">
+                            <p>• <b>直接归档</b>：输入审批安全码立即归档所有文档</p>
+                            <p>• <b>提交审核</b>：提交归档审核请求，等待审批</p>
+                        </div>
+                        <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end;">
+                            <button class="btn btn-secondary" id="batch-cancel">取消</button>
+                            <button class="btn btn-info" id="batch-review">提交审核</button>
+                            <button class="btn btn-primary" id="batch-direct">直接归档</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                modal.querySelector('#batch-cancel').onclick = () => { modal.remove(); resolve('cancel'); };
+                modal.querySelector('#batch-review').onclick = () => { modal.remove(); resolve('review'); };
+                modal.querySelector('#batch-direct').onclick = () => { modal.remove(); resolve('direct'); };
             });
-            
-            if (response.ok) {
-                successCount = docsToArchive.length;
-                showNotification(`成功归档 ${successCount} 个文档类型${failCount > 0 ? '，' + failCount + '个失败' : ''}`, 
-                    failCount > 0 ? 'warning' : 'success');
-                
-                // 刷新显示
-                await renderCycleDocuments(cycle);
-                // 刷新周期导航栏状态
-                import('./cycle.js').then(module => {
-                    module.refreshCycleProgress();
-                });
-            } else {
-                showNotification('归档保存失败', 'error');
+
+            if (actionChoice === 'cancel') return;
+
+            showLoading(true);
+            try {
+                if (actionChoice === 'direct') {
+                    const result = await ensureArchiveApproval(cycle, docsToArchive);
+                    if (result.status === 'success') {
+                        showNotification(`成功归档 ${docsToArchive.length} 个文档类型`, 'success');
+                        await renderCycleDocuments(cycle);
+                        import('./cycle.js').then(module => { module.refreshCycleProgress(); });
+                    } else if (result.status === 'cancelled') {
+                        showNotification('归档已取消', 'warning');
+                    } else {
+                        showNotification(result.message || '归档审批失败', 'error');
+                    }
+                } else {
+                    const result = await submitArchiveReview(cycle, docsToArchive);
+                    if (result.status === 'success') {
+                        showNotification(`已提交 ${docsToArchive.length} 个文档类型的归档审核请求`, 'success');
+                        await renderCycleDocuments(cycle);
+                    } else if (result.status !== 'cancelled') {
+                        showNotification(result.message || '提交审核失败', 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('批量归档失败:', error);
+                showNotification('归档失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
             }
-        } catch (error) {
-            console.error('批量归档保存失败:', error);
-            showNotification('归档失败: ' + error.message, 'error');
-        } finally {
-            showLoading(false);
+        } else {
+            // 普通用户：只能提交审核
+            showLoading(true);
+            try {
+                const result = await submitArchiveReview(cycle, docsToArchive);
+                if (result.status === 'success') {
+                    showNotification(`已提交 ${docsToArchive.length} 个文档类型的归档审核请求，等待项目经理审批`, 'success');
+                    await renderCycleDocuments(cycle);
+                } else if (result.status !== 'cancelled') {
+                    showNotification(result.message || '提交审核失败', 'error');
+                }
+            } catch (error) {
+                console.error('批量提交审核失败:', error);
+                showNotification('提交审核失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
         }
     } catch (error) {
         console.error('一键归档失败:', error);
@@ -3422,6 +3705,27 @@ export async function unarchiveDocument(cycle, docName) {
     } catch (error) {
         console.error('取消归档文档失败:', error);
         showNotification('取消归档失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 快速审批/驳回归档请求操作（供 onclick 调用）
+ */
+async function handleQuickApproveAction(approvalId, action, cycle) {
+    try {
+        const result = await quickApproveArchive(approvalId, action);
+        if (result.status === 'success') {
+            showNotification(action === 'approve' ? '归档审批已通过' : '归档审批已驳回', 'success');
+            await renderCycleDocuments(cycle);
+            if (action === 'approve') {
+                import('./cycle.js').then(module => { module.refreshCycleProgress(); });
+            }
+        } else if (result.status !== 'cancelled') {
+            showNotification(result.message || '操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('审批操作失败:', error);
+        showNotification('审批操作失败: ' + error.message, 'error');
     }
 }
 
@@ -4952,6 +5256,7 @@ if (typeof window !== 'undefined') {
     window.unarchiveDocument = unarchiveDocument;
     window.openUploadModal = openUploadModal;
     window.batchArchiveCycle = batchArchiveCycle;
+    window.handleQuickApprove = handleQuickApproveAction;
     window.initUploadMethodTabs = initUploadMethodTabs;
 }
 

@@ -13,6 +13,8 @@ import {
     batchDeleteOrganizations as apiBatchDeleteOrganizations,
     fetchAdminLogs
 } from './api.js';
+import { authState } from './auth.js';
+import { showNotification, showConfirmModal, showInputModal } from './ui.js';
 
 const roleMap = {
     'admin': '管理员',
@@ -84,7 +86,7 @@ export async function loadUserManagementList() {
         }
 
         tbody.innerHTML = '';
-        result.users.forEach(user => {
+        result.users.forEach((user, index) => {
             const roleLabel = roleMap[user.role] || user.role;
             const statusInfo = statusMap[user.status] || { label: user.status, color: '#333' };
             const tr = document.createElement('tr');
@@ -100,11 +102,11 @@ export async function loadUserManagementList() {
             checkboxTd.appendChild(checkbox);
             tr.appendChild(checkboxTd);
             
-            // 创建ID列
+            // 创建序号列
             const idTd = document.createElement('td');
             idTd.style.padding = '8px';
             idTd.style.borderBottom = '1px solid #eee';
-            idTd.textContent = user.id;
+            idTd.textContent = index + 1;
             tr.appendChild(idTd);
             
             // 创建用户名列
@@ -213,15 +215,25 @@ export async function loadUserManagementList() {
             roleSelect.addEventListener('change', async () => {
                 const newRole = roleSelect.value;
                 const result = await updateUserRole(user.id, newRole);
-                alert(result.message || (result.status === 'success' ? '更新成功' : '更新失败'));
+                showNotification(result.message || (result.status === 'success' ? '更新成功' : '更新失败'), result.status === 'success' ? 'success' : 'error');
                 if (result.status === 'success') loadUserManagementList();
             });
             
             resetBtn.addEventListener('click', () => resetUserPassword(user.id));
+            const resetApprovalBtn = document.createElement('button');
+            resetApprovalBtn.className = 'btn btn-sm btn-secondary';
+            resetApprovalBtn.style.marginRight = '4px';
+            resetApprovalBtn.style.padding = '4px 8px';
+            resetApprovalBtn.style.fontSize = '12px';
+            resetApprovalBtn.textContent = '重置审批码';
+            actionTd.appendChild(resetApprovalBtn);
+
+            resetApprovalBtn.addEventListener('click', () => resetUserApprovalCode(user.id));
             toggleBtn.addEventListener('click', () => toggleUserStatus(user.id));
             deleteBtn.addEventListener('click', () => {
-                if (!confirm(`确定删除用户"${user.username}"？此操作将永久删除该用户的所有数据，且不可恢复。`)) return;
-                deleteUser(user.id);
+                showConfirmModal('删除用户', `确定删除用户"${user.username}"？此操作将永久删除该用户的所有数据，且不可恢复。`, () => {
+                    deleteUser(user.id);
+                });
             });
             
             tbody.appendChild(tr);
@@ -244,51 +256,75 @@ function getSelectedUserIds() {
 export async function batchUpdateUserRoles() {
     const userIds = getSelectedUserIds();
     const newRole = document.getElementById('userBatchRole')?.value;
-    if (!userIds.length) { alert('请选择用户'); return; }
-    if (!newRole) { alert('请选择角色'); return; }
-    if (!confirm(`确定将选中的 ${userIds.length} 个用户角色修改为 ${roleMap[newRole] || newRole} 吗？`)) return;
-    const result = await apiBatchUpdateUserRoles(userIds, newRole);
-    alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    if (result.status === 'success') loadUserManagementList();
+    if (!userIds.length) { showNotification('请选择用户', 'warning'); return; }
+    if (!newRole) { showNotification('请选择角色', 'warning'); return; }
+    showConfirmModal('批量修改角色', `确定将选中的 ${userIds.length} 个用户角色修改为 ${roleMap[newRole] || newRole} 吗？`, async () => {
+        const result = await apiBatchUpdateUserRoles(userIds, newRole);
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadUserManagementList();
+    });
 }
 
 export async function batchUpdateUserStatus(newStatus) {
     const userIds = getSelectedUserIds();
-    if (!userIds.length) { alert('请选择用户'); return; }
+    if (!userIds.length) { showNotification('请选择用户', 'warning'); return; }
     const actionName = newStatus === 'active' ? '启用' : '禁用';
-    if (!confirm(`确定${actionName}选中的 ${userIds.length} 个用户吗？`)) return;
-    const result = await apiBatchUpdateUserStatus(userIds, newStatus);
-    alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    if (result.status === 'success') loadUserManagementList();
+    showConfirmModal('批量操作', `确定${actionName}选中的 ${userIds.length} 个用户吗？`, async () => {
+        const result = await apiBatchUpdateUserStatus(userIds, newStatus);
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadUserManagementList();
+    });
 }
 
 export async function batchDeleteUsers() {
     const userIds = getSelectedUserIds();
-    if (!userIds.length) { alert('请选择用户'); return; }
-    if (!confirm(`确定删除选中的 ${userIds.length} 个用户吗？此操作不可恢复！`)) return;
-    const result = await apiBatchDeleteUsers(userIds);
-    alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    if (result.status === 'success') loadUserManagementList();
+    if (!userIds.length) { showNotification('请选择用户', 'warning'); return; }
+    showConfirmModal('批量删除用户', `确定删除选中的 ${userIds.length} 个用户吗？此操作不可恢复！`, async () => {
+        const result = await apiBatchDeleteUsers(userIds);
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadUserManagementList();
+    });
 }
 
 export async function resetUserPassword(userId) {
-    const pwd = prompt('请输入新密码（至少6位）');
-    if (!pwd || pwd.length < 6) {
-        if (pwd !== null) alert('密码长度不能少于6位');
-        return;
-    }
-    try {
-        const response = await fetch(`/api/admin/users/${userId}/reset-password`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ new_password: pwd })
-        });
-        const result = await response.json();
-        alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    } catch (error) {
-        console.error('重置密码失败:', error);
-        alert('重置密码失败，请稍后重试');
-    }
+    showInputModal('重置密码', [
+        { label: '新密码（至少6位）', key: 'password', placeholder: '请输入新密码', type: 'password' }
+    ], async (values) => {
+        if (!values) return;
+        const pwd = values.password;
+        if (!pwd || pwd.length < 6) {
+            showNotification('密码长度不能少于6位', 'warning');
+            return;
+        }
+        try {
+            const response = await fetch(`/api/admin/users/${userId}/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password: pwd })
+            });
+            const result = await response.json();
+            showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        } catch (error) {
+            console.error('重置密码失败:', error);
+            showNotification('重置密码失败，请稍后重试', 'error');
+        }
+    });
+}
+
+export async function resetUserApprovalCode(userId) {
+    showConfirmModal('重置审批安全码', '确定要将该用户的审批安全码重置为登录密码，并要求其首次使用时修改吗？', async () => {
+        try {
+            const response = await fetch(`/api/admin/users/${userId}/reset-approval-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const result = await response.json();
+            showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        } catch (error) {
+            console.error('重置审批安全码失败:', error);
+            showNotification('重置审批安全码失败，请稍后重试', 'error');
+        }
+    });
 }
 
 export async function toggleUserStatus(userId) {
@@ -298,25 +334,26 @@ export async function toggleUserStatus(userId) {
             headers: { 'Content-Type': 'application/json' }
         });
         const result = await response.json();
-        alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
         if (result.status === 'success') loadUserManagementList();
     } catch (error) {
         console.error('切换用户状态失败:', error);
-        alert('操作失败，请稍后重试');
+        showNotification('操作失败，请稍后重试', 'error');
     }
 }
 
 export async function deleteUser(userId) {
-    if (!confirm('确定删除该用户？此操作不可恢复。')) return;
-    try {
-        const response = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
-        const result = await response.json();
-        alert(result.message || (result.status === 'success' ? '删除成功' : '删除失败'));
-        if (result.status === 'success') loadUserManagementList();
-    } catch (error) {
-        console.error('删除用户失败:', error);
-        alert('删除失败，请稍后重试');
-    }
+    showConfirmModal('删除用户', '确定删除该用户？此操作不可恢复。', async () => {
+        try {
+            const response = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+            const result = await response.json();
+            showNotification(result.message || (result.status === 'success' ? '删除成功' : '删除失败'), result.status === 'success' ? 'success' : 'error');
+            if (result.status === 'success') loadUserManagementList();
+        } catch (error) {
+            console.error('删除用户失败:', error);
+            showNotification('删除失败，请稍后重试', 'error');
+        }
+    });
 }
 
 // ============== 承建单位管理 ==============
@@ -392,15 +429,16 @@ function getSelectedOrgNames() {
 
 export async function batchDeleteOrganizations() {
     const names = getSelectedOrgNames();
-    if (!names.length) { alert('请选择承建单位'); return; }
-    if (!confirm(`确定删除选中的 ${names.length} 个承建单位吗？`)) return;
-    const result = await apiBatchDeleteOrganizations(names);
-    let msg = result.message || (result.status === 'success' ? '操作成功' : '操作失败');
-    if (result.failed && result.failed.length) {
-        msg += '\n失败: ' + result.failed.map(f => `${f.name}(${f.message})`).join(', ');
-    }
-    alert(msg);
-    if (result.status === 'success') loadOrgManagementList();
+    if (!names.length) { showNotification('请选择承建单位', 'warning'); return; }
+    showConfirmModal('批量删除承建单位', `确定删除选中的 ${names.length} 个承建单位吗？`, async () => {
+        const result = await apiBatchDeleteOrganizations(names);
+        let msg = result.message || (result.status === 'success' ? '操作成功' : '操作失败');
+        if (result.failed && result.failed.length) {
+            msg += '\n失败: ' + result.failed.map(f => `${f.name}(${f.message})`).join(', ');
+        }
+        showNotification(msg, result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadOrgManagementList();
+    });
 }
 
 export async function openOrgEditModal(org = null) {
@@ -462,7 +500,7 @@ export async function saveOrganization() {
     const oldName = oldNameInput ? oldNameInput.value.trim() : '';
     const newName = nameInput.value.trim();
     const adminId = adminSelect ? adminSelect.value : '';
-    if (!newName) { alert('请输入承建单位名称'); return; }
+    if (!newName) { showNotification('请输入承建单位名称', 'warning'); return; }
     try {
         let response;
         if (oldName) {
@@ -479,28 +517,29 @@ export async function saveOrganization() {
             });
         }
         const result = await response.json();
-        alert(result.message || (result.status === 'success' ? '保存成功' : '保存失败'));
+        showNotification(result.message || (result.status === 'success' ? '保存成功' : '保存失败'), result.status === 'success' ? 'success' : 'error');
         if (result.status === 'success') {
             closeOrgEditModal();
             loadOrgManagementList();
         }
     } catch (error) {
         console.error('保存承建单位失败:', error);
-        alert('保存失败，请稍后重试');
+        showNotification('保存失败，请稍后重试', 'error');
     }
 }
 
 export async function deleteOrganization(name) {
-    if (!confirm('确定删除该承建单位？')) return;
-    try {
-        const response = await fetch(`/api/admin/organizations?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
-        const result = await response.json();
-        alert(result.message || (result.status === 'success' ? '删除成功' : '删除失败'));
-        if (result.status === 'success') loadOrgManagementList();
-    } catch (error) {
-        console.error('删除承建单位失败:', error);
-        alert('删除失败，请稍后重试');
-    }
+    showConfirmModal('删除承建单位', '确定删除该承建单位？', async () => {
+        try {
+            const response = await fetch(`/api/admin/organizations?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+            const result = await response.json();
+            showNotification(result.message || (result.status === 'success' ? '删除成功' : '删除失败'), result.status === 'success' ? 'success' : 'error');
+            if (result.status === 'success') loadOrgManagementList();
+        } catch (error) {
+            console.error('删除承建单位失败:', error);
+            showNotification('删除失败，请稍后重试', 'error');
+        }
+    });
 }
 
 // ============== 项目管理 ==============
@@ -540,6 +579,15 @@ export async function loadProjectManagementList() {
             fetch('/organizations').then(r => r.json())
         ]);
 
+        const isAdmin = authState.user?.role === 'admin';
+        const isBusinessAdmin = authState.user?.role === 'admin' || authState.user?.role === 'pmo';
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = isAdmin ? '' : 'none';
+        });
+        document.querySelectorAll('.business-admin-only').forEach(el => {
+            el.style.display = isBusinessAdmin ? '' : 'none';
+        });
+
         // 填充批量修改单位下拉框
         if (batchSelect) {
             batchSelect.innerHTML = '<option value="">批量修改单位</option>';
@@ -574,12 +622,13 @@ export async function loadProjectManagementList() {
         }
 
         tbody.innerHTML = '';
-        projects.forEach(project => {
+        projects.forEach((project, index) => {
             const statusInfo = projectStatusMap[project.status || 'approved'] || { label: project.status || '正常', color: '#333' };
             const tr = document.createElement('tr');
+            const deleteButtonHtml = isBusinessAdmin ? `<button class="btn btn-sm btn-warning" style="padding:4px 8px;font-size:12px;" onclick="deleteSingleProject('${project.id}')">删除</button>` : '';
             tr.innerHTML = `
                 <td style="padding:8px;border-bottom:1px solid #eee;"><input type="checkbox" class="project-checkbox" value="${project.id}"></td>
-                <td style="padding:8px;border-bottom:1px solid #eee;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${project.id}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;">${index + 1}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${project.name || '-'}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${project.party_b || 'PMO'}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">
@@ -588,7 +637,7 @@ export async function loadProjectManagementList() {
                 <td style="padding:8px;border-bottom:1px solid #eee;">${project.creator_username || '-'}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;white-space:nowrap;">
                     <button class="btn btn-sm btn-primary" style="margin-right:4px;padding:4px 8px;font-size:12px;" onclick="openProjectTransferFromMgmt('${project.id}')">移交</button>
-                    <button class="btn btn-sm btn-warning" style="padding:4px 8px;font-size:12px;" onclick="deleteSingleProject('${project.id}')">删除</button>
+                    ${deleteButtonHtml}
                 </td>
             `;
             tbody.appendChild(tr);
@@ -610,37 +659,40 @@ function getSelectedProjectIds() {
 
 export async function batchDeleteProjects() {
     const ids = getSelectedProjectIds();
-    if (!ids.length) { alert('请选择项目'); return; }
-    if (!confirm(`确定删除选中的 ${ids.length} 个项目吗？此操作不可恢复！`)) return;
-    const result = await apiBatchDeleteProjects(ids);
-    alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    if (result.status === 'success') loadProjectManagementList();
+    if (!ids.length) { showNotification('请选择项目', 'warning'); return; }
+    showConfirmModal('批量删除项目', `确定删除选中的 ${ids.length} 个项目吗？此操作不可恢复！`, async () => {
+        const result = await apiBatchDeleteProjects(ids);
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadProjectManagementList();
+    });
 }
 
 export async function batchUpdateProjectPartyB() {
     const ids = getSelectedProjectIds();
     const partyB = document.getElementById('projectBatchPartyB')?.value;
-    if (!ids.length) { alert('请选择项目'); return; }
-    if (!partyB) { alert('请选择目标承建单位'); return; }
-    if (!confirm(`确定将选中的 ${ids.length} 个项目承建单位修改为 "${partyB}" 吗？`)) return;
-    const result = await apiBatchUpdateProjects(ids, { party_b: partyB });
-    alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    if (result.status === 'success') loadProjectManagementList();
+    if (!ids.length) { showNotification('请选择项目', 'warning'); return; }
+    if (!partyB) { showNotification('请选择目标承建单位', 'warning'); return; }
+    showConfirmModal('批量修改承建单位', `确定将选中的 ${ids.length} 个项目承建单位修改为 "${partyB}" 吗？`, async () => {
+        const result = await apiBatchUpdateProjects(ids, { party_b: partyB });
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadProjectManagementList();
+    });
 }
 
 export async function batchUpdateProjectStatus(status) {
     const ids = getSelectedProjectIds();
-    if (!ids.length) { alert('请选择项目'); return; }
+    if (!ids.length) { showNotification('请选择项目', 'warning'); return; }
     const actionName = status === 'approved' ? '启用' : '停用';
-    if (!confirm(`确定${actionName}选中的 ${ids.length} 个项目吗？`)) return;
-    const result = await apiBatchUpdateProjectStatus(ids, status);
-    alert(result.message || (result.status === 'success' ? '操作成功' : '操作失败'));
-    if (result.status === 'success') loadProjectManagementList();
+    showConfirmModal('批量操作', `确定${actionName}选中的 ${ids.length} 个项目吗？`, async () => {
+        const result = await apiBatchUpdateProjectStatus(ids, status);
+        showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadProjectManagementList();
+    });
 }
 
 export function openProjectTransferFromMgmt(projectId) {
     const ids = projectId ? [projectId] : getSelectedProjectIds();
-    if (!ids.length) { alert('请选择项目'); return; }
+    if (!ids.length) { showNotification('请选择项目', 'warning'); return; }
     currentBatchTransferProjectIds = ids;
     document.getElementById('batchTransferProjectCount').value = ids.length;
     const select = document.getElementById('batchTransferToOrg');
@@ -675,10 +727,10 @@ export function closeProjectBatchTransferModal() {
 
 export async function submitProjectBatchTransfer() {
     const toOrg = document.getElementById('batchTransferToOrg').value;
-    if (!toOrg) { alert('请选择目标承建单位'); return; }
+    if (!toOrg) { showNotification('请选择目标承建单位', 'warning'); return; }
 
     const ids = currentBatchTransferProjectIds;
-    if (!ids.length) { alert('未选择项目'); return; }
+    if (!ids.length) { showNotification('未选择项目', 'warning'); return; }
 
     let success = 0, failed = 0;
     for (const projectId of ids) {
@@ -695,23 +747,22 @@ export async function submitProjectBatchTransfer() {
             failed++;
         }
     }
-    alert(`移交完成：成功 ${success} 个，失败 ${failed} 个`);
+    showNotification(`移交完成：成功 ${success} 个，失败 ${failed} 个`, failed === 0 ? 'success' : 'warning');
     closeProjectBatchTransferModal();
     loadProjectManagementList();
 }
 
 export async function deleteSingleProject(projectId) {
-    if (!confirm('确定删除该项目？此操作不可恢复。')) return;
-    const result = await apiBatchDeleteProjects([projectId]);
-    alert(result.message || (result.status === 'success' ? '删除成功' : '删除失败'));
-    if (result.status === 'success') loadProjectManagementList();
+    showConfirmModal('删除项目', '确定删除该项目？此操作不可恢复。', async () => {
+        const result = await apiBatchDeleteProjects([projectId]);
+        showNotification(result.message || (result.status === 'success' ? '删除成功' : '删除失败'), result.status === 'success' ? 'success' : 'error');
+        if (result.status === 'success') loadProjectManagementList();
+    });
 }
 
 // ============== 日志管理 ==============
 let logMgmtOffset = 0;
 const logMgmtLimit = 50;
-
-import { authState } from './auth.js';
 
 export function openLogManagementModal() {
     const modal = document.getElementById('logManagementModal');

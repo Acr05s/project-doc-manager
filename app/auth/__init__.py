@@ -1,5 +1,6 @@
 """认证模块"""
 
+import re
 from flask import Blueprint, render_template, redirect, url_for, request, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -32,6 +33,12 @@ def get_real_ip():
     return ip
 
 
+def is_strong_password(password):
+    if not password or len(password) < 8:
+        return False
+    return bool(re.search(r'[A-Za-z]', password) and re.search(r'[0-9]', password))
+
+
 def check_ip_blacklist():
     """检查IP是否在黑名单中"""
     ip = get_real_ip()
@@ -61,7 +68,11 @@ def login():
                     'inactive': '账户已被禁用或注销，请联系管理员',
                     'pending': '账户正在审核中，请等待管理员批准'
                 }
-                return jsonify({'status': 'error', 'message': status_messages.get(user.status, f'账户状态异常: {user.status}'})
+                # 明确处理未知状态
+                if user.status not in status_messages:
+                    return jsonify({'status': 'error', 'message': f'账户状态异常: {user.status}'})
+                return jsonify({'status': 'error', 'message': status_messages[user.status]})
+
             
             # 只有 active 状态的用户才能登录
             login_user(user)
@@ -71,7 +82,7 @@ def login():
                 'status': 'success',
                 'message': '登录成功',
                 'user': {
-                    'id': user.id,
+                    'id': user.uuid,
                     'username': user.username,
                     'role': user.role,
                     'organization': user.organization,
@@ -147,7 +158,7 @@ def register():
                 'message': '注册成功，账户正在审核中',
                 'needs_approval': True,
                 'user': {
-                    'id': user.id,
+                    'id': user.uuid,
                     'username': user.username,
                     'role': user.role,
                     'organization': user.organization,
@@ -187,11 +198,17 @@ def _notify_user_approvers(user_id, username, organization_name, is_new_org, rol
                     related_type='user'
                 )
         else:
-            # 现有组织：通知同组织的 project_admin，以及 admin/pmo
-            approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'project_admin'])
+            # 现有组织：优先通知同组织的 project_admin 审核
+            approvers = [
+                approver for approver in user_manager.get_users_by_roles(['project_admin'])
+                if approver.get('organization') == organization_name and approver.get('status') == 'active'
+            ]
+            if not approvers:
+                approvers = [
+                    approver for approver in user_manager.get_users_by_roles(['admin', 'pmo'])
+                    if approver.get('status') == 'active'
+                ]
             for approver in approvers:
-                if approver['role'] == 'project_admin' and approver.get('organization') != organization_name:
-                    continue
                 message_manager.send_message(
                     receiver_id=approver['id'],
                     title='新用户待审批',
@@ -220,6 +237,9 @@ def get_pending_users():
     
     org = getattr(current_user, 'organization', None)
     users = user_manager.get_pending_users(current_user.role, org)
+    # 用UUID替代内部ID返回给前端
+    for u in users:
+        u['id'] = u.get('uuid', u['id'])
     return jsonify({'status': 'success', 'users': users})
 
 
@@ -235,18 +255,36 @@ def approve_user():
     if not user_id:
         return jsonify({'status': 'error', 'message': '用户ID不能为空'}), 400
     
+    # 通过UUID解析内部ID
+    target = user_manager.get_user_by_uuid(str(user_id))
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+    
     # project_admin 只能审核同组织的 contractor
     if current_user.role == 'project_admin':
-        target = user_manager.get_user_by_id(int(user_id))
-        if not target or target.organization != current_user.organization or target.role != 'contractor':
+        if target.organization != current_user.organization or target.role != 'contractor':
             return jsonify({'status': 'error', 'message': '只能审核本单位的普通用户'}), 403
     
-    result = user_manager.approve_user(int(user_id), int(current_user.id))
+    result = user_manager.approve_user(target.id, int(current_user.id))
     if result['status'] == 'success':
         ip = get_real_ip()
-        user_manager.add_operation_log(current_user.id, current_user.username, 'approve_user', str(user_id), None, None, ip)
+        user_manager.add_operation_log(current_user.id, current_user.username, 'approve_user', str(target.uuid), None, None, ip)
+
+        if current_user.role == 'project_admin' and target.role == 'contractor':
+            # 组织管理员同意后，通知 PMO 了解该用户已通过本单位审核
+            pmos = [u for u in user_manager.get_users_by_roles(['pmo']) if u.get('status') == 'active']
+            for pmo_user in pmos:
+                message_manager.send_message(
+                    receiver_id=pmo_user['id'],
+                    title='组织管理员已通过新用户审核',
+                    content=f'用户 "{target.username}" 已通过承建单位 "{target.organization}" 的管理员审核。',
+                    msg_type='system',
+                    related_id=str(target.uuid),
+                    related_type='user'
+                )
+
         # 通知申请人
-        _notify_user_applicant(int(user_id), approved=True)
+        _notify_user_applicant(target.id, approved=True)
     return jsonify(result)
 
 
@@ -262,17 +300,21 @@ def reject_user():
     if not user_id:
         return jsonify({'status': 'error', 'message': '用户ID不能为空'}), 400
     
+    # 通过UUID解析内部ID
+    target = user_manager.get_user_by_uuid(str(user_id))
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+    
     if current_user.role == 'project_admin':
-        target = user_manager.get_user_by_id(int(user_id))
-        if not target or target.organization != current_user.organization or target.role != 'contractor':
+        if target.organization != current_user.organization or target.role != 'contractor':
             return jsonify({'status': 'error', 'message': '只能审核本单位的普通用户'}), 403
     
-    result = user_manager.reject_user(int(user_id), int(current_user.id))
+    result = user_manager.reject_user(target.id, int(current_user.id))
     if result['status'] == 'success':
         ip = get_real_ip()
-        user_manager.add_operation_log(current_user.id, current_user.username, 'reject_user', str(user_id), None, None, ip)
+        user_manager.add_operation_log(current_user.id, current_user.username, 'reject_user', str(target.uuid), None, None, ip)
         # 通知申请人
-        _notify_user_applicant(int(user_id), approved=False)
+        _notify_user_applicant(target.id, approved=False)
     return jsonify(result)
 
 
@@ -313,7 +355,7 @@ def list_users():
         'status': 'success',
         'users': [
             {
-                'id': u.id,
+                'id': u.uuid,
                 'username': u.username,
                 'role': u.role,
                 'organization': u.organization,
@@ -365,13 +407,14 @@ def get_current_user_info():
     return jsonify({
         'status': 'success',
         'user': {
-            'id': user.id,
+            'id': user.uuid,
             'username': user.username,
             'role': user.role,
             'organization': user.organization,
             'email': user.email,
             'status': user.status,
-            'created_at': user.created_at
+            'created_at': user.created_at,
+            'approval_code_needs_change': getattr(user, 'approval_code_needs_change', 1) == 1
         }
     })
 
@@ -396,6 +439,8 @@ def change_current_user_password():
         return jsonify({'status': 'error', 'message': '请填写旧密码和新密码'})
     if len(new_password) < 6:
         return jsonify({'status': 'error', 'message': '新密码长度至少6位'})
+    if not is_strong_password(new_password):
+        return jsonify({'status': 'error', 'message': '新密码需至少8位，且必须包含字母和数字'})
     user = user_manager.get_user_by_id(current_user.id)
     if not check_password_hash(user.password_hash, old_password):
         return jsonify({'status': 'error', 'message': '旧密码错误'})
@@ -403,6 +448,64 @@ def change_current_user_password():
     if result['status'] == 'success':
         ip = get_real_ip()
         user_manager.add_operation_log(current_user.id, current_user.username, 'change_password', None, None, None, ip)
+    return jsonify(result)
+
+
+@auth_bp.route('/api/me/approval-code/verify', methods=['POST'])
+@login_required
+def verify_current_user_approval_code():
+    data = request.get_json() or {}
+    code = data.get('code', '')
+    new_code = data.get('new_code', '')
+    if not code:
+        return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
+    user = user_manager.get_user_by_id(current_user.id)
+    if not user:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+
+    if getattr(user, 'approval_code_needs_change', 1) == 1:
+        if not check_password_hash(user.password_hash, code):
+            return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
+        if not new_code:
+            return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 400
+        if not is_strong_password(new_code):
+            return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
+        new_hash = generate_password_hash(new_code)
+        result = user_manager.update_approval_code(current_user.id, new_hash, needs_change=0)
+        if result['status'] == 'success':
+            ip = get_real_ip()
+            user_manager.add_operation_log(current_user.id, current_user.username, 'set_approval_code', None, None, None, ip)
+        return jsonify(result)
+
+    if not user.approval_code_hash or not check_password_hash(user.approval_code_hash, code):
+        return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
+    return jsonify({'status': 'success', 'message': '审批安全码验证通过'})
+
+
+@auth_bp.route('/api/me/approval-code/change', methods=['POST'])
+@login_required
+def change_current_user_approval_code():
+    data = request.get_json() or {}
+    current_code = data.get('current_code', '')
+    new_code = data.get('new_code', '')
+    if not current_code or not new_code:
+        return jsonify({'status': 'error', 'message': '请输入当前审批码和新审批码'}), 400
+    if not is_strong_password(new_code):
+        return jsonify({'status': 'error', 'message': '新审批安全码需至少8位，且必须包含字母和数字'}), 400
+    user = user_manager.get_user_by_id(current_user.id)
+    if not user:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+    if getattr(user, 'approval_code_needs_change', 1) == 1:
+        if not check_password_hash(user.password_hash, current_code):
+            return jsonify({'status': 'error', 'message': '当前审批码验证失败'}), 400
+    else:
+        if not user.approval_code_hash or not check_password_hash(user.approval_code_hash, current_code):
+            return jsonify({'status': 'error', 'message': '当前审批码错误'}), 400
+    new_hash = generate_password_hash(new_code)
+    result = user_manager.update_approval_code(current_user.id, new_hash, needs_change=0)
+    if result['status'] == 'success':
+        ip = get_real_ip()
+        user_manager.add_operation_log(current_user.id, current_user.username, 'change_approval_code', None, None, None, ip)
     return jsonify(result)
 
 @auth_bp.route('/api/me/deactivate', methods=['POST'])
@@ -427,7 +530,7 @@ def admin_list_users():
         'status': 'success',
         'users': [
             {
-                'id': u.id,
+                'id': u.uuid,
                 'username': u.username,
                 'role': u.role,
                 'organization': u.organization,
@@ -438,61 +541,87 @@ def admin_list_users():
         ]
     })
 
-@auth_bp.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
+@auth_bp.route('/api/admin/users/<user_id>/reset-password', methods=['POST'])
 @login_required
 def admin_reset_password(user_id):
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
+    target = user_manager.get_user_by_uuid(user_id)
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
     data = request.get_json()
     new_password = data.get('new_password', '')
     if len(new_password) < 6:
         return jsonify({'status': 'error', 'message': '密码长度至少6位'})
-    result = user_manager.update_password(user_id, generate_password_hash(new_password))
+    result = user_manager.update_password(target.id, generate_password_hash(new_password))
     if result['status'] == 'success':
         ip = get_real_ip()
-        user_manager.add_operation_log(current_user.id, current_user.username, 'reset_password', str(user_id), None, None, ip)
+        user_manager.add_operation_log(current_user.id, current_user.username, 'reset_password', str(target.uuid), None, None, ip)
     return jsonify(result)
 
-@auth_bp.route('/api/admin/users/<int:user_id>/role', methods=['POST'])
+
+@auth_bp.route('/api/admin/users/<user_id>/reset-approval-code', methods=['POST'])
+@login_required
+def admin_reset_approval_code(user_id):
+    if current_user.role not in ('admin', 'pmo'):
+        return jsonify({'status': 'error', 'message': '权限不足'}), 403
+    target = user_manager.get_user_by_uuid(user_id)
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+    result = user_manager.reset_approval_code_to_password(target.id)
+    if result['status'] == 'success':
+        ip = get_real_ip()
+        user_manager.add_operation_log(current_user.id, current_user.username, 'reset_approval_code', str(target.uuid), None, None, ip)
+    return jsonify(result)
+
+@auth_bp.route('/api/admin/users/<user_id>/role', methods=['POST'])
 @login_required
 def admin_update_user_role(user_id):
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
+    target = user_manager.get_user_by_uuid(user_id)
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
     data = request.get_json()
     new_role = data.get('new_role', '').strip()
     if not new_role:
         return jsonify({'status': 'error', 'message': '角色不能为空'}), 400
-    if user_id == current_user.id:
+    if target.id == current_user.id:
         return jsonify({'status': 'error', 'message': '不能修改自己的角色'}), 400
-    result = user_manager.update_user_role(user_id, new_role)
+    result = user_manager.update_user_role(target.id, new_role)
     if result['status'] == 'success':
         ip = get_real_ip()
-        user_manager.add_operation_log(current_user.id, current_user.username, 'update_user_role', str(user_id), None, new_role, ip)
+        user_manager.add_operation_log(current_user.id, current_user.username, 'update_user_role', str(target.uuid), None, new_role, ip)
     return jsonify(result)
 
-@auth_bp.route('/api/admin/users/<int:user_id>/status', methods=['POST'])
+@auth_bp.route('/api/admin/users/<user_id>/status', methods=['POST'])
 @login_required
 def admin_toggle_user_status(user_id):
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
-    result = user_manager.toggle_user_status(user_id)
+    target = user_manager.get_user_by_uuid(user_id)
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+    result = user_manager.toggle_user_status(target.id)
     if result['status'] == 'success':
         ip = get_real_ip()
-        user_manager.add_operation_log(current_user.id, current_user.username, 'toggle_user_status', str(user_id), None, result.get('status'), ip)
+        user_manager.add_operation_log(current_user.id, current_user.username, 'toggle_user_status', str(target.uuid), None, result.get('status'), ip)
     return jsonify(result)
 
-@auth_bp.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@auth_bp.route('/api/admin/users/<user_id>', methods=['DELETE'])
 @login_required
 def admin_delete_user(user_id):
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
-    # prevent self-delete
-    if user_id == current_user.id:
+    target = user_manager.get_user_by_uuid(user_id)
+    if not target:
+        return jsonify({'status': 'error', 'message': '用户不存在'}), 404
+    if target.id == current_user.id:
         return jsonify({'status': 'error', 'message': '不能删除自己'})
-    result = user_manager.delete_user(user_id)
+    result = user_manager.delete_user(target.id)
     if result['status'] == 'success':
         ip = get_real_ip()
-        user_manager.add_operation_log(current_user.id, current_user.username, 'delete_user', str(user_id), None, None, ip)
+        user_manager.add_operation_log(current_user.id, current_user.username, 'delete_user', str(target.uuid), None, None, ip)
     return jsonify(result)
 
 @auth_bp.route('/api/admin/organizations', methods=['GET'])
@@ -505,6 +634,8 @@ def admin_list_organizations():
         org['user_count'] = user_manager.get_organization_user_count(org['name'])
         admin = user_manager.get_user_by_id(org['admin_id']) if org['admin_id'] else None
         org['admin_name'] = admin.username if admin else '-'
+        # 返回UUID给前端
+        org['admin_id'] = admin.uuid if admin else None
     return jsonify({'status': 'success', 'organizations': orgs})
 
 @auth_bp.route('/api/admin/organizations', methods=['POST'])
@@ -531,6 +662,10 @@ def admin_update_organization():
     old_name = data.get('old_name', '').strip()
     new_name = data.get('new_name', '').strip()
     admin_id = data.get('admin_id')
+    # 如果admin_id是UUID，解析为内部ID
+    if admin_id:
+        admin_user = user_manager.get_user_by_uuid(str(admin_id))
+        admin_id = admin_user.id if admin_user else None
     if not old_name or not new_name:
         return jsonify({'status': 'error', 'message': '名称不能为空'})
     result = user_manager.update_organization(old_name, new_name, admin_id)
@@ -559,9 +694,11 @@ def admin_batch_delete_users():
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     data = request.get_json()
-    user_ids = data.get('user_ids', [])
-    if not user_ids:
+    user_uuids = data.get('user_ids', [])
+    if not user_uuids:
         return jsonify({'status': 'error', 'message': '未选择用户'}), 400
+    # 解析UUID为内部ID
+    user_ids = user_manager.resolve_uuids_to_ids(user_uuids)
     if current_user.id in user_ids:
         return jsonify({'status': 'error', 'message': '不能批量删除自己'}), 400
     result = user_manager.batch_delete_users(user_ids)
@@ -576,10 +713,11 @@ def admin_batch_update_user_roles():
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     data = request.get_json()
-    user_ids = data.get('user_ids', [])
+    user_uuids = data.get('user_ids', [])
     new_role = data.get('new_role', '').strip()
-    if not user_ids or not new_role:
+    if not user_uuids or not new_role:
         return jsonify({'status': 'error', 'message': '参数不完整'}), 400
+    user_ids = user_manager.resolve_uuids_to_ids(user_uuids)
     if current_user.id in user_ids:
         return jsonify({'status': 'error', 'message': '不能修改自己的角色'}), 400
     result = user_manager.batch_update_user_roles(user_ids, new_role)
@@ -594,10 +732,11 @@ def admin_batch_update_user_status():
     if current_user.role not in ('admin', 'pmo'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     data = request.get_json()
-    user_ids = data.get('user_ids', [])
+    user_uuids = data.get('user_ids', [])
     new_status = data.get('new_status', '').strip()
-    if not user_ids or not new_status:
+    if not user_uuids or not new_status:
         return jsonify({'status': 'error', 'message': '参数不完整'}), 400
+    user_ids = user_manager.resolve_uuids_to_ids(user_uuids)
     result = user_manager.batch_update_user_status(user_ids, new_status)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -707,7 +846,7 @@ def init_auth(app):
             # pending 用户限制访问范围
             if current_user.is_authenticated and getattr(current_user, 'status', 'active') == 'pending':
                 allowed_prefixes = ['/api/messages/', '/api/me', '/logout', '/api/auth/status']
-                allowed = any(request.path.startswith(p) for p in allowed_prefixes) or request.endpoint in ['auth.logout', 'auth_routes.check_auth_status', 'auth.get_current_user_info', 'auth.update_current_user_info', 'auth.change_current_user_password', 'auth.deactivate_current_user']
+                allowed = any(request.path.startswith(p) for p in allowed_prefixes) or request.endpoint in ['auth.logout', 'auth_routes.check_auth_status', 'auth.get_current_user_info', 'auth.update_current_user_info', 'auth.change_current_user_password', 'auth.deactivate_current_user', 'main.index']
                 if not allowed:
                     return jsonify({'status': 'error', 'message': '账户正在审核中，暂无法使用该功能'}), 403
             if check_ip_blacklist():

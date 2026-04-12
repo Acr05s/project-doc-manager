@@ -59,6 +59,16 @@ test/*.pyc
 test/temp/
 temp_test_*
 
+# Test and debug files
+templates/test.html
+static/test_*.html
+tools/test/
+check_admin.py
+
+# Test output directories
+test_out/
+
+
 # Temporary files
 *.tmp
 *.bak
@@ -67,3 +77,4 @@ temp_test_*
 
 # Backup directories
 backup_*/
+projects_json_backup/

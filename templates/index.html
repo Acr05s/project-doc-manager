@@ -542,19 +542,10 @@
                     <span id="messageBadge" class="message-badge">0</span>
                 </div>
                 
-                <!-- 操作菜单下拉菜单（仅管理员/PMO/项目经理/普通用户可见） -->
-                <div id="systemManagementMenu" class="dropdown" style="display:none;">
-                    <button class="btn btn-secondary dropdown-toggle" type="button" id="systemManagementBtn">
-                        ⚙️ 操作菜单
-                    </button>
-                    <div class="dropdown-menu" id="systemManagementDropdown">
-                        <a href="#" class="dropdown-item" id="systemSettingsMenuItem">⚙️ 系统设置</a>
-                        <a href="#" class="dropdown-item" id="userApprovalBtn">👤 用户审核</a>
-                        <a href="#" class="dropdown-item" id="userManagementMenuItem">👤 用户管理</a>
-                        <a href="#" class="dropdown-item" id="orgManagementMenuItem">🏢 承建单位管理</a>
-                        <a href="#" class="dropdown-item" id="projectManagementMenuItem">📁 项目管理</a>
-                    </div>
-                </div>
+                <!-- 操作菜单切换按钮（仅管理员/PMO/项目经理可见） -->
+                <button class="btn btn-secondary" type="button" id="systemManagementBtn" style="display:none;" title="操作菜单">
+                    ⚙️ 操作菜单
+                </button>
                 
                 <!-- 文档需求下拉菜单 -->
                 <div id="documentRequirementsMenu" class="dropdown" style="display:none;">
@@ -604,6 +595,23 @@
                 </div>
             </div>
         </header>
+
+        <!-- 右侧操作菜单侧边栏 -->
+        <div id="operationSidebar" class="operation-sidebar">
+            <div class="operation-sidebar-header">
+                <span>⚙️ 操作菜单</span>
+                <button id="closeSidebarBtn" class="operation-sidebar-close" title="关闭">&times;</button>
+            </div>
+            <div class="operation-sidebar-body" id="systemManagementDropdown">
+                <a href="#" class="sidebar-menu-item" id="systemSettingsMenuItem">⚙️ 系统设置</a>
+                <a href="#" class="sidebar-menu-item" id="userApprovalBtn">👤 用户审核</a>
+                <a href="#" class="sidebar-menu-item" id="userManagementMenuItem">👤 用户管理</a>
+                <a href="#" class="sidebar-menu-item" id="orgManagementMenuItem">🏢 承建单位管理</a>
+                <a href="#" class="sidebar-menu-item" id="projectManagementMenuItem">📁 项目管理</a>
+            </div>
+        </div>
+        <!-- 侧边栏遮罩层 -->
+        <div id="sidebarOverlay" class="sidebar-overlay"></div>
 
         <!-- 顶部周期进度导航 -->
         <div id="cycleNavBar" class="cycle-nav-bar">
@@ -2105,6 +2113,7 @@
             <div class="settings-tabs">
                 <button class="settings-tab-btn active" data-tab="profile-basic" onclick="switchProfileTab('profile-basic')">基本信息</button>
                 <button class="settings-tab-btn" data-tab="profile-password" onclick="switchProfileTab('profile-password')">修改密码</button>
+                <button class="settings-tab-btn" data-tab="profile-approval-code" onclick="switchProfileTab('profile-approval-code')">审批安全码</button>
                 <button class="settings-tab-btn" data-tab="profile-deactivate" onclick="switchProfileTab('profile-deactivate')">账号注销</button>
             </div>
             <div id="profileTab-profile-basic" class="settings-tab-content active">
@@ -2147,6 +2156,27 @@
                     <button class="btn btn-primary" onclick="changeProfilePassword()">修改密码</button>
                 </div>
             </div>
+            <div id="profileTab-profile-approval-code" class="settings-tab-content">
+                <div style="background:#f0f7ff;padding:12px;border-radius:6px;border-left:4px solid #1890ff;margin-bottom:15px;">
+                    <p style="margin:0;color:#555;font-size:13px;">审批安全码用于文档归档等审批操作的身份验证，与登录密码独立。首次使用时默认为登录密码，需修改后方可使用。</p>
+                </div>
+                <div class="form-group">
+                    <label for="profileCurrentApprovalCode">当前审批安全码</label>
+                    <input type="password" id="profileCurrentApprovalCode" class="form-control" placeholder="首次修改请输入登录密码">
+                </div>
+                <div class="form-group">
+                    <label for="profileNewApprovalCode">新审批安全码</label>
+                    <input type="password" id="profileNewApprovalCode" class="form-control" placeholder="至少8位，需包含字母和数字">
+                </div>
+                <div class="form-group">
+                    <label for="profileConfirmApprovalCode">确认新审批安全码</label>
+                    <input type="password" id="profileConfirmApprovalCode" class="form-control">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="closeProfileModal()">取消</button>
+                    <button class="btn btn-primary" onclick="changeApprovalCode()">修改审批安全码</button>
+                </div>
+            </div>
             <div id="profileTab-profile-deactivate" class="settings-tab-content">
                 <div style="background:#fff3f3;padding:15px;border-radius:6px;border-left:4px solid #dc3545;margin-bottom:15px;">
                     <strong style="color:#dc3545;">警告</strong>
@@ -2184,24 +2214,24 @@
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-right:auto;">
                     <input type="checkbox" id="userSelectAll" onchange="toggleSelectAllUsers()"> 全选
                 </label>
-                <select id="userBatchRole" class="form-control" style="width:110px;font-size:12px;padding:4px 6px;">
+                <select id="userBatchRole" class="form-control business-admin-only" style="width:110px;font-size:12px;padding:4px 6px;">
                     <option value="">批量角色</option>
                     <option value="admin">管理员</option>
                     <option value="pmo">PMO</option>
                     <option value="project_admin">项目经理</option>
                     <option value="contractor">普通用户</option>
                 </select>
-                <button class="btn btn-sm btn-secondary" onclick="batchUpdateUserRoles()">修改角色</button>
-                <button class="btn btn-sm btn-info" onclick="batchUpdateUserStatus('active')">批量启用</button>
-                <button class="btn btn-sm btn-warning" onclick="batchUpdateUserStatus('inactive')">批量禁用</button>
-                <button class="btn btn-sm btn-danger" onclick="batchDeleteUsers()">批量删除</button>
+                <button class="btn btn-sm btn-secondary business-admin-only" onclick="batchUpdateUserRoles()">修改角色</button>
+                <button class="btn btn-sm btn-info business-admin-only" onclick="batchUpdateUserStatus('active')">批量启用</button>
+                <button class="btn btn-sm btn-warning business-admin-only" onclick="batchUpdateUserStatus('inactive')">批量禁用</button>
+                <button class="btn btn-sm btn-danger business-admin-only" onclick="batchDeleteUsers()">批量删除</button>
             </div>
             <div style="max-height:400px;overflow:auto;">
                 <table class="table" style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="background:#f8f9fa;">
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;width:36px;"></th>
-                            <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">ID</th>
+                            <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">序号</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">用户名</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">角色</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">单位</th>
@@ -2231,8 +2261,8 @@
                     <input type="checkbox" id="orgSelectAll" onchange="toggleSelectAllOrgs()"> 全选
                 </label>
                 <div style="display:flex;gap:8px;">
-                    <button class="btn btn-danger btn-sm" onclick="batchDeleteOrganizations()">批量删除</button>
-                    <button class="btn btn-primary btn-sm" onclick="openOrgEditModal()">+ 新建单位</button>
+                    <button class="btn btn-danger btn-sm business-admin-only" onclick="batchDeleteOrganizations()">批量删除</button>
+                    <button class="btn btn-primary btn-sm business-admin-only" onclick="openOrgEditModal()">+ 新建单位</button>
                 </div>
             </div>
             <div style="max-height:380px;overflow:auto;">
@@ -2299,21 +2329,21 @@
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-right:auto;">
                     <input type="checkbox" id="projectSelectAll" onchange="toggleSelectAllProjects()"> 全选
                 </label>
-                <select id="projectBatchPartyB" class="form-control" style="width:150px;font-size:12px;padding:4px 6px;">
+                <select id="projectBatchPartyB" class="form-control business-admin-only" style="width:150px;font-size:12px;padding:4px 6px;">
                     <option value="">批量修改单位</option>
                 </select>
-                <button class="btn btn-sm btn-secondary" onclick="batchUpdateProjectPartyB()">修改单位</button>
+                <button class="btn btn-sm btn-secondary business-admin-only" onclick="batchUpdateProjectPartyB()">修改单位</button>
                 <button class="btn btn-sm btn-primary" onclick="openProjectTransferFromMgmt()">批量移交</button>
-                <button class="btn btn-sm btn-success" onclick="batchUpdateProjectStatus('approved')">批量启用</button>
-                <button class="btn btn-sm btn-warning" onclick="batchUpdateProjectStatus('disabled')">批量停用</button>
-                <button class="btn btn-sm btn-danger" onclick="batchDeleteProjects()">批量删除</button>
+                <button class="btn btn-sm btn-success business-admin-only" onclick="batchUpdateProjectStatus('approved')">批量启用</button>
+                <button class="btn btn-sm btn-warning business-admin-only" onclick="batchUpdateProjectStatus('disabled')">批量停用</button>
+                <button class="btn btn-sm btn-danger business-admin-only" onclick="batchDeleteProjects()">批量删除</button>
             </div>
             <div style="max-height:400px;overflow:auto;">
                 <table class="table" style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="background:#f8f9fa;">
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;width:36px;"></th>
-                            <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">ID</th>
+                            <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">序号</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">名称</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">承建单位</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">状态</th>

@@ -59,9 +59,10 @@ class ReportService:
         }
     }
     
-    def __init__(self, doc_manager, user_manager):
+    def __init__(self, doc_manager, user_manager, user_context=None):
         self.doc_manager = doc_manager
         self.user_manager = user_manager
+        self.user_context = user_context  # {'id': int, 'role': str, 'organization': str}
     
     def get_report_configs(self) -> List[Dict]:
         """获取所有报表配置"""
@@ -88,7 +89,25 @@ class ReportService:
             return self._overview_report()
     
     def _load_all_project_details(self):
-        """加载所有项目详情"""
+        """加载所有项目详情（根据用户权限过滤）"""
+        # 管理员和PMO可以看到所有项目
+        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', None):
+            accessible = self.doc_manager.get_user_accessible_projects(
+                self.user_context['id'],
+                self.user_context['role'],
+                self.user_context.get('organization', '')
+            )
+            accessible_ids = {p['id'] for p in accessible}
+            all_projects = self.doc_manager.projects.list_all()
+            details = []
+            for proj_info in all_projects:
+                if proj_info['id'] not in accessible_ids:
+                    continue
+                config = self.doc_manager.projects.load(proj_info['id'])
+                if config:
+                    details.append({**proj_info, 'config': config})
+            return details
+
         all_projects = self.doc_manager.projects.list_all()
         details = []
         for proj_info in all_projects:
@@ -100,7 +119,18 @@ class ReportService:
     def _overview_report(self):
         """平台概览报表"""
         projects = self._load_all_project_details()
-        orgs = self.user_manager.list_organizations()
+        
+        # 管理员和PMO看到全部承建单位，其他角色只看到涉及自己的
+        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', None):
+            org_set = set()
+            for p in projects:
+                pb = p['config'].get('party_b', '')
+                if pb:
+                    org_set.add(pb)
+            total_organizations = len(org_set)
+        else:
+            orgs = self.user_manager.list_organizations()
+            total_organizations = len(orgs)
         
         accepted = partial = pending = 0
         complete = partial_docs = empty = 0
@@ -149,7 +179,7 @@ class ReportService:
         
         return {
             'total_projects': len(projects),
-            'total_organizations': len(orgs),
+            'total_organizations': total_organizations,
             'acceptance': {'accepted': accepted, 'partial': partial, 'pending': pending},
             'document_completeness': {
                 'complete': complete, 'partial': partial_docs, 'empty': empty,

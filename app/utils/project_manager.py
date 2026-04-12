@@ -326,8 +326,9 @@ class ProjectManager:
             Dict: 创建结果
         """
         try:
-            # 生成项目ID
-            project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            # 生成项目ID（UUID格式）
+            import uuid as _uuid
+            project_id = str(_uuid.uuid4())
             
             # 确定项目状态：承建单位普通用户创建的项目需要审批
             status = 'pending' if creator_role == self.ROLE_CONTRACTOR else 'approved'
@@ -1620,8 +1621,8 @@ class ProjectManager:
             
             accessible_projects = []
             
-            # 管理员、PMO、项目经理可以访问所有项目（包括 pending）
-            if user_role in (self.ROLE_ADMIN, self.ROLE_PMO, self.ROLE_PROJECT_ADMIN):
+            # 管理员、PMO 可以访问所有项目（包括 pending）
+            if user_role in (self.ROLE_ADMIN, self.ROLE_PMO):
                 projects = self.list_all()
                 # 补充状态信息
                 for proj in projects:
@@ -1641,11 +1642,11 @@ class ProjectManager:
                 status = config.get('status', 'approved')
                 creator_id = config.get('creator_id')
                 is_creator = creator_id == user_id
-                
-                # contractor 权限逻辑：可以看到已批准的项目和与自己相关的项目
-                if user_role == self.ROLE_CONTRACTOR:
-                    is_related = is_creator or (user_organization and config.get('party_b') == user_organization)
-                    if status == 'approved' or is_related:
+                same_org = user_organization and config.get('party_b') == user_organization
+
+                if user_role == self.ROLE_PROJECT_ADMIN:
+                    # 项目经理仅能看到本单位项目或自己创建的项目
+                    if same_org or is_creator:
                         accessible_projects.append({
                             'id': project_id,
                             'name': info.get('name', ''),
@@ -1656,19 +1657,21 @@ class ProjectManager:
                         })
                     continue
 
-                # 其他角色（兼容旧逻辑）
-                if is_creator:
-                    accessible_projects.append({
-                        'id': project_id,
-                        'name': info.get('name', ''),
-                        'description': info.get('description', ''),
-                        'created_time': info.get('created_time', ''),
-                        'updated_time': info.get('updated_time', ''),
-                        'status': status
-                    })
+                if user_role == self.ROLE_CONTRACTOR:
+                    # 承建方普通用户仅能看到本单位项目或自己创建的项目
+                    if same_org or is_creator:
+                        accessible_projects.append({
+                            'id': project_id,
+                            'name': info.get('name', ''),
+                            'description': info.get('description', ''),
+                            'created_time': info.get('created_time', ''),
+                            'updated_time': info.get('updated_time', ''),
+                            'status': status
+                        })
                     continue
 
-                if user_organization and config.get('party_b') == user_organization:
+                # 其他角色：兼容旧逻辑
+                if is_creator or same_org:
                     accessible_projects.append({
                         'id': project_id,
                         'name': info.get('name', ''),

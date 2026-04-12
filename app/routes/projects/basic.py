@@ -199,7 +199,14 @@ def get_dashboard_stats():
     """获取首页看板统计数据（兼容旧接口）"""
     try:
         doc_manager = get_doc_manager()
-        report_service = ReportService(doc_manager, user_manager)
+        user_context = None
+        if current_user.is_authenticated:
+            user_context = {
+                'id': int(current_user.id),
+                'role': current_user.role,
+                'organization': getattr(current_user, 'organization', '') or ''
+            }
+        report_service = ReportService(doc_manager, user_manager, user_context)
         data = report_service.generate_report('overview')
         return jsonify({'status': 'success', 'data': data})
     except Exception as e:
@@ -223,7 +230,14 @@ def get_report_data():
     try:
         report_type = request.args.get('type', 'overview')
         doc_manager = get_doc_manager()
-        report_service = ReportService(doc_manager, user_manager)
+        user_context = None
+        if current_user.is_authenticated:
+            user_context = {
+                'id': int(current_user.id),
+                'role': current_user.role,
+                'organization': getattr(current_user, 'organization', '') or ''
+            }
+        report_service = ReportService(doc_manager, user_manager, user_context)
         data = report_service.generate_report(report_type)
         return jsonify({'status': 'success', 'type': report_type, 'data': data})
     except Exception as e:
@@ -256,9 +270,8 @@ def initiate_project_transfer(project_id):
         if user_role in ('admin', 'pmo'):
             can_transfer = True
         elif user_role == 'project_admin' and user_org == from_org:
-            # 项目经理需要同时是项目创建者才能移交
-            if creator_id and int(creator_id) == int(current_user.id):
-                can_transfer = True
+            # 项目经理可以移交本单位项目
+            can_transfer = True
         elif creator_id and int(creator_id) == int(current_user.id):
             can_transfer = True
 
@@ -284,7 +297,7 @@ def initiate_project_transfer(project_id):
         if result['status'] != 'success':
             return jsonify(result), 500
 
-        transfer_id = result['transfer_id']
+        transfer_uuid = result['transfer_uuid']
 
         # 通知目标单位的项目经理（project_admin）
         for u in target_admins:
@@ -293,7 +306,7 @@ def initiate_project_transfer(project_id):
                 title='项目所有权移交申请',
                 content=f'项目 "{project_name}"（原单位：{from_org or "无"}）申请移交到贵单位 "{to_org}"，请尽快处理。',
                 msg_type='approval',
-                related_id=str(transfer_id),
+                related_id=str(transfer_uuid),
                 related_type='project_transfer'
             )
 
@@ -303,7 +316,7 @@ def initiate_project_transfer(project_id):
             str(project_id), project_name, f'to_org={to_org}', request.remote_addr
         )
 
-        return jsonify({'status': 'success', 'message': '移交申请已发起，等待目标单位确认', 'transfer_id': transfer_id})
+        return jsonify({'status': 'success', 'message': '移交申请已发起，等待目标单位确认', 'transfer_id': transfer_uuid})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -323,7 +336,8 @@ def respond_project_transfer():
         if action not in ('accept', 'reject'):
             return jsonify({'status': 'error', 'message': '操作类型无效'}), 400
 
-        transfer = user_manager.get_project_transfer(int(transfer_id))
+        # 通过UUID查找移交申请
+        transfer = user_manager.get_project_transfer_by_uuid(str(transfer_id))
         if not transfer:
             return jsonify({'status': 'error', 'message': '移交申请不存在'}), 404
         if transfer['status'] != 'pending':
@@ -341,7 +355,7 @@ def respond_project_transfer():
 
         if action == 'accept':
             # 接受移交
-            result = user_manager.accept_project_transfer(int(transfer_id), int(current_user.id))
+            result = user_manager.accept_project_transfer(transfer['id'], int(current_user.id))
             if result['status'] != 'success':
                 return jsonify(result), 500
 
@@ -389,7 +403,11 @@ def respond_project_transfer():
             return jsonify({'status': 'success', 'message': '移交已接受，项目所有权已更新'})
 
         else:
-            # 拒绝移交：仅通知发起人，不改变状态
+            # 拒绝移交：更新状态并通知发起人
+            result = user_manager.reject_project_transfer(transfer['id'], int(current_user.id))
+            if result['status'] != 'success':
+                return jsonify(result), 500
+
             creator = user_manager.get_user_by_id(transfer['created_by']) if transfer['created_by'] else None
             if creator:
                 message_manager.send_message(
@@ -495,12 +513,18 @@ def batch_update_project_status():
 
 @login_required
 def list_all_projects():
-    """列出所有项目（管理员/PMO）"""
+    """列出所有项目（管理员/PMO）或本单位项目（项目经理）"""
     try:
-        if current_user.role not in ('admin', 'pmo'):
-            return jsonify({'status': 'error', 'message': '权限不足'}), 403
         doc_manager = get_doc_manager()
-        projects = doc_manager.projects.list_all()
+        if current_user.role in ('admin', 'pmo'):
+            projects = doc_manager.projects.list_all()
+        elif current_user.role == 'project_admin':
+            user_id = int(current_user.id)
+            user_organization = getattr(current_user, 'organization', '') or ''
+            projects = doc_manager.get_user_accessible_projects(user_id, current_user.role, user_organization)
+        else:
+            return jsonify({'status': 'error', 'message': '权限不足'}), 403
+
         for proj in projects:
             config = doc_manager.projects.load(proj['id'])
             if config:

@@ -353,9 +353,9 @@ class DocumentManager:
             # 获取项目名称
             project_name = new_name or project_config.get('name', '导入项目')
             
-            # 生成新的项目ID
-            from datetime import datetime
-            new_project_id = f"project_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            # 生成新的项目ID（使UUID格式）
+            import uuid as _uuid
+            new_project_id = str(_uuid.uuid4())
             
             # 检查项目名称是否已存在（只有外部未传 new_name 时才自动加后缀，
             # 如果外部已传 new_name 说明调用方已处理过冲突，直接使用）

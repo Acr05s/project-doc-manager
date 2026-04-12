@@ -26,6 +26,9 @@ def list_messages():
             limit=limit,
             offset=offset
         )
+        # 用UUID替代内部ID返回给前端
+        for msg in messages:
+            msg['id'] = msg.get('uuid', msg['id'])
         return jsonify({'status': 'success', 'messages': messages})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -42,12 +45,12 @@ def unread_count():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@message_bp.route('/read/<int:message_id>', methods=['POST'])
+@message_bp.route('/read/<message_id>', methods=['POST'])
 @login_required
 def mark_read(message_id):
     """标记消息为已读"""
     try:
-        success = message_manager.mark_as_read(message_id, int(current_user.id))
+        success = message_manager.mark_as_read_by_uuid(message_id, int(current_user.id))
         if success:
             return jsonify({'status': 'success', 'message': '已标记为已读'})
         return jsonify({'status': 'error', 'message': '消息不存在'}), 404
@@ -66,12 +69,12 @@ def mark_all_read():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@message_bp.route('/<int:message_id>', methods=['DELETE'])
+@message_bp.route('/<message_id>', methods=['DELETE'])
 @login_required
 def delete_message(message_id):
     """删除消息"""
     try:
-        success = message_manager.delete_message(message_id, int(current_user.id))
+        success = message_manager.delete_message_by_uuid(message_id, int(current_user.id))
         if success:
             return jsonify({'status': 'success', 'message': '已删除'})
         return jsonify({'status': 'error', 'message': '消息不存在'}), 404
@@ -90,15 +93,18 @@ def send_message():
         content = data.get('content', '').strip()
         
         # 验证接收人ID格式
-        try:
-            receiver_id = int(receiver_id)
-        except (ValueError, TypeError):
+        if not receiver_id:
             return jsonify({'status': 'error', 'message': '接收人ID格式错误'}), 400
         
-        if not receiver_id or not content:
+        # 通过UUID解析接收人ID
+        receiver_user = user_manager.get_user_by_uuid(str(receiver_id))
+        if not receiver_user:
+            return jsonify({'status': 'error', 'message': '接收人不存在'}), 404
+        
+        if not content:
             return jsonify({'status': 'error', 'message': '缺少接收人或内容'}), 400
         msg_id = message_manager.send_message(
-            receiver_id=receiver_id,
+            receiver_id=receiver_user.id,
             title=title or '用户留言',
             content=content,
             sender_id=int(current_user.id),
