@@ -366,6 +366,9 @@ export function updateRoleBasedUI() {
                     case 'userApprovalBtn':
                         import('./user-approval.js').then(m => m.openUserApprovalModal());
                         break;
+                    case 'archiveApprovalBtn':
+                        import('./archive-approval.js').then(m => m.openArchiveApprovalModal());
+                        break;
                     case 'userManagementMenuItem':
                         import('./admin.js').then(m => m.openUserManagementModal());
                         break;

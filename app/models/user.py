@@ -1246,6 +1246,58 @@ class UserManager:
             item['target_approver_ids'] = json.loads(item['target_approver_ids']) if item.get('target_approver_ids') else []
             return item
 
+    def get_pending_archive_approvals_for_user(self, user_id, user_role):
+        """获取用户待审批的文档归档请求
+
+        Args:
+            user_id: 用户ID
+            user_role: 用户角色('pmo' 或 'project_admin' 等)
+
+        Returns:
+            list: 用户需要审批的申请列表
+        """
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                # 查询status为pending或stage_approved的审批请求
+                cursor.execute(
+                    '''SELECT * FROM archive_approvals
+                       WHERE status IN ('pending', 'stage_approved')
+                       ORDER BY created_at DESC'''
+                )
+                approvals = []
+                for row in cursor.fetchall():
+                    item = dict(row)
+
+                    # 解析approval_stages JSON
+                    try:
+                        approval_stages = json.loads(item.get('approval_stages', '[]'))
+                    except:
+                        approval_stages = []
+
+                    # 检查当前用户是否是该阶段的审批人
+                    current_stage = item.get('current_stage', 1)
+                    if not approval_stages or current_stage < 1 or current_stage > len(approval_stages):
+                        continue
+
+                    stage = approval_stages[current_stage - 1]
+                    required_role = stage.get('required_role')
+
+                    # 只返回当前用户应该批准的请求（基于角色匹配）
+                    if required_role == user_role:
+                        item['doc_names'] = json.loads(item['doc_names']) if item.get('doc_names') else []
+                        item['target_approver_ids'] = json.loads(item['target_approver_ids']) if item.get('target_approver_ids') else []
+                        item['approval_stages'] = approval_stages
+                        approvals.append(item)
+
+                return approvals
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return []
+
     def resolve_archive_approval(self, approval_id, status, approver_id, approver_username, reject_reason=None):
         """处理归档审批（通过/驳回）"""
         try:

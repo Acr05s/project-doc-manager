@@ -389,6 +389,94 @@ export async function handleEditProjectSave(e) {
 }
 
 /**
+ * 打开归档审批配置弹窗
+ */
+export async function openArchiveApprovalConfigModal(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}`);
+        const result = await response.json();
+        if (result.status !== 'success' || !result.project) {
+            showNotification('加载项目信息失败', 'error');
+            return;
+        }
+
+        const project = result.project;
+        document.getElementById('archiveConfigProjectId').value = projectId;
+
+        // 设置审批模式单选框
+        const approvalMode = project.archive_approval_mode || 'two_level';
+        const radioOptions = document.getElementsByName('archiveApprovalMode');
+        radioOptions.forEach(radio => {
+            radio.checked = (radio.value === approvalMode);
+        });
+
+        const modal = document.getElementById('archiveApprovalConfigModal');
+        if (modal) {
+            modal.classList.add('show');
+            modal.style.display = 'flex';
+        }
+    } catch (error) {
+        console.error('打开归档审批配置弹窗失败:', error);
+        showNotification('加载项目配置失败', 'error');
+    }
+}
+
+/**
+ * 关闭归档审批配置弹窗
+ */
+export function closeArchiveApprovalConfigModal() {
+    const modal = document.getElementById('archiveApprovalConfigModal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * 处理保存归档审批配置
+ */
+export async function handleArchiveApprovalConfigSave(e) {
+    e.preventDefault();
+
+    const projectId = document.getElementById('archiveConfigProjectId').value;
+    const approvalMode = document.querySelector('input[name="archiveApprovalMode"]:checked').value;
+
+    if (!projectId || !approvalMode) {
+        showNotification('参数错误', 'error');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const response = await fetch(`/api/projects/${projectId}/config`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                archive_approval_mode: approvalMode
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            showNotification('归档审批配置保存成功', 'success');
+            closeArchiveApprovalConfigModal();
+            // 如果当前打开的就是该项目，更新apState
+            if (appState.currentProjectId === projectId && appState.projectConfig) {
+                appState.projectConfig.archive_approval_mode = approvalMode;
+            }
+        } else {
+            showNotification('保存失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('保存归档审批配置失败:', error);
+        showNotification('保存失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
  * 处理加载项目配置（Excel）
  */
 export async function handleLoadProject(e) {

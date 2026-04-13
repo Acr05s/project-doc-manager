@@ -302,6 +302,39 @@ def get_archive_requests(project_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def get_pending_archive_approvals():
+    """获取当前用户需要审批的文档归档请求"""
+    try:
+        user_id = int(current_user.id)
+        user_role = current_user.role
+
+        # 获取当前用户待审批的记录（status='pending' 且 current_stage 对应用户角色）
+        pending_approvals = user_manager.get_pending_archive_approvals_for_user(user_id, user_role)
+
+        # 格式化返回数据
+        formatted = []
+        for approval in pending_approvals:
+            approval['id'] = approval.get('uuid', approval['id'])
+            # 解析approval_stages JSON
+            if isinstance(approval.get('approval_stages'), str):
+                try:
+                    approval['approval_stages'] = json.loads(approval['approval_stages'])
+                except:
+                    approval['approval_stages'] = []
+            # 解析stage_history JSON
+            if isinstance(approval.get('stage_history'), str):
+                try:
+                    approval['stage_history'] = json.loads(approval['stage_history'])
+                except:
+                    approval['stage_history'] = []
+            formatted.append(approval)
+
+        return jsonify({'status': 'success', 'approvals': formatted})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+
 def approve_archive_request(project_id):
     """审批当前阶段的归档请求（支持多级审批）"""
     try:

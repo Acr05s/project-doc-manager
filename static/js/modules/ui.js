@@ -156,6 +156,44 @@ export function setupEventListeners() {
         });
     }
 
+    // 文档归档与审批下拉菜单
+    const archiveAndApprovalBtn = document.getElementById('archiveAndApprovalBtn');
+    const archiveAndApprovalDropdown = document.getElementById('archiveAndApprovalDropdown');
+    if (archiveAndApprovalBtn && archiveAndApprovalDropdown) {
+        archiveAndApprovalBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            archiveAndApprovalDropdown.classList.toggle('show');
+        });
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!archiveAndApprovalBtn.contains(e.target) && !archiveAndApprovalDropdown.contains(e.target)) {
+                archiveAndApprovalDropdown.classList.remove('show');
+            }
+        });
+    }
+
+    // 配置审批流程按钮
+    const openArchiveConfigBtn = document.getElementById('openArchiveConfigBtn');
+    if (openArchiveConfigBtn) {
+        openArchiveConfigBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            import('./project.js').then(({ openArchiveApprovalConfigModal }) => {
+                const projectId = appState?.currentProjectId;
+                if (projectId) {
+                    openArchiveApprovalConfigModal(projectId);
+                } else {
+                    showNotification('请先选择项目', 'error');
+                }
+            });
+            // 关闭下拉菜单
+            if (archiveAndApprovalDropdown) {
+                archiveAndApprovalDropdown.classList.remove('show');
+            }
+        });
+    }
+
     // 新建项目 - 使用document.getElementById确保获取到元素
     const newProjectBtn = document.getElementById('newProjectBtn');
     const newProjectModal = document.getElementById('newProjectModal');
@@ -173,13 +211,23 @@ export function setupEventListeners() {
     if (newProjectForm) {
         newProjectForm.addEventListener('submit', handleCreateProject);
     }
-    
+
     // 编辑项目表单提交
     const editProjectForm = document.getElementById('editProjectForm');
     if (editProjectForm) {
         editProjectForm.addEventListener('submit', (e) => {
             import('./project.js').then(({ handleEditProjectSave }) => {
                 handleEditProjectSave(e);
+            });
+        });
+    }
+
+    // 归档审批配置表单提交
+    const archiveApprovalConfigForm = document.getElementById('archiveApprovalConfigForm');
+    if (archiveApprovalConfigForm) {
+        archiveApprovalConfigForm.addEventListener('submit', (e) => {
+            import('./project.js').then(({ handleArchiveApprovalConfigSave }) => {
+                handleArchiveApprovalConfigSave(e);
             });
         });
     }
@@ -1858,12 +1906,12 @@ export function updateSelectedDocumentsList() {
 export function showProjectButtons() {
     const user = getCurrentUser();
     const isContractor = user && user.role === 'contractor';
-    
+
     const menus = [
-        'documentRequirementsMenu', 'documentManagementMenu', 
-        'acceptanceMenu'
+        'documentRequirementsMenu', 'documentManagementMenu',
+        'acceptanceMenu', 'archiveAndApprovalMenu'
     ];
-    
+
     menus.forEach(menuId => {
         const menu = document.getElementById(menuId);
         if (!menu) return;
@@ -1893,10 +1941,10 @@ export function showProjectButtons() {
  */
 export function hideProjectButtons() {
     const menus = [
-        'documentRequirementsMenu', 'documentManagementMenu', 
-        'acceptanceMenu'
+        'documentRequirementsMenu', 'documentManagementMenu',
+        'acceptanceMenu', 'archiveAndApprovalMenu'
     ];
-    
+
     menus.forEach(menuId => {
         const menu = document.getElementById(menuId);
         if (menu) menu.style.display = 'none';

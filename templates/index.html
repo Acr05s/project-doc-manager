@@ -593,6 +593,17 @@
                         <a href="#" class="dropdown-item" id="downloadPackageBtn">📦 打包下载</a>
                     </div>
                 </div>
+
+                <!-- 文档归档与审批下拉菜单 -->
+                <div id="archiveAndApprovalMenu" class="dropdown" style="display:none;">
+                    <button class="btn btn-warning dropdown-toggle" type="button" id="archiveAndApprovalBtn">
+                        📋 文档归档与审批
+                    </button>
+                    <div class="dropdown-menu" id="archiveAndApprovalDropdown">
+                        <a href="#" class="dropdown-item" id="openArchiveConfigBtn">⚙️ 配置审批流程</a>
+                        <a href="#" class="dropdown-item" id="viewArchiveRequestsBtn">📨 查看审批请求</a>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -605,6 +616,7 @@
             <div class="operation-sidebar-body" id="systemManagementDropdown">
                 <a href="#" class="sidebar-menu-item" id="systemSettingsMenuItem">⚙️ 系统设置</a>
                 <a href="#" class="sidebar-menu-item" id="userApprovalBtn">👤 用户审核</a>
+                <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn">📋 文档归档审批</a>
                 <a href="#" class="sidebar-menu-item" id="userManagementMenuItem">👤 用户管理</a>
                 <a href="#" class="sidebar-menu-item" id="orgManagementMenuItem">🏢 承建单位管理</a>
                 <a href="#" class="sidebar-menu-item" id="projectManagementMenuItem">📁 项目管理</a>
@@ -1181,6 +1193,44 @@
 
                 <button type="submit" class="btn btn-success">保存修改</button>
                 <button type="button" class="btn btn-warning" id="transferProjectBtn" style="margin-left:10px;" onclick="openTransferProjectModal()">移交所有权</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 归档审批配置弹窗 -->
+    <div id="archiveApprovalConfigModal" class="modal">
+        <div class="modal-content" style="max-width:500px;">
+            <span class="close" onclick="closeArchiveApprovalConfigModal()">&times;</span>
+            <h2>文档归档审批流程配置</h2>
+            <input type="hidden" id="archiveConfigProjectId">
+
+            <form id="archiveApprovalConfigForm">
+                <div class="form-group">
+                    <label>审批模式 *</label>
+                    <div style="margin-top: 10px;">
+                        <div style="margin-bottom: 12px;">
+                            <input type="radio" id="approvalModeTwoLevel" name="archiveApprovalMode" value="two_level" checked>
+                            <label for="approvalModeTwoLevel" style="display:inline; margin-left:8px;">两级审批</label>
+                            <div style="font-size:13px; color:#666; margin-left:24px; margin-top:4px;">承包单位项目经理审批 → PMO审批</div>
+                        </div>
+                        <div>
+                            <input type="radio" id="approvalModePmoOnly" name="archiveApprovalMode" value="pmo_only">
+                            <label for="approvalModePmoOnly" style="display:inline; margin-left:8px;">PMO直接审批</label>
+                            <div style="font-size:13px; color:#666; margin-left:24px; margin-top:4px;">跳过项目经理，直接由PMO审批</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px; padding: 12px; background:#f0f8ff; border-radius:4px; font-size:13px; color:#333;">
+                    <strong>说明：</strong><br>
+                    • <strong>两级审批（推荐）：</strong>通过项目经理初审后送PMO最终审批，确保文档质量<br>
+                    • <strong>PMO直接审批：</strong>适用于特殊项目，文档直接由PMO审批
+                </div>
+
+                <div style="margin-top: 20px; text-align:right;">
+                    <button type="button" class="btn btn-secondary" onclick="closeArchiveApprovalConfigModal()">取消</button>
+                    <button type="submit" class="btn btn-success" style="margin-left:10px;">保存配置</button>
+                </div>
             </form>
         </div>
     </div>
@@ -2085,7 +2135,44 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- 文档归档审批模态框 -->
+    <div id="archiveApprovalModal" class="modal">
+        <div class="modal-content" style="max-width: 1000px;">
+            <div class="modal-header">
+                <h2>📋 文档归档审批</h2>
+                <span class="close" onclick="closeArchiveApprovalModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="pendingArchiveApprovalsContainer" style="max-height: calc(85vh - 150px); overflow-y: auto;">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 归档审批详情确认弹窗 -->
+    <div id="archiveApprovalConfirmModal" class="modal" style="z-index: 10005;">
+        <div class="modal-content" style="max-width: 550px;">
+            <div class="modal-header">
+                <h2 id="archiveApprovalConfirmTitle">文档归档审批</h2>
+                <span class="close" onclick="closeArchiveApprovalConfirmModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="archiveApprovalInfo" style="background:#f8f9fa; padding:12px; border-radius:6px; margin-bottom:15px; font-size:13px;"></div>
+                <div class="form-group">
+                    <label for="archiveApprovalRemark">审批意见（可选）</label>
+                    <textarea id="archiveApprovalRemark" class="form-control" rows="2" placeholder="填写审批意见"></textarea>
+                </div>
+                <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button class="btn btn-secondary" onclick="closeArchiveApprovalConfirmModal()">取消</button>
+                    <button id="archiveApprovalRejectBtn" class="btn btn-warning">驳回</button>
+                    <button id="archiveApprovalConfirmBtn" class="btn btn-success">批准</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 消息中心模态框 -->
     <div id="messageModal" class="modal">
         <div class="modal-content" style="max-width: 700px;">
