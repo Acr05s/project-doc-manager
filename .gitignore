@@ -78,4 +78,5 @@ test_out/
 
 # Backup directories
 backup_*/
+backup_20260411121914/
 projects_json_backup/

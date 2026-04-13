@@ -4465,3 +4465,69 @@ input[type="month"].compact-input {
 .sidebar-overlay.show {
     display: block;
 }
+
+/* 文档变化统计样式 */
+.doc-changes-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.doc-change-tab {
+    padding: 8px 16px;
+    border: 1px solid #dee2e6;
+    border-radius: 20px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.doc-change-tab:hover {
+    background: #f8f9fa;
+}
+
+.doc-change-tab.active {
+    background: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+.doc-changes-content {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.doc-changes-chart {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.doc-changes-details {
+    margin-top: 20px;
+}
+
+.doc-changes-details h4 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.doc-change-item {
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    transition: transform 0.2s ease;
+}
+
+.doc-change-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+}
+
+.doc-change-type {
+    font-weight: 500;
+}
+

@@ -114,22 +114,32 @@ function renderOverviewReport(data) {
     const accTotal = acc.accepted + acc.partial + acc.pending || 1;
     const docsTotal = docs.complete + docs.partial + docs.empty || 1;
     
-    return `
-        <div class="dashboard-cards">
-            <div class="dashboard-card primary">
-                <div class="card-icon">📁</div>
-                <div class="card-info">
-                    <div class="card-value">${data.total_projects}</div>
-                    <div class="card-label">项目总数</div>
-                </div>
+    // 获取用户角色
+    const { authState } = window;
+    const userRole = authState?.user?.role || '';
+    
+    let cardsHTML = `
+        <div class="dashboard-card primary">
+            <div class="card-icon">📁</div>
+            <div class="card-info">
+                <div class="card-value">${data.total_projects}</div>
+                <div class="card-label">项目总数</div>
             </div>
+        </div>`;
+    
+    // 只有非 contractor 角色显示承建单位卡片
+    if (userRole !== 'contractor') {
+        cardsHTML += `
             <div class="dashboard-card success">
                 <div class="card-icon">🏢</div>
                 <div class="card-info">
                     <div class="card-value">${data.total_organizations}</div>
                     <div class="card-label">承建单位</div>
                 </div>
-            </div>
+            </div>`;
+    }
+    
+    cardsHTML += `
             <div class="dashboard-card warning">
                 <div class="card-icon">✅</div>
                 <div class="card-info">
@@ -143,7 +153,11 @@ function renderOverviewReport(data) {
                     <div class="card-value">${docs.completion_rate}%</div>
                     <div class="card-label">资料完整率</div>
                 </div>
-            </div>
+            </div>`;
+    
+    return `
+        <div class="dashboard-cards">
+            ${cardsHTML}
         </div>
         
         <div class="dashboard-charts">
@@ -199,10 +213,34 @@ function renderOverviewReport(data) {
                         <span class="progress-value">${docs.empty}</span>
                     </div>
                 </div>
-                <div class="chart-summary" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
-                    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #666;">
-                        <span>需求文档总数: <strong>${docs.total_required}</strong></span>
-                        <span>已归档文档数: <strong>${docs.total_completed}</strong></span>
+        <div class="chart-summary" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+            <div style="display: flex; justify-content: space-between; font-size: 13px; color: #666;">
+                <span>需求文档总数: <strong>${docs.total_required}</strong></span>
+                <span>已归档文档数: <strong>${docs.total_completed}</strong></span>
+            </div>
+        </div>
+            </div>
+        </div>
+        
+        <!-- 文档变化统计 -->
+        <div class="dashboard-charts" style="margin-top: 20px;">
+            <div class="chart-box" style="width: 100%;">
+                <h3>文档变化情况统计</h3>
+                <div class="doc-changes-tabs" style="margin-bottom: 15px;">
+                    <button class="doc-change-tab active" data-period="day">今日</button>
+                    <button class="doc-change-tab" data-period="3days">最近3天</button>
+                    <button class="doc-change-tab" data-period="7days">最近7天</button>
+                    <button class="doc-change-tab" data-period="month">最近1个月</button>
+                </div>
+                <div class="doc-changes-content">
+                    <div class="doc-changes-chart" style="height: 300px; margin-bottom: 20px;">
+                        <canvas id="docChangesChart"></canvas>
+                    </div>
+                    <div class="doc-changes-details">
+                        <h4>变化明细</h4>
+                        <div class="doc-changes-list" id="docChangesList">
+                            <div class="loading" style="padding: 20px; text-align: center;">加载中...</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -916,3 +954,275 @@ export async function sendApproverMessage() {
         showNotification(result.message || '发送失败', 'error');
     }
 }
+
+// 文档变化统计功能
+let docChangesChartInstance = null;
+
+/**
+ * 初始化文档变化统计
+ */
+export function initDocChangesStats() {
+    // 绑定标签页事件
+    document.querySelectorAll('.doc-change-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.doc-change-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            loadDocChangesData(tab.dataset.period);
+        });
+    });
+    
+    // 初始加载今日数据
+    loadDocChangesData('day');
+}
+
+/**
+ * 加载文档变化数据
+ */
+async function loadDocChangesData(period) {
+    try {
+        // 模拟数据 - 实际应从API获取
+        const mockData = getMockDocChangesData(period);
+        
+        // 更新图表
+        updateDocChangesChart(mockData);
+        
+        // 更新明细列表
+        updateDocChangesList(mockData.details);
+    } catch (error) {
+        console.error('加载文档变化数据失败:', error);
+        document.getElementById('docChangesList').innerHTML = '<p class="empty-tip">加载失败</p>';
+    }
+}
+
+/**
+ * 更新文档变化图表
+ */
+function updateDocChangesChart(data) {
+    const ctx = document.getElementById('docChangesChart');
+    if (!ctx) return;
+    
+    if (docChangesChartInstance) {
+        docChangesChartInstance.destroy();
+    }
+    
+    docChangesChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: '新增文档',
+                    data: data.added,
+                    backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                    borderColor: 'rgba(40, 167, 69, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: '更新文档',
+                    data: data.updated,
+                    backgroundColor: 'rgba(23, 162, 184, 0.6)',
+                    borderColor: 'rgba(23, 162, 184, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: '删除文档',
+                    data: data.deleted,
+                    backgroundColor: 'rgba(220, 53, 69, 0.6)',
+                    borderColor: 'rgba(220, 53, 69, 1)',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' }
+            },
+            scales: {
+                y: { beginAtZero: true, ticks: { precision: 0 } }
+            }
+        }
+    });
+}
+
+/**
+ * 更新文档变化明细列表
+ */
+function updateDocChangesList(details) {
+    const container = document.getElementById('docChangesList');
+    if (!container) return;
+    
+    if (!details.length) {
+        container.innerHTML = '<p class="empty-tip">暂无变化记录</p>';
+        return;
+    }
+    
+    container.innerHTML = details.map(item => `
+        <div class="doc-change-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee;">
+            <div style="flex: 1;">
+                <div style="font-weight: 500;">${item.doc_name}</div>
+                <div style="font-size: 12px; color: #666;">${item.project_name} - ${item.cycle}</div>
+                <div style="font-size: 11px; color: #999;">${item.time}</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <span class="doc-change-type" style="padding: 2px 8px; border-radius: 12px; font-size: 12px; background-color: ${getChangeTypeColor(item.type)}; color: white;">
+                    ${item.type === 'added' ? '新增' : item.type === 'updated' ? '更新' : '删除'}
+                </span>
+                <button class="btn btn-sm btn-primary" onclick="previewDocument('${item.doc_id}')" style="padding: 4px 8px; font-size: 12px;">预览</button>
+                <button class="btn btn-sm btn-secondary" onclick="jumpToDocument('${item.project_id}', '${item.cycle}', '${item.doc_name}')" style="padding: 4px 8px; font-size: 12px;">管理</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * 获取变化类型的颜色
+ */
+function getChangeTypeColor(type) {
+    switch (type) {
+        case 'added': return '#28a745';
+        case 'updated': return '#17a2b8';
+        case 'deleted': return '#dc3545';
+        default: return '#6c757d';
+    }
+}
+
+/**
+ * 跳转到文档管理界面
+ */
+function jumpToDocument(projectId, cycle, docName) {
+    // 加载项目
+    selectProject(projectId).then(() => {
+        // 切换到指定周期
+        appState.currentCycle = cycle;
+        // 这里可以添加更多逻辑来定位到具体文档
+        showNotification(`已跳转到项目: ${projectId}, 周期: ${cycle}`, 'success');
+    }).catch(error => {
+        console.error('跳转失败:', error);
+        showNotification('跳转失败: ' + error.message, 'error');
+    });
+}
+
+/**
+ * 获取模拟文档变化数据
+ */
+function getMockDocChangesData(period) {
+    const now = new Date();
+    let labels = [];
+    let added = [];
+    let updated = [];
+    let deleted = [];
+    let details = [];
+    
+    // 根据周期生成数据
+    switch (period) {
+        case 'day':
+            // 今日每小时数据
+            for (let i = 0; i < 24; i++) {
+                const hour = i.toString().padStart(2, '0');
+                labels.push(`${hour}:00`);
+                added.push(Math.floor(Math.random() * 5));
+                updated.push(Math.floor(Math.random() * 3));
+                deleted.push(Math.floor(Math.random() * 2));
+            }
+            // 生成明细
+            for (let i = 0; i < 10; i++) {
+                details.push({
+                    doc_id: `doc_${Date.now()}_${i}`,
+                    doc_name: `文档${i + 1}`,
+                    project_name: `项目${Math.floor(Math.random() * 3) + 1}`,
+                    cycle: `周期${Math.floor(Math.random() * 2) + 1}`,
+                    project_id: `project_${Math.floor(Math.random() * 3) + 1}`,
+                    type: ['added', 'updated', 'deleted'][Math.floor(Math.random() * 3)],
+                    time: `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`
+                });
+            }
+            break;
+        case '3days':
+            // 最近3天数据
+            for (let i = 2; i >= 0; i--) {
+                const date = new Date(now);
+                date.setDate(date.getDate() - i);
+                labels.push(`${date.getMonth() + 1}/${date.getDate()}`);
+                added.push(Math.floor(Math.random() * 15));
+                updated.push(Math.floor(Math.random() * 10));
+                deleted.push(Math.floor(Math.random() * 5));
+            }
+            // 生成明细
+            for (let i = 0; i < 15; i++) {
+                details.push({
+                    doc_id: `doc_${Date.now()}_${i}`,
+                    doc_name: `文档${i + 1}`,
+                    project_name: `项目${Math.floor(Math.random() * 3) + 1}`,
+                    cycle: `周期${Math.floor(Math.random() * 2) + 1}`,
+                    project_id: `project_${Math.floor(Math.random() * 3) + 1}`,
+                    type: ['added', 'updated', 'deleted'][Math.floor(Math.random() * 3)],
+                    time: `${Math.floor(Math.random() * 3) + 1}天前`
+                });
+            }
+            break;
+        case '7days':
+            // 最近7天数据
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(now);
+                date.setDate(date.getDate() - i);
+                labels.push(`${date.getMonth() + 1}/${date.getDate()}`);
+                added.push(Math.floor(Math.random() * 20));
+                updated.push(Math.floor(Math.random() * 15));
+                deleted.push(Math.floor(Math.random() * 8));
+            }
+            // 生成明细
+            for (let i = 0; i < 20; i++) {
+                details.push({
+                    doc_id: `doc_${Date.now()}_${i}`,
+                    doc_name: `文档${i + 1}`,
+                    project_name: `项目${Math.floor(Math.random() * 3) + 1}`,
+                    cycle: `周期${Math.floor(Math.random() * 2) + 1}`,
+                    project_id: `project_${Math.floor(Math.random() * 3) + 1}`,
+                    type: ['added', 'updated', 'deleted'][Math.floor(Math.random() * 3)],
+                    time: `${Math.floor(Math.random() * 7) + 1}天前`
+                });
+            }
+            break;
+        case 'month':
+            // 最近4周数据
+            for (let i = 3; i >= 0; i--) {
+                labels.push(`第${4 - i}周`);
+                added.push(Math.floor(Math.random() * 50));
+                updated.push(Math.floor(Math.random() * 30));
+                deleted.push(Math.floor(Math.random() * 15));
+            }
+            // 生成明细
+            for (let i = 0; i < 25; i++) {
+                details.push({
+                    doc_id: `doc_${Date.now()}_${i}`,
+                    doc_name: `文档${i + 1}`,
+                    project_name: `项目${Math.floor(Math.random() * 3) + 1}`,
+                    cycle: `周期${Math.floor(Math.random() * 2) + 1}`,
+                    project_id: `project_${Math.floor(Math.random() * 3) + 1}`,
+                    type: ['added', 'updated', 'deleted'][Math.floor(Math.random() * 3)],
+                    time: `${Math.floor(Math.random() * 30) + 1}天前`
+                });
+            }
+            break;
+    }
+    
+    return {
+        labels,
+        added,
+        updated,
+        deleted,
+        details
+    };
+}
+
+// 确保在页面加载后初始化文档变化统计
+document.addEventListener('DOMContentLoaded', () => {
+    // 延迟初始化，确保DOM已完全加载
+    setTimeout(() => {
+        if (document.querySelector('.doc-change-tab')) {
+            initDocChangesStats();
+        }
+    }, 1000);
+});
