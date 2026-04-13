@@ -26,6 +26,7 @@ venv/
 ENV/
 env/
 .venv
+backup_20260411121914/
 
 # IDE
 .vscode/
