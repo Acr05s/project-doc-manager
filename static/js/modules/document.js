@@ -3191,6 +3191,7 @@ async function promptApprovalCodeForArchive(message, requireNewCode = false, app
  * 弹出选择审批人的模态框（用于提交归档审核）
  */
 async function promptSelectApprovers(approvers) {
+    console.log('[DEBUG] promptSelectApprovers called with approvers:', approvers);
     return new Promise((resolve) => {
         // 构建 checkbox 列表
         let html = `<div style="margin-bottom:15px;color:#666;font-size:13px;">选择接收归档审批通知的项目经理：</div>`;
@@ -3199,7 +3200,7 @@ async function promptSelectApprovers(approvers) {
             const roleLabel = a.role === 'admin' ? '管理员' : a.role === 'pmo' ? 'PMO' : '项目经理';
             const orgLabel = a.organization ? ` - ${a.organization}` : '';
             html += `<label style="display:flex;align-items:center;padding:6px 8px;border-radius:4px;cursor:pointer;margin-bottom:4px;background:#f8f9fa;">
-                <input type="checkbox" value="${a.id}" checked style="margin-right:8px;"> 
+                <input type="checkbox" value="${a.id}" checked style="margin-right:8px;">
                 <span>${a.username}（${roleLabel}${orgLabel}）</span>
             </label>`;
         }
@@ -3217,18 +3218,32 @@ async function promptSelectApprovers(approvers) {
                 </div>
             </div>
         `;
+        console.log('[DEBUG] Appending modal to document.body');
         document.body.appendChild(modal);
+        console.log('[DEBUG] Modal appended, attaching event listeners');
 
-        modal.querySelector('#approver-cancel-btn').onclick = () => {
+        const cancelBtn = modal.querySelector('#approver-cancel-btn');
+        const confirmBtn = modal.querySelector('#approver-confirm-btn');
+
+        if (!cancelBtn || !confirmBtn) {
+            console.error('[ERROR] Modal buttons not found!');
+            resolve(null);
+            return;
+        }
+
+        cancelBtn.onclick = () => {
+            console.log('[DEBUG] Cancel button clicked');
             modal.remove();
             resolve(null);
         };
-        modal.querySelector('#approver-confirm-btn').onclick = () => {
+        confirmBtn.onclick = () => {
             const checked = Array.from(modal.querySelectorAll('input[type=checkbox]:checked'))
                 .map(cb => Number(cb.value));
+            console.log('[DEBUG] Confirm button clicked, selected approvers:', checked);
             modal.remove();
             resolve(checked);
         };
+        console.log('[DEBUG] Event listeners attached');
     });
 }
 
@@ -3236,22 +3251,40 @@ async function promptSelectApprovers(approvers) {
  * 提交归档审核请求（新流程）
  */
 async function submitArchiveReview(cycle, docNames) {
-    // 获取可选审批人
-    const approversResult = await getArchiveApprovers(appState.currentProjectId);
-    if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
-        showNotification('未找到可审批的项目经理，请联系管理员', 'error');
-        return { status: 'error', message: '无可用审批人' };
-    }
+    try {
+        console.log('[DEBUG] submitArchiveReview called - cycle:', cycle, 'docNames:', docNames, 'projectId:', appState.currentProjectId);
 
-    // 弹出选择审批人
-    const selectedIds = await promptSelectApprovers(approversResult.approvers);
-    if (!selectedIds || selectedIds.length === 0) {
-        return { status: 'cancelled', message: '未选择审批人' };
-    }
+        // 获取可选审批人
+        const approversResult = await getArchiveApprovers(appState.currentProjectId);
+        console.log('[DEBUG] getArchiveApprovers response:', approversResult);
 
-    // 提交审核请求
-    const result = await submitArchiveRequest(appState.currentProjectId, cycle, docNames, selectedIds);
-    return result;
+        if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
+            console.error('[ERROR] No approvers found - status:', approversResult.status, 'approvers:', approversResult.approvers);
+            showNotification('未找到可审批的项目经理，请联系管理员', 'error');
+            return { status: 'error', message: '无可用审批人' };
+        }
+
+        console.log('[DEBUG] Found approvers:', approversResult.approvers.length);
+
+        // 弹出选择审批人
+        const selectedIds = await promptSelectApprovers(approversResult.approvers);
+        console.log('[DEBUG] User selected approvers:', selectedIds);
+
+        if (!selectedIds || selectedIds.length === 0) {
+            console.log('[DEBUG] User cancelled approver selection');
+            return { status: 'cancelled', message: '未选择审批人' };
+        }
+
+        // 提交审核请求
+        console.log('[DEBUG] Submitting archive request with selectedIds:', selectedIds);
+        const result = await submitArchiveRequest(appState.currentProjectId, cycle, docNames, selectedIds);
+        console.log('[DEBUG] submitArchiveRequest result:', result);
+        return result;
+    } catch (error) {
+        console.error('[ERROR] submitArchiveReview exception:', error);
+        showNotification('提交审核失败: ' + error.message, 'error');
+        return { status: 'error', message: error.message };
+    }
 }
 
 /**
@@ -3447,17 +3480,20 @@ export async function archiveDocument(cycle, docName) {
             return result;
         } else {
             // 普通用户：只能提交审核
+            console.log('[DEBUG] Regular contractor - submitting archive review. User role:', authState.user?.role);
             const result = await submitArchiveReview(cycle, [docName]);
+            console.log('[DEBUG] Archive review result:', result);
             if (result.status === 'success') {
                 showNotification('归档审核请求已提交，等待项目经理审批', 'success');
                 await renderCycleDocuments(cycle);
             } else if (result.status !== 'cancelled') {
+                console.error('[ERROR] Archive review failed:', result);
                 showNotification(result.message || '提交审核失败', 'error');
             }
             return result;
         }
     } catch (error) {
-        console.error('归档文档失败:', error);
+        console.error('[ERROR] archiveDocument exception:', error, error.stack);
         showNotification('归档失败: ' + error.message, 'error');
         return { status: 'error', message: error.message };
     }

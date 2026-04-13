@@ -286,6 +286,12 @@ export async function archiveProjectDocuments(projectId, cycle, docNames, approv
 
 export async function submitArchiveRequest(projectId, cycle, docNames, targetApproverIds) {
     try {
+        console.log('[DEBUG] submitArchiveRequest called -', {
+            projectId,
+            cycle,
+            docNames,
+            targetApproverIds
+        });
         const response = await fetch(`/api/projects/${projectId}/archive-request`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -295,10 +301,19 @@ export async function submitArchiveRequest(projectId, cycle, docNames, targetApp
                 target_approver_ids: targetApproverIds
             })
         });
-        return await response.json();
+        const data = await response.json();
+        console.log('[DEBUG] submitArchiveRequest response:', {
+            ok: response.ok,
+            status: response.status,
+            data: data
+        });
+        if (!response.ok) {
+            console.error('[ERROR] submitArchiveRequest HTTP error:', response.status, data);
+        }
+        return data;
     } catch (error) {
-        console.error('提交归档审批失败:', error);
-        return { status: 'error', message: '请求失败' };
+        console.error('[ERROR] submitArchiveRequest exception:', error);
+        return { status: 'error', message: '请求失败: ' + error.message };
     }
 }
 
@@ -355,11 +370,21 @@ export async function rejectArchiveRequest(projectId, approvalId, approverId, ap
 
 export async function getArchiveApprovers(projectId) {
     try {
+        console.log('[DEBUG] getArchiveApprovers called for projectId:', projectId);
         const response = await fetch(`/api/projects/${projectId}/archive-approvers`);
-        return await response.json();
+        const data = await response.json();
+        console.log('[DEBUG] getArchiveApprovers response:', {
+            ok: response.ok,
+            status: response.status,
+            data: data
+        });
+        if (!response.ok) {
+            console.error('[ERROR] getArchiveApprovers HTTP error:', response.status);
+        }
+        return data;
     } catch (error) {
-        console.error('获取审批人列表失败:', error);
-        return { status: 'error', message: '请求失败' };
+        console.error('[ERROR] getArchiveApprovers exception:', error);
+        return { status: 'error', message: '请求失败: ' + error.message };
     }
 }
 

@@ -14,52 +14,70 @@ from .utils import get_doc_manager
 def get_archive_approvers(project_id):
     """获取可审批的项目经理列表（同组织的 project_admin + admin + pmo）"""
     try:
+        import sys
+        print(f'[DEBUG] get_archive_approvers called - project_id: {project_id}', file=sys.stderr, flush=True)
         approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'project_admin'])
+        print(f'[DEBUG] Found {len(approvers) if approvers else 0} approvers with roles', file=sys.stderr, flush=True)
+
         # 加载项目获取承建单位信息
         doc_manager = get_doc_manager()
         project_result = doc_manager.load_project(project_id)
         party_b = ''
         if project_result.get('status') == 'success':
             party_b = (project_result.get('project', {}).get('party_b', '') or '').strip()
+            print(f'[DEBUG] Project party_b: {party_b}', file=sys.stderr, flush=True)
 
         result = []
         for a in approvers:
             if a.get('status') != 'active':
+                print(f'[DEBUG] Skipping user {a.get("username")} - status not active: {a.get("status")}', file=sys.stderr, flush=True)
                 continue
             # project_admin 需要组织匹配（同承建单位）
             if a['role'] == 'project_admin':
                 user_org = (a.get('organization') or '').strip()
                 if party_b and user_org and user_org != party_b:
+                    print(f'[DEBUG] Skipping project_admin {a.get("username")} - org mismatch: {user_org} != {party_b}', file=sys.stderr, flush=True)
                     continue
                 # 如果项目未设置承建单位或用户无组织，也允许
+            print(f'[DEBUG] Including approver: {a.get("username")} ({a.get("role")})', file=sys.stderr, flush=True)
             result.append({
                 'id': a.get('uuid', a['id']),
                 'username': a['username'],
                 'role': a['role'],
                 'organization': a.get('organization', '')
             })
+
+        print(f'[DEBUG] Returning {len(result)} approvers', file=sys.stderr, flush=True)
         return jsonify({'status': 'success', 'approvers': result})
     except Exception as e:
+        import traceback
+        print(f'[ERROR] get_archive_approvers failed: {e}', file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 def submit_archive_request(project_id):
     """提交归档审核请求"""
     try:
+        import sys
         data = request.get_json() or {}
         cycle = (data.get('cycle') or '').strip()
         doc_names = data.get('doc_names', [])
         doc_name = data.get('doc_name')
         target_approver_ids = data.get('target_approver_ids', [])
 
+        print(f'[DEBUG] submit_archive_request - project_id: {project_id}, cycle: {cycle}, doc_names: {doc_names}, target_approver_ids: {target_approver_ids}', file=sys.stderr, flush=True)
+
         if doc_name and not doc_names:
             doc_names = [doc_name]
 
         if not cycle or not doc_names:
+            print(f'[DEBUG] Invalid parameters - cycle: {cycle}, doc_names: {doc_names}', file=sys.stderr, flush=True)
             return jsonify({'status': 'error', 'message': '归档参数不完整'}), 400
 
         # 检查是否已存在相同的待审批请求
         if user_manager.has_pending_archive_approval(project_id, cycle, doc_names):
+            print(f'[DEBUG] Duplicate pending request found', file=sys.stderr, flush=True)
             return jsonify({'status': 'error', 'message': '已存在相同的待审批请求，请勿重复提交'}), 400
 
         requester_id = int(current_user.id)
@@ -70,6 +88,8 @@ def submit_archive_request(project_id):
             requester_id, requester_username,
             target_approver_ids
         )
+
+        print(f'[DEBUG] create_archive_approval result: {result}', file=sys.stderr, flush=True)
 
         if result.get('status') == 'success':
             approval_uuid = result['uuid']
@@ -87,6 +107,7 @@ def submit_archive_request(project_id):
             if target_approver_ids:
                 for approver_id in target_approver_ids:
                     if approver_id != requester_id:
+                        print(f'[DEBUG] Sending message to approver {approver_id}', file=sys.stderr, flush=True)
                         message_manager.send_message(
                             receiver_id=approver_id,
                             title='归档审批请求',
@@ -106,6 +127,10 @@ def submit_archive_request(project_id):
 
         return jsonify(result)
     except Exception as e:
+        import traceback
+        import sys
+        print(f'[ERROR] submit_archive_request failed: {e}', file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
