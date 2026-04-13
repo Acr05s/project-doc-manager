@@ -232,6 +232,26 @@ export function setupEventListeners() {
         });
     }
 
+    // 归档审批确认按钮
+    const archiveApprovalConfirmBtn = document.getElementById('archiveApprovalConfirmBtn');
+    if (archiveApprovalConfirmBtn) {
+        archiveApprovalConfirmBtn.addEventListener('click', (e) => {
+            import('./archive-approval.js').then(({ handleArchiveApprovalConfirm }) => {
+                handleArchiveApprovalConfirm();
+            });
+        });
+    }
+
+    // 归档审批驳回按钮
+    const archiveApprovalRejectBtn = document.getElementById('archiveApprovalRejectBtn');
+    if (archiveApprovalRejectBtn) {
+        archiveApprovalRejectBtn.addEventListener('click', (e) => {
+            import('./archive-approval.js').then(({ handleArchiveApprovalReject }) => {
+                handleArchiveApprovalReject();
+            });
+        });
+    }
+
     // 加载项目配置（Excel）
     const loadProjectBtn = document.getElementById('loadProjectBtn');
     const loadProjectModal = document.getElementById('loadProjectModal');

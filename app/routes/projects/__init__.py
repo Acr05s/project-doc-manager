@@ -3,7 +3,7 @@
 from flask import Blueprint
 from flask_login import login_required
 from .utils import init_doc_manager, project_access_required
-from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects
+from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
@@ -51,6 +51,7 @@ project_bp.route('/import/merge', methods=['POST'])(login_required(import_projec
 # ===== 含 project_id 的路由：需 project_access_required =====
 project_bp.route('/<project_id>', methods=['GET'])(project_access_required(get_project))
 project_bp.route('/<project_id>', methods=['PUT'])(project_access_required(update_project))
+project_bp.route('/<project_id>/config', methods=['PATCH'])(project_access_required(update_project_config))
 project_bp.route('/<project_id>', methods=['DELETE'])(project_access_required(delete_project))
 project_bp.route('/<project_id>/transfer', methods=['POST'])(project_access_required(initiate_project_transfer))
 project_bp.route('/<project_id>/apply-requirements', methods=['POST'])(project_access_required(apply_requirements_to_project_route))

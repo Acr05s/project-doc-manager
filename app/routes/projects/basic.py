@@ -185,6 +185,47 @@ def update_project(project_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def update_project_config(project_id):
+    """更新项目配置（PATCH端点）"""
+    try:
+        doc_manager = get_doc_manager()
+        data = request.get_json() or {}
+
+        # 加载项目
+        project_result = doc_manager.load_project(project_id)
+        if project_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目加载失败'}), 500
+
+        project_config = project_result.get('project', {})
+
+        # 更新配置字段
+        if 'archive_approval_mode' in data:
+            project_config['archive_approval_mode'] = data['archive_approval_mode']
+
+        # 保存项目配置
+        save_result = doc_manager.save_project(project_config)
+        if save_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '配置保存失败'}), 500
+
+        # 记录操作日志
+        from app.routes.settings import now_with_timezone
+        user_manager.add_operation_log(
+            int(current_user.id), current_user.username,
+            'update_project_config', project_id, '',
+            f'archive_approval_mode={data.get("archive_approval_mode")}',
+            request.remote_addr
+        )
+
+        return jsonify({
+            'status': 'success',
+            'config': {
+                'archive_approval_mode': project_config.get('archive_approval_mode', 'two_level')
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def delete_project(project_id):
     """删除项目"""
     try:

@@ -7,6 +7,7 @@ import { getCurrentUser } from './auth.js';
 
 let currentApprovalIdForConfirm = null;
 let currentApprovalActionForConfirm = null;
+let currentApprovalObjectForConfirm = null;
 
 /**
  * 打开文档归档审批模态框
@@ -91,6 +92,9 @@ async function loadPendingArchiveApprovals() {
                 stageDisplay = statuses;
             }
 
+            // 创建数据属性以存储完整的批准对象（Base64编码以避免HTML问题）
+            const approvalDataBase64 = btoa(JSON.stringify(approval));
+
             html += '<tr>';
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.project_id || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.cycle || '-')}</td>`;
@@ -99,8 +103,8 @@ async function loadPendingArchiveApprovals() {
             html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${approval.created_at || '-'}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${stageDisplay}</td>`;
             html += '<td style="padding:10px; border:1px solid #ddd; text-align:center;">';
-            html += `<button class="btn btn-sm btn-success" onclick="openArchiveApprovalConfirmModal('${escapeHtml(approval.id)}', 'approve')" style="margin-right:5px;">批准</button>`;
-            html += `<button class="btn btn-sm btn-warning" onclick="openArchiveApprovalConfirmModal('${escapeHtml(approval.id)}', 'reject')">驳回</button>`;
+            html += `<button class="btn btn-sm btn-success" onclick="openArchiveApprovalConfirmModal('${escapeHtml(approval.id)}', 'approve', '${approvalDataBase64}')" style="margin-right:5px;">批准</button>`;
+            html += `<button class="btn btn-sm btn-warning" onclick="openArchiveApprovalConfirmModal('${escapeHtml(approval.id)}', 'reject', '${approvalDataBase64}')">驳回</button>`;
             html += '</td>';
             html += '</tr>';
         });
@@ -116,9 +120,20 @@ async function loadPendingArchiveApprovals() {
 /**
  * 打开审批确认对话框
  */
-export function openArchiveApprovalConfirmModal(approvalId, action) {
+export function openArchiveApprovalConfirmModal(approvalId, action, approvalDataBase64) {
     currentApprovalIdForConfirm = approvalId;
     currentApprovalActionForConfirm = action;
+
+    // 解码批准对象
+    let approvalObject = null;
+    if (approvalDataBase64) {
+        try {
+            approvalObject = JSON.parse(atob(approvalDataBase64));
+            currentApprovalObjectForConfirm = approvalObject;
+        } catch (e) {
+            console.error('解码批准对象失败:', e);
+        }
+    }
 
     const modal = document.getElementById('archiveApprovalConfirmModal');
     const titleEl = document.getElementById('archiveApprovalConfirmTitle');
@@ -130,8 +145,18 @@ export function openArchiveApprovalConfirmModal(approvalId, action) {
     const actionName = action === 'approve' ? '批准' : '驳回';
     if (titleEl) titleEl.textContent = `${actionName}文档归档`;
 
-    // 从列表中查找该批准记录的详情（简化处理，直接显示ID）
-    if (infoEl) {
+    // 显示批准详情
+    if (infoEl && approvalObject) {
+        const docNames = Array.isArray(approvalObject.doc_names) ? approvalObject.doc_names : [];
+        const docList = docNames.length > 0 ? docNames.join('、') : '-';
+        infoEl.innerHTML = `
+            <div style="margin-bottom: 8px;"><strong>项目：</strong>${escapeHtml(approvalObject.project_id || '-')}</div>
+            <div style="margin-bottom: 8px;"><strong>周期：</strong>${escapeHtml(approvalObject.cycle || '-')}</div>
+            <div style="margin-bottom: 8px;"><strong>文档：</strong>${escapeHtml(docList)}</div>
+            <div style="margin-bottom: 8px;"><strong>申请人：</strong>${escapeHtml(approvalObject.requester_username || '-')}</div>
+            <div style="margin-bottom: 8px; color:#f60;"><strong>操作：</strong>${actionName}</div>
+        `;
+    } else {
         infoEl.innerHTML = `
             <div style="margin-bottom: 8px;"><strong>批准ID：</strong>${escapeHtml(approvalId)}</div>
             <div style="margin-bottom: 8px; color:#f60;"><strong>操作：</strong>${actionName}</div>
@@ -183,35 +208,87 @@ export function closeArchiveApprovalConfirmModal() {
  * 处理批准操作
  */
 export async function handleArchiveApprovalConfirm() {
-    if (!currentApprovalIdForConfirm) {
+    if (!currentApprovalIdForConfirm || !currentApprovalObjectForConfirm) {
         showNotification('参数错误', 'error');
         return;
     }
 
-    // 需要从模态框中获取所需信息
-    // 实际应用中需要从某处获取project_id等
+    const approval = currentApprovalObjectForConfirm;
+    const projectId = approval.project_id;
+    const approvalId = currentApprovalIdForConfirm;
+    const remark = document.getElementById('archiveApprovalRemark')?.value || '';
+
     showNotification('正在处理批准请求...', 'info');
 
-    // TODO: 调用后端API进行批准操作
-    closeArchiveApprovalConfirmModal();
-    await loadPendingArchiveApprovals();
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approval_id: approvalId,
+                comment: remark
+            })
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            showNotification('✓ 已批准本阶段审批，文档已提交至下一阶段', 'success');
+        } else if (result.status === 'stage_approved') {
+            showNotification('✓ 已批准本阶段，等待下一阶段审批...', 'success');
+        } else {
+            showNotification('批准失败: ' + (result.message || '未知错误'), 'error');
+        }
+        closeArchiveApprovalConfirmModal();
+        await loadPendingArchiveApprovals();
+    } catch (error) {
+        console.error('批准操作失败:', error);
+        showNotification('批准操作失败: ' + error.message, 'error');
+    }
 }
 
 /**
  * 处理驳回操作
  */
 export async function handleArchiveApprovalReject() {
-    if (!currentApprovalIdForConfirm) {
+    if (!currentApprovalIdForConfirm || !currentApprovalObjectForConfirm) {
         showNotification('参数错误', 'error');
         return;
     }
 
-    const remark = document.getElementById('archiveApprovalRemark')?.value || '';
+    const approval = currentApprovalObjectForConfirm;
+    const projectId = approval.project_id;
+    const approvalId = currentApprovalIdForConfirm;
+    const reason = document.getElementById('archiveApprovalRemark')?.value || '无具体原因';
+
+    if (!reason || reason === '无具体原因') {
+        showNotification('请输入驳回原因', 'warning');
+        return;
+    }
+
     showNotification('正在处理驳回请求...', 'info');
 
-    // TODO: 调用后端API进行驳回操作
-    closeArchiveApprovalConfirmModal();
-    await loadPendingArchiveApprovals();
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approval_id: approvalId,
+                reason: reason
+            })
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            showNotification('✓ 已驳回此审批请求，申请人将收到通知', 'success');
+        } else {
+            showNotification('驳回失败: ' + (result.message || '未知错误'), 'error');
+        }
+        closeArchiveApprovalConfirmModal();
+        await loadPendingArchiveApprovals();
+    } catch (error) {
+        console.error('驳回操作失败:', error);
+        showNotification('驳回操作失败: ' + error.message, 'error');
+    }
 }
 
 /**
