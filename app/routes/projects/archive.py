@@ -264,7 +264,7 @@ def submit_archive_request(project_id):
                     content=f'用户 "{requester_username}" 申请归档项目 "{project_name}" 周期 "{cycle}" 的文档：{doc_list}，请审批。',
                     sender_id=requester_id,
                     msg_type='archive_approval',
-                    related_id=str(approval_uuid),
+                    related_id=project_id,
                     related_type='archive_approval'
                 )
 
@@ -434,7 +434,7 @@ def approve_archive_request(project_id):
                     content=f'您申请的 "{cycle}" 周期文档归档已完成所有审批，文档已归档。',
                     sender_id=actual_approver_id,
                     msg_type='archive_approval',
-                    related_id=str(approval_id),
+                    related_id=project_id,
                     related_type='archive_approval'
                 )
 
@@ -501,10 +501,10 @@ def approve_archive_request(project_id):
                 message_manager.send_message(
                     receiver_id=approver_next_id,
                     title='待审批：文档归档申请',
-                    content=f'项目 "{project_name}" 周期 "{cycle}" 的文档归档申请（{doc_list}）已通过项目经理审批，现需您（PMO）审批。',
+                    content=f'项目 "{project_name}" 周期 "{cycle}" 的文档归档申请（{doc_list}）已通过项目经理审批，现需您（项目管理组织）审批。',
                     sender_id=actual_approver_id,
                     msg_type='archive_approval',
-                    related_id=str(approval_id),
+                    related_id=project_id,
                     related_type='archive_approval'
                 )
 
@@ -512,10 +512,10 @@ def approve_archive_request(project_id):
             message_manager.send_message(
                 receiver_id=approval['requester_id'],
                 title='归档申请已通过第一级审批',
-                content=f'您申请的 "{cycle}" 周期文档归档已由 "{approver.username}" 审批通过，现等待PMO审批。',
+                content=f'您申请的 "{cycle}" 周期文档归档已由 "{approver.username}" 审批通过，现等待项目管理组织审批。',
                 sender_id=actual_approver_id,
                 msg_type='archive_approval',
-                related_id=str(approval_id),
+                related_id=project_id,
                 related_type='archive_approval'
             )
 
@@ -600,7 +600,7 @@ def reject_archive_request(project_id):
             content=f'您申请的 "{approval["cycle"]}" 周期文档归档已由 "{approver.username}" 驳回{reason_text}。',
             sender_id=actual_approver_id,
             msg_type='archive_approval',
-            related_id=str(approval_id),
+            related_id=project_id,
             related_type='archive_approval'
         )
 

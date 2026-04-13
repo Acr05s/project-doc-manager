@@ -566,6 +566,28 @@ async function handleProjectMessageClick(message) {
     showNotification('请在项目列表中查看该项目', 'info');
 }
 
+async function handleArchiveApprovalMessageClick(message) {
+    const projectId = message.related_id;
+    if (!message.is_read) {
+        await markMessageAsRead(message.id);
+        await loadMessages();
+    }
+    closeMessageModal();
+    if (projectId) {
+        navigateToProject(projectId);
+    } else {
+        showNotification('无法定位项目，请手动打开文档列表', 'info');
+    }
+}
+
+function navigateToProject(projectId) {
+    if (!projectId) return;
+    // 更新URL参数并触发项目加载
+    const url = new URL(window.location);
+    url.searchParams.set('project', projectId);
+    window.location.href = url.toString();
+}
+
 export async function initMessageCenter() {
     await refreshUnreadCount();
     // 绑定消息中心事件
@@ -687,7 +709,8 @@ function renderMessageList(messages) {
     container.innerHTML = messages.map(m => {
         const isTransfer = m.related_type === 'project_transfer' && !m.is_read;
         const isUserApproval = m.type === 'approval' && m.related_type === 'user' && !m.is_read;
-        const clickable = m.related_type === 'user' || m.related_type === 'project_transfer' || m.related_type === 'project';
+        const isArchiveApproval = m.related_type === 'archive_approval';
+        const clickable = m.related_type === 'user' || m.related_type === 'project_transfer' || m.related_type === 'project' || m.related_type === 'archive_approval';
         return `
         <div class="message-item ${m.is_read ? 'read' : 'unread'}${clickable ? ' clickable' : ''}" data-id="${m.id}">
             <div class="message-header">
@@ -703,6 +726,9 @@ function renderMessageList(messages) {
                 ${isUserApproval ? `
                     <button class="btn btn-sm btn-success msg-user-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">审批通过</button>
                     <button class="btn btn-sm btn-danger msg-user-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
+                ` : ''}
+                ${isArchiveApproval ? `
+                    <button class="btn btn-sm btn-primary msg-archive-goto-btn" data-id="${m.id}" data-related="${m.related_id || ''}">查看文档</button>
                 ` : ''}
                 ${!m.is_read && !isTransfer && !isUserApproval ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
                 <button class="btn btn-sm btn-secondary msg-del-btn" data-id="${m.id}">删除</button>
@@ -794,6 +820,19 @@ function renderMessageList(messages) {
             }
         });
     });
+    // 绑定归档审批"查看文档"按钮
+    container.querySelectorAll('.msg-archive-goto-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const projectId = btn.dataset.related;
+            if (!projectId) return;
+            await markMessageAsRead(id);
+            await loadMessages();
+            closeMessageModal();
+            navigateToProject(projectId);
+        });
+    });
     // 绑定消息项点击跳转
     container.querySelectorAll('.message-item.clickable').forEach(item => {
         item.addEventListener('click', async (e) => {
@@ -807,6 +846,8 @@ function renderMessageList(messages) {
                 await handleTransferMessageClick(m);
             } else if (m.related_type === 'project') {
                 await handleProjectMessageClick(m);
+            } else if (m.related_type === 'archive_approval') {
+                await handleArchiveApprovalMessageClick(m);
             }
         });
     });

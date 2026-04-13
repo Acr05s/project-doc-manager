@@ -841,10 +841,10 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         ${pendingRequest ? `
                                             <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ 待审核 (申请人: ${pendingRequest.requester_username || ''})</div>
                                             ${['admin','pmo','project_admin'].includes(authState.user?.role) ? `
-                                                <button class="btn btn-success btn-sm" onclick="handleQuickApprove(${pendingRequest.id}, 'approve', '${cycle}')">
+                                                <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                     ✅ 审批通过
                                                 </button>
-                                                <button class="btn btn-danger btn-sm" onclick="handleQuickApprove(${pendingRequest.id}, 'reject', '${cycle}')">
+                                                <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                     ❌ 驳回
                                                 </button>
                                             ` : ''}
