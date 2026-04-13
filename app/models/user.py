@@ -60,8 +60,8 @@ class UserManager:
     
     def _init_db(self):
         """初始化数据库"""
-        conn = sqlite3.connect(str(self.db_path))
-        try:
+        # 使用上下文管理器确保连接正确关闭
+        with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             
             # 创建用户表（CREATE TABLE IF NOT EXISTS 是自动提交的）
@@ -319,9 +319,6 @@ class UserManager:
                 )
             ''')
             conn.commit()
-        finally:
-            # 确保数据库连接关闭
-            conn.close()
     
     def _row_to_user(self, row):
         """将数据库行转换为 User 对象，兼容旧数据"""
