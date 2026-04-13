@@ -4,7 +4,7 @@ from flask import Blueprint
 from flask_login import login_required
 from .utils import init_doc_manager, project_access_required
 from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects
-from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements
+from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements, get_document_directories, create_document_directory, delete_document_directory
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
 from .export import export_project, import_project, import_project_file, package_project, import_package, download_package, import_project_chunk, import_project_merge, package_full_project, preview_import_package, import_from_preview, preview_package_chunk, preview_package_merge
@@ -86,6 +86,11 @@ project_bp.route('/<project_id>/archive-approve', methods=['POST'])(project_acce
 project_bp.route('/<project_id>/archive-reject', methods=['POST'])(project_access_required(reject_archive_request))
 project_bp.route('/<project_id>/archive-approvers', methods=['GET'])(project_access_required(get_archive_approvers))
 project_bp.route('/archive/pending', methods=['GET'])(login_required(get_pending_archive_approvals))
+
+# 文档目录映射相关路由
+project_bp.route('/<project_id>/document-directories', methods=['GET'])(project_access_required(get_document_directories))
+project_bp.route('/<project_id>/document-directories', methods=['POST'])(project_access_required(create_document_directory))
+project_bp.route('/<project_id>/document-directories', methods=['DELETE'])(project_access_required(delete_document_directory))
 
 # 模板管理相关路由（不含 project_id）
 project_bp.route('/templates', methods=['GET'])(login_required(list_templates))

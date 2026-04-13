@@ -338,6 +338,21 @@ class UserManager:
                     accepted_at TIMESTAMP
                 )
             ''')
+            # 创建文档目录映射表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS document_directory_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL,
+                    cycle TEXT NOT NULL,
+                    doc_category TEXT NOT NULL,
+                    directory_path TEXT NOT NULL,
+                    document_patterns TEXT,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(project_id, cycle, doc_category, directory_path),
+                    FOREIGN KEY (created_by) REFERENCES users(id)
+                )
+            ''')
             conn.commit()
     
     def _row_to_user(self, row):
@@ -1332,6 +1347,76 @@ class UserManager:
                     return True
             return False
 
+    def create_document_directory(self, project_id, cycle, doc_category, directory_path, created_by, document_patterns=None):
+        """创建文档目录映射"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO document_directory_mappings
+                    (project_id, cycle, doc_category, directory_path, document_patterns, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (project_id, cycle, doc_category, directory_path, document_patterns, created_by))
+                conn.commit()
+                return {'status': 'success', 'id': cursor.lastrowid}
+        except Exception as e:
+            if 'UNIQUE constraint failed' in str(e):
+                return {'status': 'error', 'message': '该目录已存在'}
+            return {'status': 'error', 'message': str(e)}
+
+    def get_document_directories(self, project_id, cycle, doc_category):
+        """获取文档类型的所有目录映射"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, directory_path, document_patterns, created_at
+                    FROM document_directory_mappings
+                    WHERE project_id = ? AND cycle = ? AND doc_category = ?
+                    ORDER BY directory_path
+                ''', (project_id, cycle, doc_category))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            return []
+
+    def delete_document_directory(self, mapping_id):
+        """删除文档目录映射"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM document_directory_mappings WHERE id = ?', (mapping_id,))
+                if cursor.rowcount == 0:
+                    return {'status': 'error', 'message': '目录不存在'}
+                conn.commit()
+                return {'status': 'success'}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def get_directory_for_document(self, project_id, cycle, doc_category, doc_name):
+        """根据文档名称获取其应该放在的目录（根据规则匹配）"""
+        try:
+            mappings = self.get_document_directories(project_id, cycle, doc_category)
+            if not mappings:
+                return ''
+
+            # 简单的模式匹配逻辑
+            # 如果有 document_patterns，则使用模式匹配
+            # 否则所有文档都放在该目录
+            for mapping in mappings:
+                doc_name_lower = doc_name.lower()
+                pattern = mapping.get('document_patterns', '').lower() if mapping.get('document_patterns') else None
+
+                if not pattern or '*' in pattern:
+                    # 无模式或通配符 - 匹配所有
+                    return mapping['directory_path']
+                elif pattern in doc_name_lower:
+                    # 模式匹配
+                    return mapping['directory_path']
+
+            return ''
+        except Exception as e:
+            return ''
 
 # 创建全局用户管理器实例
 user_manager = UserManager()

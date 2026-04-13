@@ -119,3 +119,88 @@ def export_requirements():
         )
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def get_document_directories(project_id):
+    """获取项目的文档目录映射"""
+    try:
+        from flask_login import current_user
+        from app.models.user import user_manager
+
+        cycle = request.args.get('cycle')
+        doc_category = request.args.get('doc_category')
+
+        if not cycle or not doc_category:
+            return jsonify({'status': 'error', 'message': '缺少周期或文档类型参数'}), 400
+
+        directories = user_manager.get_document_directories(project_id, cycle, doc_category)
+        return jsonify({'status': 'success', 'directories': directories})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def create_document_directory(project_id):
+    """创建文档目录映射（仅 PMO/Admin 可用）"""
+    try:
+        from flask_login import current_user
+        from app.models.user import user_manager
+
+        # 权限检查
+        if current_user.role not in ('pmo', 'admin'):
+            return jsonify({'status': 'error', 'message': '权限不足，仅 PMO/Admin 可操作'}), 403
+
+        data = request.get_json() or {}
+        cycle = data.get('cycle')
+        doc_category = data.get('doc_category')
+        directory_path = data.get('directory_path')
+        document_patterns = data.get('document_patterns')
+
+        if not all([cycle, doc_category, directory_path]):
+            return jsonify({'status': 'error', 'message': '参数不完整'}), 400
+
+        result = user_manager.create_document_directory(
+            project_id, cycle, doc_category, directory_path,
+            int(current_user.id), document_patterns
+        )
+
+        if result['status'] == 'success':
+            user_manager.add_operation_log(
+                int(current_user.id), current_user.username,
+                'create_document_directory', project_id, f'{cycle}/{doc_category}',
+                f'directory={directory_path}', ''
+            )
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def delete_document_directory(project_id):
+    """删除文档目录映射（仅 PMO/Admin 可用）"""
+    try:
+        from flask_login import current_user
+        from app.models.user import user_manager
+
+        # 权限检查
+        if current_user.role not in ('pmo', 'admin'):
+            return jsonify({'status': 'error', 'message': '权限不足，仅 PMO/Admin 可操作'}), 403
+
+        data = request.get_json() or {}
+        mapping_id = data.get('mapping_id')
+
+        if not mapping_id:
+            return jsonify({'status': 'error', 'message': '缺少映射ID'}), 400
+
+        result = user_manager.delete_document_directory(mapping_id)
+
+        if result['status'] == 'success':
+            user_manager.add_operation_log(
+                int(current_user.id), current_user.username,
+                'delete_document_directory', project_id, '',
+                f'mapping_id={mapping_id}', ''
+            )
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
