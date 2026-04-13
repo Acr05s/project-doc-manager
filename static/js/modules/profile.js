@@ -56,7 +56,10 @@ export async function openProfileModal() {
             const profileOrg = document.getElementById('profileOrg');
             const profileEmail = document.getElementById('profileEmail');
             if (profileUsername) profileUsername.value = u.username || '';
-            if (profileRole) profileRole.value = u.role || '';
+            if (profileRole) {
+                const roleMap = { 'admin': '系统管理员', 'pmo': '项目管理组织', 'project_admin': '项目经理', 'contractor': '普通员工' };
+                profileRole.value = roleMap[u.role] || u.role || '';
+            }
             if (profileOrg) profileOrg.value = u.organization || '';
             if (profileEmail) profileEmail.value = u.email || '';
         } else {

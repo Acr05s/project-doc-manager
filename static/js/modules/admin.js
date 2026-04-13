@@ -17,10 +17,10 @@ import { authState } from './auth.js';
 import { showNotification, showConfirmModal, showInputModal } from './ui.js';
 
 const roleMap = {
-    'admin': '管理员',
-    'pmo': 'PMO',
+    'admin': '系统管理员',
+    'pmo': '项目管理组织',
     'project_admin': '项目经理',
-    'contractor': '普通用户'
+    'contractor': '普通员工'
 };
 
 const statusMap = {
@@ -165,10 +165,10 @@ export async function loadUserManagementList() {
             roleSelect.style.border = '1px solid #ccc';
             
             const roles = [
-                { value: 'admin', label: '管理员' },
-                { value: 'pmo', label: 'PMO' },
+                { value: 'admin', label: '系统管理员' },
+                { value: 'pmo', label: '项目管理组织' },
                 { value: 'project_admin', label: '项目经理' },
-                { value: 'contractor', label: '普通用户' }
+                { value: 'contractor', label: '普通员工' }
             ];
             
             roles.forEach(role => {

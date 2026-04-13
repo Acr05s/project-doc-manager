@@ -1211,20 +1211,20 @@
                         <div style="margin-bottom: 12px;">
                             <input type="radio" id="approvalModeTwoLevel" name="archiveApprovalMode" value="two_level" checked>
                             <label for="approvalModeTwoLevel" style="display:inline; margin-left:8px;">两级审批</label>
-                            <div style="font-size:13px; color:#666; margin-left:24px; margin-top:4px;">承包单位项目经理审批 → PMO审批</div>
+                            <div style="font-size:13px; color:#666; margin-left:24px; margin-top:4px;">承包单位项目经理审批 → 项目管理组织审批</div>
                         </div>
                         <div>
                             <input type="radio" id="approvalModePmoOnly" name="archiveApprovalMode" value="pmo_only">
-                            <label for="approvalModePmoOnly" style="display:inline; margin-left:8px;">PMO直接审批</label>
-                            <div style="font-size:13px; color:#666; margin-left:24px; margin-top:4px;">跳过项目经理，直接由PMO审批</div>
+                            <label for="approvalModePmoOnly" style="display:inline; margin-left:8px;">项目管理组织直接审批</label>
+                            <div style="font-size:13px; color:#666; margin-left:24px; margin-top:4px;">跳过项目经理，直接由项目管理组织审批</div>
                         </div>
                     </div>
                 </div>
 
                 <div style="margin-top: 20px; padding: 12px; background:#f0f8ff; border-radius:4px; font-size:13px; color:#333;">
                     <strong>说明：</strong><br>
-                    • <strong>两级审批（推荐）：</strong>通过项目经理初审后送PMO最终审批，确保文档质量<br>
-                    • <strong>PMO直接审批：</strong>适用于特殊项目，文档直接由PMO审批
+                    • <strong>两级审批（推荐）：</strong>通过项目经理初审后送项目管理组织最终审批，确保文档质量<br>
+                    • <strong>项目管理组织直接审批：</strong>适用于特殊项目，文档直接由项目管理组织审批
                 </div>
 
                 <div style="margin-top: 20px; text-align:right;">
@@ -2329,10 +2329,10 @@
                 </label>
                 <select id="userBatchRole" class="form-control business-admin-only" style="width:110px;font-size:12px;padding:4px 6px;">
                     <option value="">批量角色</option>
-                    <option value="admin">管理员</option>
-                    <option value="pmo">PMO</option>
+                    <option value="admin">系统管理员</option>
+                    <option value="pmo">项目管理组织</option>
                     <option value="project_admin">项目经理</option>
-                    <option value="contractor">普通用户</option>
+                    <option value="contractor">普通员工</option>
                 </select>
                 <button class="btn btn-sm btn-secondary business-admin-only" onclick="batchUpdateUserRoles()">修改角色</button>
                 <button class="btn btn-sm btn-info business-admin-only" onclick="batchUpdateUserStatus('active')">批量启用</button>

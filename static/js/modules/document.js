@@ -3172,7 +3172,7 @@ async function promptApprovalCodeForArchive(message, requireNewCode = false, app
                 type: 'select',
                 options: approvers.map(a => ({
                     value: String(a.id),
-                    label: `${a.username}（${a.role === 'admin' ? '管理员' : a.role === 'pmo' ? 'PMO' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                    label: `${a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
                 })),
                 placeholder: '请选择你的身份'
             });
@@ -3197,7 +3197,7 @@ async function promptSelectApprovers(approvers) {
         let html = `<div style="margin-bottom:15px;color:#666;font-size:13px;">选择接收归档审批通知的项目经理：</div>`;
         html += `<div style="max-height:250px;overflow-y:auto;">`;
         for (const a of approvers) {
-            const roleLabel = a.role === 'admin' ? '管理员' : a.role === 'pmo' ? 'PMO' : '项目经理';
+            const roleLabel = a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理';
             const orgLabel = a.organization ? ` - ${a.organization}` : '';
             html += `<label style="display:flex;align-items:center;padding:6px 8px;border-radius:4px;cursor:pointer;margin-bottom:4px;background:#f8f9fa;">
                 <input type="checkbox" value="${a.id}" checked style="margin-right:8px;">

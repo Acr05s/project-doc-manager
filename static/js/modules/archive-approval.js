@@ -284,7 +284,7 @@ async function openSelectPMOApproverModal(projectId) {
         return;
     }
 
-    showNotification('加载 PMO 成员...', 'info');
+    showNotification('加载项目管理组织成员...', 'info');
 
     try {
         // 获取所有PMO成员
@@ -292,7 +292,7 @@ async function openSelectPMOApproverModal(projectId) {
         const result = await response.json();
 
         if (result.status !== 'success' || !result.users) {
-            showNotification('加载 PMO 成员失败', 'error');
+            showNotification('加载项目管理组织成员失败', 'error');
             return;
         }
 
@@ -302,7 +302,7 @@ async function openSelectPMOApproverModal(projectId) {
         // 更新 dropdown 列表
         const selectEl = document.getElementById('pmoApproverSelect');
         if (selectEl) {
-            selectEl.innerHTML = '<option value="">-- 默认（通知全部PMO成员）--</option>';
+            selectEl.innerHTML = '<option value="">-- 默认（通知全部项目管理组织成员）--</option>';
             pmoUsers.forEach(user => {
                 const option = document.createElement('option');
                 option.value = user.id || user.uuid;
@@ -315,7 +315,7 @@ async function openSelectPMOApproverModal(projectId) {
         const listContainer = document.getElementById('pmoListContainer');
         if (listContainer) {
             if (pmoUsers.length === 0) {
-                listContainer.innerHTML = '<div style="color: #999; text-align: center; padding: 20px;">暂无 PMO 成员</div>';
+                listContainer.innerHTML = '<div style="color: #999; text-align: center; padding: 20px;">暂无项目管理组织成员</div>';
             } else {
                 let html = '<div style="font-size: 13px;">';
                 pmoUsers.forEach(user => {
@@ -335,8 +335,8 @@ async function openSelectPMOApproverModal(projectId) {
         modal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
     } catch (error) {
-        console.error('加载 PMO 成员失败:', error);
-        showNotification('加载 PMO 成员失败: ' + error.message, 'error');
+        console.error('加载项目管理组织成员失败:', error);
+        showNotification('加载项目管理组织成员失败: ' + error.message, 'error');
     }
 }
 

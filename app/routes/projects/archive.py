@@ -1,6 +1,8 @@
 """归档审批相关路由"""
 
 import json
+import sqlite3
+import logging
 from flask import request, jsonify
 from flask_login import current_user
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -9,6 +11,8 @@ from app.models.user import user_manager
 from app.models.message import message_manager
 from app.routes.settings import now_with_timezone
 from .utils import get_doc_manager
+
+logger = logging.getLogger(__name__)
 
 
 # ===== 多级审批 Helper 函数 =====
@@ -702,11 +706,13 @@ def withdraw_archive_request(project_id):
             return jsonify({'status': 'error', 'message': '只有待审批的请求才能撤回'}), 400
 
         # 更新状态为withdrawn
-        user_manager.db_execute_query(
-            'UPDATE archive_approvals SET status = ? WHERE id = ?',
-            ('withdrawn', approval['id']),
-            commit=True
-        )
+        with sqlite3.connect(str(user_manager.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'UPDATE archive_approvals SET status = ? WHERE id = ?',
+                ('withdrawn', approval['id'])
+            )
+            conn.commit()
 
         # 记录操作日志
         user_manager.add_operation_log(

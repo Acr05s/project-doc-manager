@@ -125,10 +125,10 @@ function updateAuthUI() {
     
     if (authState.isAuthenticated) {
         const roleMap = {
-            'admin': '管理员',
-            'pmo': 'PMO',
+            'admin': '系统管理员',
+            'pmo': '项目管理组织',
             'project_admin': '项目经理',
-            'contractor': '普通用户'
+            'contractor': '普通员工'
         };
         const roleLabel = roleMap[authState.user.role] || authState.user.role;
         const orgLabel = authState.user.organization ? authState.user.organization : '';
