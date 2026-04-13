@@ -3252,33 +3252,20 @@ async function promptSelectApprovers(approvers) {
  */
 async function submitArchiveReview(cycle, docNames) {
     try {
-        console.log('[DEBUG] submitArchiveReview called - cycle:', cycle, 'docNames:', docNames, 'projectId:', appState.currentProjectId);
+        console.log('[DEBUG] submitArchiveReview - NEW TWO-LEVEL WORKFLOW - cycle:', cycle, 'docNames:', docNames, 'projectId:', appState.currentProjectId);
 
-        // 获取可选审批人
-        const approversResult = await getArchiveApprovers(appState.currentProjectId);
-        console.log('[DEBUG] getArchiveApprovers response:', approversResult);
-
-        if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
-            console.error('[ERROR] No approvers found - status:', approversResult.status, 'approvers:', approversResult.approvers);
-            showNotification('未找到可审批的项目经理，请联系管理员', 'error');
-            return { status: 'error', message: '无可用审批人' };
-        }
-
-        console.log('[DEBUG] Found approvers:', approversResult.approvers.length);
-
-        // 弹出选择审批人
-        const selectedIds = await promptSelectApprovers(approversResult.approvers);
-        console.log('[DEBUG] User selected approvers:', selectedIds);
-
-        if (!selectedIds || selectedIds.length === 0) {
-            console.log('[DEBUG] User cancelled approver selection');
-            return { status: 'cancelled', message: '未选择审批人' };
-        }
-
-        // 提交审核请求
-        console.log('[DEBUG] Submitting archive request with selectedIds:', selectedIds);
-        const result = await submitArchiveRequest(appState.currentProjectId, cycle, docNames, selectedIds);
+        // 直接提交，无需approver选择 - 系统自动路由到Level 1
+        console.log('[DEBUG] Auto-routing to Level 1 approvers (project manager)');
+        const result = await submitArchiveRequest(appState.currentProjectId, cycle, docNames, []);
         console.log('[DEBUG] submitArchiveRequest result:', result);
+
+        if (result.status === 'success') {
+            showNotification('归档审核请求已提交，等待项目经理审批', 'success');
+            await renderCycleDocuments(cycle);
+        } else if (result.status !== 'cancelled') {
+            console.error('[ERROR] Archive submission failed:', result);
+            showNotification(result.message || '提交审核失败', 'error');
+        }
         return result;
     } catch (error) {
         console.error('[ERROR] submitArchiveReview exception:', error);
@@ -3750,17 +3737,24 @@ export async function unarchiveDocument(cycle, docName) {
 async function handleQuickApproveAction(approvalId, action, cycle) {
     try {
         const result = await quickApproveArchive(approvalId, action);
+
         if (result.status === 'success') {
-            showNotification(action === 'approve' ? '归档审批已通过' : '归档审批已驳回', 'success');
+            // 所有阶段完成，文档已归档
+            showNotification('🎉 所有审批完成，文档已归档', 'success');
             await renderCycleDocuments(cycle);
             if (action === 'approve') {
                 import('./cycle.js').then(module => { module.refreshCycleProgress(); });
             }
+        } else if (result.status === 'stage_approved') {
+            // 当前阶段通过，等待下一阶段
+            const message = result.message || `第 ${result.current_stage} 阶段已批准，等待第 ${result.next_stage} 阶段审批`;
+            showNotification(message, 'info');
+            await renderCycleDocuments(cycle);
         } else if (result.status !== 'cancelled') {
             showNotification(result.message || '操作失败', 'error');
         }
     } catch (error) {
-        console.error('审批操作失败:', error);
+        console.error('[ERROR] 审批操作失败:', error);
         showNotification('审批操作失败: ' + error.message, 'error');
     }
 }
