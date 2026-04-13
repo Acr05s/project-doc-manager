@@ -97,6 +97,7 @@ def package_project(project_id):
             # 3. 复制文档文件
             copied_count = 0
             debug_dirs = set()
+            from app.models.user import user_manager
             for doc in all_docs:
                 file_path = doc.get('file_path')
                 if file_path and Path(file_path).exists():
@@ -106,17 +107,23 @@ def package_project(project_id):
                         cycle = doc.get('cycle', 'unknown')
                         doc_name = doc.get('doc_name', 'unknown')
                         filename = doc.get('filename', Path(file_path).name)
-                        
-                        # 优先使用 display_directory（已由 list.py 计算好，与显示一致）
-                        directory = doc.get('display_directory', '') or doc.get('directory', '')
+
+                        # 优先使用目录映射规则(新系统), 其次使用 display_directory（已由 list.py 计算好，与显示一致）
+                        directory = user_manager.get_directory_for_document(
+                            project_id, cycle, doc_name, doc.get('filename', '')
+                        )
+                        if not directory:
+                            # 没有映射规则，使用原先逻辑
+                            directory = doc.get('display_directory', '') or doc.get('directory', '')
+
                         debug_dirs.add(directory)
-                        
+
                         # 构建归档路径
                         if directory and directory != '/':
                             arcname = f"{cycle}/{doc_name}/{directory}/{filename}"
                         else:
                             arcname = f"{cycle}/{doc_name}/{filename}"
-                        
+
                         zip_file.write(file_path, arcname)
                         copied_count += 1
                     except Exception as e:
