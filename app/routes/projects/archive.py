@@ -11,6 +11,117 @@ from app.routes.settings import now_with_timezone
 from .utils import get_doc_manager
 
 
+# ===== 多级审批 Helper 函数 =====
+
+def initialize_approval_stages(project_config):
+    """根据项目配置初始化审批阶段结构"""
+    approval_mode = project_config.get('archive_approval_mode', 'two_level')
+    approval_chain = project_config.get('archive_approval_chain', [])
+
+    stages = []
+    for stage_config in approval_chain:
+        stages.append({
+            'level': stage_config.get('level', 1),
+            'required_role': stage_config.get('required_role'),
+            'org_match': stage_config.get('org_match'),
+            'status': 'pending',
+            'assigned_to_id': None,
+            'assigned_to_username': None,
+            'approved_by_id': None,
+            'approved_by_username': None,
+            'approved_at': None,
+            'reject_reason': None
+        })
+    return stages
+
+
+def get_next_stage_approvers(project_id, current_stage, approval_chain, project_config):
+    """获取下一阶段的审批人列表
+
+    Args:
+        project_id: 项目ID
+        current_stage: 当前完成的阶段（0表示第一阶段开始）
+        approval_chain: 审批链配置
+        project_config: 项目配置
+
+    Returns:
+        list: 符合条件的审批人列表
+    """
+    if current_stage >= len(approval_chain):
+        return []
+
+    next_stage_config = approval_chain[current_stage]
+    required_role = next_stage_config.get('required_role')
+    org_match = next_stage_config.get('org_match')
+
+    # 获取具有指定角色的所有活跃用户
+    approvers = user_manager.get_users_by_roles([required_role])
+    result = []
+
+    for approver in approvers:
+        if approver.get('status') != 'active':
+            continue
+
+        # 如果配置了组织匹配，检查组织
+        if org_match == 'party_b':
+            user_org = (approver.get('organization') or '').strip()
+            project_org = (project_config.get('party_b') or '').strip()
+            if project_org and user_org and user_org != project_org:
+                continue
+
+        result.append({
+            'id': approver.get('uuid', approver.get('id')),
+            'username': approver['username'],
+            'role': approver['role'],
+            'organization': approver.get('organization', '')
+        })
+
+    return result
+
+
+def should_proceed_to_next_stage(approval_stages):
+    """检查是否所有阶段都已完成
+
+    Returns:
+        tuple: (is_all_completed, next_stage_index)
+    """
+    for i, stage in enumerate(approval_stages):
+        if stage['status'] == 'pending':
+            return False, i
+    return True, len(approval_stages)
+
+
+def complete_archive_if_all_stages_done(approval_id, project_id, approval_record, doc_manager):
+    """如果所有阶段都完成，执行文档归档"""
+    approval_stages = json.loads(approval_record.get('approval_stages', '[]'))
+
+    # 检查所有阶段是否都已批准
+    for stage in approval_stages:
+        if stage['status'] != 'approved':
+            return False
+
+    # 所有阶段都已批准，执行归档
+    project_result = doc_manager.load_project(project_id)
+    if project_result.get('status') != 'success':
+        return False
+
+    project_config = project_result.get('project', {})
+    cycle = approval_record.get('cycle')
+    doc_names = json.loads(approval_record.get('doc_names', '[]'))
+
+    if 'documents_archived' not in project_config:
+        project_config['documents_archived'] = {}
+    if cycle not in project_config['documents_archived']:
+        project_config['documents_archived'][cycle] = {}
+
+    for doc_name in doc_names:
+        if isinstance(doc_name, str) and doc_name:
+            project_config['documents_archived'][cycle][doc_name] = True
+
+    save_result = doc_manager.save_project(project_config)
+    return save_result.get('status') == 'success'
+
+
 def get_archive_approvers(project_id):
     """获取可审批的项目经理列表（同组织的 project_admin + admin + pmo）"""
     try:
@@ -57,16 +168,15 @@ def get_archive_approvers(project_id):
 
 
 def submit_archive_request(project_id):
-    """提交归档审核请求"""
+    """提交归档审核请求（自动路由到第一阶段审批人）"""
     try:
         import sys
         data = request.get_json() or {}
         cycle = (data.get('cycle') or '').strip()
         doc_names = data.get('doc_names', [])
         doc_name = data.get('doc_name')
-        target_approver_ids = data.get('target_approver_ids', [])
 
-        print(f'[DEBUG] submit_archive_request - project_id: {project_id}, cycle: {cycle}, doc_names: {doc_names}, target_approver_ids: {target_approver_ids}', file=sys.stderr, flush=True)
+        print(f'[DEBUG] submit_archive_request - project_id: {project_id}, cycle: {cycle}, doc_names: {doc_names}', file=sys.stderr, flush=True)
 
         if doc_name and not doc_names:
             doc_names = [doc_name]
@@ -83,49 +193,94 @@ def submit_archive_request(project_id):
         requester_id = int(current_user.id)
         requester_username = current_user.username
 
+        # 加载项目配置以获取审批链
+        doc_manager = get_doc_manager()
+        project_result = doc_manager.load_project(project_id)
+        if project_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目加载失败'}), 500
+
+        project_config = project_result.get('project', {})
+        project_name = project_config.get('name', project_id)
+        approval_chain = project_config.get('archive_approval_chain', [])
+
+        # 初始化audit approval_stages
+        approval_stages = initialize_approval_stages(project_config)
+        if not approval_stages:
+            return jsonify({'status': 'error', 'message': '审批链配置错误'}), 400
+
+        print(f'[DEBUG] Initialized {len(approval_stages)} approval stages', file=sys.stderr, flush=True)
+
+        # 获取第一阶段的审批人
+        level_1_approvers = get_next_stage_approvers(project_id, 0, approval_chain, project_config)
+        if not level_1_approvers:
+            print(f'[DEBUG] No Level 1 approvers found', file=sys.stderr, flush=True)
+            return jsonify({'status': 'error', 'message': '未找到项目经理，请联系管理员配置'}), 400
+
+        print(f'[DEBUG] Found {len(level_1_approvers)} Level 1 approvers', file=sys.stderr, flush=True)
+
+        # 创建归档审批记录（带有approval_stages）
         result = user_manager.create_archive_approval(
             project_id, cycle, doc_names,
             requester_id, requester_username,
-            target_approver_ids
+            []  # 不再使用target_approver_ids，自动路由
         )
 
-        print(f'[DEBUG] create_archive_approval result: {result}', file=sys.stderr, flush=True)
+        if result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '创建审批记录失败'}), 500
 
-        if result.get('status') == 'success':
-            approval_uuid = result['uuid']
-            doc_manager = get_doc_manager()
-            project_result = doc_manager.load_project(project_id)
-            project_name = project_id
-            if project_result.get('status') == 'success':
-                project_name = project_result.get('project', {}).get('name', project_id)
+        approval_id = result['id']
+        approval_uuid = result['uuid']
 
-            doc_list = '、'.join(doc_names[:5])
-            if len(doc_names) > 5:
-                doc_list += f'等{len(doc_names)}个文档'
-
-            # 向指定审批人发送消息
-            if target_approver_ids:
-                for approver_id in target_approver_ids:
-                    if approver_id != requester_id:
-                        print(f'[DEBUG] Sending message to approver {approver_id}', file=sys.stderr, flush=True)
-                        message_manager.send_message(
-                            receiver_id=approver_id,
-                            title='归档审批请求',
-                            content=f'用户 "{requester_username}" 申请归档项目 "{project_name}" 周期 "{cycle}" 的文档：{doc_list}，请审批。',
-                            sender_id=requester_id,
-                            msg_type='archive_approval',
-                            related_id=str(approval_uuid),
-                            related_type='archive_approval'
-                        )
-
-            user_manager.add_operation_log(
-                requester_id, requester_username,
-                'archive_request', project_id, cycle,
-                json.dumps(doc_names, ensure_ascii=False),
-                request.remote_addr
+        # 更新approval_stages到数据库
+        import sqlite3
+        from pathlib import Path
+        db_path = Path(user_manager.db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'UPDATE archive_approvals SET approval_stages = ?, current_stage = 1, stage_completed = 0 WHERE id = ?',
+                (json.dumps(approval_stages, ensure_ascii=False), approval_id)
             )
+            conn.commit()
 
-        return jsonify(result)
+        print(f'[DEBUG] Updated approval_stages for approval_id: {approval_id}', file=sys.stderr, flush=True)
+
+        # 向第一阶段的所有审批人发送通知
+        doc_list = '、'.join(doc_names[:5])
+        if len(doc_names) > 5:
+            doc_list += f'等{len(doc_names)}个文档'
+
+        for approver in level_1_approvers:
+            approver_id = int(approver['id']) if isinstance(approver['id'], str) and approver['id'].isdigit() else approver['id']
+            if approver_id != requester_id:
+                print(f'[DEBUG] Sending notification to Level 1 approver {approver_id}', file=sys.stderr, flush=True)
+                message_manager.send_message(
+                    receiver_id=approver_id,
+                    title='待审批：文档归档申请',
+                    content=f'用户 "{requester_username}" 申请归档项目 "{project_name}" 周期 "{cycle}" 的文档：{doc_list}，请审批。',
+                    sender_id=requester_id,
+                    msg_type='archive_approval',
+                    related_id=str(approval_uuid),
+                    related_type='archive_approval'
+                )
+
+        user_manager.add_operation_log(
+            requester_id, requester_username,
+            'archive_request', project_id, cycle,
+            json.dumps(doc_names, ensure_ascii=False),
+            request.remote_addr
+        )
+
+        print(f'[DEBUG] Archive request created successfully - approval_uuid: {approval_uuid}', file=sys.stderr, flush=True)
+
+        return jsonify({
+            'status': 'success',
+            'approval_id': approval_uuid,
+            'current_stage': 1,
+            'total_stages': len(approval_stages),
+            'message': f'归档审批请求已提交，等待项目经理审批'
+        })
+
     except Exception as e:
         import traceback
         import sys
@@ -148,11 +303,15 @@ def get_archive_requests(project_id):
 
 
 def approve_archive_request(project_id):
-    """审批通过归档请求（快速审批 - 需要审批安全码）"""
+    """审批当前阶段的归档请求（支持多级审批）"""
     try:
+        import sys
+        import sqlite3
+        from pathlib import Path
+
         data = request.get_json() or {}
         approval_id = data.get('approval_id')
-        approver_id = data.get('approver_id')  # 选择的审批人身份 ID
+        approver_id = data.get('approver_id')
         approval_code = data.get('approval_code', '')
         new_approval_code = data.get('new_approval_code', '')
 
@@ -161,7 +320,7 @@ def approve_archive_request(project_id):
         if not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
 
-        # 确定实际审批人：通过UUID解析
+        # 确定实际审批人
         if approver_id:
             approver = user_manager.get_user_by_uuid(str(approver_id))
         else:
@@ -186,7 +345,7 @@ def approve_archive_request(project_id):
         elif not approver.approval_code_hash or not check_password_hash(approver.approval_code_hash, approval_code):
             return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
 
-        # 获取审批请求（通过UUID查找）
+        # 获取审批记录
         approval = user_manager.get_archive_approval_by_uuid(str(approval_id))
         if not approval:
             return jsonify({'status': 'error', 'message': '审批请求不存在'}), 404
@@ -195,7 +354,7 @@ def approve_archive_request(project_id):
         if approval['project_id'] != project_id:
             return jsonify({'status': 'error', 'message': '审批请求与项目不匹配'}), 400
 
-        # 执行归档
+        # 加载项目配置
         doc_manager = get_doc_manager()
         project_result = doc_manager.load_project(project_id)
         if project_result.get('status') != 'success':
@@ -203,47 +362,147 @@ def approve_archive_request(project_id):
 
         project_config = project_result.get('project', {})
         cycle = approval['cycle']
-        doc_names = approval['doc_names']
+        doc_names = json.loads(approval.get('doc_names', '[]'))
+        approval_chain = project_config.get('archive_approval_chain', [])
 
-        if 'documents' not in project_config or cycle not in project_config.get('documents', {}):
-            return jsonify({'status': 'error', 'message': '归档周期不存在'}), 400
+        # 加载当前approval_stages
+        approval_stages = json.loads(approval.get('approval_stages', '[]'))
+        current_stage_idx = approval.get('current_stage', 1) - 1
 
-        if 'documents_archived' not in project_config:
-            project_config['documents_archived'] = {}
-        if cycle not in project_config['documents_archived']:
-            project_config['documents_archived'][cycle] = {}
+        if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
+            return jsonify({'status': 'error', 'message': '审批阶段异常'}), 400
 
-        for name in doc_names:
-            if isinstance(name, str) and name:
-                project_config['documents_archived'][cycle][name] = True
+        # 更新当前阶段为已批准
+        approval_stages[current_stage_idx]['status'] = 'approved'
+        approval_stages[current_stage_idx]['approved_by_id'] = actual_approver_id
+        approval_stages[current_stage_idx]['approved_by_username'] = approver.username
+        approval_stages[current_stage_idx]['approved_at'] = now_with_timezone().isoformat()
 
-        save_result = doc_manager.save_project(project_config)
-        if save_result.get('status') != 'success':
-            return jsonify({'status': 'error', 'message': save_result.get('message', '归档保存失败')}), 500
+        print(f'[DEBUG] Stage {current_stage_idx + 1} approved by {approver.username}', file=sys.stderr, flush=True)
 
-        # 更新审批状态
-        user_manager.resolve_archive_approval(approval['id'], 'approved', actual_approver_id, approver.username)
+        # 检查是否所有阶段都已完成
+        all_completed = all(stage['status'] == 'approved' for stage in approval_stages)
 
-        # 通知申请人
-        message_manager.send_message(
-            receiver_id=approval['requester_id'],
-            title='归档审批已通过',
-            content=f'您申请的 "{cycle}" 周期文档归档已由 "{approver.username}" 审批通过。',
-            sender_id=actual_approver_id,
-            msg_type='archive_approval',
-            related_id=str(approval_id),
-            related_type='archive_approval'
-        )
+        if all_completed:
+            # 执行最终归档
+            print(f'[DEBUG] All stages completed - executing archive', file=sys.stderr, flush=True)
+            if complete_archive_if_all_stages_done(approval['id'], project_id, approval, doc_manager):
+                # 更新审批状态为已完成
+                user_manager.resolve_archive_approval(approval['id'], 'approved', actual_approver_id, approver.username)
 
-        user_manager.add_operation_log(
-            actual_approver_id, approver.username,
-            'archive_approve', project_id, cycle,
-            json.dumps(doc_names, ensure_ascii=False),
-            request.remote_addr
-        )
+                # 通知申请人
+                message_manager.send_message(
+                    receiver_id=approval['requester_id'],
+                    title='文档已归档',
+                    content=f'您申请的 "{cycle}" 周期文档归档已完成所有审批，文档已归档。',
+                    sender_id=actual_approver_id,
+                    msg_type='archive_approval',
+                    related_id=str(approval_id),
+                    related_type='archive_approval'
+                )
 
-        return jsonify({'status': 'success', 'message': '归档审批通过'})
+                # 更新数据库的approval_stages
+                db_path = Path(user_manager.db_path)
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        'UPDATE archive_approvals SET approval_stages = ?, stage_completed = 1 WHERE id = ?',
+                        (json.dumps(approval_stages, ensure_ascii=False), approval['id'])
+                    )
+                    conn.commit()
+
+                user_manager.add_operation_log(
+                    actual_approver_id, approver.username,
+                    'archive_approve', project_id, cycle,
+                    json.dumps(doc_names, ensure_ascii=False),
+                    request.remote_addr
+                )
+
+                return jsonify({
+                    'status': 'success',
+                    'message': '文档已归档',
+                    'current_stage': current_stage_idx + 1,
+                    'total_stages': len(approval_stages),
+                    'all_complete': True
+                })
+            else:
+                return jsonify({'status': 'error', 'message': '执行归档失败'}), 500
+
+        else:
+            # 还有更多阶段，通知下一阶段审批人
+            next_stage_idx = current_stage_idx + 1
+            next_stage_config = approval_chain[next_stage_idx] if next_stage_idx < len(approval_chain) else None
+
+            if not next_stage_config:
+                return jsonify({'status': 'error', 'message': '审批链配置不一致'}), 400
+
+            # 获取下一阶段的审批人
+            next_approvers = get_next_stage_approvers(project_id, next_stage_idx, approval_chain, project_config)
+            if not next_approvers:
+                return jsonify({'status': 'error', 'message': '未找到下一级审批人'}), 400
+
+            print(f'[DEBUG] Moving to stage {next_stage_idx + 1}, found {len(next_approvers)} approvers', file=sys.stderr, flush=True)
+
+            # 更新审批记录的当前阶段和approval_stages
+            db_path = Path(user_manager.db_path)
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'UPDATE archive_approvals SET approval_stages = ?, current_stage = ? WHERE id = ?',
+                    (json.dumps(approval_stages, ensure_ascii=False), next_stage_idx + 1, approval['id'])
+                )
+                conn.commit()
+
+            # 通知下一阶段审批人
+            doc_list = '、'.join(doc_names[:5])
+            if len(doc_names) > 5:
+                doc_list += f'等{len(doc_names)}个文档'
+
+            project_name = project_config.get('name', project_id)
+            for approver_info in next_approvers:
+                approver_next_id = int(approver_info['id']) if isinstance(approver_info['id'], str) and approver_info['id'].isdigit() else approver_info['id']
+                message_manager.send_message(
+                    receiver_id=approver_next_id,
+                    title='待审批：文档归档申请',
+                    content=f'项目 "{project_name}" 周期 "{cycle}" 的文档归档申请（{doc_list}）已通过项目经理审批，现需您（PMO）审批。',
+                    sender_id=actual_approver_id,
+                    msg_type='archive_approval',
+                    related_id=str(approval_id),
+                    related_type='archive_approval'
+                )
+
+            # 通知申请人阶段通过
+            message_manager.send_message(
+                receiver_id=approval['requester_id'],
+                title='归档申请已通过第一级审批',
+                content=f'您申请的 "{cycle}" 周期文档归档已由 "{approver.username}" 审批通过，现等待PMO审批。',
+                sender_id=actual_approver_id,
+                msg_type='archive_approval',
+                related_id=str(approval_id),
+                related_type='archive_approval'
+            )
+
+            user_manager.add_operation_log(
+                actual_approver_id, approver.username,
+                'archive_stage_approve', project_id, cycle,
+                json.dumps({'stage': current_stage_idx + 1, 'doc_names': doc_names}, ensure_ascii=False),
+                request.remote_addr
+            )
+
+            return jsonify({
+                'status': 'stage_approved',
+                'message': f'第 {current_stage_idx + 1} 阶段已批准，等待第 {next_stage_idx + 1} 阶段审批',
+                'current_stage': current_stage_idx + 1,
+                'next_stage': next_stage_idx + 1,
+                'total_stages': len(approval_stages),
+                'all_complete': False
+            })
+
     except Exception as e:
+        import traceback
+        import sys
+        print(f'[ERROR] approve_archive_request failed: {e}', file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 

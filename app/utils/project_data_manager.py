@@ -746,7 +746,25 @@ class ProjectDataManager:
                         config['documents_not_involved'] = {}
                 except:
                     config['documents_not_involved'] = {}
-            
+
+            # 加载归档审批配置
+            if 'archive_approval_mode' not in config:
+                config['archive_approval_mode'] = 'two_level'  # 默认值
+            if 'archive_approval_chain' not in config:
+                # 默认两级审批链：项目经理 → PMO
+                config['archive_approval_chain'] = [
+                    {
+                        'level': 1,
+                        'required_role': 'project_admin',
+                        'org_match': 'party_b'  # 匹配项目承建单位
+                    },
+                    {
+                        'level': 2,
+                        'required_role': 'pmo',
+                        'org_match': None  # PMO 不受组织限制
+                    }
+                ]
+
             return config
         except Exception as e:
             logger.error(f"加载完整配置失败: {e}")

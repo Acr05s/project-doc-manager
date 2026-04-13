@@ -221,6 +221,26 @@ class UserManager:
                     
                     cursor.execute('INSERT INTO migration_versions (version) VALUES (4)')
 
+                # 迁移版本 5: 添加多级审批支持字段
+                if current_version < 5:
+                    print("Running migration version 5: Adding multi-level approval support")
+
+                    # 为 archive_approvals 表添加多级审批字段
+                    cursor.execute('PRAGMA table_info(archive_approvals)')
+                    aa_cols = {row[1] for row in cursor.fetchall()}
+
+                    if 'approval_stages' not in aa_cols:
+                        cursor.execute('ALTER TABLE archive_approvals ADD COLUMN approval_stages TEXT')
+                    if 'current_stage' not in aa_cols:
+                        cursor.execute('ALTER TABLE archive_approvals ADD COLUMN current_stage INTEGER DEFAULT 1')
+                    if 'stage_completed' not in aa_cols:
+                        cursor.execute('ALTER TABLE archive_approvals ADD COLUMN stage_completed BOOLEAN DEFAULT 0')
+                    if 'stage_history' not in aa_cols:
+                        cursor.execute('ALTER TABLE archive_approvals ADD COLUMN stage_history TEXT')
+
+                    print("Migration version 5: Multi-level approval fields added successfully")
+                    cursor.execute('INSERT INTO migration_versions (version) VALUES (5)')
+
                 # 提交迁移操作
                 conn.commit()
                 print("Database migration completed successfully")
