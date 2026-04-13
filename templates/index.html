@@ -2173,6 +2173,32 @@
         </div>
     </div>
 
+    <!-- 选择PMO审批人弹窗 -->
+    <div id="selectPMOApproverModal" class="modal" style="z-index: 10010;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>选择 PMO 审批人</h2>
+                <span class="close" onclick="closeSelectPMOApproverModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 15px; font-size: 13px; color: #666;">
+                    <p>请选择下一个审批人，或使用默认（全部 PMO 成员）</p>
+                </div>
+                <div class="form-group">
+                    <label for="pmoApproverSelect">PMO 审批人</label>
+                    <select id="pmoApproverSelect" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="">-- 默认（通知全部PMO成员）--</option>
+                    </select>
+                </div>
+                <div id="pmoListContainer" style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 10px; margin-bottom: 15px;"></div>
+                <div class="modal-actions" style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button class="btn btn-secondary" onclick="closeSelectPMOApproverModal()">取消</button>
+                    <button id="selectPMOConfirmBtn" class="btn btn-success">确认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 消息中心模态框 -->
     <div id="messageModal" class="modal">
         <div class="modal-content" style="max-width: 700px;">

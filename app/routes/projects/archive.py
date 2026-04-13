@@ -677,3 +677,45 @@ def archive_project_document(project_id):
         return jsonify({'status': 'success', 'message': '文档归档成功'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def withdraw_archive_request(project_id):
+    """撤回归档请求（仅申请人可操作，且请求状态必须为pending）"""
+    try:
+        data = request.get_json() or {}
+        approval_id = data.get('approval_id')
+
+        if not approval_id:
+            return jsonify({'status': 'error', 'message': '缺少审批ID'}), 400
+
+        # 获取审批请求
+        approval = user_manager.get_archive_approval_by_uuid(str(approval_id))
+        if not approval:
+            return jsonify({'status': 'error', 'message': '审批请求不存在'}), 404
+
+        # 检查权限：只有申请人可撤回
+        if approval['requester_id'] != int(current_user.id):
+            return jsonify({'status': 'error', 'message': '只有申请人才能撤回请求'}), 403
+
+        # 检查状态：只有pending状态的请求才能撤回
+        if approval['status'] != 'pending':
+            return jsonify({'status': 'error', 'message': '只有待审批的请求才能撤回'}), 400
+
+        # 更新状态为withdrawn
+        user_manager.db_execute_query(
+            'UPDATE archive_approvals SET status = ? WHERE id = ?',
+            ('withdrawn', approval['id']),
+            commit=True
+        )
+
+        # 记录操作日志
+        user_manager.add_operation_log(
+            int(current_user.id), current_user.username,
+            'withdraw_archive_request', project_id, approval.get('cycle', ''),
+            f'approval_id={approval_id}', request.remote_addr
+        )
+
+        return jsonify({'status': 'success', 'message': '已撤回归档请求'})
+    except Exception as e:
+        logger.error(f"撤回归档请求失败: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500

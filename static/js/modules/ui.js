@@ -252,6 +252,16 @@ export function setupEventListeners() {
         });
     }
 
+    // 选择PMO审批人确认按钮
+    const selectPMOConfirmBtn = document.getElementById('selectPMOConfirmBtn');
+    if (selectPMOConfirmBtn) {
+        selectPMOConfirmBtn.addEventListener('click', (e) => {
+            import('./archive-approval.js').then(({ handleSelectPMOApproverConfirm }) => {
+                handleSelectPMOApproverConfirm();
+            });
+        });
+    }
+
     // 加载项目配置（Excel）
     const loadProjectBtn = document.getElementById('loadProjectBtn');
     const loadProjectModal = document.getElementById('loadProjectModal');

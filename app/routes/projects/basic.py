@@ -577,3 +577,164 @@ def list_all_projects():
         import traceback
         traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@login_required
+def get_archive_stats():
+    """
+    获取文档归档审批统计信息（Phase 9）
+    返回按审批阶段分类的待审批数量、最近批准、等待时间等
+    """
+    try:
+        import sqlite3
+        from datetime import datetime, timedelta
+
+        user_id = int(current_user.id)
+        user_role = current_user.role
+
+        with sqlite3.connect(str(user_manager.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # 统计 Level 1（项目经理）待审批数
+            cursor.execute('''
+                SELECT COUNT(*) as count FROM archive_approvals
+                WHERE status = 'pending' AND current_stage = 1 AND json_extract(approval_stages, '$[0].status') != 'approved'
+            ''')
+            level1_pending = cursor.fetchone()['count'] if cursor.fetchone() else 0
+
+            # 统计 Level 2（PMO）待审批数
+            cursor.execute('''
+                SELECT COUNT(*) as count FROM archive_approvals
+                WHERE status = 'pending' AND current_stage = 2 AND json_extract(approval_stages, '$[1].status') != 'approved'
+            ''')
+            level2_pending = cursor.fetchone()['count'] if cursor.fetchone() else 0
+
+            # 获取最近7天已批准的归档
+            seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+            cursor.execute('''
+                SELECT COUNT(*) as count FROM archive_approvals
+                WHERE status = 'archived' AND created_at > ?
+            ''', (seven_days_ago,))
+            recent_archived = cursor.fetchone()['count'] if cursor.fetchone() else 0
+
+            # 计算超时请求（等待超过3天）
+            three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
+            cursor.execute('''
+                SELECT COUNT(*) as count FROM archive_approvals
+                WHERE status = 'pending' AND created_at < ?
+            ''', (three_days_ago,))
+            overdue_count = cursor.fetchone()['count'] if cursor.fetchone() else 0
+
+            # 获取用户相关的某些统计（基于角色）
+            user_stats = {}
+            if user_role in ('project_admin', 'pmo'):
+                # 该用户作为审批人需要处理的请求
+                cursor.execute('''
+                    SELECT COUNT(*) as count FROM archive_approvals
+                    WHERE status = 'pending' AND (
+                        (current_stage = 1 AND ? = 'project_admin') OR
+                        (current_stage = 2 AND ? = 'pmo')
+                    )
+                ''', (user_role, user_role))
+                result = cursor.fetchone()
+                user_stats['pending_for_me'] = result['count'] if result else 0
+
+            return jsonify({
+                'status': 'success',
+                'level1_pending': level1_pending,
+                'level2_pending': level2_pending,
+                'recent_archived_count': recent_archived,
+                'overdue_count': overdue_count,
+                'user_stats': user_stats
+            })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@login_required
+def bulk_approve_archive_requests():
+    """
+    批量批准或驳回归档请求（Phase 10）
+    """
+    try:
+        if current_user.role not in ('admin', 'pmo', 'project_admin'):
+            return jsonify({'status': 'error', 'message': '权限不足'}), 403
+
+        data = request.get_json() or {}
+        approval_ids = data.get('approval_ids', [])
+        action = data.get('action', 'approve')  # 'approve' 或 'reject'
+        reason = data.get('reason', '')
+
+        if not approval_ids:
+            return jsonify({'status': 'error', 'message': '请选择至少一个审批请求'}), 400
+
+        if action not in ('approve', 'reject'):
+            return jsonify({'status': 'error', 'message': '无效的操作类型'}), 400
+
+        if action == 'reject' and not reason:
+            return jsonify({'status': 'error', 'message': '驳回必须提供原因'}), 400
+
+        success_count = 0
+        failed = []
+
+        user_id = int(current_user.id)
+
+        for approval_id in approval_ids:
+            try:
+                # 获取审批请求
+                approval = user_manager.get_archive_approval_by_uuid(str(approval_id))
+                if not approval:
+                    failed.append({'id': approval_id, 'error': '方案不存在'})
+                    continue
+
+                # 权限检查
+                current_stage = approval.get('current_stage', 1)
+                if current_stage == 1 and current_user.role != 'project_admin':
+                    failed.append({'id': approval_id, 'error': '权限不足'})
+                    continue
+                elif current_stage == 2 and current_user.role != 'pmo':
+                    failed.append({'id': approval_id, 'error': '权限不足'})
+                    continue
+
+                if approval['status'] != 'pending':
+                    failed.append({'id': approval_id, 'error': '已处理'})
+                    continue
+
+                if action == 'approve':
+                    # 调用批准逻辑
+                    user_manager.resolve_archive_approval(
+                        approval['id'], 'approved', user_id,
+                        current_user.username, ''
+                    )
+                    success_count += 1
+                else:  # reject
+                    # 调用驳回逻辑
+                    user_manager.resolve_archive_approval(
+                        approval['id'], 'rejected', user_id,
+                        current_user.username, reason
+                    )
+                    success_count += 1
+
+            except Exception as e:
+                failed.append({'id': approval_id, 'error': str(e)})
+
+        # 记录操作日志
+        user_manager.add_operation_log(
+            user_id, current_user.username,
+            f'bulk_{action}_archive_requests', None, None,
+            f'count={success_count}, failed={len(failed)}', request.remote_addr
+        )
+
+        return jsonify({
+            'status': 'success',
+            'success_count': success_count,
+            'failed_count': len(failed),
+            'failed': failed
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500

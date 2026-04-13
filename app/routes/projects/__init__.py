@@ -3,7 +3,7 @@
 from flask import Blueprint
 from flask_login import login_required
 from .utils import init_doc_manager, project_access_required
-from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects
+from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects, get_archive_stats, bulk_approve_archive_requests
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements, get_document_directories, create_document_directory, delete_document_directory
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
@@ -14,7 +14,7 @@ from .versions import list_config_versions, save_config_version, load_config_ver
 from .templates import list_templates, save_template, load_template, delete_template, apply_template_to_project, export_template, import_template
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
-from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals
+from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request
 
 # 创建蓝图
 project_bp = Blueprint('project', __name__)
@@ -27,6 +27,8 @@ project_bp.route('/approve', methods=['POST'])(login_required(approve_project))
 project_bp.route('/dashboard', methods=['GET'])(login_required(get_dashboard_stats))
 project_bp.route('/reports/types', methods=['GET'])(login_required(get_report_types))
 project_bp.route('/reports/data', methods=['GET'])(login_required(get_report_data))
+project_bp.route('/archive-stats', methods=['GET'])(login_required(get_archive_stats))
+project_bp.route('/bulk-approve', methods=['POST'])(login_required(bulk_approve_archive_requests))
 project_bp.route('/transfer/respond', methods=['POST'])(login_required(respond_project_transfer))
 project_bp.route('/batch/delete', methods=['POST'])(login_required(batch_delete_projects))
 project_bp.route('/batch/update', methods=['POST'])(login_required(batch_update_projects))
@@ -84,6 +86,7 @@ project_bp.route('/<project_id>/archive-request', methods=['POST'])(project_acce
 project_bp.route('/<project_id>/archive-requests', methods=['GET'])(project_access_required(get_archive_requests))
 project_bp.route('/<project_id>/archive-approve', methods=['POST'])(project_access_required(approve_archive_request))
 project_bp.route('/<project_id>/archive-reject', methods=['POST'])(project_access_required(reject_archive_request))
+project_bp.route('/<project_id>/archive-withdraw', methods=['POST'])(project_access_required(withdraw_archive_request))
 project_bp.route('/<project_id>/archive-approvers', methods=['GET'])(project_access_required(get_archive_approvers))
 project_bp.route('/archive/pending', methods=['GET'])(login_required(get_pending_archive_approvals))
 

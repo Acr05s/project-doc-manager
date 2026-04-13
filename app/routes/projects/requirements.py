@@ -140,14 +140,10 @@ def get_document_directories(project_id):
 
 
 def create_document_directory(project_id):
-    """创建文档目录映射（仅 PMO/Admin 可用）"""
+    """创建文档目录映射"""
     try:
         from flask_login import current_user
         from app.models.user import user_manager
-
-        # 权限检查
-        if current_user.role not in ('pmo', 'admin'):
-            return jsonify({'status': 'error', 'message': '权限不足，仅 PMO/Admin 可操作'}), 403
 
         data = request.get_json() or {}
         cycle = data.get('cycle')
