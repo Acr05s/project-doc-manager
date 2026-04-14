@@ -64,7 +64,6 @@ temp_test_*
 templates/test.html
 static/test_*.html
 tools/test/
-check_admin.py
 
 # Test output directories
 test_out/
@@ -80,3 +79,7 @@ test_out/
 backup_*/
 backup_20260411121914/
 projects_json_backup/
+
+# Temporary tool scripts (do not track)
+tmp_tools/
+emp_tools/
