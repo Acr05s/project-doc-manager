@@ -573,38 +573,100 @@ async function handleArchiveApprovalMessageClick(message) {
         await loadMessages();
     }
     closeMessageModal();
-    if (projectId) {
-        navigateToProject(projectId);
-    } else {
-        showNotification('无法定位项目，请手动打开文档列表', 'info');
+    // 打开归档审批界面
+    try {
+        const m = await import('./archive-approval.js');
+        m.openArchiveApprovalModal();
+    } catch (e) {
+        console.error('打开审批界面失败:', e);
+        // 降级为导航到项目
+        if (projectId) {
+            let cycle = null;
+            if (message.content) {
+                const match = message.content.match(/周期\s*["""]([^"""]+)["""]/);
+                if (match) cycle = match[1];
+            }
+            navigateToProject(projectId, cycle);
+        }
     }
 }
 
-function navigateToProject(projectId) {
+function navigateToProject(projectId, cycle) {
     if (!projectId) return;
     // 更新URL参数并触发项目加载
     const url = new URL(window.location);
     url.searchParams.set('project', projectId);
+    if (cycle) {
+        url.searchParams.set('cycle', cycle);
+    }
     window.location.href = url.toString();
 }
 
 export async function initMessageCenter() {
     await refreshUnreadCount();
+    await refreshHeaderMarquee();
     // 绑定消息中心事件
     const msgBtn = document.getElementById('messageCenterBtn');
     if (msgBtn) {
         msgBtn.addEventListener('click', openMessageModal);
     }
+    // 绑定顶部铃铛和滚动消息点击
+    const bellBtn = document.getElementById('headerBellBtn');
+    if (bellBtn) {
+        bellBtn.addEventListener('click', openMessageModal);
+    }
+    const marqueeWrap = document.getElementById('marqueeWrap');
+    if (marqueeWrap) {
+        marqueeWrap.addEventListener('click', openMessageModal);
+    }
+    // 显示header-center
+    const headerCenter = document.getElementById('headerCenter');
+    if (headerCenter) {
+        headerCenter.style.display = 'flex';
+    }
     setInterval(refreshUnreadCount, 30000);
+    setInterval(refreshHeaderMarquee, 60000);
 }
 
 async function refreshUnreadCount() {
     const result = await getUnreadMessageCount();
+    const count = result.status === 'success' ? result.count : 0;
+    // 更新原始badge
     const badge = document.getElementById('messageBadge');
     if (badge) {
-        const count = result.status === 'success' ? result.count : 0;
         badge.textContent = count > 99 ? '99+' : count;
         badge.style.display = count > 0 ? 'inline-flex' : 'none';
+    }
+    // 更新顶部铃铛badge
+    const bellBadge = document.getElementById('headerBellBadge');
+    if (bellBadge) {
+        bellBadge.textContent = count > 99 ? '99+' : count;
+        bellBadge.style.display = count > 0 ? 'flex' : 'none';
+    }
+}
+
+async function refreshHeaderMarquee() {
+    const marqueeText = document.getElementById('marqueeText');
+    if (!marqueeText) return;
+    try {
+        const result = await getMessages(null, 10, 0);
+        const marqueeWrap = document.getElementById('marqueeWrap');
+        if (result.status === 'success' && result.messages && result.messages.length > 0) {
+            const texts = result.messages.slice(0, 5).map(m => {
+                const prefix = m.is_read ? '' : '🔴 ';
+                return prefix + m.title + '：' + (m.content || '').substring(0, 40);
+            });
+            marqueeText.textContent = texts.join('　　｜　　');
+            marqueeText.classList.remove('no-scroll');
+            if (marqueeWrap) marqueeWrap.style.visibility = 'visible';
+        } else {
+            marqueeText.textContent = '';
+            marqueeText.classList.add('no-scroll');
+            if (marqueeWrap) marqueeWrap.style.visibility = 'hidden';
+        }
+    } catch (e) {
+        marqueeText.textContent = '';
+        marqueeText.classList.add('no-scroll');
     }
 }
 
@@ -728,7 +790,7 @@ function renderMessageList(messages) {
                     <button class="btn btn-sm btn-danger msg-user-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
                 ` : ''}
                 ${isArchiveApproval ? `
-                    <button class="btn btn-sm btn-primary msg-archive-goto-btn" data-id="${m.id}" data-related="${m.related_id || ''}">查看文档</button>
+                    <button class="btn btn-sm btn-primary msg-archive-goto-btn" data-id="${m.id}" data-related="${m.related_id || ''}">去审批</button>
                 ` : ''}
                 ${!m.is_read && !isTransfer && !isUserApproval ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
                 <button class="btn btn-sm btn-secondary msg-del-btn" data-id="${m.id}">删除</button>
@@ -825,12 +887,15 @@ function renderMessageList(messages) {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const id = btn.dataset.id;
-            const projectId = btn.dataset.related;
-            if (!projectId) return;
             await markMessageAsRead(id);
             await loadMessages();
             closeMessageModal();
-            navigateToProject(projectId);
+            try {
+                const m = await import('./archive-approval.js');
+                m.openArchiveApprovalModal();
+            } catch (err) {
+                console.error('打开审批界面失败:', err);
+            }
         });
     });
     // 绑定消息项点击跳转
@@ -936,13 +1001,23 @@ export async function initApp() {
     // 检查URL参数是否有项目ID
     const urlParams = new URLSearchParams(window.location.search);
     const projectId = urlParams.get('project');
-    console.log('URL中的projectId:', projectId);
+    const urlCycle = urlParams.get('cycle');
+    console.log('URL中的projectId:', projectId, 'cycle:', urlCycle);
 
     if (projectId) {
         // 直接使用selectProject加载项目
         setTimeout(async () => {
             try {
                 await selectProject(projectId);
+                // 如果URL中指定了周期，自动选择该周期
+                if (urlCycle) {
+                    const { selectCycle } = await import('./cycle.js');
+                    selectCycle(urlCycle);
+                    // 清除URL中的cycle参数，避免刷新时重复跳转
+                    const cleanUrl = new URL(window.location);
+                    cleanUrl.searchParams.delete('cycle');
+                    window.history.replaceState({}, '', cleanUrl);
+                }
             } catch (err) {
                 console.error('通过URL加载项目失败:', err);
                 showNotification('加载项目失败: ' + err.message, 'error');

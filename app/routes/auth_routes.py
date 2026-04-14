@@ -19,7 +19,8 @@ def check_auth_status():
                 'role': current_user.role,
                 'organization': getattr(current_user, 'organization', None),
                 'status': getattr(current_user, 'status', 'active'),
-                'email': getattr(current_user, 'email', None)
+                'email': getattr(current_user, 'email', None),
+                'display_name': getattr(current_user, 'display_name', None)
             }
         })
     else:

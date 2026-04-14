@@ -456,6 +456,78 @@
             justify-content: center;
             padding: 0 4px;
         }
+
+        /* 顶部导航中间消息滚动区域 */
+        .header-center {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            margin: 0 16px;
+        }
+        .header-marquee-wrap {
+            flex: 1;
+            overflow: hidden;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            padding: 4px 0;
+            min-width: 0;
+            position: relative;
+        }
+        .header-marquee-wrap:hover .marquee-text {
+            animation-play-state: paused;
+        }
+        .header-marquee {
+            overflow: hidden;
+            white-space: nowrap;
+            position: relative;
+        }
+        .marquee-text {
+            display: inline-block;
+            white-space: nowrap;
+            animation: marqueeScroll 45s linear infinite;
+            color: rgba(255,255,255,0.9);
+            font-size: 13px;
+        }
+        .marquee-text.no-scroll {
+            animation: none;
+        }
+        @keyframes marqueeScroll {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
+        .header-bell {
+            position: relative;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 50%;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        .header-bell:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        .header-bell-badge {
+            position: absolute;
+            top: -2px;
+            right: -6px;
+            background: #ff4757;
+            color: #fff;
+            font-size: 10px;
+            font-weight: bold;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
         .message-list {
             max-height: 400px;
             overflow-y: auto;
@@ -529,13 +601,26 @@
                 <div id="currentProjectName" class="current-project-name" style="display:none;"></div>
                 <button id="backToDashboardBtn" class="btn btn-sm" style="display:none; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:#fff; border-radius:4px; padding:4px 10px; font-size:12px; margin-left:8px; cursor:pointer;">📊 返回看板</button>
             </div>
+            <!-- 中间滚动消息区域 -->
+            <div class="header-center" id="headerCenter" style="display:none;">
+                <div class="header-marquee-wrap" id="marqueeWrap" title="点击查看全部消息">
+                    <div class="header-marquee" id="headerMarquee">
+                        <span class="marquee-text" id="marqueeText">暂无新消息</span>
+                    </div>
+                </div>
+                <div class="header-bell" id="headerBellBtn" title="消息中心">
+                    <span class="bell-icon">🔔</span>
+                    <span class="header-bell-badge" id="headerBellBadge" style="display:none;">0</span>
+                </div>
+            </div>
+
             <div class="header-right" style="display: flex; gap: 10px;">
                 <!-- 认证容器 -->
                 <div id="authContainer" style="display: flex; align-items: center; gap: 10px; z-index: 1000;">
                     <!-- 内容由 auth.js 动态生成 -->
                 </div>
                 
-                <!-- 消息中心按钮 -->
+                <!-- 消息中心按钮（保留隐藏，供内部逻辑使用） -->
                 <div id="messageCenterBtn" class="message-trigger" style="display:none;">
                     <span>🔔</span>
                     <span>消息</span>
@@ -600,6 +685,7 @@
                     <div class="dropdown-menu" id="archiveAndApprovalDropdown">
                         <a href="#" class="dropdown-item" id="openArchiveConfigBtn">⚙️ 配置审批流程</a>
                         <a href="#" class="dropdown-item" id="viewArchiveRequestsBtn">📨 查看审批请求</a>
+                        <a href="#" class="dropdown-item" id="viewApprovalHistoryBtn">📊 审批历史</a>
                     </div>
                 </div>
             </div>
@@ -615,6 +701,7 @@
                 <a href="#" class="sidebar-menu-item" id="systemSettingsMenuItem"><span>⚙️ 系统设置</span></a>
                 <a href="#" class="sidebar-menu-item" id="userApprovalBtn"><span>👤 用户审核</span><span class="menu-badge" id="userApprovalBadge" style="display:none;"></span></a>
                 <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn"><span>📋 文档归档审批</span><span class="menu-badge" id="archiveApprovalBadge" style="display:none;"></span></a>
+                <a href="#" class="sidebar-menu-item" id="approvalHistoryBtn"><span>📊 审批历史</span></a>
                 <a href="#" class="sidebar-menu-item" id="userManagementMenuItem"><span>👤 用户管理</span></a>
                 <a href="#" class="sidebar-menu-item" id="orgManagementMenuItem"><span>🏢 承建单位管理</span></a>
                 <a href="#" class="sidebar-menu-item" id="projectManagementMenuItem"><span>📁 项目管理</span></a>
@@ -632,6 +719,15 @@
         <div id="cycleNavBar" class="cycle-nav-bar">
             <div id="cycleNavList" class="cycle-nav-list">
                 <span class="placeholder">请先选择项目</span>
+            </div>
+            <!-- 周期文档搜索框 -->
+            <div id="cycleSearchBox" class="cycle-search-box" style="display:none;">
+                <div class="cycle-search-input-wrapper">
+                    <span class="cycle-search-icon">🔍</span>
+                    <input type="text" id="cycleSearchInput" class="cycle-search-input" placeholder="搜索所有周期文档..." autocomplete="off">
+                    <span id="cycleSearchClear" class="cycle-search-clear" style="display:none;">✕</span>
+                </div>
+                <div id="cycleSearchDropdown" class="cycle-search-dropdown" style="display:none;"></div>
             </div>
         </div>
 
@@ -1326,6 +1422,7 @@
             <div class="settings-tabs">
                 <button class="settings-tab-btn active" data-tab="basic">基本信息</button>
                 <button class="settings-tab-btn" data-tab="features">功能设置</button>
+                <button class="settings-tab-btn" data-tab="email">邮件配置</button>
                 <button class="settings-tab-btn" data-tab="update">系统更新</button>
             </div>
             
@@ -1402,6 +1499,46 @@
                         <button type="button" class="btn btn-warning" onclick="archiveLogsNow()">立即归档旧日志</button>
                         <button type="button" class="btn btn-info" onclick="document.getElementById('logImportFile').click()">导入日志文件</button>
                         <input type="file" id="logImportFile" accept=".json" style="display:none;" onchange="importLogsFile(this)">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 邮件配置标签页 -->
+            <div id="settingsTab-email" class="settings-tab-content">
+                <div class="settings-section">
+                    <h3>SMTP 邮件服务器配置</h3>
+                    <small style="color: #999; display: block; margin-bottom: 15px;">配置邮件服务器后，系统可发送审批通知、用户注册通知等邮件</small>
+                    <div class="form-group">
+                        <label for="smtpHost">SMTP 服务器地址：</label>
+                        <input type="text" id="smtpHost" class="form-control" placeholder="如 smtp.qq.com、smtp.163.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtpPort">SMTP 端口：</label>
+                        <input type="number" id="smtpPort" class="form-control" placeholder="465" min="1" max="65535" value="465">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtpUsername">SMTP 用户名（邮箱地址）：</label>
+                        <input type="text" id="smtpUsername" class="form-control" placeholder="your@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtpPassword">SMTP 密码/授权码：</label>
+                        <input type="password" id="smtpPassword" class="form-control" placeholder="邮箱授权码或密码">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtpSender">发件人名称：</label>
+                        <input type="text" id="smtpSender" class="form-control" placeholder="项目资料管理平台">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtpEncryption">加密方式：</label>
+                        <select id="smtpEncryption" class="form-control">
+                            <option value="ssl">SSL（推荐，端口465）</option>
+                            <option value="tls">STARTTLS（端口587）</option>
+                            <option value="none">不加密（端口25）</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-top: 15px;">
+                        <button type="button" class="btn btn-info" onclick="testSmtpConnection()">测试邮件连接</button>
+                        <span id="smtpTestResult" style="margin-left: 10px; font-size: 13px;"></span>
                     </div>
                 </div>
             </div>

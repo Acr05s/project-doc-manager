@@ -14,7 +14,7 @@ from .versions import list_config_versions, save_config_version, load_config_ver
 from .templates import list_templates, save_template, load_template, delete_template, apply_template_to_project, export_template, import_template
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
-from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request
+from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request, get_approval_history, get_all_approval_history
 
 # 创建蓝图
 project_bp = Blueprint('project', __name__)
@@ -88,7 +88,9 @@ project_bp.route('/<project_id>/archive-approve', methods=['POST'])(project_acce
 project_bp.route('/<project_id>/archive-reject', methods=['POST'])(project_access_required(reject_archive_request))
 project_bp.route('/<project_id>/archive-withdraw', methods=['POST'])(project_access_required(withdraw_archive_request))
 project_bp.route('/<project_id>/archive-approvers', methods=['GET'])(project_access_required(get_archive_approvers))
+project_bp.route('/<project_id>/archive-history', methods=['GET'])(project_access_required(get_approval_history))
 project_bp.route('/archive/pending', methods=['GET'])(login_required(get_pending_archive_approvals))
+project_bp.route('/archive/history', methods=['GET'])(login_required(get_all_approval_history))
 
 # 文档目录映射相关路由
 project_bp.route('/<project_id>/document-directories', methods=['GET'])(project_access_required(get_document_directories))

@@ -87,7 +87,8 @@ def login():
                     'role': user.role,
                     'organization': user.organization,
                     'status': user.status,
-                    'email': user.email
+                    'email': user.email,
+                    'display_name': user.display_name
                 }
             })
         else:
@@ -122,6 +123,7 @@ def register():
     org_mode = data.get('org_mode', 'existing')  # 'existing' 或 'new'
     email = data.get('email', '').strip()
     role = data.get('role', '').strip()
+    display_name = data.get('display_name', '').strip()
 
     if not username or not password:
         return jsonify({'status': 'error', 'message': '请填写所有必填项'})
@@ -139,7 +141,7 @@ def register():
 
     password_hash = generate_password_hash(password)
     result = user_manager.register_user(
-        username, password_hash, organization_name, is_new_org=(org_mode == 'new'), email=email or None, role=role or None
+        username, password_hash, organization_name, is_new_org=(org_mode == 'new'), email=email or None, role=role or None, display_name=display_name or None
     )
 
     if result['status'] == 'success':
@@ -148,6 +150,13 @@ def register():
         user_manager.add_operation_log(None, username, 'register', str(user_id), username, f'组织: {organization_name}, 模式: {org_mode}, 邮箱: {email}, 角色: {role}', ip)
         # 发送通知给审批人
         _notify_user_approvers(user_id, username, organization_name, org_mode == 'new', role=role)
+
+        # 发送注册邮件通知
+        try:
+            from app.utils.notification import notify_user_registered
+            notify_user_registered(username, email, organization_name, role)
+        except Exception as e:
+            print(f"发送注册邮件通知失败: {e}")
 
         # 自动登录该用户（pending 状态也可以登录）
         user = user_manager.get_user_by_id(user_id)
@@ -163,7 +172,8 @@ def register():
                     'role': user.role,
                     'organization': user.organization,
                     'status': user.status,
-                    'email': user.email
+                    'email': user.email,
+                    'display_name': user.display_name
                 }
             })
 
@@ -338,6 +348,15 @@ def _notify_user_applicant(user_id, approved=True):
             related_id=str(user_id),
             related_type='user'
         )
+        # 发送邮件通知
+        try:
+            from app.utils.notification import notify_user_approved, notify_user_rejected
+            if approved:
+                notify_user_approved(user.username, user.email)
+            else:
+                notify_user_rejected(user.username, user.email)
+        except Exception as e:
+            print(f"发送邮件通知失败: {e}")
     except Exception as e:
         print(f"通知用户申请人失败: {e}")
 

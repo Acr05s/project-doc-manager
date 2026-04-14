@@ -5,7 +5,7 @@
 import { appState, elements } from './app-state.js';
 import { authState } from './auth.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal } from './ui.js';
-import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers } from './api.js';
+import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers, getApprovalHistory } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 
 // 辅助函数：转义HTML
@@ -624,6 +624,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     
     // 获取当前周期的待审核归档请求
     let pendingArchiveMap = {};
+    let approvedArchiveMap = {};
     try {
         const archiveResult = await getArchiveRequests(appState.currentProjectId, 'pending');
         if (archiveResult.status === 'success' && archiveResult.requests) {
@@ -637,6 +638,21 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
         }
     } catch (e) {
         console.warn('获取归档审批状态失败:', e);
+    }
+    // 获取已完成的归档请求（用于已归档文档的流转查看）
+    try {
+        const approvedResult = await getArchiveRequests(appState.currentProjectId, 'approved');
+        if (approvedResult.status === 'success' && approvedResult.requests) {
+            for (const req of approvedResult.requests) {
+                if (req.cycle === cycle && req.status === 'approved') {
+                    for (const docName of (req.doc_names || [])) {
+                        approvedArchiveMap[docName] = req;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('获取已完成归档请求失败:', e);
     }
     
     // 按文档类型分组
@@ -793,7 +809,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         const statusTag = isNotInvolved 
                             ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">🚫不涉及</div>`
                             : (isArchived ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` 
-                            : (pendingRequest ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #ffc107; color: #333; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">⏳待审核</div>` : ''));
+                            : (pendingRequest ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #ffc107; color: #333; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">⏳${pendingRequest.request_type === 'not_involved' ? '不涉及审批' : '待审核'}</div>` : ''));
                         
                         // 序号列状态图标
                         let indexStatusIcon = '';
@@ -839,7 +855,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                 <div class="action-buttons">
                                     ${!isArchived ? `
                                         ${pendingRequest ? `
-                                            <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ 待审核 (申请人: ${pendingRequest.requester_username || ''})</div>
+                                            <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ ${pendingRequest.request_type === 'not_involved' ? '不涉及审批中' : '待审核'} (申请人: ${pendingRequest.requester_username || ''})</div>
                                             ${(() => {
                                                 const stages = pendingRequest.approval_stages || [];
                                                 if (stages.length > 0) {
@@ -854,14 +870,26 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 }
                                                 return '';
                                             })()}
-                                            ${['admin','pmo','project_admin'].includes(authState.user?.role) ? `
+                                            <button class="btn btn-outline-info btn-sm" style="margin-bottom:4px;" onclick="showApprovalTimelineModal('${pendingRequest.id}', '${cycle}')">
+                                                📊 流程查看
+                                            </button>
+                                            ${(() => {
+                                                const userRole = authState.user?.role;
+                                                if (!['admin','pmo','project_admin'].includes(userRole)) return '';
+                                                const stages = pendingRequest.approval_stages || [];
+                                                const currentStageIdx = (pendingRequest.current_stage || 1) - 1;
+                                                const currentStage = stages[currentStageIdx];
+                                                // admin 可以审批任何阶段，其他角色只能审批自己角色的阶段
+                                                if (currentStage && userRole !== 'admin' && currentStage.required_role !== userRole) return '';
+                                                if (currentStage && currentStage.status === 'approved') return '';
+                                                return `
                                                 <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                     ✅ 审批通过
                                                 </button>
                                                 <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                     ❌ 驳回
-                                                </button>
-                                            ` : ''}
+                                                </button>`;
+                                            })()}
                                             ${pendingRequest.requester_username === authState.user?.username ? `
                                                 <button class="btn btn-secondary btn-sm" style="margin-top:4px;" onclick="handleWithdrawArchive('${appState.currentProjectId}', '${pendingRequest.id}', '${cycle}')">
                                                     ↩️ 撤回审批
@@ -894,6 +922,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         <button class="btn btn-warning btn-sm" onclick="unarchiveDocument('${cycle}', '${doc.name}')">
                                             📤 撤销归档
                                         </button>
+                                        ${approvedArchiveMap[doc.name] ? `
+                                            <button class="btn btn-outline-info btn-sm" style="margin-top:4px;" onclick="showApprovalTimelineModal('${approvedArchiveMap[doc.name].id}', '${cycle}')">
+                                                📊 流转查看
+                                            </button>
+                                        ` : ''}
                                     `}
                                 </div>
                             </td>
@@ -961,112 +994,67 @@ export async function markDocumentNotInvolved(cycle, docName) {
         const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[docName];
         const isCurrentlyNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
         
-        // 根据当前状态显示不同的确认弹窗
-        const title = isCurrentlyNotInvolved ? '撤销不涉及' : '标记为不涉及';
-        const message = isCurrentlyNotInvolved 
-            ? `确定将「${docName}」撤销标记为不涉及吗？`
-            : `确定将「${docName}」标记为本次项目不涉及并自动归档吗？`;
-        
-        showConfirmModal(
-            title,
-            message,
-            async () => {
+        if (isCurrentlyNotInvolved) {
+            // 撤销不涉及标记 — 直接执行（不需要审批）
+            const title = '撤销不涉及';
+            const message = `确定将「${docName}」撤销标记为不涉及吗？`;
+            showConfirmModal(title, message, async () => {
                 showLoading(true);
                 try {
-                    if (isCurrentlyNotInvolved) {
-                        // 撤销不涉及标记
-                        let success = true;
-                        
-                        // 如果有文档记录，更新文档
-                        if (doc) {
-                            const docData = { not_involved: false };
-                            const result = await editDocument(doc.id, docData);
-                            if (result.status !== 'success') {
-                                success = false;
-                                showNotification('操作失败: ' + result.message, 'error');
-                            }
-                        }
-                        
-                        // 清除项目配置中的标记
-                        if (appState.projectConfig.documents_not_involved?.[cycle]?.[docName]) {
-                            delete appState.projectConfig.documents_not_involved[cycle][docName];
-                            // 保存项目配置
-                            const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(appState.projectConfig)
-                            });
-                            if (!response.ok) {
-                                success = false;
-                            }
-                        }
-                        
-                        if (success) {
-                            // 取消归档
-                            await unarchiveDocument(cycle, docName);
-                            showNotification('文档已撤销不涉及标记', 'success');
-                        }
-                    } else if (doc) {
-                        // 标记为不涉及
-                        const docData = { not_involved: true };
+                    let success = true;
+                    if (doc) {
+                        const docData = { not_involved: false };
                         const result = await editDocument(doc.id, docData);
-                        
-                        if (result.status === 'success') {
-                            // 自动归档
-                            const archiveResult = await archiveDocument(cycle, docName);
-                            if (archiveResult.status === 'success') {
-                                showNotification('文档已标记为不涉及并归档', 'success');
-                            } else {
-                                showNotification('文档已标记为不涉及，但归档失败', 'warning');
-                            }
-                        } else {
-                            showNotification('标记失败: ' + result.message, 'error');
+                        if (result.status !== 'success') {
+                            success = false;
+                            showNotification('操作失败: ' + result.message, 'error');
                         }
-                    } else {
-                        // 如果没有文档，将不涉及标记存储在项目配置中
-                        try {
-                            // 初始化不涉及标记存储
-                            if (!appState.projectConfig.documents_not_involved) {
-                                appState.projectConfig.documents_not_involved = {};
-                            }
-                            if (!appState.projectConfig.documents_not_involved[cycle]) {
-                                appState.projectConfig.documents_not_involved[cycle] = {};
-                            }
-                            appState.projectConfig.documents_not_involved[cycle][docName] = true;
-                            
-                            // 保存项目配置
-                            const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(appState.projectConfig)
-                            });
-                            
-                            if (response.ok) {
-                                // 再归档
-                                const archiveResult = await archiveDocument(cycle, docName);
-                                if (archiveResult.status === 'success') {
-                                    showNotification('文档已标记为不涉及并归档', 'success');
-                                } else {
-                                    showNotification('文档已标记为不涉及，但归档失败', 'warning');
-                                }
-                            } else {
-                                showNotification('保存标记失败', 'error');
-                            }
-                        } catch (e) {
-                            console.error('标记不涉及失败:', e);
-                            showNotification('标记失败', 'error');
-                        }
+                    }
+                    if (appState.projectConfig.documents_not_involved?.[cycle]?.[docName]) {
+                        delete appState.projectConfig.documents_not_involved[cycle][docName];
+                        const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(appState.projectConfig)
+                        });
+                        if (!response.ok) success = false;
+                    }
+                    if (success) {
+                        await unarchiveDocument(cycle, docName);
+                        showNotification('文档已撤销不涉及标记', 'success');
                     }
                 } catch (error) {
                     console.error('操作失败:', error);
                     showNotification('操作失败: ' + error.message, 'error');
                 } finally {
                     showLoading(false);
-                    // 刷新文档列表
                     await renderCycleDocuments(cycle);
                 }
-            }
-        );
+            });
+        } else {
+            // 标记为不涉及 — 走审批流程
+            const title = '标记为不涉及';
+            const message = `确定将「${docName}」标记为本次项目不涉及吗？\n提交后需要项目经理和PMO审批通过后才会生效。`;
+            showConfirmModal(title, message, async () => {
+                showLoading(true);
+                try {
+                    const result = await submitArchiveRequest(
+                        appState.currentProjectId, cycle, [docName], [], 'not_involved'
+                    );
+                    if (result.status === 'success') {
+                        showNotification(result.message || '不涉及审批请求已提交，等待审批', 'success');
+                        await renderCycleDocuments(cycle);
+                    } else {
+                        showNotification(result.message || '提交失败', 'error');
+                    }
+                } catch (error) {
+                    console.error('提交不涉及审批失败:', error);
+                    showNotification('提交失败: ' + error.message, 'error');
+                } finally {
+                    showLoading(false);
+                }
+            });
+        }
     } catch (error) {
         console.error('操作失败:', error);
         showNotification('操作失败: ' + error.message, 'error');
@@ -3194,7 +3182,7 @@ async function promptApprovalCodeForArchive(message, requireNewCode = false, app
                 type: 'select',
                 options: approvers.map(a => ({
                     value: String(a.id),
-                    label: `${a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
                 })),
                 placeholder: '请选择你的身份'
             });
@@ -3225,7 +3213,7 @@ async function promptSelectApprovers(approvers) {
             const orgLabel = a.organization ? ` - ${a.organization}` : '';
             html += `<label style="display:flex;align-items:center;padding:6px 8px;border-radius:4px;cursor:pointer;margin-bottom:4px;background:#f8f9fa;">
                 <input type="checkbox" value="${a.id}" checked style="margin-right:8px;">
-                <span>${a.username}（${roleLabel}${orgLabel}）</span>
+                <span>${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${roleLabel}${orgLabel}）</span>
             </label>`;
         }
         html += `</div>`;
@@ -3364,25 +3352,38 @@ async function quickApproveArchive(approvalId, action = 'approve') {
     // 检查是否需要审批安全码
     const requireCode = appState.systemSettings?.require_approval_code !== false;
 
+    // 自动匹配当前登录用户
+    const currentUserId = authState.user?.id;
+    const currentUsername = authState.user?.username;
+    let matchedApprover = null;
+    if (currentUserId) {
+        matchedApprover = approversResult.approvers.find(a => String(a.id) === String(currentUserId));
+    }
+    if (!matchedApprover && currentUsername) {
+        matchedApprover = approversResult.approvers.find(a => a.username === currentUsername);
+    }
+
     if (!requireCode) {
         // 不需要安全码，自动选择审批人
-        if (approversResult.approvers.length === 1) {
+        if (matchedApprover) {
+            approvalInput = { approver_id: String(matchedApprover.id), approval_code: '__skip__' };
+        } else if (approversResult.approvers.length === 1) {
             approvalInput = { approver_id: String(approversResult.approvers[0].id), approval_code: '__skip__' };
         } else {
-            // 多个审批人，只选择身份不输安全码
+            // 无法自动匹配，选择身份不输安全码
             approvalInput = await promptApprovalCodeForArchive(title, false, approversResult.approvers, true);
             if (!approvalInput) return { status: 'cancelled' };
             approvalInput.approval_code = '__skip__';
         }
-    } else if (approversResult.approvers.length === 1) {
-        // 单一审批人，自动选中，只需输入安全码
+    } else if (matchedApprover || approversResult.approvers.length === 1) {
+        // 自动匹配或单一审批人，只需输入安全码
         approvalInput = await promptApprovalCodeForArchive(title, false, null);
         if (!approvalInput || !approvalInput.approval_code) {
             return { status: 'cancelled' };
         }
-        approvalInput.approver_id = String(approversResult.approvers[0].id);
+        approvalInput.approver_id = String(matchedApprover ? matchedApprover.id : approversResult.approvers[0].id);
     } else {
-        // 多个审批人，显示选择下拉框 + 安全码
+        // 多个审批人且无法自动匹配，显示选择下拉框 + 安全码
         approvalInput = await promptApprovalCodeForArchive(title, false, approversResult.approvers);
         if (!approvalInput || !approvalInput.approval_code) {
             return { status: 'cancelled' };
@@ -3883,6 +3884,410 @@ async function handleWithdrawArchiveAction(projectId, approvalId, cycle) {
 }
 
 /**
+ * 显示审批流程时间线Modal
+ */
+async function showApprovalTimeline(approvalId, cycle, overrideProjectId) {
+    const projectId = overrideProjectId || appState.currentProjectId;
+    if (!projectId || !approvalId) {
+        showNotification('参数错误', 'error');
+        return;
+    }
+
+    showNotification('加载流程历史...', 'info');
+    const result = await getApprovalHistory(projectId, approvalId);
+    if (result.status !== 'success') {
+        showNotification(result.message || '获取流程历史失败', 'error');
+        return;
+    }
+
+    const history = result.history || [];
+    const approval = result.approval || {};
+    const docNames = (approval.doc_names || []).join('、');
+    const statusLabels = {
+        'pending': '审批中',
+        'approved': '已归档',
+        'rejected': '已驳回',
+        'withdrawn': '已撤回',
+        'stage_approved': '阶段审批中'
+    };
+    const statusColors = {
+        'pending': '#ffc107',
+        'approved': '#28a745',
+        'rejected': '#dc3545',
+        'withdrawn': '#6c757d',
+        'stage_approved': '#17a2b8'
+    };
+
+    const actionIcons = {
+        'submit': { icon: '📋', color: '#007bff', label: '提交申请' },
+        'stage_approve': { icon: '✅', color: '#28a745', label: '阶段通过' },
+        'reject': { icon: '❌', color: '#dc3545', label: '驳回' },
+        'archived': { icon: '📦', color: '#28a745', label: '归档完成' },
+        'withdraw': { icon: '↩️', color: '#6c757d', label: '撤回' }
+    };
+
+    // 构建时间线HTML
+    let timelineHtml = '';
+    if (history.length === 0) {
+        timelineHtml = '<div style="text-align:center;color:#999;padding:30px;">暂无流程记录</div>';
+    } else {
+        timelineHtml = '<div class="approval-timeline">';
+        history.forEach((item, idx) => {
+            const config = actionIcons[item.action] || { icon: '📌', color: '#6c757d', label: item.action };
+            const isLast = idx === history.length - 1;
+            const timestamp = item.timestamp || '';
+            let displayTime = '';
+            if (timestamp) {
+                try {
+                    const d = new Date(timestamp);
+                    if (!isNaN(d.getTime())) {
+                        displayTime = d.toLocaleString('zh-CN');
+                    } else {
+                        displayTime = timestamp;
+                    }
+                } catch { displayTime = timestamp; }
+            }
+
+            timelineHtml += `
+                <div class="timeline-item ${isLast ? 'timeline-item-last' : ''}">
+                    <div class="timeline-dot" style="background:${config.color};"></div>
+                    <div class="timeline-line" ${isLast ? 'style="display:none;"' : ''}></div>
+                    <div class="timeline-content">
+                        <div class="timeline-header">
+                            <span class="timeline-icon">${config.icon}</span>
+                            <span class="timeline-label" style="color:${config.color};font-weight:600;">${config.label}</span>
+                            <span class="timeline-time">${displayTime}</span>
+                        </div>
+                        <div class="timeline-detail">${escapeHtml(item.detail || '')}</div>
+                        ${item.username ? `<div class="timeline-user">操作人: ${escapeHtml(item.username)}</div>` : ''}
+                    </div>
+                </div>`;
+        });
+        timelineHtml += '</div>';
+    }
+
+    // 当前状态标签
+    const curStatus = approval.status || 'pending';
+    const statusLabel = statusLabels[curStatus] || curStatus;
+    const statusColor = statusColors[curStatus] || '#6c757d';
+
+    // 审批阶段进度条
+    const stages = approval.approval_stages || [];
+    let stagesHtml = '';
+    if (stages.length > 0) {
+        stagesHtml = '<div class="timeline-stages-bar">';
+        stages.forEach((s, i) => {
+            const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'admin' ? '管理员' : `Level${i+1}`;
+            let stageColor = '#e9ecef';
+            let stageIcon = '⏳';
+            let textColor = '#666';
+            if (s.status === 'approved') { stageColor = '#d4edda'; stageIcon = '✓'; textColor = '#155724'; }
+            else if (s.status === 'rejected') { stageColor = '#f8d7da'; stageIcon = '✗'; textColor = '#721c24'; }
+            const arrow = i < stages.length - 1 ? '<span class="stage-arrow">→</span>' : '';
+            stagesHtml += `<span class="stage-badge" style="background:${stageColor};color:${textColor};">${stageIcon} ${roleName}</span>${arrow}`;
+        });
+        stagesHtml += '</div>';
+    }
+
+    // 构建Modal
+    const existingModal = document.getElementById('approvalTimelineModal');
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'approvalTimelineModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:600px;max-height:80vh;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;">📊 审批流程详情</h3>
+                <button class="modal-close-btn" id="closeTimelineModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:#666;">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;max-height:calc(80vh - 120px);padding:15px 20px;">
+                <div style="margin-bottom:15px;padding:12px;background:#f8f9fa;border-radius:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <span style="font-weight:600;">周期:</span> <span>${escapeHtml(approval.cycle || '')}</span>
+                        <span style="margin-left:auto;padding:3px 10px;border-radius:12px;font-size:12px;color:white;background:${statusColor};">${statusLabel}</span>
+                    </div>
+                    <div style="font-size:13px;color:#666;">文档: ${escapeHtml(docNames || '无')}</div>
+                    <div style="font-size:13px;color:#666;margin-top:4px;">申请人: ${escapeHtml(approval.requester_username || '')}</div>
+                </div>
+                ${stagesHtml ? `<div style="margin-bottom:15px;">${stagesHtml}</div>` : ''}
+                <div style="font-weight:600;margin-bottom:10px;font-size:14px;">流程时间线</div>
+                ${timelineHtml}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 添加点击关闭
+    document.getElementById('closeTimelineModal').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+/**
+ * 显示项目的审批历史列表
+ */
+export async function showApprovalHistoryList(projectId) {
+    if (!projectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+
+    showNotification('加载审批历史...', 'info');
+
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-requests`);
+        if (!response.ok) {
+            showNotification('获取审批记录失败', 'error');
+            return;
+        }
+        const result = await response.json();
+        if (result.status !== 'success') {
+            showNotification(result.message || '获取审批记录失败', 'error');
+            return;
+        }
+
+        const requests = result.requests || [];
+
+        // 构建Modal
+        const existingModal = document.getElementById('approvalHistoryListModal');
+        if (existingModal) existingModal.remove();
+
+        const statusLabels = {
+            'pending': { label: '审批中', color: '#ffc107', bg: '#fff8e1' },
+            'approved': { label: '已归档', color: '#28a745', bg: '#e8f5e9' },
+            'rejected': { label: '已驳回', color: '#dc3545', bg: '#ffebee' },
+            'withdrawn': { label: '已撤回', color: '#6c757d', bg: '#f5f5f5' },
+            'stage_approved': { label: '阶段审批', color: '#17a2b8', bg: '#e0f7fa' }
+        };
+
+        let listHtml = '';
+        if (requests.length === 0) {
+            listHtml = '<div style="text-align:center;color:#999;padding:40px;">暂无审批记录</div>';
+        } else {
+            listHtml = '<div style="display:flex;flex-direction:column;gap:10px;">';
+            requests.forEach(req => {
+                const s = statusLabels[req.status] || { label: req.status, color: '#6c757d', bg: '#f5f5f5' };
+                const docNames = Array.isArray(req.doc_names) ? req.doc_names : [];
+                const docDisplay = docNames.length > 3
+                    ? docNames.slice(0, 3).join('、') + `...等${docNames.length}个`
+                    : docNames.join('、') || '-';
+                const createdAt = req.created_at ? new Date(req.created_at).toLocaleString('zh-CN') : '-';
+
+                // 审批阶段进度
+                const stages = req.approval_stages || [];
+                let stageHtml = '';
+                if (stages.length > 0) {
+                    stageHtml = '<div style="display:flex;gap:4px;align-items:center;margin-top:6px;flex-wrap:wrap;">';
+                    stages.forEach((st, i) => {
+                        const roleName = st.required_role === 'project_admin' ? '项目经理' : st.required_role === 'pmo' ? 'PMO' : st.required_role === 'admin' ? '管理员' : `Level${i+1}`;
+                        let stageColor = '#e9ecef'; let icon = '⏳'; let textColor = '#666';
+                        if (st.status === 'approved') { stageColor = '#d4edda'; icon = '✓'; textColor = '#155724'; }
+                        else if (st.status === 'rejected') { stageColor = '#f8d7da'; icon = '✗'; textColor = '#721c24'; }
+                        const arrow = i < stages.length - 1 ? '<span style="color:#ccc;">→</span>' : '';
+                        stageHtml += `<span style="background:${stageColor};color:${textColor};padding:2px 8px;border-radius:10px;font-size:11px;">${icon} ${roleName}</span>${arrow}`;
+                    });
+                    stageHtml += '</div>';
+                }
+
+                listHtml += `
+                <div style="padding:14px;background:${s.bg};border-radius:8px;border:1px solid ${s.color}22;cursor:pointer;" class="approval-history-item" data-id="${req.id}" data-cycle="${escapeHtml(req.cycle || '')}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span style="font-weight:600;font-size:14px;">周期: ${escapeHtml(req.cycle || '-')}</span>
+                        <span style="padding:3px 10px;border-radius:12px;font-size:12px;color:white;background:${s.color};">${s.label}</span>
+                    </div>
+                    <div style="font-size:12px;color:#666;margin-bottom:4px;">文档: ${escapeHtml(docDisplay)}</div>
+                    <div style="font-size:12px;color:#666;">申请人: ${escapeHtml(req.requester_username || '-')} | 时间: ${createdAt}</div>
+                    ${stageHtml}
+                    <div style="text-align:right;margin-top:8px;">
+                        <span style="color:${s.color};font-size:12px;">点击查看详情 →</span>
+                    </div>
+                </div>`;
+            });
+            listHtml += '</div>';
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'approvalHistoryListModal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:650px;max-height:80vh;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;">📊 审批历史记录</h3>
+                    <button class="modal-close-btn" id="closeHistoryListModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:#666;">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y:auto;max-height:calc(80vh - 80px);padding:15px 20px;">
+                    ${listHtml}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // 绑定关闭
+        document.getElementById('closeHistoryListModal').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+
+        // 绑定每条记录的点击 → 查看详细时间线
+        modal.querySelectorAll('.approval-history-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const approvalId = item.dataset.id;
+                const cycle = item.dataset.cycle;
+                modal.remove();
+                showApprovalTimeline(approvalId, cycle);
+            });
+        });
+    } catch (error) {
+        console.error('加载审批历史失败:', error);
+        showNotification('加载审批历史失败', 'error');
+    }
+}
+
+/**
+ * 全局审批历史 - 显示所有项目的审批记录
+ */
+export async function showGlobalApprovalHistory() {
+    showNotification('加载审批历史...', 'info');
+
+    try {
+        const response = await fetch('/api/projects/archive/history');
+        if (!response.ok) {
+            showNotification('获取审批记录失败', 'error');
+            return;
+        }
+        const result = await response.json();
+        if (result.status !== 'success') {
+            showNotification(result.message || '获取审批记录失败', 'error');
+            return;
+        }
+
+        const requests = result.requests || [];
+
+        const existingModal = document.getElementById('globalApprovalHistoryModal');
+        if (existingModal) existingModal.remove();
+
+        const statusLabels = {
+            'pending': { label: '审批中', color: '#ffc107', bg: '#fff8e1' },
+            'approved': { label: '已归档', color: '#28a745', bg: '#e8f5e9' },
+            'rejected': { label: '已驳回', color: '#dc3545', bg: '#ffebee' },
+            'withdrawn': { label: '已撤回', color: '#6c757d', bg: '#f5f5f5' },
+            'stage_approved': { label: '阶段审批', color: '#17a2b8', bg: '#e0f7fa' }
+        };
+
+        // 按状态筛选
+        let filterHtml = `
+            <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+                <button class="btn btn-sm btn-outline-secondary history-filter-btn active" data-filter="all">全部</button>
+                <button class="btn btn-sm btn-outline-warning history-filter-btn" data-filter="pending">审批中</button>
+                <button class="btn btn-sm btn-outline-success history-filter-btn" data-filter="approved">已归档</button>
+                <button class="btn btn-sm btn-outline-danger history-filter-btn" data-filter="rejected">已驳回</button>
+                <button class="btn btn-sm btn-outline-secondary history-filter-btn" data-filter="withdrawn">已撤回</button>
+            </div>`;
+
+        let listHtml = '';
+        if (requests.length === 0) {
+            listHtml = '<div style="text-align:center;color:#999;padding:40px;">暂无审批记录</div>';
+        } else {
+            listHtml = '<div class="global-history-list" style="display:flex;flex-direction:column;gap:10px;">';
+            requests.forEach(req => {
+                const s = statusLabels[req.status] || { label: req.status, color: '#6c757d', bg: '#f5f5f5' };
+                const docNames = Array.isArray(req.doc_names) ? req.doc_names : [];
+                const docDisplay = docNames.length > 3
+                    ? docNames.slice(0, 3).join('、') + `...等${docNames.length}个`
+                    : docNames.join('、') || '-';
+                const createdAt = req.created_at ? new Date(req.created_at).toLocaleString('zh-CN') : '-';
+                const projectName = req.project_name || req.project_id || '-';
+
+                const stages = req.approval_stages || [];
+                let stageHtml = '';
+                if (stages.length > 0) {
+                    stageHtml = '<div style="display:flex;gap:4px;align-items:center;margin-top:6px;flex-wrap:wrap;">';
+                    stages.forEach((st, i) => {
+                        const roleName = st.required_role === 'project_admin' ? '项目经理' : st.required_role === 'pmo' ? 'PMO' : st.required_role === 'admin' ? '管理员' : `Level${i+1}`;
+                        let stageColor = '#e9ecef'; let icon = '⏳'; let textColor = '#666';
+                        if (st.status === 'approved') { stageColor = '#d4edda'; icon = '✓'; textColor = '#155724'; }
+                        else if (st.status === 'rejected') { stageColor = '#f8d7da'; icon = '✗'; textColor = '#721c24'; }
+                        const arrow = i < stages.length - 1 ? '<span style="color:#ccc;">→</span>' : '';
+                        stageHtml += `<span style="background:${stageColor};color:${textColor};padding:2px 8px;border-radius:10px;font-size:11px;">${icon} ${roleName}</span>${arrow}`;
+                    });
+                    stageHtml += '</div>';
+                }
+
+                listHtml += `
+                <div style="padding:14px;background:${s.bg};border-radius:8px;border:1px solid ${s.color}22;cursor:pointer;" class="global-history-item" data-id="${req.id}" data-cycle="${escapeHtml(req.cycle || '')}" data-project-id="${escapeHtml(req.project_id || '')}" data-status="${req.status}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span style="font-weight:600;font-size:14px;">📁 ${escapeHtml(projectName)}</span>
+                        <span style="padding:3px 10px;border-radius:12px;font-size:12px;color:white;background:${s.color};">${s.label}</span>
+                    </div>
+                    <div style="font-size:12px;color:#666;margin-bottom:4px;">周期: ${escapeHtml(req.cycle || '-')} | 文档: ${escapeHtml(docDisplay)}</div>
+                    <div style="font-size:12px;color:#666;">申请人: ${escapeHtml(req.requester_username || '-')} | 时间: ${createdAt}</div>
+                    ${stageHtml}
+                    <div style="text-align:right;margin-top:8px;">
+                        <span style="color:${s.color};font-size:12px;">点击查看详情 →</span>
+                    </div>
+                </div>`;
+            });
+            listHtml += '</div>';
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'globalApprovalHistoryModal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:700px;max-height:85vh;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;">📊 审批历史记录</h3>
+                    <button class="modal-close-btn" id="closeGlobalHistoryModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:#666;">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y:auto;max-height:calc(85vh - 80px);padding:15px 20px;">
+                    ${filterHtml}
+                    ${listHtml}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // 绑定关闭
+        document.getElementById('closeGlobalHistoryModal').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+
+        // 绑定筛选按钮
+        modal.querySelectorAll('.history-filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                modal.querySelectorAll('.history-filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const filter = btn.dataset.filter;
+                modal.querySelectorAll('.global-history-item').forEach(item => {
+                    if (filter === 'all' || item.dataset.status === filter) {
+                        item.style.display = '';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            });
+        });
+
+        // 绑定每条记录的点击 → 查看详细时间线
+        modal.querySelectorAll('.global-history-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const approvalId = item.dataset.id;
+                const cycle = item.dataset.cycle;
+                const projectId = item.dataset.projectId;
+                showApprovalTimeline(approvalId, cycle, projectId);
+            });
+        });
+    } catch (error) {
+        console.error('加载审批历史失败:', error);
+        showNotification('加载审批历史失败', 'error');
+    }
+}
+
+/**
  * 承建方快速审批（由项目经理输入安全码完成审批）
  */
 async function handleContractorQuickApproveAction(approvalId, cycle) {
@@ -3900,19 +4305,30 @@ async function handleContractorQuickApproveAction(approvalId, cycle) {
         let selectedApprover;
         let approvalCode = '';
 
-        if (approvers.length === 1) {
-            selectedApprover = approvers[0];
+        // 自动匹配当前登录用户
+        const currentUserId = authState.user?.id;
+        const currentUsername = authState.user?.username;
+        let matchedApprover = null;
+        if (currentUserId) {
+            matchedApprover = approvers.find(a => String(a.id) === String(currentUserId));
+        }
+        if (!matchedApprover && currentUsername) {
+            matchedApprover = approvers.find(a => a.username === currentUsername);
+        }
+
+        if (matchedApprover || approvers.length === 1) {
+            selectedApprover = matchedApprover || approvers[0];
             if (requireCode) {
                 const codeInput = await promptApprovalCodeForArchive(
-                    `项目经理 "${selectedApprover.username}" 快速审批 - 请输入审批安全码`
+                    `${selectedApprover.username} 快速审批 - 请输入审批安全码`
                 );
                 if (!codeInput?.approval_code) return;
                 approvalCode = codeInput.approval_code;
             }
         } else {
-            // 多个审批人，需要选择 + 输入安全码
+            // 多个审批人且无法自动匹配，需要选择 + 输入安全码
             const input = await promptApprovalCodeForArchive(
-                '快速审批 - 选择项目经理并输入安全码',
+                '快速审批 - 选择审批人并输入安全码',
                 false, approvers, !requireCode
             );
             if (!input) return;
@@ -5515,6 +5931,7 @@ if (typeof window !== 'undefined') {
     window.handleQuickApprove = handleQuickApproveAction;
     window.handleWithdrawArchive = handleWithdrawArchiveAction;
     window.handleContractorQuickApprove = handleContractorQuickApproveAction;
+    window.showApprovalTimelineModal = showApprovalTimeline;
     window.handleRenameDirectory = handleRenameDirectoryAction;
     // 编辑表单中选择目录按钮
     window.pickEditDirectory = async function() {
@@ -5582,6 +5999,7 @@ if (typeof window !== 'undefined') {
     window.batchArchiveCycle = batchArchiveCycle;
     window.handleQuickApprove = handleQuickApproveAction;
     window.handleContractorQuickApprove = handleContractorQuickApproveAction;
+    window.showApprovalTimelineModal = showApprovalTimeline;
     window.initUploadMethodTabs = initUploadMethodTabs;
 }
 

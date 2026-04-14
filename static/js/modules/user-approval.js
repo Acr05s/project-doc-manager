@@ -58,7 +58,7 @@ async function loadPendingUsers() {
             const roleMap = { 'contractor': '普通员工', 'project_admin': '项目经理', 'pmo': '项目管理组织', 'admin': '系统管理员' };
             const roleLabel = roleMap[user.role] || user.role;
             html += `<tr>`;
-            html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(user.username)}</td>`;
+            html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(user.display_name ? user.username + '（' + user.display_name + '）' : user.username)}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${roleLabel}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(user.organization || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${user.created_at || '-'}</td>`;

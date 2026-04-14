@@ -113,7 +113,7 @@ export async function loadUserManagementList() {
             const usernameTd = document.createElement('td');
             usernameTd.style.padding = '8px';
             usernameTd.style.borderBottom = '1px solid #eee';
-            usernameTd.textContent = user.username;
+            usernameTd.textContent = user.display_name ? `${user.username}（${user.display_name}）` : user.username;
             tr.appendChild(usernameTd);
             
             // 创建角色列

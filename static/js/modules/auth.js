@@ -85,22 +85,15 @@ export async function login(username, password) {
  */
 export async function logout() {
     try {
-        const response = await fetch('/logout');
-        const result = await response.json();
-        
-        authState.isAuthenticated = false;
-        authState.user = null;
-        updateAuthUI();
-        updateRoleBasedUI();
-        return { success: true, message: result.message };
+        await fetch('/logout');
     } catch (error) {
-        console.error('注销失败:', error);
-        authState.isAuthenticated = false;
-        authState.user = null;
-        updateAuthUI();
-        updateRoleBasedUI();
-        return { success: false, message: '注销失败，请稍后重试' };
+        console.error('注销请求异常:', error);
     }
+    authState.isAuthenticated = false;
+    authState.user = null;
+    // 直接跳转到登录页面
+    window.location.href = '/login';
+    return { success: true };
 }
 
 /**
@@ -136,7 +129,7 @@ function updateAuthUI() {
             <div class="dropdown" id="userProfileDropdown" style="position:relative;display:inline-block;">
                 <button class="dropdown-toggle" type="button" id="userProfileBtn" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
                     <span class="user-role" style="font-size:11px;color:#fff;font-weight:bold;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:3px;">${roleLabel}</span>
-                    <span class="username" style="font-size:12px;color:#fff;">${authState.user.username}</span>
+                    <span class="username" style="font-size:12px;color:#fff;">${authState.user.display_name ? `${authState.user.username}（${authState.user.display_name}）` : authState.user.username}</span>
                     ${orgLabel ? `<span style="font-size:11px;color:rgba(255,255,255,0.75);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${orgLabel}">${orgLabel}</span>` : ''}
                     <span style="font-size:10px;">▼</span>
                 </button>
@@ -182,8 +175,9 @@ function updateAuthUI() {
             });
         }
         
+        // messageCenterBtn已废弃，使用headerBellBtn代替
         const msgBtn = document.getElementById('messageCenterBtn');
-        if (msgBtn) msgBtn.style.display = 'flex';
+        if (msgBtn) msgBtn.style.display = 'none';
     } else {
         // 隐藏消息中心按钮
         const msgBtn = document.getElementById('messageCenterBtn');
@@ -215,10 +209,10 @@ export function updateRoleBasedUI() {
     const isContractor = role === 'contractor';
     const isPending = authState.user?.status === 'pending';
 
-    // 消息中心按钮
+    // messageCenterBtn已废弃，始终隐藏
     const msgBtn = document.getElementById('messageCenterBtn');
     if (msgBtn) {
-        msgBtn.style.display = authState.isAuthenticated ? 'flex' : 'none';
+        msgBtn.style.display = 'none';
     }
 
     // 待审核用户隐藏所有功能菜单
@@ -383,6 +377,9 @@ export function updateRoleBasedUI() {
                     case 'archiveApprovalBtn':
                         import('./archive-approval.js').then(m => m.openArchiveApprovalModal());
                         break;
+                    case 'approvalHistoryBtn':
+                        import('./document.js').then(m => m.showGlobalApprovalHistory());
+                        break;
                     case 'userManagementMenuItem':
                         import('./admin.js').then(m => m.openUserManagementModal());
                         break;
@@ -474,26 +471,35 @@ export function openLoginModal() {
     const modal = document.createElement('div');
     modal.id = 'loginModal';
     modal.className = 'modal show';
-    modal.style.display = 'block';
+    modal.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;';
     modal.innerHTML = `
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">登录</h5>
-                </div>
-                <div class="modal-body">
-                    <div id="loginMessage" class="alert alert-danger" style="display: none;"></div>
-                    <form id="loginForm">
-                        <div class="form-group">
-                            <label for="loginUsername">用户名</label>
-                            <input type="text" class="form-control" id="loginUsername" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="loginPassword">密码</label>
-                            <input type="password" class="form-control" id="loginPassword" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary btn-block">登录</button>
-                    </form>
+        <div style="background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.25);width:360px;max-width:90vw;overflow:hidden;">
+            <div style="background:linear-gradient(135deg,#0066cc,#004d99);padding:24px 28px 20px;color:#fff;">
+                <h3 style="margin:0;font-size:18px;font-weight:600;">📁 项目资料管理平台</h3>
+                <p style="margin:6px 0 0;font-size:13px;opacity:0.85;">请登录以继续使用</p>
+            </div>
+            <div style="padding:24px 28px 28px;">
+                <div id="loginMessage" style="display:none;padding:10px 12px;border-radius:6px;background:#fee;color:#c00;font-size:13px;margin-bottom:16px;border:1px solid #fcc;"></div>
+                <form id="loginForm">
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:13px;color:#555;margin-bottom:6px;font-weight:500;">用户名</label>
+                        <input type="text" id="loginUsername" required placeholder="请输入用户名"
+                            style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;transition:border-color 0.2s;"
+                            onfocus="this.style.borderColor='#0066cc';this.style.boxShadow='0 0 0 3px rgba(0,102,204,0.1)'"
+                            onblur="this.style.borderColor='#ddd';this.style.boxShadow='none'">
+                    </div>
+                    <div style="margin-bottom:20px;">
+                        <label style="display:block;font-size:13px;color:#555;margin-bottom:6px;font-weight:500;">密码</label>
+                        <input type="password" id="loginPassword" required placeholder="请输入密码"
+                            style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;transition:border-color 0.2s;"
+                            onfocus="this.style.borderColor='#0066cc';this.style.boxShadow='0 0 0 3px rgba(0,102,204,0.1)'"
+                            onblur="this.style.borderColor='#ddd';this.style.boxShadow='none'">
+                    </div>
+                    <button type="submit" style="width:100%;padding:11px;background:linear-gradient(135deg,#0066cc,#004d99);color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;transition:opacity 0.2s;"
+                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">登 录</button>
+                </form>
+                <div style="text-align:center;margin-top:14px;">
+                    <a href="/login" style="font-size:12px;color:#999;text-decoration:none;">前往注册页面 →</a>
                 </div>
             </div>
         </div>
@@ -501,6 +507,19 @@ export function openLoginModal() {
     
     document.body.appendChild(modal);
     document.body.style.overflow = 'hidden';
+
+    // 点击背景不关闭（防误关）
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            // 不关闭，提示用户需要登录
+        }
+    });
+    
+    // 自动聚焦用户名
+    setTimeout(() => {
+        const usernameInput = document.getElementById('loginUsername');
+        if (usernameInput) usernameInput.focus();
+    }, 100);
     
     // 添加表单提交事件
     const loginForm = document.getElementById('loginForm');

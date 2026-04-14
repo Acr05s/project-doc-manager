@@ -637,9 +637,13 @@ function setupEventListeners() {
     });
 
     // 点击模态框外部关闭（需要确认，防止误关闭）
+    // 安全码验证等关键弹窗不允许点击背景关闭
+    const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'packageProgressModal'];
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
+                // 关键弹窗不允许点击背景关闭
+                if (noBackdropCloseIds.includes(modal.id)) return;
                 // 检查模态框内是否有未保存的更改
                 const hasUnsavedChanges = checkUnsavedChanges(modal);
                 if (hasUnsavedChanges) {
@@ -1396,6 +1400,9 @@ async function loadCycleProgresses(cycles, docsData) {
                     selectCycle(item.dataset.cycle);
                 });
             });
+
+            // 初始化周期文档搜索框
+            initCycleSearch();
         } else {
             console.error('cycleNavList元素未找到，无法渲染周期导航');
         }
@@ -1449,6 +1456,172 @@ function selectCycle(cycle) {
 
     // 渲染该周期的文档
     renderCycleDocuments(cycle);
+}
+
+/**
+ * 初始化周期文档搜索框
+ */
+function initCycleSearch() {
+    const searchBox = document.getElementById('cycleSearchBox');
+    const searchInput = document.getElementById('cycleSearchInput');
+    const searchDropdown = document.getElementById('cycleSearchDropdown');
+    const searchClear = document.getElementById('cycleSearchClear');
+    if (!searchBox || !searchInput) return;
+
+    // 显示搜索框
+    searchBox.style.display = '';
+
+    // 构建搜索索引：所有周期的所有文档名
+    const searchIndex = [];
+    const cycles = appState.projectConfig.cycles || [];
+    const documents = appState.projectConfig.documents || {};
+    cycles.forEach(cycle => {
+        const docsInfo = documents[cycle];
+        if (docsInfo && docsInfo.required_docs) {
+            docsInfo.required_docs.forEach(doc => {
+                searchIndex.push({ cycle, docName: doc.name });
+            });
+        }
+    });
+
+    let activeIndex = -1;
+    let filteredResults = [];
+    let debounceTimer = null;
+
+    function highlightMatch(text, keyword) {
+        if (!keyword) return text;
+        const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return text.replace(new RegExp(`(${escaped})`, 'gi'), '<mark>$1</mark>');
+    }
+
+    function renderDropdown() {
+        if (!filteredResults.length) {
+            searchDropdown.innerHTML = '<div class="cycle-search-no-result">未找到匹配的文档</div>';
+            searchDropdown.style.display = '';
+            return;
+        }
+
+        const keyword = searchInput.value.trim();
+        // 按周期分组
+        const grouped = {};
+        filteredResults.forEach(item => {
+            if (!grouped[item.cycle]) grouped[item.cycle] = [];
+            grouped[item.cycle].push(item);
+        });
+
+        let html = '';
+        let globalIdx = 0;
+        Object.keys(grouped).forEach(cycle => {
+            html += `<div class="cycle-search-group-header">📁 ${cycle}</div>`;
+            grouped[cycle].forEach(item => {
+                html += `<div class="cycle-search-item${globalIdx === activeIndex ? ' active' : ''}" data-index="${globalIdx}" data-cycle="${item.cycle}" data-doc="${item.docName}">
+                    <span class="search-cycle-tag">${cycle}</span>
+                    <span class="search-doc-name">${highlightMatch(item.docName, keyword)}</span>
+                </div>`;
+                globalIdx++;
+            });
+        });
+
+        searchDropdown.innerHTML = html;
+        searchDropdown.style.display = '';
+
+        // 绑定点击事件
+        searchDropdown.querySelectorAll('.cycle-search-item').forEach(el => {
+            el.addEventListener('click', () => {
+                navigateToCycleDoc(el.dataset.cycle, el.dataset.doc);
+            });
+        });
+    }
+
+    function navigateToCycleDoc(cycle, docName) {
+        // 切换到对应周期
+        selectCycle(cycle);
+        searchInput.value = '';
+        searchClear.style.display = 'none';
+        searchDropdown.style.display = 'none';
+
+        // 延迟等待文档表格渲染完成后滚动到对应行并高亮
+        setTimeout(() => {
+            const rows = document.querySelectorAll('.doc-row');
+            for (const row of rows) {
+                const docTypeEl = row.querySelector('.doc-type');
+                if (docTypeEl && docTypeEl.textContent.trim() === docName) {
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    row.style.transition = 'background 0.3s';
+                    row.style.background = '#fff3cd';
+                    setTimeout(() => {
+                        row.style.background = '';
+                    }, 2000);
+                    break;
+                }
+            }
+        }, 500);
+    }
+
+    function doSearch() {
+        const keyword = searchInput.value.trim().toLowerCase();
+        searchClear.style.display = keyword ? '' : 'none';
+
+        if (!keyword) {
+            searchDropdown.style.display = 'none';
+            filteredResults = [];
+            activeIndex = -1;
+            return;
+        }
+
+        filteredResults = searchIndex.filter(item =>
+            item.docName.toLowerCase().includes(keyword)
+        );
+        activeIndex = -1;
+        renderDropdown();
+    }
+
+    searchInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(doSearch, 200);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+        if (!filteredResults.length) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIndex = Math.min(activeIndex + 1, filteredResults.length - 1);
+            renderDropdown();
+            const activeEl = searchDropdown.querySelector('.cycle-search-item.active');
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIndex = Math.max(activeIndex - 1, 0);
+            renderDropdown();
+            const activeEl = searchDropdown.querySelector('.cycle-search-item.active');
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeIndex >= 0 && activeIndex < filteredResults.length) {
+                const item = filteredResults[activeIndex];
+                navigateToCycleDoc(item.cycle, item.docName);
+            }
+        } else if (e.key === 'Escape') {
+            searchDropdown.style.display = 'none';
+            searchInput.blur();
+        }
+    });
+
+    searchClear.addEventListener('click', () => {
+        searchInput.value = '';
+        searchClear.style.display = 'none';
+        searchDropdown.style.display = 'none';
+        filteredResults = [];
+        activeIndex = -1;
+    });
+
+    // 点击外部关闭下拉
+    document.addEventListener('click', (e) => {
+        if (!searchBox.contains(e.target)) {
+            searchDropdown.style.display = 'none';
+        }
+    });
 }
 
 /**

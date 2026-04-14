@@ -3909,6 +3909,15 @@ export function openNewProjectModal() {
     const modal = document.getElementById('newProjectModal');
     if (modal) {
         modal.classList.add('show');
+        // 承建单位角色自动带入乙方信息
+        const partyBInput = document.getElementById('newProjectPartyB');
+        if (partyBInput && !partyBInput.value) {
+            const user = getCurrentUser();
+            if (user && user.organization &&
+                (user.role === 'project_admin' || user.role === 'contractor')) {
+                partyBInput.value = user.organization;
+            }
+        }
     }
 }
 

@@ -204,6 +204,39 @@ export function setupEventListeners() {
         });
     }
 
+    // 查看审批请求按钮
+    const viewArchiveRequestsBtn = document.getElementById('viewArchiveRequestsBtn');
+    if (viewArchiveRequestsBtn) {
+        viewArchiveRequestsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            import('./archive-approval.js').then(m => m.openArchiveApprovalModal());
+            if (archiveAndApprovalDropdown) {
+                archiveAndApprovalDropdown.classList.remove('show');
+            }
+        });
+    }
+
+    // 审批历史按钮
+    const viewApprovalHistoryBtn = document.getElementById('viewApprovalHistoryBtn');
+    if (viewApprovalHistoryBtn) {
+        viewApprovalHistoryBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            import('./document.js').then(m => {
+                const projectId = appState?.currentProjectId;
+                if (projectId) {
+                    m.showApprovalHistoryList(projectId);
+                } else {
+                    showNotification('请先选择项目', 'error');
+                }
+            });
+            if (archiveAndApprovalDropdown) {
+                archiveAndApprovalDropdown.classList.remove('show');
+            }
+        });
+    }
+
     // 新建项目 - 使用document.getElementById确保获取到元素
     const newProjectBtn = document.getElementById('newProjectBtn');
     const newProjectModal = document.getElementById('newProjectModal');
@@ -1026,9 +1059,13 @@ export function setupEventListeners() {
     });
 
     // 点击模态框外部关闭（需要确认，防止误关闭）
+    // 安全码验证等关键弹窗不允许点击背景关闭
+    const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'packageProgressModal'];
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
+                // 关键弹窗不允许点击背景关闭
+                if (noBackdropCloseIds.includes(modal.id)) return;
                 // 检查模态框内是否有未保存的更改
                 const hasUnsavedChanges = checkUnsavedChanges(modal);
                 if (hasUnsavedChanges) {
@@ -1209,6 +1246,20 @@ async function loadSystemSettings() {
             if (systemTimezone) {
                 systemTimezone.value = settings.timezone || 'Asia/Shanghai';
             }
+
+            // 填充邮件配置
+            const smtpHost = document.getElementById('smtpHost');
+            if (smtpHost) smtpHost.value = settings.smtp_host || '';
+            const smtpPort = document.getElementById('smtpPort');
+            if (smtpPort) smtpPort.value = settings.smtp_port || 465;
+            const smtpUsername = document.getElementById('smtpUsername');
+            if (smtpUsername) smtpUsername.value = settings.smtp_username || '';
+            const smtpPassword = document.getElementById('smtpPassword');
+            if (smtpPassword) smtpPassword.value = settings.smtp_password || '';
+            const smtpSender = document.getElementById('smtpSender');
+            if (smtpSender) smtpSender.value = settings.smtp_sender || '';
+            const smtpEncryption = document.getElementById('smtpEncryption');
+            if (smtpEncryption) smtpEncryption.value = settings.smtp_encryption || 'ssl';
         }
     } catch (error) {
         console.error('加载系统设置失败:', error);
@@ -1256,6 +1307,20 @@ async function saveSystemSettings() {
         if (systemTimezone) {
             settings.timezone = systemTimezone.value || 'Asia/Shanghai';
         }
+
+        // SMTP 邮件配置
+        const smtpHost = document.getElementById('smtpHost');
+        if (smtpHost) settings.smtp_host = smtpHost.value.trim();
+        const smtpPort = document.getElementById('smtpPort');
+        if (smtpPort) settings.smtp_port = parseInt(smtpPort.value, 10) || 465;
+        const smtpUsername = document.getElementById('smtpUsername');
+        if (smtpUsername) settings.smtp_username = smtpUsername.value.trim();
+        const smtpPassword = document.getElementById('smtpPassword');
+        if (smtpPassword) settings.smtp_password = smtpPassword.value;
+        const smtpSender = document.getElementById('smtpSender');
+        if (smtpSender) settings.smtp_sender = smtpSender.value.trim();
+        const smtpEncryption = document.getElementById('smtpEncryption');
+        if (smtpEncryption) settings.smtp_encryption = smtpEncryption.value;
 
         const response = await fetch('/api/settings', {
             method: 'POST',
@@ -2187,4 +2252,53 @@ export function refreshAfterCleanup() {
 if (typeof window !== 'undefined') {
     window.archiveLogsNow = archiveLogsNow;
     window.importLogsFile = importLogsFile;
+    window.testSmtpConnection = testSmtpConnection;
+}
+
+/**
+ * 测试SMTP邮件连接
+ */
+async function testSmtpConnection() {
+    const resultEl = document.getElementById('smtpTestResult');
+    if (resultEl) {
+        resultEl.textContent = '测试中...';
+        resultEl.style.color = '#666';
+    }
+    try {
+        const smtpConfig = {
+            smtp_host: (document.getElementById('smtpHost')?.value || '').trim(),
+            smtp_port: parseInt(document.getElementById('smtpPort')?.value, 10) || 465,
+            smtp_username: (document.getElementById('smtpUsername')?.value || '').trim(),
+            smtp_password: document.getElementById('smtpPassword')?.value || '',
+            smtp_encryption: document.getElementById('smtpEncryption')?.value || 'ssl',
+            smtp_sender: (document.getElementById('smtpSender')?.value || '').trim()
+        };
+        if (!smtpConfig.smtp_host || !smtpConfig.smtp_username) {
+            if (resultEl) {
+                resultEl.textContent = '❌ 请先填写SMTP服务器地址和用户名';
+                resultEl.style.color = '#dc3545';
+            }
+            return;
+        }
+        const response = await fetch('/api/settings/test-smtp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(smtpConfig)
+        });
+        const result = await response.json();
+        if (resultEl) {
+            if (result.status === 'success') {
+                resultEl.textContent = '✅ 连接成功';
+                resultEl.style.color = '#28a745';
+            } else {
+                resultEl.textContent = '❌ ' + (result.message || '连接失败');
+                resultEl.style.color = '#dc3545';
+            }
+        }
+    } catch (error) {
+        if (resultEl) {
+            resultEl.textContent = '❌ 测试请求失败';
+            resultEl.style.color = '#dc3545';
+        }
+    }
 }

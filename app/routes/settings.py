@@ -198,7 +198,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)
@@ -255,3 +255,41 @@ def api_check_update():
         'status': 'success',
         'data': result
     })
+
+
+@settings_bp.route('/api/settings/test-smtp', methods=['POST'])
+def test_smtp_connection():
+    """测试SMTP邮件连接"""
+    try:
+        from flask_login import current_user, login_required
+        if not current_user.is_authenticated or current_user.role not in ('admin', 'pmo'):
+            return jsonify({'status': 'error', 'message': '权限不足'}), 403
+
+        data = request.get_json()
+        smtp_host = (data.get('smtp_host') or '').strip()
+        smtp_port = int(data.get('smtp_port') or 465)
+        smtp_username = (data.get('smtp_username') or '').strip()
+        smtp_password = data.get('smtp_password') or ''
+        smtp_encryption = data.get('smtp_encryption') or 'ssl'
+
+        if not smtp_host or not smtp_username:
+            return jsonify({'status': 'error', 'message': '请填写SMTP服务器地址和用户名'}), 400
+
+        import smtplib
+        if smtp_encryption == 'ssl':
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            if smtp_encryption == 'tls':
+                server.starttls()
+
+        server.login(smtp_username, smtp_password)
+        server.quit()
+
+        return jsonify({'status': 'success', 'message': 'SMTP连接测试成功'})
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({'status': 'error', 'message': '认证失败，请检查用户名和密码/授权码'})
+    except smtplib.SMTPConnectError:
+        return jsonify({'status': 'error', 'message': '无法连接到SMTP服务器，请检查地址和端口'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'连接失败: {str(e)}'})

@@ -284,13 +284,14 @@ export async function archiveProjectDocuments(projectId, cycle, docNames, approv
 
 // ===== 归档审批 API =====
 
-export async function submitArchiveRequest(projectId, cycle, docNames, targetApproverIds) {
+export async function submitArchiveRequest(projectId, cycle, docNames, targetApproverIds, requestType = 'archive') {
     try {
         console.log('[DEBUG] submitArchiveRequest called -', {
             projectId,
             cycle,
             docNames,
-            targetApproverIds
+            targetApproverIds,
+            requestType
         });
         const response = await fetch(`/api/projects/${projectId}/archive-request`, {
             method: 'POST',
@@ -298,7 +299,8 @@ export async function submitArchiveRequest(projectId, cycle, docNames, targetApp
             body: JSON.stringify({
                 cycle,
                 doc_names: docNames,
-                target_approver_ids: targetApproverIds
+                target_approver_ids: targetApproverIds,
+                request_type: requestType
             })
         });
         const data = await response.json();
@@ -325,6 +327,16 @@ export async function getArchiveRequests(projectId, status = null) {
         return await response.json();
     } catch (error) {
         console.error('获取归档审批列表失败:', error);
+        return { status: 'error', message: '请求失败' };
+    }
+}
+
+export async function getApprovalHistory(projectId, approvalId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/archive-history?approval_id=${encodeURIComponent(approvalId)}`);
+        return await response.json();
+    } catch (error) {
+        console.error('获取审批历史失败:', error);
         return { status: 'error', message: '请求失败' };
     }
 }

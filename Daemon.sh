@@ -42,6 +42,7 @@ show_help() {
     echo "  logs        View server logs (tail -f)"
     echo "  log         View recent logs (last 50 lines)"
     echo "  upgrade     Upgrade to latest version (git pull + restart)"
+    echo "  migrate     Migrate from main branch to target branch (auto backup + DB migrate)"
     echo "  enable      Install as system service (auto-start on boot)"
     echo "  disable     Remove system service"
     echo "  service     View service status"
@@ -58,6 +59,8 @@ show_help() {
     echo "  ./Daemon.sh start -p 8080   # Start on port 8080"
     echo "  ./Daemon.sh install         # Install dependencies"
     echo "  ./Daemon.sh upgrade         # Upgrade to latest version"
+    echo "  ./Daemon.sh migrate                       # Migrate to feature/security-enhancements"
+    echo "  ./Daemon.sh migrate feature/xxx            # Migrate to specified branch"
     echo "  ./Daemon.sh logs            # View logs in real-time"
     echo "  ./Daemon.sh install-lo      # Install LibreOffice headless"
     echo ""
@@ -503,6 +506,220 @@ cmd_upgrade() {
     echo -e "${GREEN}========================================${NC}"
 }
 
+# 自动迁移分支（从 main 迁移到目标分支，含数据库迁移）
+cmd_migrate() {
+    local TARGET_BRANCH="${1:-feature/security-enhancements}"
+
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}  Branch Migration Tool${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+
+    # 检查git
+    if ! command -v git &> /dev/null; then
+        echo -e "${RED}[ERROR] Git not found! Please install git first.${NC}"
+        exit 1
+    fi
+
+    if [ ! -d "$APP_DIR/.git" ]; then
+        echo -e "${RED}[ERROR] Not a git repository!${NC}"
+        exit 1
+    fi
+
+    cd "$APP_DIR"
+
+    # 获取当前分支
+    local CURRENT_BRANCH
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    echo -e "${BLUE}Current branch : ${CURRENT_BRANCH}${NC}"
+    echo -e "${BLUE}Target  branch : ${TARGET_BRANCH}${NC}"
+    echo ""
+
+    if [ "$CURRENT_BRANCH" = "$TARGET_BRANCH" ]; then
+        echo -e "${GREEN}[OK] Already on target branch '$TARGET_BRANCH'${NC}"
+        echo -e "${YELLOW}Running DB migration to ensure schema is up-to-date...${NC}"
+        run_db_migrate
+        return 0
+    fi
+
+    # =============== 1. 停止服务器 ===============
+    local WAS_RUNNING=false
+    if [ -f "$PID_FILE" ]; then
+        local PID
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            WAS_RUNNING=true
+        fi
+    fi
+
+    if [ "$WAS_RUNNING" = true ]; then
+        echo -e "${YELLOW}[1/7] Stopping server before migration...${NC}"
+        cmd_stop
+        sleep 2
+    else
+        echo -e "${YELLOW}[1/7] Server not running, skip stop${NC}"
+    fi
+
+    # =============== 2. 备份数据 ===============
+    echo -e "${YELLOW}[2/7] Creating backup...${NC}"
+    local BACKUP_TS
+    BACKUP_TS=$(date +%Y%m%d%H%M%S)
+    local BACKUP_DIR="$APP_DIR/backup_migrate_${BACKUP_TS}"
+    mkdir -p "$BACKUP_DIR"
+
+    # 备份数据库
+    if [ -f "$APP_DIR/data/users.db" ]; then
+        cp "$APP_DIR/data/users.db" "$BACKUP_DIR/users.db"
+        echo -e "${GREEN}  + data/users.db${NC}"
+    fi
+
+    # 备份项目索引
+    if [ -d "$APP_DIR/projects" ]; then
+        cp -r "$APP_DIR/projects" "$BACKUP_DIR/projects" 2>/dev/null || true
+        echo -e "${GREEN}  + projects/${NC}"
+    fi
+
+    # 备份配置
+    if [ -f "$APP_DIR/settings.json" ]; then
+        cp "$APP_DIR/settings.json" "$BACKUP_DIR/settings.json"
+        echo -e "${GREEN}  + settings.json${NC}"
+    fi
+
+    # 备份上传文件目录
+    if [ -d "$APP_DIR/uploads" ]; then
+        cp -r "$APP_DIR/uploads" "$BACKUP_DIR/uploads" 2>/dev/null || true
+        echo -e "${GREEN}  + uploads/${NC}"
+    fi
+
+    echo -e "${GREEN}  Backup saved to: $BACKUP_DIR${NC}"
+
+    # =============== 3. Fetch 远程分支 ===============
+    echo -e "${YELLOW}[3/7] Fetching remote branches...${NC}"
+    if ! git fetch --all --prune; then
+        echo -e "${RED}[ERROR] git fetch failed! Check your network.${NC}"
+        rollback_migrate "$WAS_RUNNING"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] Fetch complete${NC}"
+
+    # =============== 4. 切换分支 ===============
+    echo -e "${YELLOW}[4/7] Switching to branch '$TARGET_BRANCH'...${NC}"
+
+    # 检查目标分支是否存在（本地或远程）
+    if git show-ref --verify --quiet "refs/heads/$TARGET_BRANCH" 2>/dev/null; then
+        echo -e "${BLUE}  Local branch found, checking out...${NC}"
+        if ! git checkout "$TARGET_BRANCH"; then
+            echo -e "${RED}[ERROR] Failed to checkout '$TARGET_BRANCH'${NC}"
+            rollback_migrate "$WAS_RUNNING" "$CURRENT_BRANCH"
+            exit 1
+        fi
+        # 拉取最新代码
+        git pull origin "$TARGET_BRANCH" --ff-only 2>/dev/null || \
+        git pull origin "$TARGET_BRANCH" --no-rebase 2>/dev/null || true
+    elif git show-ref --verify --quiet "refs/remotes/origin/$TARGET_BRANCH" 2>/dev/null; then
+        echo -e "${BLUE}  Remote branch found, creating local tracking branch...${NC}"
+        if ! git checkout -b "$TARGET_BRANCH" "origin/$TARGET_BRANCH"; then
+            echo -e "${RED}[ERROR] Failed to create local branch from 'origin/$TARGET_BRANCH'${NC}"
+            rollback_migrate "$WAS_RUNNING" "$CURRENT_BRANCH"
+            exit 1
+        fi
+    else
+        echo -e "${RED}[ERROR] Branch '$TARGET_BRANCH' not found locally or on remote!${NC}"
+        echo -e "${YELLOW}Available remote branches:${NC}"
+        git branch -r --list | grep -v HEAD | sed 's/origin\//  /'
+        rollback_migrate "$WAS_RUNNING"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] Switched to '$TARGET_BRANCH'${NC}"
+
+    # =============== 5. 清除缓存 ===============
+    echo -e "${YELLOW}[5/7] Clearing Python cache...${NC}"
+    find "$APP_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    find "$APP_DIR" -name "*.pyc" -delete 2>/dev/null || true
+    echo -e "${GREEN}[OK] Cache cleared${NC}"
+
+    # =============== 6. 安装依赖 ===============
+    echo -e "${YELLOW}[6/7] Installing dependencies for new branch...${NC}"
+    cmd_install
+
+    # =============== 7. 数据库迁移 ===============
+    echo -e "${YELLOW}[7/7] Running database migration...${NC}"
+    run_db_migrate
+
+    # =============== 完成，启动服务 ===============
+    echo ""
+    if [ "$WAS_RUNNING" = true ]; then
+        echo -e "${YELLOW}Starting server...${NC}"
+        cmd_start
+    fi
+
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  Migration completed successfully!${NC}"
+    echo -e "${GREEN}  From: $CURRENT_BRANCH${NC}"
+    echo -e "${GREEN}  To:   $TARGET_BRANCH${NC}"
+    echo -e "${GREEN}  Backup: $BACKUP_DIR${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+    echo -e "${YELLOW}If anything goes wrong, you can rollback with:${NC}"
+    echo -e "  git checkout $CURRENT_BRANCH"
+    echo -e "  cp $BACKUP_DIR/users.db $APP_DIR/data/users.db"
+    echo -e "  ./Daemon.sh restart"
+}
+
+# 执行数据库迁移
+run_db_migrate() {
+    setup_venv
+    local DB_FILE="$APP_DIR/data/users.db"
+
+    # 优先使用完整的分支迁移脚本（检测版本差异 + DB + settings + 项目数据）
+    if [ -f "$APP_DIR/tools/migrate_branch.py" ]; then
+        echo -e "${BLUE}Running tools/migrate_branch.py (full migration) ...${NC}"
+        "$PYTHON_BIN" "$APP_DIR/tools/migrate_branch.py"
+        local RET=$?
+        if [ $RET -eq 0 ]; then
+            echo -e "${GREEN}[OK] Full migration complete${NC}"
+        else
+            echo -e "${RED}[ERROR] Migration failed (exit code $RET)${NC}"
+            echo -e "${YELLOW}You may need to run manually: python tools/migrate_branch.py${NC}"
+            return $RET
+        fi
+    elif [ -f "$APP_DIR/tools/migrate_db.py" ]; then
+        # 回退到 DB-only 迁移
+        if [ ! -f "$DB_FILE" ]; then
+            echo -e "${YELLOW}[INFO] Database not found, will be created on first start.${NC}"
+            return 0
+        fi
+        echo -e "${BLUE}Running tools/migrate_db.py ...${NC}"
+        "$PYTHON_BIN" "$APP_DIR/tools/migrate_db.py" "$DB_FILE"
+        local RET=$?
+        if [ $RET -eq 0 ]; then
+            echo -e "${GREEN}[OK] Database migration complete${NC}"
+        else
+            echo -e "${RED}[ERROR] Database migration failed (exit code $RET)${NC}"
+            echo -e "${YELLOW}You may need to run manually: python tools/migrate_db.py${NC}"
+            return $RET
+        fi
+    else
+        echo -e "${YELLOW}[WARN] No migration script found, skipping migration${NC}"
+    fi
+}
+
+# 迁移失败回滚辅助
+rollback_migrate() {
+    local WAS_RUNNING="${1:-false}"
+    local ORIGINAL_BRANCH="${2:-}"
+
+    echo -e "${YELLOW}Rolling back...${NC}"
+    if [ -n "$ORIGINAL_BRANCH" ]; then
+        git checkout "$ORIGINAL_BRANCH" 2>/dev/null || true
+    fi
+    if [ "$WAS_RUNNING" = true ]; then
+        echo -e "${YELLOW}Attempting to restart server on original branch...${NC}"
+        cmd_start
+    fi
+}
+
 # 安装系统服务（开机自启）
 cmd_enable_service() {
     echo -e "${BLUE}========================================${NC}"
@@ -757,6 +974,12 @@ while [[ $# -gt 0 ]]; do
             COMMAND="$1"
             shift
             ;;
+        migrate)
+            COMMAND="$1"
+            shift
+            # 剩余参数留给 cmd_migrate，直接跳出循环
+            break
+            ;;
         --mirror|-m)
             MIRROR_FLAG="--mirror"
             shift
@@ -809,6 +1032,9 @@ case $COMMAND in
         ;;
     upgrade)
         cmd_upgrade
+        ;;
+    migrate)
+        cmd_migrate "$@"
         ;;
     enable)
         cmd_enable_service

@@ -270,6 +270,10 @@
                     <input type="text" id="reg-username" placeholder="设置用户名" required>
                 </div>
                 <div class="form-group">
+                    <label for="reg-display-name">姓名（可选，用于显示）</label>
+                    <input type="text" id="reg-display-name" placeholder="请输入真实姓名">
+                </div>
+                <div class="form-group">
                     <label for="reg-password">密码</label>
                     <input type="password" id="reg-password" placeholder="设置密码（至少6位）" required minlength="6">
                 </div>
@@ -536,6 +540,7 @@
             hideMessage();
             
             const username = document.getElementById('reg-username').value.trim();
+            const displayName = document.getElementById('reg-display-name').value.trim();
             const password = document.getElementById('reg-password').value;
             const passwordConfirm = document.getElementById('reg-password-confirm').value;
             const email = document.getElementById('reg-email').value.trim();
@@ -553,7 +558,7 @@
                 return;
             }
 
-            const payload = {username, password, password_confirm: passwordConfirm, email, role: regRole};
+            const payload = {username, password, password_confirm: passwordConfirm, email, role: regRole, display_name: displayName};
             if (regRole !== 'pmo') {
                 payload.organization = organization;
                 payload.org_mode = orgMode;

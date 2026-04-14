@@ -15,7 +15,7 @@ class User:
     
     def __init__(self, id, username, password_hash, role, created_at, status='active',
                  organization=None, approver_id=None, approved_at=None, email=None,
-                 approval_code_hash=None, approval_code_needs_change=1, uuid=None):
+                 approval_code_hash=None, approval_code_needs_change=1, uuid=None, display_name=None):
         self.id = id
         self.username = username
         self.password_hash = password_hash
@@ -29,6 +29,7 @@ class User:
         self.approval_code_hash = approval_code_hash
         self.approval_code_needs_change = approval_code_needs_change
         self.uuid = uuid
+        self.display_name = display_name
     
     @property
     def is_authenticated(self):
@@ -241,6 +242,26 @@ class UserManager:
                     print("Migration version 5: Multi-level approval fields added successfully")
                     cursor.execute('INSERT INTO migration_versions (version) VALUES (5)')
 
+                # 迁移版本 6: 用户表添加 display_name 字段
+                if current_version < 6:
+                    print("Running migration version 6: Adding display_name to users")
+                    cursor.execute('PRAGMA table_info(users)')
+                    user_cols = {row[1] for row in cursor.fetchall()}
+                    if 'display_name' not in user_cols:
+                        cursor.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
+                    print("Migration version 6: display_name column added successfully")
+                    cursor.execute('INSERT INTO migration_versions (version) VALUES (6)')
+
+                # 迁移版本 7: 归档审批表添加 request_type 字段（区分归档/不涉及）
+                if current_version < 7:
+                    print("Running migration version 7: Adding request_type to archive_approvals")
+                    cursor.execute('PRAGMA table_info(archive_approvals)')
+                    cols = {row[1] for row in cursor.fetchall()}
+                    if 'request_type' not in cols:
+                        cursor.execute("ALTER TABLE archive_approvals ADD COLUMN request_type TEXT DEFAULT 'archive'")
+                    print("Migration version 7: request_type column added successfully")
+                    cursor.execute('INSERT INTO migration_versions (version) VALUES (7)')
+
                 # 提交迁移操作
                 conn.commit()
                 print("Database migration completed successfully")
@@ -359,19 +380,21 @@ class UserManager:
         """将数据库行转换为 User 对象，兼容旧数据"""
         if row is None:
             return None
-        # 13列：含uuid; 12列：不含uuid; 旧数据可能更少
-        if len(row) >= 13:
-            return User(*row[:13])
+        # 14列：含UUID+display_name; 13列：含uuid不含display_name; 12列：不含uuid; 旧数据可能更少
+        if len(row) >= 14:
+            return User(*row[:14])
+        elif len(row) == 13:
+            return User(*row[:13], display_name=None)
         elif len(row) == 12:
-            return User(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], None)
+            return User(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], None, None)
         elif len(row) == 11:
-            return User(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], 1, None)
+            return User(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], 1, None, None)
         elif len(row) == 10:
-            return User(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], None, 1, None)
+            return User(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], None, 1, None, None)
         elif len(row) == 9:
-            return User(row[0], row[1], row[2], row[3], row[4], 'active', row[5], row[6], row[7], row[8], None, 1, None)
+            return User(row[0], row[1], row[2], row[3], row[4], 'active', row[5], row[6], row[7], row[8], None, 1, None, None)
         elif len(row) == 5:
-            return User(row[0], row[1], row[2], row[3], row[4], 'active', None, None, None, None, None, 1, None)
+            return User(row[0], row[1], row[2], row[3], row[4], 'active', None, None, None, None, None, 1, None, None)
         else:
             return None
     
@@ -390,7 +413,7 @@ class UserManager:
         except sqlite3.IntegrityError:
             return None
     
-    def register_user(self, username, password_hash, organization_name, is_new_org=False, email=None, role=None):
+    def register_user(self, username, password_hash, organization_name, is_new_org=False, email=None, role=None, display_name=None):
         """注册新用户
 
         Args:
@@ -430,8 +453,8 @@ class UserManager:
 
                 new_uuid = str(uuid_module.uuid4())
                 cursor.execute(
-                    'INSERT INTO users (username, password_hash, role, status, organization, email, uuid) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    (username, password_hash, role, status, org_name, email, new_uuid)
+                    'INSERT INTO users (username, password_hash, role, status, organization, email, uuid, display_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (username, password_hash, role, status, org_name, email, new_uuid, display_name)
                 )
                 conn.commit()
                 user_id = cursor.lastrowid
@@ -446,7 +469,7 @@ class UserManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid FROM users WHERE username = ?',
+                'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid, display_name FROM users WHERE username = ?',
                 (username,)
             )
             return self._row_to_user(cursor.fetchone())
@@ -456,7 +479,7 @@ class UserManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid FROM users WHERE id = ?',
+                'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid, display_name FROM users WHERE id = ?',
                 (user_id,)
             )
             return self._row_to_user(cursor.fetchone())
@@ -466,7 +489,7 @@ class UserManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid FROM users WHERE uuid = ?',
+                'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid, display_name FROM users WHERE uuid = ?',
                 (user_uuid,)
             )
             return self._row_to_user(cursor.fetchone())
@@ -500,20 +523,20 @@ class UserManager:
             if viewer_role in ('admin', 'pmo'):
                 # 管理员/PMO 可以看到所有待审核用户，包括新建组织的 project_admin
                 cursor.execute(
-                    'SELECT id, username, role, created_at, organization, email, uuid FROM users WHERE status = ? ORDER BY created_at',
+                    'SELECT id, username, role, created_at, organization, email, uuid, display_name FROM users WHERE status = ? ORDER BY created_at',
                     ('pending',)
                 )
             elif viewer_role == 'project_admin':
                 # 项目经理只能看到同组织的 contractor 待审核用户
                 cursor.execute(
-                    'SELECT id, username, role, created_at, organization, email, uuid FROM users WHERE status = ? AND organization = ? AND role = ? ORDER BY created_at',
+                    'SELECT id, username, role, created_at, organization, email, uuid, display_name FROM users WHERE status = ? AND organization = ? AND role = ? ORDER BY created_at',
                     ('pending', viewer_org, 'contractor')
                 )
             else:
                 return []
             
             return [
-                {'id': row[0], 'username': row[1], 'role': row[2], 'created_at': row[3], 'organization': row[4], 'email': row[5], 'uuid': row[6]}
+                {'id': row[0], 'username': row[1], 'role': row[2], 'created_at': row[3], 'organization': row[4], 'email': row[5], 'uuid': row[6], 'display_name': row[7]}
                 for row in cursor.fetchall()
             ]
     
@@ -591,11 +614,11 @@ class UserManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f'SELECT id, username, role, organization, status, uuid FROM users WHERE role IN ({placeholders})',
+                f'SELECT id, username, role, organization, status, uuid, display_name FROM users WHERE role IN ({placeholders})',
                 roles
             )
             return [
-                {'id': row[0], 'username': row[1], 'role': row[2], 'organization': row[3], 'status': row[4], 'uuid': row[5]}
+                {'id': row[0], 'username': row[1], 'role': row[2], 'organization': row[3], 'status': row[4], 'uuid': row[5], 'display_name': row[6]}
                 for row in cursor.fetchall()
             ]
     
@@ -603,15 +626,15 @@ class UserManager:
         """获取所有用户，支持关键字搜索和状态过滤"""
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
-            sql = 'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid FROM users WHERE 1=1'
+            sql = 'SELECT id, username, password_hash, role, created_at, status, organization, approver_id, approved_at, email, approval_code_hash, approval_code_needs_change, uuid, display_name FROM users WHERE 1=1'
             params = []
             if status:
                 sql += ' AND status = ?'
                 params.append(status)
             if keyword:
-                sql += ' AND (username LIKE ? OR organization LIKE ? OR role LIKE ? OR email LIKE ?)'
+                sql += ' AND (username LIKE ? OR organization LIKE ? OR role LIKE ? OR email LIKE ? OR display_name LIKE ?)'
                 like = f'%{keyword}%'
-                params.extend([like, like, like, like])
+                params.extend([like, like, like, like, like])
             sql += ' ORDER BY created_at DESC'
             cursor.execute(sql, params)
             rows = cursor.fetchall()
@@ -1192,7 +1215,7 @@ class UserManager:
 
     # ===== 归档审批 (archive_approvals) =====
 
-    def create_archive_approval(self, project_id, cycle, doc_names, requester_id, requester_username, target_approver_ids):
+    def create_archive_approval(self, project_id, cycle, doc_names, requester_id, requester_username, target_approver_ids, request_type='archive'):
         """创建归档审批请求"""
         try:
             new_uuid = str(uuid_module.uuid4())
@@ -1200,12 +1223,12 @@ class UserManager:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''INSERT INTO archive_approvals
-                       (project_id, cycle, doc_names, requester_id, requester_username, status, target_approver_ids, created_at, uuid)
-                       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)''',
+                       (project_id, cycle, doc_names, requester_id, requester_username, status, target_approver_ids, created_at, uuid, request_type)
+                       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)''',
                     (project_id, cycle, json.dumps(doc_names, ensure_ascii=False),
                      requester_id, requester_username,
                      json.dumps(target_approver_ids) if target_approver_ids else None,
-                     now_with_timezone().isoformat(), new_uuid)
+                     now_with_timezone().isoformat(), new_uuid, request_type)
                 )
                 conn.commit()
                 return {'status': 'success', 'id': cursor.lastrowid, 'uuid': new_uuid}
@@ -1231,6 +1254,38 @@ class UserManager:
                 item['doc_names'] = json.loads(item['doc_names']) if item.get('doc_names') else []
                 item['target_approver_ids'] = json.loads(item['target_approver_ids']) if item.get('target_approver_ids') else []
                 # 解析approval_stages和stage_history JSON
+                if isinstance(item.get('approval_stages'), str):
+                    try:
+                        item['approval_stages'] = json.loads(item['approval_stages'])
+                    except:
+                        item['approval_stages'] = []
+                if isinstance(item.get('stage_history'), str):
+                    try:
+                        item['stage_history'] = json.loads(item['stage_history'])
+                    except:
+                        item['stage_history'] = []
+                result.append(item)
+            return result
+
+    def get_all_archive_approvals(self, status=None, limit=100):
+        """查询所有项目的归档审批列表"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            sql = 'SELECT * FROM archive_approvals'
+            params = []
+            if status:
+                sql += ' WHERE status = ?'
+                params.append(status)
+            sql += ' ORDER BY created_at DESC LIMIT ?'
+            params.append(limit)
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item['doc_names'] = json.loads(item['doc_names']) if item.get('doc_names') else []
+                item['target_approver_ids'] = json.loads(item['target_approver_ids']) if item.get('target_approver_ids') else []
                 if isinstance(item.get('approval_stages'), str):
                     try:
                         item['approval_stages'] = json.loads(item['approval_stages'])

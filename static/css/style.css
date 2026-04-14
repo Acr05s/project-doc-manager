@@ -38,14 +38,14 @@ body {
     color: white;
     padding: 12px 20px;
     display: flex;
-    justify-content: flex-start;
+    justify-content: space-between;
     align-items: center;
     box-shadow: var(--shadow);
     flex-wrap: nowrap;
     overflow-x: visible;
     position: relative;
     z-index: 100;
-    gap: 16px;
+    gap: 12px;
 }
 
 .header-left {
@@ -459,6 +459,7 @@ body {
     border-bottom: 1px solid var(--border-color);
     padding: 10px 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    position: relative;
 }
 
 .cycle-nav-list {
@@ -467,6 +468,144 @@ body {
     align-items: center;
     gap: 15px;
     justify-content: center;
+}
+
+/* 周期文档搜索框 */
+.cycle-search-box {
+    position: absolute;
+    top: 8px;
+    right: 20px;
+    z-index: 100;
+    width: 260px;
+}
+
+.cycle-search-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.cycle-search-icon {
+    position: absolute;
+    left: 8px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.cycle-search-input {
+    width: 100%;
+    padding: 6px 28px 6px 30px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    background: #fff;
+    transition: border-color 0.2s;
+}
+
+.cycle-search-input:focus {
+    border-color: #4a90d9;
+    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.15);
+}
+
+.cycle-search-clear {
+    position: absolute;
+    right: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #999;
+    z-index: 1;
+    line-height: 1;
+}
+
+.cycle-search-clear:hover {
+    color: #333;
+}
+
+.cycle-search-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 2px;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    max-height: 320px;
+    overflow-y: auto;
+    z-index: 200;
+}
+
+.cycle-search-dropdown::-webkit-scrollbar {
+    width: 6px;
+}
+
+.cycle-search-dropdown::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+.cycle-search-group-header {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    background: #f5f5f5;
+    border-bottom: 1px solid #eee;
+    position: sticky;
+    top: 0;
+}
+
+.cycle-search-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s;
+}
+
+.cycle-search-item:last-child {
+    border-bottom: none;
+}
+
+.cycle-search-item:hover,
+.cycle-search-item.active {
+    background: #e8f0fe;
+}
+
+.cycle-search-item .search-cycle-tag {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #e9ecef;
+    color: #555;
+    white-space: nowrap;
+}
+
+.cycle-search-item .search-doc-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cycle-search-item .search-doc-name mark {
+    background: #fff3cd;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
+.cycle-search-no-result {
+    padding: 12px;
+    text-align: center;
+    color: #999;
+    font-size: 13px;
 }
 
 /* 确保每个周期项宽度一致，实现平均分布 */
@@ -4519,40 +4658,40 @@ input[type="month"].compact-input {
     left: 0;
     top: 50%;
     transform: translateY(-50%);
-    width: 40px;
-    height: 40px;
+    width: 52px;
+    height: 52px;
     background: linear-gradient(135deg, var(--primary-color) 0%, #004d99 100%);
     color: #fff;
     border: none;
-    border-radius: 0 10px 10px 0;
+    border-radius: 0 14px 14px 0;
     cursor: pointer;
     z-index: 9999;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    box-shadow: 2px 2px 8px rgba(0,0,0,0.15);
-    transition: opacity 0.3s ease, transform 0.3s ease;
-    opacity: 0.85;
+    font-size: 28px;
+    box-shadow: 2px 2px 10px rgba(0,0,0,0.2);
+    transition: opacity 0.3s ease, width 0.2s ease;
+    opacity: 0.9;
 }
 
 .sidebar-clover-btn:hover {
     opacity: 1;
-    width: 46px;
+    width: 60px;
 }
 
 .sidebar-clover-btn .clover-badge {
     position: absolute;
-    top: -4px;
-    right: -4px;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 4px;
+    top: -5px;
+    right: -5px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
     background: #dc3545;
     color: #fff;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: bold;
-    border-radius: 9px;
+    border-radius: 10px;
     display: none;
     align-items: center;
     justify-content: center;
@@ -4666,5 +4805,127 @@ input[type="month"].compact-input {
 select.input-modal-input {
     appearance: auto;
     cursor: pointer;
+}
+
+/* ===== 审批流程时间线 ===== */
+.approval-timeline {
+    position: relative;
+    padding: 0 0 0 10px;
+}
+
+.timeline-item {
+    position: relative;
+    padding: 0 0 20px 30px;
+    min-height: 50px;
+}
+
+.timeline-item-last {
+    padding-bottom: 0;
+}
+
+.timeline-dot {
+    position: absolute;
+    left: 0;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.1);
+    z-index: 1;
+}
+
+.timeline-line {
+    position: absolute;
+    left: 6px;
+    top: 20px;
+    bottom: 0;
+    width: 2px;
+    background: #e0e0e0;
+}
+
+.timeline-content {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 10px 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.timeline-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.timeline-icon {
+    font-size: 16px;
+}
+
+.timeline-label {
+    font-size: 14px;
+}
+
+.timeline-time {
+    margin-left: auto;
+    font-size: 12px;
+    color: #999;
+    white-space: nowrap;
+}
+
+.timeline-detail {
+    font-size: 13px;
+    color: #555;
+    line-height: 1.5;
+}
+
+.timeline-user {
+    font-size: 12px;
+    color: #888;
+    margin-top: 4px;
+}
+
+.timeline-stages-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 10px;
+    background: #fafafa;
+    border-radius: 8px;
+    border: 1px solid #eee;
+}
+
+.stage-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.stage-arrow {
+    color: #ccc;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.btn-outline-info {
+    background: transparent;
+    color: var(--info-color);
+    border: 1px solid var(--info-color);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-outline-info:hover {
+    background: var(--info-color);
+    color: white;
 }
 

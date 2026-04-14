@@ -3,7 +3,7 @@
  */
 
 import { showNotification, showInputModal } from './ui.js';
-import { getCurrentUser } from './auth.js';
+import { getCurrentUser, authState } from './auth.js';
 import { getArchiveApprovers } from './api.js';
 
 let currentApprovalIdForConfirm = null;
@@ -69,6 +69,7 @@ async function loadPendingArchiveApprovals() {
         let html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
         html += '<thead><tr style="background:#f0f0f0; font-weight:bold;">';
         html += '<th style="padding:10px; border:1px solid #ddd; text-align:left;">项目</th>';
+        html += '<th style="padding:10px; border:1px solid #ddd; text-align:left;">类型</th>';
         html += '<th style="padding:10px; border:1px solid #ddd; text-align:left;">周期</th>';
         html += '<th style="padding:10px; border:1px solid #ddd; text-align:left;">文档</th>';
         html += '<th style="padding:10px; border:1px solid #ddd; text-align:left;">申请人</th>';
@@ -98,12 +99,14 @@ async function loadPendingArchiveApprovals() {
 
             // 项目名称显示：项目名称@承建单位
             const projectDisplayName = (approval.project_name || approval.project_id || '-') + (approval.party_b ? '@' + approval.party_b : '');
+            const typeLabel = approval.request_type === 'not_involved' ? '🚫 不涉及' : '📦 归档';
 
             // 创建数据属性以存储完整的批准对象（Base64编码，支持中文）
             const approvalDataBase64 = btoa(encodeURIComponent(JSON.stringify(approval)));
 
             html += '<tr>';
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(projectDisplayName)}</td>`;
+            html += `<td style="padding:10px; border:1px solid #ddd;">${typeLabel}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.cycle || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${escapeHtml(docDisplay || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.requester_username || '-')}</td>`;
@@ -221,7 +224,10 @@ export async function handleArchiveApprovalConfirm() {
         return;
     }
 
-    const approval = currentApprovalObjectForConfirm;
+    // 先保存变量，因为 closeArchiveApprovalConfirmModal 会重置它们
+    const savedApprovalId = currentApprovalIdForConfirm;
+    const savedApprovalObject = currentApprovalObjectForConfirm;
+    const approval = savedApprovalObject;
     const approvalStages = approval.approval_stages || [];
     const currentStage = approval.current_stage || 1;
 
@@ -230,15 +236,18 @@ export async function handleArchiveApprovalConfirm() {
         // 有下一阶段，需要选择PMO审批人
         closeArchiveApprovalConfirmModal();
         currentApprovalStagesForConfirm = approvalStages;
+        // 恢复被 close 重置的变量
+        currentApprovalIdForConfirm = savedApprovalId;
+        currentApprovalObjectForConfirm = savedApprovalObject;
         await openSelectPMOApproverModal(approval.project_id);
         return;
     }
 
     // 没有下一阶段，需要先验证安全码
     closeArchiveApprovalConfirmModal();
-    const codeResult = await promptArchiveApprovalCode(approval.project_id, currentApprovalIdForConfirm);
+    const codeResult = await promptArchiveApprovalCode(approval.project_id, savedApprovalId);
     if (!codeResult) return; // 用户取消
-    await submitArchiveApproval(approval.project_id, currentApprovalIdForConfirm, null, codeResult.approver_id, codeResult.approval_code, codeResult.new_approval_code);
+    await submitArchiveApproval(approval.project_id, savedApprovalId, null, codeResult.approver_id, codeResult.approval_code, codeResult.new_approval_code);
 }
 
 /**
@@ -254,16 +263,28 @@ async function promptArchiveApprovalCode(projectId, approvalId) {
         }
     } catch (e) { /* ignore */ }
 
+    // 自动匹配当前登录用户的身份
+    const currentUserId = authState.user?.id;
+    const currentUsername = authState.user?.username;
+    let matchedApprover = null;
+    if (currentUserId) {
+        matchedApprover = approvers.find(a => String(a.id) === String(currentUserId));
+    }
+    if (!matchedApprover && currentUsername) {
+        matchedApprover = approvers.find(a => a.username === currentUsername);
+    }
+
     return new Promise((resolve) => {
         const fields = [];
-        if (approvers.length > 1) {
+        // 只有当无法自动匹配时才显示身份选择
+        if (!matchedApprover && approvers.length > 1) {
             fields.push({
                 label: '选择审批人身份',
                 key: 'approver_id',
                 type: 'select',
                 options: approvers.map(a => ({
                     value: String(a.id),
-                    label: `${a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
                 })),
                 placeholder: '请选择你的身份'
             });
@@ -279,7 +300,9 @@ async function promptArchiveApprovalCode(projectId, approvalId) {
                 resolve(null);
                 return;
             }
-            if (approvers.length === 1) {
+            if (matchedApprover) {
+                result.approver_id = String(matchedApprover.id);
+            } else if (approvers.length === 1) {
                 result.approver_id = String(approvers[0].id);
             }
             resolve(result);
@@ -347,6 +370,14 @@ async function submitArchiveApproval(projectId, approvalId, selectPMOId = null, 
         closeArchiveApprovalConfirmModal();
         closeSelectPMOApproverModal();
         await loadPendingArchiveApprovals();
+        // 刷新当前周期的文档列表
+        try {
+            const { appState } = await import('./app-state.js');
+            if (appState.currentCycle) {
+                const { renderCycleDocuments } = await import('./document.js');
+                await renderCycleDocuments(appState.currentCycle);
+            }
+        } catch (e) { /* ignore */ }
     } catch (error) {
         console.error('批准操作失败:', error);
         showNotification('批准操作失败: ' + error.message, 'error');
@@ -385,7 +416,7 @@ async function openSelectPMOApproverModal(projectId) {
             pmoUsers.forEach(user => {
                 const option = document.createElement('option');
                 option.value = user.id || user.uuid;
-                option.textContent = `${user.username} (${user.organization || '未分配'})`;
+                option.textContent = `${user.display_name ? user.username + '（' + user.display_name + '）' : user.username} (${user.organization || '未分配'})`;
                 selectEl.appendChild(option);
             });
         }
@@ -400,8 +431,8 @@ async function openSelectPMOApproverModal(projectId) {
                 pmoUsers.forEach(user => {
                     const userId = user.id || user.uuid;
                     html += `<div style="padding: 8px; border-bottom: 1px solid #eee;">
-                        <input type="radio" name="pmoApproverRadio" value="${userId}" style="margin-right: 8px;">
-                        <strong>${escapeHtml(user.username)}</strong> - ${escapeHtml(user.organization || '未分配')}
+                        <input type="checkbox" name="pmoApproverCheckbox" value="${userId}" style="margin-right: 8px;">
+                        <strong>${escapeHtml(user.display_name ? user.username + '（' + user.display_name + '）' : user.username)}</strong> - ${escapeHtml(user.organization || '未分配')}
                     </div>`;
                 });
                 html += '</div>';
@@ -435,24 +466,31 @@ export function closeSelectPMOApproverModal() {
  * 处理选择确认
  */
 export async function handleSelectPMOApproverConfirm() {
-    let selectedId = document.getElementById('pmoApproverSelect')?.value;
+    let selectedIds = [];
 
-    if (!selectedId) {
-        const radioBtn = document.querySelector('input[name="pmoApproverRadio"]:checked');
-        if (radioBtn) {
-            selectedId = radioBtn.value;
-        }
+    // 从 checkbox 收集多个选中的 PMO 成员
+    const checkboxes = document.querySelectorAll('input[name="pmoApproverCheckbox"]:checked');
+    checkboxes.forEach(cb => {
+        selectedIds.push(cb.value);
+    });
+
+    // 兼容下拉选择
+    const selectVal = document.getElementById('pmoApproverSelect')?.value;
+    if (selectVal && !selectedIds.includes(selectVal)) {
+        selectedIds.push(selectVal);
     }
 
-    selectedPMOApproverIdForConfirm = selectedId || null;
+    // 传递逗号分隔的 ID 字符串，或 null 表示通知全部
+    selectedPMOApproverIdForConfirm = selectedIds.length > 0 ? selectedIds.join(',') : null;
 
     if (currentApprovalIdForConfirm && currentApprovalObjectForConfirm) {
         const projectId = currentApprovalObjectForConfirm.project_id;
+        const savedApprovalId = currentApprovalIdForConfirm;
         closeSelectPMOApproverModal();
         // 验证安全码
-        const codeResult = await promptArchiveApprovalCode(projectId, currentApprovalIdForConfirm);
+        const codeResult = await promptArchiveApprovalCode(projectId, savedApprovalId);
         if (!codeResult) return;
-        submitArchiveApproval(projectId, currentApprovalIdForConfirm, selectedPMOApproverIdForConfirm, codeResult.approver_id, codeResult.approval_code, codeResult.new_approval_code);
+        submitArchiveApproval(projectId, savedApprovalId, selectedPMOApproverIdForConfirm, codeResult.approver_id, codeResult.approval_code, codeResult.new_approval_code);
     }
 }
 
