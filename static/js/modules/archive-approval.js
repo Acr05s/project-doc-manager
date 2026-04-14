@@ -2,8 +2,9 @@
  * 文档归档审批模块
  */
 
-import { showNotification } from './ui.js';
+import { showNotification, showInputModal } from './ui.js';
 import { getCurrentUser } from './auth.js';
+import { getArchiveApprovers } from './api.js';
 
 let currentApprovalIdForConfirm = null;
 let currentApprovalActionForConfirm = null;
@@ -87,18 +88,22 @@ async function loadPendingArchiveApprovals() {
             let stageDisplay = '未知';
             if (archiveApprovalStages.length > 0) {
                 const statuses = archiveApprovalStages.map((s, i) => {
-                    const statusIcon = s.status === 'approved' ? '✓' : s.status === 'rejected' ? '✗' : '⏳';
-                    const levelLabel = `Level${s.level || i + 1}`;
-                    return `${statusIcon} ${levelLabel}`;
+                    const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'admin' ? '管理员' : `Level${s.level || i + 1}`;
+                    if (s.status === 'approved') return `✓ ${roleName}已审核`;
+                    if (s.status === 'rejected') return `✗ ${roleName}已驳回`;
+                    return `⏳ ${roleName}审批`;
                 }).join(' → ');
                 stageDisplay = statuses;
             }
 
-            // 创建数据属性以存储完整的批准对象（Base64编码以避免HTML问题）
-            const approvalDataBase64 = btoa(JSON.stringify(approval));
+            // 项目名称显示：项目名称@承建单位
+            const projectDisplayName = (approval.project_name || approval.project_id || '-') + (approval.party_b ? '@' + approval.party_b : '');
+
+            // 创建数据属性以存储完整的批准对象（Base64编码，支持中文）
+            const approvalDataBase64 = btoa(encodeURIComponent(JSON.stringify(approval)));
 
             html += '<tr>';
-            html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.project_id || '-')}</td>`;
+            html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(projectDisplayName)}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.cycle || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${escapeHtml(docDisplay || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.requester_username || '-')}</td>`;
@@ -126,11 +131,11 @@ export function openArchiveApprovalConfirmModal(approvalId, action, approvalData
     currentApprovalIdForConfirm = approvalId;
     currentApprovalActionForConfirm = action;
 
-    // 解码批准对象
+    // 解码批准对象（支持中文）
     let approvalObject = null;
     if (approvalDataBase64) {
         try {
-            approvalObject = JSON.parse(atob(approvalDataBase64));
+            approvalObject = JSON.parse(decodeURIComponent(atob(approvalDataBase64)));
             currentApprovalObjectForConfirm = approvalObject;
         } catch (e) {
             console.error('解码批准对象失败:', e);
@@ -151,8 +156,9 @@ export function openArchiveApprovalConfirmModal(approvalId, action, approvalData
     if (infoEl && approvalObject) {
         const docNames = Array.isArray(approvalObject.doc_names) ? approvalObject.doc_names : [];
         const docList = docNames.length > 0 ? docNames.join('、') : '-';
+        const projectDisplay = (approvalObject.project_name || approvalObject.project_id || '-') + (approvalObject.party_b ? '@' + approvalObject.party_b : '');
         infoEl.innerHTML = `
-            <div style="margin-bottom: 8px;"><strong>项目：</strong>${escapeHtml(approvalObject.project_id || '-')}</div>
+            <div style="margin-bottom: 8px;"><strong>项目：</strong>${escapeHtml(projectDisplay)}</div>
             <div style="margin-bottom: 8px;"><strong>周期：</strong>${escapeHtml(approvalObject.cycle || '-')}</div>
             <div style="margin-bottom: 8px;"><strong>文档：</strong>${escapeHtml(docList)}</div>
             <div style="margin-bottom: 8px;"><strong>申请人：</strong>${escapeHtml(approvalObject.requester_username || '-')}</div>
@@ -228,14 +234,63 @@ export async function handleArchiveApprovalConfirm() {
         return;
     }
 
-    // 没有下一阶段，直接批准
-    await submitArchiveApproval(approval.project_id, currentApprovalIdForConfirm);
+    // 没有下一阶段，需要先验证安全码
+    closeArchiveApprovalConfirmModal();
+    const codeResult = await promptArchiveApprovalCode(approval.project_id, currentApprovalIdForConfirm);
+    if (!codeResult) return; // 用户取消
+    await submitArchiveApproval(approval.project_id, currentApprovalIdForConfirm, null, codeResult.approver_id, codeResult.approval_code, codeResult.new_approval_code);
+}
+
+/**
+ * 弹出审批安全码输入对话框
+ */
+async function promptArchiveApprovalCode(projectId, approvalId) {
+    // 获取当前阶段的审批人列表
+    let approvers = [];
+    try {
+        const approversResult = await getArchiveApprovers(projectId, approvalId);
+        if (approversResult.status === 'success' && approversResult.approvers) {
+            approvers = approversResult.approvers;
+        }
+    } catch (e) { /* ignore */ }
+
+    return new Promise((resolve) => {
+        const fields = [];
+        if (approvers.length > 1) {
+            fields.push({
+                label: '选择审批人身份',
+                key: 'approver_id',
+                type: 'select',
+                options: approvers.map(a => ({
+                    value: String(a.id),
+                    label: `${a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                })),
+                placeholder: '请选择你的身份'
+            });
+        }
+        fields.push({
+            label: '审批安全码',
+            key: 'approval_code',
+            type: 'password',
+            placeholder: '输入审批安全码'
+        });
+        showInputModal('文档归档审批 - 请输入审批安全码', fields, (result) => {
+            if (!result || !result.approval_code) {
+                resolve(null);
+                return;
+            }
+            if (approvers.length === 1) {
+                result.approver_id = String(approvers[0].id);
+            }
+            resolve(result);
+        });
+    });
 }
 
 /**
  * 提交审批到服务器
  */
-async function submitArchiveApproval(projectId, approvalId, selectPMOId = null) {
+async function submitArchiveApproval(projectId, approvalId, selectPMOId = null, approverId = null, approvalCode = '', newApprovalCode = '') {
     const remark = document.getElementById('archiveApprovalRemark')?.value || '';
 
     showNotification('正在处理批准请求...', 'info');
@@ -251,6 +306,17 @@ async function submitArchiveApproval(projectId, approvalId, selectPMOId = null) 
             body.next_approver_id = selectPMOId;
         }
 
+        // 添加审批人和安全码
+        if (approverId) {
+            body.approver_id = approverId;
+        }
+        if (approvalCode) {
+            body.approval_code = approvalCode;
+        }
+        if (newApprovalCode) {
+            body.new_approval_code = newApprovalCode;
+        }
+
         const response = await fetch(`/api/projects/${projectId}/archive-approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -262,6 +328,19 @@ async function submitArchiveApproval(projectId, approvalId, selectPMOId = null) 
             showNotification('✓ 已批准本阶段审批，文档已提交至下一阶段', 'success');
         } else if (result.status === 'stage_approved') {
             showNotification('✓ 已批准本阶段，等待下一阶段审批...', 'success');
+        } else if (result.status === 'needs_change') {
+            // 首次使用审批安全码需要设置新码
+            const newCodeResult = await new Promise((resolve) => {
+                showInputModal('首次使用审批安全码，请输入当前登录密码并设置新审批安全码', [
+                    { label: '当前登录密码', key: 'approval_code', type: 'password', placeholder: '输入当前登录密码' },
+                    { label: '新审批安全码', key: 'new_approval_code', type: 'password', placeholder: '至少8位，包含字母和数字' }
+                ], resolve);
+            });
+            if (newCodeResult && newCodeResult.approval_code && newCodeResult.new_approval_code) {
+                await submitArchiveApproval(projectId, approvalId, selectPMOId, approverId, newCodeResult.approval_code, newCodeResult.new_approval_code);
+                return;
+            }
+            showNotification('已取消审批', 'info');
         } else {
             showNotification('批准失败: ' + (result.message || '未知错误'), 'error');
         }
@@ -355,7 +434,7 @@ export function closeSelectPMOApproverModal() {
 /**
  * 处理选择确认
  */
-export function handleSelectPMOApproverConfirm() {
+export async function handleSelectPMOApproverConfirm() {
     let selectedId = document.getElementById('pmoApproverSelect')?.value;
 
     if (!selectedId) {
@@ -369,7 +448,11 @@ export function handleSelectPMOApproverConfirm() {
 
     if (currentApprovalIdForConfirm && currentApprovalObjectForConfirm) {
         const projectId = currentApprovalObjectForConfirm.project_id;
-        submitArchiveApproval(projectId, currentApprovalIdForConfirm, selectedPMOApproverIdForConfirm);
+        closeSelectPMOApproverModal();
+        // 验证安全码
+        const codeResult = await promptArchiveApprovalCode(projectId, currentApprovalIdForConfirm);
+        if (!codeResult) return;
+        submitArchiveApproval(projectId, currentApprovalIdForConfirm, selectedPMOApproverIdForConfirm, codeResult.approver_id, codeResult.approval_code, codeResult.new_approval_code);
     }
 }
 
@@ -392,6 +475,11 @@ export async function handleArchiveApprovalReject() {
         return;
     }
 
+    // 验证安全码
+    closeArchiveApprovalConfirmModal();
+    const codeResult = await promptArchiveApprovalCode(projectId, approvalId);
+    if (!codeResult) return;
+
     showNotification('正在处理驳回请求...', 'info');
 
     try {
@@ -400,13 +488,41 @@ export async function handleArchiveApprovalReject() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 approval_id: approvalId,
-                reason: reason
+                reason: reason,
+                approver_id: codeResult.approver_id || '',
+                approval_code: codeResult.approval_code || ''
             })
         });
 
         const result = await response.json();
         if (result.status === 'success') {
             showNotification('✓ 已驳回此审批请求，申请人将收到通知', 'success');
+        } else if (result.status === 'needs_change') {
+            const newCodeResult = await new Promise((resolve) => {
+                showInputModal('首次使用审批安全码，请输入当前登录密码并设置新审批安全码', [
+                    { label: '当前登录密码', key: 'approval_code', type: 'password', placeholder: '输入当前登录密码' },
+                    { label: '新审批安全码', key: 'new_approval_code', type: 'password', placeholder: '至少8位，包含字母和数字' }
+                ], resolve);
+            });
+            if (newCodeResult && newCodeResult.approval_code && newCodeResult.new_approval_code) {
+                const retryResp = await fetch(`/api/projects/${projectId}/archive-reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        approval_id: approvalId,
+                        reason: reason,
+                        approver_id: codeResult.approver_id || '',
+                        approval_code: newCodeResult.approval_code,
+                        new_approval_code: newCodeResult.new_approval_code
+                    })
+                });
+                const retryResult = await retryResp.json();
+                if (retryResult.status === 'success') {
+                    showNotification('✓ 已驳回此审批请求', 'success');
+                } else {
+                    showNotification('驳回失败: ' + (retryResult.message || ''), 'error');
+                }
+            }
         } else {
             showNotification('驳回失败: ' + (result.message || '未知错误'), 'error');
         }

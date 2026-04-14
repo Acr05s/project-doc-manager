@@ -323,15 +323,8 @@ window.unarchiveDocument = function(cycle, docName) {
     });
 };
 
-window.handleQuickApprove = function(approvalId, action, cycle) {
-    // This is also set via initDocumentEvents; this is a fallback
-    import('./modules/document.js').then(module => {
-        // handleQuickApprove is set via initDocumentEvents on window
-        if (window.handleQuickApprove !== arguments.callee) {
-            window.handleQuickApprove(approvalId, action, cycle);
-        }
-    });
-};
+// handleQuickApprove 和 handleWithdrawArchive 已在 document.js 模块加载时绑定到 window
+// 此处不再设置 fallback，避免覆盖
 
 window.loadMaintainDocuments = function() {
     import('./modules/document.js').then(module => {

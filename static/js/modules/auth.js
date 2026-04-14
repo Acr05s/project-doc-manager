@@ -252,6 +252,20 @@ export function updateRoleBasedUI() {
         systemManagementBtn.style.display = canSeeSystemMenu ? 'inline-block' : 'none';
     }
 
+    // 四叶草按钮显示控制
+    const sidebarCloverBtn = document.getElementById('sidebarCloverBtn');
+    if (sidebarCloverBtn) {
+        sidebarCloverBtn.style.display = canSeeSystemMenu ? 'flex' : 'none';
+    }
+
+    // 启动菜单通知角标定期刷新
+    if (canSeeSystemMenu) {
+        refreshMenuBadges();
+        if (!window._menuBadgeInterval) {
+            window._menuBadgeInterval = setInterval(refreshMenuBadges, 30000);
+        }
+    }
+
     const systemManagementDropdown = document.getElementById('systemManagementDropdown');
     if (systemManagementDropdown) {
         const existingSysSettings = document.getElementById('systemSettingsMenuItem');
@@ -391,6 +405,58 @@ export function updateRoleBasedUI() {
     
     if (deletedProjectsSection) {
         deletedProjectsSection.style.display = (isAdmin || isProjectAdmin) ? 'block' : 'none';
+    }
+}
+
+/**
+ * 刷新菜单角标（待审核用户数、待审批归档数）
+ */
+async function refreshMenuBadges() {
+    let totalBadge = 0;
+
+    // 获取待审核用户数
+    try {
+        const resp = await fetch('/api/users/pending');
+        const data = await resp.json();
+        const count = (data.status === 'success' && Array.isArray(data.users)) ? data.users.length : 0;
+        const badge = document.getElementById('userApprovalBadge');
+        if (badge) {
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.style.display = 'inline-flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        totalBadge += count;
+    } catch (e) { /* ignore */ }
+
+    // 获取待审批归档数
+    try {
+        const resp = await fetch('/api/projects/archive/pending');
+        const data = await resp.json();
+        const count = (data.status === 'success' && Array.isArray(data.approvals)) ? data.approvals.length : 0;
+        const badge = document.getElementById('archiveApprovalBadge');
+        if (badge) {
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.style.display = 'inline-flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        totalBadge += count;
+    } catch (e) { /* ignore */ }
+
+    // 更新四叶草角标
+    const cloverBadge = document.getElementById('cloverBadge');
+    if (cloverBadge) {
+        if (totalBadge > 0) {
+            cloverBadge.textContent = totalBadge > 99 ? '99+' : totalBadge;
+            cloverBadge.classList.add('show');
+        } else {
+            cloverBadge.classList.remove('show');
+        }
     }
 }
 

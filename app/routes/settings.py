@@ -198,7 +198,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)

@@ -542,10 +542,8 @@
                     <span id="messageBadge" class="message-badge">0</span>
                 </div>
                 
-                <!-- 操作菜单切换按钮（仅管理员/PMO/项目经理可见） -->
-                <button class="btn btn-secondary" type="button" id="systemManagementBtn" style="display:none;" title="操作菜单">
-                    ⚙️ 操作菜单
-                </button>
+                <!-- 操作菜单按钮已移至左侧四叶草浮动按钮 -->
+                <span id="systemManagementBtn" style="display:none;"></span>
                 
                 <!-- 文档需求下拉菜单 -->
                 <div id="documentRequirementsMenu" class="dropdown" style="display:none;">
@@ -607,23 +605,28 @@
             </div>
         </header>
 
-        <!-- 右侧操作菜单侧边栏 -->
+        <!-- 左侧操作菜单侧边栏 -->
         <div id="operationSidebar" class="operation-sidebar">
             <div class="operation-sidebar-header">
-                <span>⚙️ 操作菜单</span>
+                <span>🍀 系统管理</span>
                 <button id="closeSidebarBtn" class="operation-sidebar-close" title="关闭">&times;</button>
             </div>
             <div class="operation-sidebar-body" id="systemManagementDropdown">
-                <a href="#" class="sidebar-menu-item" id="systemSettingsMenuItem">⚙️ 系统设置</a>
-                <a href="#" class="sidebar-menu-item" id="userApprovalBtn">👤 用户审核</a>
-                <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn">📋 文档归档审批</a>
-                <a href="#" class="sidebar-menu-item" id="userManagementMenuItem">👤 用户管理</a>
-                <a href="#" class="sidebar-menu-item" id="orgManagementMenuItem">🏢 承建单位管理</a>
-                <a href="#" class="sidebar-menu-item" id="projectManagementMenuItem">📁 项目管理</a>
+                <a href="#" class="sidebar-menu-item" id="systemSettingsMenuItem"><span>⚙️ 系统设置</span></a>
+                <a href="#" class="sidebar-menu-item" id="userApprovalBtn"><span>👤 用户审核</span><span class="menu-badge" id="userApprovalBadge" style="display:none;"></span></a>
+                <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn"><span>📋 文档归档审批</span><span class="menu-badge" id="archiveApprovalBadge" style="display:none;"></span></a>
+                <a href="#" class="sidebar-menu-item" id="userManagementMenuItem"><span>👤 用户管理</span></a>
+                <a href="#" class="sidebar-menu-item" id="orgManagementMenuItem"><span>🏢 承建单位管理</span></a>
+                <a href="#" class="sidebar-menu-item" id="projectManagementMenuItem"><span>📁 项目管理</span></a>
             </div>
         </div>
         <!-- 侧边栏遮罩层 -->
         <div id="sidebarOverlay" class="sidebar-overlay"></div>
+        <!-- 四叶草浮动按钮 -->
+        <button id="sidebarCloverBtn" class="sidebar-clover-btn" style="display:none;" title="操作菜单">
+            🍀
+            <span class="clover-badge" id="cloverBadge"></span>
+        </button>
 
         <!-- 顶部周期进度导航 -->
         <div id="cycleNavBar" class="cycle-nav-bar">
@@ -1360,6 +1363,13 @@
                             <span>开启邮件通知（注册/审核结果邮件提醒）</span>
                         </label>
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，系统将在用户注册、审核通过/拒绝时发送邮件通知（需配置 SMTP）</small>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="requireApprovalCode" style="width: 18px; height: 18px;" checked>
+                            <span>审批时要求输入安全码</span>
+                        </label>
+                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">关闭后，审批归档操作将不再要求输入审批安全码验证</small>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label for="logRetentionDays">操作日志保留天数：</label>

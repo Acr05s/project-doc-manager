@@ -840,12 +840,34 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     ${!isArchived ? `
                                         ${pendingRequest ? `
                                             <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ 待审核 (申请人: ${pendingRequest.requester_username || ''})</div>
+                                            ${(() => {
+                                                const stages = pendingRequest.approval_stages || [];
+                                                if (stages.length > 0) {
+                                                    const currentStage = pendingRequest.current_stage || 1;
+                                                    const stageLabels = stages.map((s, i) => {
+                                                        const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'admin' ? '管理员' : s.required_role || ('Level'+(i+1));
+                                                        if (s.status === 'approved') return '<span style="color:#28a745;">✓ ' + roleName + '已审核</span>';
+                                                        if (s.status === 'rejected') return '<span style="color:#dc3545;">✗ ' + roleName + '已驳回</span>';
+                                                        return '<span style="color:#ffc107;">⏳ ' + roleName + '审批中</span>';
+                                                    });
+                                                    return '<div style="margin-bottom:6px;font-size:12px;color:#555;line-height:1.8;">流程: ' + stageLabels.join(' → ') + '</div>';
+                                                }
+                                                return '';
+                                            })()}
                                             ${['admin','pmo','project_admin'].includes(authState.user?.role) ? `
                                                 <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                     ✅ 审批通过
                                                 </button>
                                                 <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                     ❌ 驳回
+                                                </button>
+                                            ` : ''}
+                                            ${pendingRequest.requester_username === authState.user?.username ? `
+                                                <button class="btn btn-secondary btn-sm" style="margin-top:4px;" onclick="handleWithdrawArchive('${appState.currentProjectId}', '${pendingRequest.id}', '${cycle}')">
+                                                    ↩️ 撤回审批
+                                                </button>
+                                                <button class="btn btn-info btn-sm" style="margin-top:4px;" onclick="handleContractorQuickApprove('${pendingRequest.id}', '${cycle}')">
+                                                    ⚡ 快速审批
                                                 </button>
                                             ` : ''}
                                         ` : `
@@ -3162,7 +3184,7 @@ async function requestArchiveApproval(cycle, docNames, approvalCode, newApproval
     return await archiveProjectDocuments(appState.currentProjectId, cycle, docNames, approvalCode, newApprovalCode);
 }
 
-async function promptApprovalCodeForArchive(message, requireNewCode = false, approvers = null) {
+async function promptApprovalCodeForArchive(message, requireNewCode = false, approvers = null, skipCode = false) {
     return new Promise((resolve) => {
         const fields = [];
         if (approvers && approvers.length > 0) {
@@ -3177,9 +3199,11 @@ async function promptApprovalCodeForArchive(message, requireNewCode = false, app
                 placeholder: '请选择你的身份'
             });
         }
-        fields.push(
-            { label: '审批安全码', key: 'approval_code', type: 'password', placeholder: '输入审批安全码' }
-        );
+        if (!skipCode) {
+            fields.push(
+                { label: '审批安全码', key: 'approval_code', type: 'password', placeholder: '输入审批安全码' }
+            );
+        }
         if (requireNewCode) {
             fields.push({ label: '新审批安全码', key: 'new_approval_code', type: 'password', placeholder: '至少8位，包含字母和数字' });
         }
@@ -3262,6 +3286,55 @@ async function submitArchiveReview(cycle, docNames) {
         if (result.status === 'success') {
             showNotification('归档审核请求已提交，等待项目经理审批', 'success');
             await renderCycleDocuments(cycle);
+
+            // 快速审批：如果只有一个 Level 1 审批人，提供快速审批入口
+            if (result.approval_id) {
+                try {
+                    const approversResult = await getArchiveApprovers(appState.currentProjectId, result.approval_id);
+                    if (approversResult.status === 'success' && approversResult.approvers?.length === 1) {
+                        const pmName = approversResult.approvers[0].username;
+                        showConfirmModal('快速审批',
+                            `检测到仅有一位项目经理 "${pmName}" 可审批此请求。\n如项目经理在场，可由其输入审批安全码快速完成第一级审批。\n\n是否现在进行快速审批？`,
+                            async () => {
+                                const requireCode = appState.systemSettings?.require_approval_code !== false;
+                                let approvalCode = '';
+                                if (requireCode) {
+                                    const codeInput = await promptApprovalCodeForArchive('项目经理快速审批 - 请输入审批安全码');
+                                    if (!codeInput?.approval_code) return;
+                                    approvalCode = codeInput.approval_code;
+                                }
+                                const approveResult = await approveArchiveRequest(
+                                    appState.currentProjectId, result.approval_id,
+                                    approversResult.approvers[0].id, approvalCode
+                                );
+                                if (approveResult.status === 'success') {
+                                    showNotification('🎉 所有审批完成，文档已归档', 'success');
+                                } else if (approveResult.status === 'stage_approved') {
+                                    showNotification(approveResult.message || '第一级审批已通过，等待PMO审批', 'info');
+                                } else if (approveResult.status === 'needs_change') {
+                                    const updatedInput = await promptApprovalCodeForArchive('首次使用审批安全码，请输入当前登录密码并设置新审批安全码', true);
+                                    if (updatedInput?.approval_code && updatedInput?.new_approval_code) {
+                                        const retryResult = await approveArchiveRequest(
+                                            appState.currentProjectId, result.approval_id,
+                                            approversResult.approvers[0].id, updatedInput.approval_code, updatedInput.new_approval_code
+                                        );
+                                        if (retryResult.status === 'success' || retryResult.status === 'stage_approved') {
+                                            showNotification(retryResult.message || '审批完成', 'success');
+                                        } else {
+                                            showNotification(retryResult.message || '审批失败', 'error');
+                                        }
+                                    }
+                                } else {
+                                    showNotification(approveResult.message || '快速审批失败', 'error');
+                                }
+                                await renderCycleDocuments(cycle);
+                            }
+                        );
+                    }
+                } catch (e) {
+                    console.warn('快速审批检查失败（不影响提交）:', e);
+                }
+            }
         } else if (result.status !== 'cancelled') {
             console.error('[ERROR] Archive submission failed:', result);
             showNotification(result.message || '提交审核失败', 'error');
@@ -3278,17 +3351,42 @@ async function submitArchiveReview(cycle, docNames) {
  * 快速审批归档请求（项目经理在文档页面操作）
  */
 async function quickApproveArchive(approvalId, action = 'approve') {
-    // 获取可选审批人身份
-    const approversResult = await getArchiveApprovers(appState.currentProjectId);
+    // 获取当前阶段的审批人（按 approval_id 过滤）
+    const approversResult = await getArchiveApprovers(appState.currentProjectId, approvalId);
     if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
         showNotification('获取审批人信息失败', 'error');
         return { status: 'error' };
     }
 
     const title = action === 'approve' ? '审批通过 - 请验证身份' : '驳回归档 - 请验证身份';
-    let approvalInput = await promptApprovalCodeForArchive(title, false, approversResult.approvers);
-    if (!approvalInput || !approvalInput.approval_code) {
-        return { status: 'cancelled' };
+    let approvalInput;
+
+    // 检查是否需要审批安全码
+    const requireCode = appState.systemSettings?.require_approval_code !== false;
+
+    if (!requireCode) {
+        // 不需要安全码，自动选择审批人
+        if (approversResult.approvers.length === 1) {
+            approvalInput = { approver_id: String(approversResult.approvers[0].id), approval_code: '__skip__' };
+        } else {
+            // 多个审批人，只选择身份不输安全码
+            approvalInput = await promptApprovalCodeForArchive(title, false, approversResult.approvers, true);
+            if (!approvalInput) return { status: 'cancelled' };
+            approvalInput.approval_code = '__skip__';
+        }
+    } else if (approversResult.approvers.length === 1) {
+        // 单一审批人，自动选中，只需输入安全码
+        approvalInput = await promptApprovalCodeForArchive(title, false, null);
+        if (!approvalInput || !approvalInput.approval_code) {
+            return { status: 'cancelled' };
+        }
+        approvalInput.approver_id = String(approversResult.approvers[0].id);
+    } else {
+        // 多个审批人，显示选择下拉框 + 安全码
+        approvalInput = await promptApprovalCodeForArchive(title, false, approversResult.approvers);
+        if (!approvalInput || !approvalInput.approval_code) {
+            return { status: 'cancelled' };
+        }
     }
 
     let rejectReason = '';
@@ -3301,7 +3399,7 @@ async function quickApproveArchive(approvalId, action = 'approve') {
     }
 
     const approverId = approvalInput.approver_id;
-    const approvalCode = approvalInput.approval_code;
+    const approvalCode = requireCode ? approvalInput.approval_code : '';
 
     let result;
     if (action === 'approve') {
@@ -3310,8 +3408,8 @@ async function quickApproveArchive(approvalId, action = 'approve') {
         result = await rejectArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', rejectReason);
     }
 
-    // 处理 needs_change
-    if (result.status === 'needs_change') {
+    // 处理 needs_change（仅在需要安全码时触发）
+    if (result.status === 'needs_change' && requireCode) {
         const updatedInput = await promptApprovalCodeForArchive(
             '首次使用审批安全码，请输入当前登录密码并设置新审批安全码',
             true, approversResult.approvers
@@ -3760,6 +3858,107 @@ async function handleQuickApproveAction(approvalId, action, cycle) {
 }
 
 /**
+ * 撤回归档审批请求（供 onclick 调用）
+ */
+async function handleWithdrawArchiveAction(projectId, approvalId, cycle) {
+    showConfirmModal('撤回审批', '确定要撤回此归档审批请求吗？', async () => {
+        try {
+            const response = await fetch(`/api/projects/${projectId}/archive-withdraw`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ approval_id: approvalId })
+            });
+            const result = await response.json();
+            if (result.status === 'success') {
+                showNotification('已撤回归档审批请求', 'success');
+                await renderCycleDocuments(cycle);
+            } else {
+                showNotification('撤回失败: ' + (result.message || '未知错误'), 'error');
+            }
+        } catch (error) {
+            console.error('撤回操作失败:', error);
+            showNotification('撤回操作失败: ' + error.message, 'error');
+        }
+    });
+}
+
+/**
+ * 承建方快速审批（由项目经理输入安全码完成审批）
+ */
+async function handleContractorQuickApproveAction(approvalId, cycle) {
+    try {
+        // 获取当前阶段的审批人
+        const approversResult = await getArchiveApprovers(appState.currentProjectId, approvalId);
+        if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
+            showNotification('获取审批人信息失败', 'error');
+            return;
+        }
+
+        const approvers = approversResult.approvers;
+        const requireCode = appState.systemSettings?.require_approval_code !== false;
+
+        let selectedApprover;
+        let approvalCode = '';
+
+        if (approvers.length === 1) {
+            selectedApprover = approvers[0];
+            if (requireCode) {
+                const codeInput = await promptApprovalCodeForArchive(
+                    `项目经理 "${selectedApprover.username}" 快速审批 - 请输入审批安全码`
+                );
+                if (!codeInput?.approval_code) return;
+                approvalCode = codeInput.approval_code;
+            }
+        } else {
+            // 多个审批人，需要选择 + 输入安全码
+            const input = await promptApprovalCodeForArchive(
+                '快速审批 - 选择项目经理并输入安全码',
+                false, approvers, !requireCode
+            );
+            if (!input) return;
+            if (requireCode && !input.approval_code) return;
+            selectedApprover = approvers.find(a => String(a.id) === input.approver_id) || approvers[0];
+            approvalCode = requireCode ? input.approval_code : '';
+        }
+
+        const result = await approveArchiveRequest(
+            appState.currentProjectId, approvalId,
+            selectedApprover.id, approvalCode
+        );
+
+        if (result.status === 'success') {
+            showNotification('🎉 所有审批完成，文档已归档', 'success');
+            await renderCycleDocuments(cycle);
+            import('./cycle.js').then(module => { module.refreshCycleProgress(); });
+        } else if (result.status === 'stage_approved') {
+            showNotification(result.message || '第一级审批已通过，等待PMO审批', 'info');
+            await renderCycleDocuments(cycle);
+        } else if (result.status === 'needs_change') {
+            const updatedInput = await promptApprovalCodeForArchive(
+                '首次使用审批安全码，请输入当前登录密码并设置新审批安全码', true
+            );
+            if (updatedInput?.approval_code && updatedInput?.new_approval_code) {
+                const retryResult = await approveArchiveRequest(
+                    appState.currentProjectId, approvalId,
+                    selectedApprover.id, updatedInput.approval_code, updatedInput.new_approval_code
+                );
+                if (retryResult.status === 'success' || retryResult.status === 'stage_approved') {
+                    showNotification(retryResult.message || '审批完成', 'success');
+                } else {
+                    showNotification(retryResult.message || '审批失败', 'error');
+                }
+                await renderCycleDocuments(cycle);
+            }
+        } else {
+            showNotification(result.message || '快速审批失败', 'error');
+        }
+    } catch (error) {
+        console.error('[ERROR] 承建方快速审批失败:', error);
+        showNotification('快速审批失败: ' + error.message, 'error');
+    }
+}
+
+/**
  * 格式化日期为月/日
  */
 function formatDateToMonth(dateString) {
@@ -4170,6 +4369,7 @@ function renderDocumentsTree(documents, cycle, docName) {
                         <span style="font-size:14px;">📁</span>
                         <span class="dir-name-label" style="flex:1;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">${escapeHtml(dirNode.name)}</span>
                         <span style="color:#888;font-size:11px;flex-shrink:0;">(${totalCount})</span>
+                        <button class="btn btn-sm dir-rename-btn" data-dir="${escapedDirPath}" onclick="event.stopPropagation();handleRenameDirectory('${escapedDirPath}')" style="padding:1px 6px;font-size:11px;margin-left:4px;background:#fff;border:1px solid #aaa;color:#333;cursor:pointer;border-radius:3px;" title="重命名目录">✏️</button>
                     </div>
                     <div class="doc-dir-children" data-dir-files="${escapedDirPath}" style="display:block;">
                         ${renderNode(dirNode, depth + 1)}
@@ -4203,6 +4403,86 @@ function countAllFiles(node) {
     return count;
 }
 
+/**
+ * 目录重命名 - 修改目录路径中的最后一段名称，并更新所有子文档的directory
+ */
+async function handleRenameDirectoryAction(dirPath) {
+    if (!dirPath) return;
+    const parts = dirPath.split('/').filter(Boolean);
+    const currentName = parts[parts.length - 1] || dirPath;
+
+    showInputModal('重命名目录', [
+        { label: '新目录名称', key: 'newName', type: 'text', placeholder: currentName, value: currentName }
+    ], async (val) => {
+        const newName = val?.newName?.trim();
+        if (!newName || newName === currentName) return;
+
+        // 构建新路径
+        const newParts = [...parts];
+        newParts[newParts.length - 1] = newName;
+        const newDirPath = '/' + newParts.join('/');
+        const oldDirPrefix = '/' + parts.join('/');
+
+        // 从API获取当前文档类型下所有文档
+        let allDocs = [];
+        try {
+            let apiUrl = `/api/documents/list?project_id=${encodeURIComponent(appState.currentProjectId)}`;
+            if (appState.currentCycle) apiUrl += `&cycle=${encodeURIComponent(appState.currentCycle)}`;
+            if (appState.currentDocument) apiUrl += `&doc_name=${encodeURIComponent(appState.currentDocument)}`;
+            const response = await fetch(apiUrl);
+            const result = await response.json();
+            if (result.status === 'success') allDocs = result.data || [];
+        } catch (e) {
+            showNotification('获取文档列表失败', 'error');
+            return;
+        }
+
+        const docsToUpdate = allDocs.filter(doc => {
+            const docDir = doc.display_directory || doc.directory || '/';
+            return docDir === oldDirPrefix || docDir.startsWith(oldDirPrefix + '/');
+        });
+
+        if (docsToUpdate.length === 0) {
+            showNotification('未找到需要更新的文档', 'warning');
+            return;
+        }
+
+        showLoading(true);
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const doc of docsToUpdate) {
+            const docId = doc.doc_id || doc.id;
+            if (!docId) continue;
+            const oldDir = doc.display_directory || doc.directory || '/';
+            const updatedDir = oldDir === oldDirPrefix
+                ? newDirPath
+                : newDirPath + oldDir.substring(oldDirPrefix.length);
+            try {
+                const result = await editDocument(docId, { directory: updatedDir });
+                if (result.status === 'success') {
+                    successCount++;
+                } else {
+                    errorCount++;
+                }
+            } catch (e) {
+                errorCount++;
+            }
+        }
+
+        showLoading(false);
+        showNotification(
+            `目录已重命名: ${successCount} 个文档更新${errorCount > 0 ? '，' + errorCount + ' 个失败' : ''}`,
+            errorCount > 0 ? 'warning' : 'success'
+        );
+
+        // 刷新维护文档列表
+        if (appState.currentCycle && appState.currentDocument) {
+            await loadMaintainDocumentsList(appState.currentCycle, appState.currentDocument);
+        }
+    });
+}
+
 // 渲染单个文档项
 function renderDocItem(doc, cycle, docName, indent) {
     const docId = doc.doc_id || doc.id || `${doc.cycle || 'unknown'}_${doc.doc_name || doc.name || 'unknown'}_${Date.now()}`;
@@ -4216,10 +4496,16 @@ function renderDocItem(doc, cycle, docName, indent) {
         'no_seal', 'other_seal', 'not_involved'];
     const labels = ['📅', '✍️', '🏢甲:', '🏭乙:', '📆', '❌不签字', '🏢甲方盖章',
         '🏭乙方盖章', '🔖', '', '❌不盖章', '📍', '🚫本次不涉及'];
-    
+
     for (let i = 0; i < fields.length; i++) {
         const val = getField(fields[i]);
-        if (val) attrParts.push(labels[i] + (labels[i].match(/[📅✍️🏢🏭📆📍]/) ? val : ''));
+        if (val) {
+            if (typeof val === 'boolean') {
+                attrParts.push(labels[i]);
+            } else {
+                attrParts.push(labels[i] + val);
+            }
+        }
     }
 
     // 自定义属性
@@ -4227,8 +4513,12 @@ function renderDocItem(doc, cycle, docName, indent) {
     customDefs.forEach(attrDef => {
         const value = getField(attrDef.id);
         const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
-        if (isCompleted && attrDef.type !== 'checkbox') {
-            attrParts.push(`📌${attrDef.name}: ${value}`);
+        if (isCompleted) {
+            if (typeof value === 'boolean') {
+                attrParts.push(`📌${attrDef.name}`);
+            } else {
+                attrParts.push(`📌${attrDef.name}: ${value}`);
+            }
         }
     });
     const attrStr = attrParts.join(' ');
@@ -5222,6 +5512,10 @@ if (typeof window !== 'undefined') {
     window.formatDateInput = formatDateInput;
     window.openMaintainModal = openMaintainModal;
     window.autoSearchFiles = autoSearchFiles;  // HTML 中 oninput 调用
+    window.handleQuickApprove = handleQuickApproveAction;
+    window.handleWithdrawArchive = handleWithdrawArchiveAction;
+    window.handleContractorQuickApprove = handleContractorQuickApproveAction;
+    window.handleRenameDirectory = handleRenameDirectoryAction;
     // 编辑表单中选择目录按钮
     window.pickEditDirectory = async function() {
         // 收集已存在的目录
@@ -5287,6 +5581,7 @@ if (typeof window !== 'undefined') {
     window.openUploadModal = openUploadModal;
     window.batchArchiveCycle = batchArchiveCycle;
     window.handleQuickApprove = handleQuickApproveAction;
+    window.handleContractorQuickApprove = handleContractorQuickApproveAction;
     window.initUploadMethodTabs = initUploadMethodTabs;
 }
 
@@ -6077,28 +6372,58 @@ export function handleBatchEdit() {
     // 用 onsubmit 赋值绑定提交事件
     formContainer.onsubmit = async (e) => {
         e.preventDefault();
-        
+
         const docIds = document.getElementById('editDocId').value.split(',');
-        
+
+        // 字段名映射表（与单文档编辑保持一致）
+        const fieldNameMap = {
+            'editDocDate': 'doc_date',
+            'editSignDate': 'sign_date',
+            'editSigner': 'signer',
+            'editPartyASigner': 'party_a_signer',
+            'editPartyBSigner': 'party_b_signer',
+            'editNoSignature': 'no_signature',
+            'editHasSeal': 'has_seal_marked',
+            'editPartyASeal': 'party_a_seal',
+            'editPartyBSeal': 'party_b_seal',
+            'editNoSeal': 'no_seal',
+            'editOtherSeal': 'other_seal',
+            'editNotInvolved': 'not_involved',
+            'editRemark': 'notes',
+            'editDirectory': 'directory',
+            'editRootDirectory': 'root_directory'
+        };
+
         // 动态收集表单数据
         const docData = {};
-        
+
         // 收集文本、日期和文本域输入
         document.querySelectorAll('#editDocForm input[type="text"], #editDocForm input[type="date"], #editDocForm textarea').forEach(input => {
             if (input.id.startsWith('edit') && input.id !== 'editDocId') {
-                const fieldName = input.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
-                const value = input.value;
-                if (value) {
-                    docData[fieldName] = value;
+                if (fieldNameMap[input.id]) {
+                    const value = input.value;
+                    if (value) {
+                        docData[fieldNameMap[input.id]] = value;
+                    }
+                } else {
+                    const fieldName = input.dataset.fieldName || input.id.replace('edit', '');
+                    const value = input.value;
+                    if (value) {
+                        docData[fieldName] = value;
+                    }
                 }
             }
         });
-        
+
         // 收集复选框
         document.querySelectorAll('#editDocForm input[type="checkbox"]').forEach(checkbox => {
             if (checkbox.id.startsWith('edit')) {
-                const fieldName = checkbox.id.replace('edit', '').replace(/([A-Z])/g, '_$1').toLowerCase();
-                docData[fieldName] = checkbox.checked;
+                if (fieldNameMap[checkbox.id]) {
+                    docData[fieldNameMap[checkbox.id]] = checkbox.checked;
+                } else {
+                    const fieldName = checkbox.dataset.fieldName || checkbox.id.replace('edit', '');
+                    docData[fieldName] = checkbox.checked;
+                }
             }
         });
         

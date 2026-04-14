@@ -6,5 +6,5 @@
   "log_retention_days": 30,
   "timezone": "Asia/Shanghai",
   "fast_preview_threshold": 5,
-  "email_notification_enabled": true
+  "email_notification_enabled": false
 }

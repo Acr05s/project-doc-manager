@@ -1036,7 +1036,7 @@ class UserManager:
                 cursor = conn.cursor()
                 cursor.execute(
                     'INSERT INTO operation_logs (user_id, username, operation_type, target_id, target_name, details, ip_address, operation_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (user_id, username, operation_type, target_id, target_name, details, ip_address, now_with_timezone().isoformat())
+                    (user_id, username, operation_type, target_id, target_name, details, ip_address, now_with_timezone().strftime('%Y-%m-%d %H:%M:%S'))
                 )
                 conn.commit()
                 return True
@@ -1230,6 +1230,17 @@ class UserManager:
                 item = dict(row)
                 item['doc_names'] = json.loads(item['doc_names']) if item.get('doc_names') else []
                 item['target_approver_ids'] = json.loads(item['target_approver_ids']) if item.get('target_approver_ids') else []
+                # 解析approval_stages和stage_history JSON
+                if isinstance(item.get('approval_stages'), str):
+                    try:
+                        item['approval_stages'] = json.loads(item['approval_stages'])
+                    except:
+                        item['approval_stages'] = []
+                if isinstance(item.get('stage_history'), str):
+                    try:
+                        item['stage_history'] = json.loads(item['stage_history'])
+                    except:
+                        item['stage_history'] = []
                 result.append(item)
             return result
 

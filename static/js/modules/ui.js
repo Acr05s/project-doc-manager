@@ -50,6 +50,7 @@ export function setupEventListeners() {
     const operationSidebar = document.getElementById('operationSidebar');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+    const sidebarCloverBtn = document.getElementById('sidebarCloverBtn');
 
     function openSidebar() {
         if (operationSidebar) operationSidebar.classList.add('open');
@@ -58,6 +59,15 @@ export function setupEventListeners() {
     function closeSidebar() {
         if (operationSidebar) operationSidebar.classList.remove('open');
         if (sidebarOverlay) sidebarOverlay.classList.remove('show');
+    }
+
+    // 四叶草按钮打开侧边栏
+    if (sidebarCloverBtn) {
+        sidebarCloverBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openSidebar();
+        });
     }
 
     if (systemManagementBtn) {
@@ -1185,6 +1195,11 @@ async function loadSystemSettings() {
                 emailNotificationEnabled.checked = !!settings.email_notification_enabled;
             }
 
+            const requireApprovalCode = document.getElementById('requireApprovalCode');
+            if (requireApprovalCode) {
+                requireApprovalCode.checked = settings.require_approval_code !== false;
+            }
+
             const logRetentionDays = document.getElementById('logRetentionDays');
             if (logRetentionDays) {
                 logRetentionDays.value = settings.log_retention_days || 30;
@@ -1224,6 +1239,11 @@ async function saveSystemSettings() {
         const emailNotificationEnabled = document.getElementById('emailNotificationEnabled');
         if (emailNotificationEnabled) {
             settings.email_notification_enabled = emailNotificationEnabled.checked;
+        }
+
+        const requireApprovalCode = document.getElementById('requireApprovalCode');
+        if (requireApprovalCode) {
+            settings.require_approval_code = requireApprovalCode.checked;
         }
 
         const logRetentionDays = document.getElementById('logRetentionDays');

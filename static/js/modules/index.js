@@ -951,18 +951,10 @@ export async function initApp() {
             }
         }, 300);
     } else {
-        // 没有指定项目ID
-        const { getCurrentUser } = await import('./auth.js');
-        const user = getCurrentUser();
-        if (user && (user.role === 'admin' || user.role === 'pmo')) {
-            // PMO/管理员以看板为主要界面，不自动弹出项目选择框
-            console.log('PMO/管理员角色，默认显示看板');
-        } else {
-            // 其他角色默认弹出项目选择
-            setTimeout(() => {
-                openProjectSelectModal();
-            }, 200);
-        }
+        // 没有指定项目ID，所有角色默认显示看板
+        console.log('默认显示看板，点击系统名称打开项目管理');
+        // 显示动画箭头提示
+        showProjectHintArrow();
     }
 
     // 将generateReport函数添加到全局作用域
@@ -993,6 +985,75 @@ export async function sendApproverMessage() {
         textarea.value = '';
     } else {
         showNotification(result.message || '发送失败', 'error');
+    }
+}
+
+/**
+ * 显示指向系统名称的动画箭头提示
+ */
+function showProjectHintArrow() {
+    // 如果已有箭头，不重复创建
+    if (document.getElementById('projectHintArrow')) return;
+
+    const arrow = document.createElement('div');
+    arrow.id = 'projectHintArrow';
+    arrow.innerHTML = `
+        <div style="
+            position: fixed;
+            top: 50px;
+            left: 20px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: hintBounce 1.5s ease-in-out infinite;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        ">
+            <span style="font-size: 28px; transform: rotate(-45deg); display: inline-block;">👆</span>
+            <span style="
+                background: rgba(0,0,0,0.75);
+                color: #fff;
+                padding: 6px 14px;
+                border-radius: 16px;
+                font-size: 13px;
+                white-space: nowrap;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            ">点击此处开始项目管理</span>
+        </div>
+    `;
+    document.body.appendChild(arrow);
+
+    // 注入动画
+    if (!document.getElementById('hintBounceStyle')) {
+        const style = document.createElement('style');
+        style.id = 'hintBounceStyle';
+        style.textContent = `
+            @keyframes hintBounce {
+                0%, 100% { transform: translateY(0); }
+                50% { transform: translateY(-10px); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // 点击projectTitle时移除箭头
+    const title = document.getElementById('projectTitle');
+    if (title) {
+        title.addEventListener('click', removeProjectHintArrow, { once: true });
+    }
+
+    // 10秒后自动消失
+    setTimeout(() => {
+        removeProjectHintArrow();
+    }, 10000);
+}
+
+function removeProjectHintArrow() {
+    const arrow = document.getElementById('projectHintArrow');
+    if (arrow) {
+        arrow.style.opacity = '0';
+        setTimeout(() => arrow.remove(), 500);
     }
 }
 

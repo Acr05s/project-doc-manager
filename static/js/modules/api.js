@@ -368,10 +368,12 @@ export async function rejectArchiveRequest(projectId, approvalId, approverId, ap
     }
 }
 
-export async function getArchiveApprovers(projectId) {
+export async function getArchiveApprovers(projectId, approvalId = null) {
     try {
-        console.log('[DEBUG] getArchiveApprovers called for projectId:', projectId);
-        const response = await fetch(`/api/projects/${projectId}/archive-approvers`);
+        console.log('[DEBUG] getArchiveApprovers called for projectId:', projectId, 'approvalId:', approvalId);
+        let url = `/api/projects/${projectId}/archive-approvers`;
+        if (approvalId) url += `?approval_id=${encodeURIComponent(approvalId)}`;
+        const response = await fetch(url);
         const data = await response.json();
         console.log('[DEBUG] getArchiveApprovers response:', {
             ok: response.ok,

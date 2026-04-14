@@ -97,7 +97,9 @@ def should_proceed_to_next_stage(approval_stages):
 
 def complete_archive_if_all_stages_done(approval_id, project_id, approval_record, doc_manager):
     """如果所有阶段都完成，执行文档归档"""
-    approval_stages = json.loads(approval_record.get('approval_stages', '[]'))
+    approval_stages = approval_record.get('approval_stages') or []
+    if isinstance(approval_stages, str):
+        approval_stages = json.loads(approval_stages)
 
     # 检查所有阶段是否都已批准
     for stage in approval_stages:
@@ -111,7 +113,9 @@ def complete_archive_if_all_stages_done(approval_id, project_id, approval_record
 
     project_config = project_result.get('project', {})
     cycle = approval_record.get('cycle')
-    doc_names = json.loads(approval_record.get('doc_names', '[]'))
+    doc_names = approval_record.get('doc_names') or []
+    if isinstance(doc_names, str):
+        doc_names = json.loads(doc_names)
 
     if 'documents_archived' not in project_config:
         project_config['documents_archived'] = {}
@@ -127,34 +131,51 @@ def complete_archive_if_all_stages_done(approval_id, project_id, approval_record
 
 
 def get_archive_approvers(project_id):
-    """获取可审批的项目经理列表（同组织的 project_admin + admin + pmo）"""
+    """获取可审批的审批人列表（支持按审批阶段过滤）
+
+    查询参数:
+        approval_id: 审批记录UUID，用于获取当前阶段对应的审批人
+    """
     try:
         import sys
         print(f'[DEBUG] get_archive_approvers called - project_id: {project_id}', file=sys.stderr, flush=True)
-        approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'project_admin'])
-        print(f'[DEBUG] Found {len(approvers) if approvers else 0} approvers with roles', file=sys.stderr, flush=True)
 
-        # 加载项目获取承建单位信息
+        approval_id = request.args.get('approval_id', '').strip()
+
+        # 加载项目配置
         doc_manager = get_doc_manager()
         project_result = doc_manager.load_project(project_id)
-        party_b = ''
-        if project_result.get('status') == 'success':
-            party_b = (project_result.get('project', {}).get('party_b', '') or '').strip()
-            print(f'[DEBUG] Project party_b: {party_b}', file=sys.stderr, flush=True)
+        if project_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目加载失败'}), 500
+
+        project_config = project_result.get('project', {})
+        approval_chain = project_config.get('archive_approval_chain', [])
+
+        # 如果提供了 approval_id，按当前阶段过滤审批人
+        if approval_id and approval_chain:
+            approval = user_manager.get_archive_approval_by_uuid(approval_id)
+            if approval:
+                current_stage = approval.get('current_stage', 1)
+                stage_idx = current_stage - 1
+                print(f'[DEBUG] Filtering approvers for stage {current_stage} (idx={stage_idx})', file=sys.stderr, flush=True)
+                stage_approvers = get_next_stage_approvers(project_id, stage_idx, approval_chain, project_config)
+                print(f'[DEBUG] Found {len(stage_approvers)} stage-filtered approvers', file=sys.stderr, flush=True)
+                return jsonify({'status': 'success', 'approvers': stage_approvers, 'current_stage': current_stage})
+
+        # 无 approval_id 或无审批链：返回所有符合条件的审批人（兼容旧逻辑）
+        approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'project_admin'])
+        print(f'[DEBUG] Found {len(approvers) if approvers else 0} approvers with roles (fallback)', file=sys.stderr, flush=True)
+
+        party_b = (project_config.get('party_b', '') or '').strip()
 
         result = []
         for a in approvers:
             if a.get('status') != 'active':
-                print(f'[DEBUG] Skipping user {a.get("username")} - status not active: {a.get("status")}', file=sys.stderr, flush=True)
                 continue
-            # project_admin 需要组织匹配（同承建单位）
             if a['role'] == 'project_admin':
                 user_org = (a.get('organization') or '').strip()
                 if party_b and user_org and user_org != party_b:
-                    print(f'[DEBUG] Skipping project_admin {a.get("username")} - org mismatch: {user_org} != {party_b}', file=sys.stderr, flush=True)
                     continue
-                # 如果项目未设置承建单位或用户无组织，也允许
-            print(f'[DEBUG] Including approver: {a.get("username")} ({a.get("role")})', file=sys.stderr, flush=True)
             result.append({
                 'id': a.get('uuid', a['id']),
                 'username': a['username'],
@@ -162,7 +183,7 @@ def get_archive_approvers(project_id):
                 'organization': a.get('organization', '')
             })
 
-        print(f'[DEBUG] Returning {len(result)} approvers', file=sys.stderr, flush=True)
+        print(f'[DEBUG] Returning {len(result)} approvers (fallback)', file=sys.stderr, flush=True)
         return jsonify({'status': 'success', 'approvers': result})
     except Exception as e:
         import traceback
@@ -298,9 +319,22 @@ def get_archive_requests(project_id):
     try:
         status_filter = request.args.get('status')
         approvals = user_manager.get_archive_approvals(project_id, status=status_filter)
-        # 用UUID替代内部ID返回给前端
+        # 用UUID替代内部ID返回给前端，加载项目名称
+        doc_manager = get_doc_manager()
+        project_name = project_id
+        party_b = ''
+        try:
+            project_result = doc_manager.load_project(project_id)
+            if project_result.get('status') == 'success':
+                project_config = project_result.get('project', {})
+                project_name = project_config.get('name', project_id)
+                party_b = project_config.get('party_b', '')
+        except:
+            pass
         for a in approvals:
             a['id'] = a.get('uuid', a['id'])
+            a['project_name'] = project_name
+            a['party_b'] = party_b
         return jsonify({'status': 'success', 'requests': approvals})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -317,6 +351,7 @@ def get_pending_archive_approvals():
 
         # 格式化返回数据
         formatted = []
+        doc_manager = get_doc_manager()
         for approval in pending_approvals:
             approval['id'] = approval.get('uuid', approval['id'])
             # 解析approval_stages JSON
@@ -331,6 +366,20 @@ def get_pending_archive_approvals():
                     approval['stage_history'] = json.loads(approval['stage_history'])
                 except:
                     approval['stage_history'] = []
+            # 加载项目名称和承建单位
+            project_id = approval.get('project_id', '')
+            try:
+                project_result = doc_manager.load_project(project_id)
+                if project_result.get('status') == 'success':
+                    project_config = project_result.get('project', {})
+                    approval['project_name'] = project_config.get('name', project_id)
+                    approval['party_b'] = project_config.get('party_b', '')
+                else:
+                    approval['project_name'] = project_id
+                    approval['party_b'] = ''
+            except:
+                approval['project_name'] = project_id
+                approval['party_b'] = ''
             formatted.append(approval)
 
         return jsonify({'status': 'success', 'approvals': formatted})
@@ -354,7 +403,13 @@ def approve_archive_request(project_id):
 
         if not approval_id:
             return jsonify({'status': 'error', 'message': '缺少审批ID'}), 400
-        if not approval_code:
+
+        # 检查系统设置是否要求审批安全码
+        from app.routes.settings import load_settings
+        settings = load_settings()
+        require_code = settings.get('require_approval_code', True)
+
+        if require_code and not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
 
         # 确定实际审批人
@@ -370,17 +425,18 @@ def approve_archive_request(project_id):
         if approver.role not in ('admin', 'pmo', 'project_admin'):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
 
-        # 验证审批安全码
-        if getattr(approver, 'approval_code_needs_change', 1) == 1:
-            if not check_password_hash(approver.password_hash, approval_code):
-                return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
-            if not new_approval_code:
-                return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 200
-            if len(new_approval_code) < 8 or not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code):
-                return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
-            user_manager.update_approval_code(actual_approver_id, generate_password_hash(new_approval_code), needs_change=0)
-        elif not approver.approval_code_hash or not check_password_hash(approver.approval_code_hash, approval_code):
-            return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
+        # 验证审批安全码（仅在系统要求时）
+        if require_code:
+            if getattr(approver, 'approval_code_needs_change', 1) == 1:
+                if not check_password_hash(approver.password_hash, approval_code):
+                    return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
+                if not new_approval_code:
+                    return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 200
+                if len(new_approval_code) < 8 or not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code):
+                    return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
+                user_manager.update_approval_code(actual_approver_id, generate_password_hash(new_approval_code), needs_change=0)
+            elif not approver.approval_code_hash or not check_password_hash(approver.approval_code_hash, approval_code):
+                return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
 
         # 获取审批记录
         approval = user_manager.get_archive_approval_by_uuid(str(approval_id))
@@ -399,11 +455,15 @@ def approve_archive_request(project_id):
 
         project_config = project_result.get('project', {})
         cycle = approval['cycle']
-        doc_names = json.loads(approval.get('doc_names', '[]'))
+        doc_names = approval.get('doc_names') or []
+        if isinstance(doc_names, str):
+            doc_names = json.loads(doc_names)
         approval_chain = project_config.get('archive_approval_chain', [])
 
         # 加载当前approval_stages
-        approval_stages = json.loads(approval.get('approval_stages', '[]'))
+        approval_stages = approval.get('approval_stages') or []
+        if isinstance(approval_stages, str):
+            approval_stages = json.loads(approval_stages)
         current_stage_idx = approval.get('current_stage', 1) - 1
 
         if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
@@ -413,7 +473,7 @@ def approve_archive_request(project_id):
         approval_stages[current_stage_idx]['status'] = 'approved'
         approval_stages[current_stage_idx]['approved_by_id'] = actual_approver_id
         approval_stages[current_stage_idx]['approved_by_username'] = approver.username
-        approval_stages[current_stage_idx]['approved_at'] = now_with_timezone().isoformat()
+        approval_stages[current_stage_idx]['approved_at'] = now_with_timezone().strftime('%Y-%m-%d %H:%M:%S')
 
         print(f'[DEBUG] Stage {current_stage_idx + 1} approved by {approver.username}', file=sys.stderr, flush=True)
 
@@ -555,7 +615,13 @@ def reject_archive_request(project_id):
 
         if not approval_id:
             return jsonify({'status': 'error', 'message': '缺少审批ID'}), 400
-        if not approval_code:
+
+        # 检查系统设置是否要求审批安全码
+        from app.routes.settings import load_settings
+        settings = load_settings()
+        require_code = settings.get('require_approval_code', True)
+
+        if require_code and not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
 
         # 通过UUID解析审批人
@@ -570,17 +636,18 @@ def reject_archive_request(project_id):
         if approver.role not in ('admin', 'pmo', 'project_admin'):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
 
-        # 验证审批安全码
-        if getattr(approver, 'approval_code_needs_change', 1) == 1:
-            if not check_password_hash(approver.password_hash, approval_code):
-                return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
-            if not new_approval_code:
-                return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 200
-            if len(new_approval_code) < 8 or not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code):
-                return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
-            user_manager.update_approval_code(actual_approver_id, generate_password_hash(new_approval_code), needs_change=0)
-        elif not approver.approval_code_hash or not check_password_hash(approver.approval_code_hash, approval_code):
-            return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
+        # 验证审批安全码（仅在系统要求时）
+        if require_code:
+            if getattr(approver, 'approval_code_needs_change', 1) == 1:
+                if not check_password_hash(approver.password_hash, approval_code):
+                    return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
+                if not new_approval_code:
+                    return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 200
+                if len(new_approval_code) < 8 or not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code):
+                    return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
+                user_manager.update_approval_code(actual_approver_id, generate_password_hash(new_approval_code), needs_change=0)
+            elif not approver.approval_code_hash or not check_password_hash(approver.approval_code_hash, approval_code):
+                return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
 
         approval = user_manager.get_archive_approval_by_uuid(str(approval_id))
         if not approval:
