@@ -218,20 +218,37 @@ class ReportService:
     def _organizations_report(self):
         """承建单位分析报表"""
         projects = self._load_all_project_details()
-        orgs = self.user_manager.list_organizations()
-        
-        org_stats = {}
-        for org in orgs:
-            org_stats[org['name']] = {
+
+        # 非管理员/PMO 只能看到本单位数据
+        my_org = None
+        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', None):
+            my_org = self.user_context.get('organization', '') or ''
+
+        if my_org is not None:
+            # 承建单位用户或项目经理：只展示本单位
+            org_stats = {my_org: {
                 'project_count': 0,
                 'total_docs': 0,
                 'completed_docs': 0,
                 'accepted_projects': 0
-            }
-        
+            }}
+        else:
+            orgs = self.user_manager.list_organizations()
+            org_stats = {}
+            for org in orgs:
+                org_stats[org['name']] = {
+                    'project_count': 0,
+                    'total_docs': 0,
+                    'completed_docs': 0,
+                    'accepted_projects': 0
+                }
+
         for p in projects:
             cfg = p['config']
             org = cfg.get('party_b', '未指定')
+            # 非管理员只统计本单位的项目
+            if my_org is not None and org != my_org:
+                continue
             if org not in org_stats:
                 org_stats[org] = {
                     'project_count': 0,

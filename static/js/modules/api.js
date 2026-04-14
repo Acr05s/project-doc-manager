@@ -119,6 +119,40 @@ export async function deleteMessage(messageId) {
 }
 
 /**
+ * 批量标记消息为已读
+ */
+export async function batchMarkMessagesAsRead(ids) {
+    try {
+        const response = await fetch('/api/messages/batch-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量标记已读失败:', error);
+        return { status: 'error', message: '批量标记失败' };
+    }
+}
+
+/**
+ * 批量删除消息
+ */
+export async function batchDeleteMessages(ids) {
+    try {
+        const response = await fetch('/api/messages/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('批量删除消息失败:', error);
+        return { status: 'error', message: '批量删除失败' };
+    }
+}
+
+/**
  * 加载项目列表
  */
 export async function loadProjectsList() {

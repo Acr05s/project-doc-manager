@@ -428,6 +428,33 @@
         .p-progress { color: #667eea; font-weight: 500; text-align: right; }
         
         /* 消息中心 */
+        .msg-batch-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+        .msg-batch-toolbar .btn-outline-secondary {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .msg-batch-toolbar .btn-outline-secondary:hover {
+            background: #e9ecef;
+        }
+        .msg-item-checkbox {
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #4a90d9;
+        }
         .message-trigger {
             position: relative;
             cursor: pointer;
@@ -699,6 +726,7 @@
             </div>
             <div class="operation-sidebar-body" id="systemManagementDropdown">
                 <a href="#" class="sidebar-menu-item" id="systemSettingsMenuItem"><span>⚙️ 系统设置</span></a>
+                <a href="#" class="sidebar-menu-item" id="permissionConfigMenuItem" style="display:none;"><span>🔐 权限配置</span></a>
                 <a href="#" class="sidebar-menu-item" id="userApprovalBtn"><span>👤 用户审核</span><span class="menu-badge" id="userApprovalBadge" style="display:none;"></span></a>
                 <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn"><span>📋 文档归档审批</span><span class="menu-badge" id="archiveApprovalBadge" style="display:none;"></span></a>
                 <a href="#" class="sidebar-menu-item" id="approvalHistoryBtn"><span>📊 审批历史</span></a>
@@ -720,14 +748,22 @@
             <div id="cycleNavList" class="cycle-nav-list">
                 <span class="placeholder">请先选择项目</span>
             </div>
-            <!-- 周期文档搜索框 -->
+            <!-- 周期文档搜索框 - Excel筛选风格 -->
             <div id="cycleSearchBox" class="cycle-search-box" style="display:none;">
-                <div class="cycle-search-input-wrapper">
-                    <span class="cycle-search-icon">🔍</span>
-                    <input type="text" id="cycleSearchInput" class="cycle-search-input" placeholder="搜索所有周期文档..." autocomplete="off">
-                    <span id="cycleSearchClear" class="cycle-search-clear" style="display:none;">✕</span>
+                <div id="cycleSearchTrigger" class="cycle-search-trigger" title="搜索所有周期文档">
+                    <span>🔍</span><span>搜索文档</span>
                 </div>
-                <div id="cycleSearchDropdown" class="cycle-search-dropdown" style="display:none;"></div>
+                <div id="cycleSearchPanel" class="cycle-search-panel">
+                    <div class="cycle-search-panel-header">
+                        <div class="cycle-search-input-wrapper">
+                            <span class="cycle-search-icon">🔍</span>
+                            <input type="text" id="cycleSearchInput" class="cycle-search-input" placeholder="输入关键字筛选文档..." autocomplete="off">
+                            <span id="cycleSearchClear" class="cycle-search-clear" style="display:none;">✕</span>
+                        </div>
+                    </div>
+                    <div id="cycleSearchResultInfo" class="cycle-search-result-info" style="display:none;"></div>
+                    <div id="cycleSearchDropdown" class="cycle-search-dropdown"></div>
+                </div>
             </div>
         </div>
 
@@ -2354,9 +2390,21 @@
                 <span class="close" onclick="closeMessageModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <span style="font-size: 13px; color: #666;">系统通知和审批提醒</span>
                     <button id="markAllReadBtn" class="btn btn-sm btn-secondary">全部标为已读</button>
+                </div>
+                <!-- 批量操作工具栏 -->
+                <div id="msgBatchToolbar" class="msg-batch-toolbar">
+                    <label class="msg-batch-checkbox-label" style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+                        <input type="checkbox" id="msgSelectAll"> 全选
+                    </label>
+                    <button id="msgInvertSelect" class="btn btn-sm btn-outline-secondary" style="padding:2px 8px;font-size:12px;">反选</button>
+                    <span id="msgSelectedCount" style="font-size:12px;color:#666;">已选 0 条</span>
+                    <div style="margin-left:auto;display:flex;gap:6px;">
+                        <button id="msgBatchRead" class="btn btn-sm btn-primary" style="padding:2px 10px;font-size:12px;" disabled>批量已读</button>
+                        <button id="msgBatchDelete" class="btn btn-sm btn-danger" style="padding:2px 10px;font-size:12px;" disabled>批量删除</button>
+                    </div>
                 </div>
                 <div id="messageListContainer" class="message-list">
                     <div class="loading">加载中...</div>
@@ -2479,7 +2527,7 @@
                     <option value="admin">系统管理员</option>
                     <option value="pmo">项目管理组织</option>
                     <option value="project_admin">项目经理</option>
-                    <option value="contractor">普通员工</option>
+                    <option value="contractor">一般员工</option>
                 </select>
                 <button class="btn btn-sm btn-secondary business-admin-only" onclick="batchUpdateUserRoles()">修改角色</button>
                 <button class="btn btn-sm btn-info business-admin-only" onclick="batchUpdateUserStatus('active')">批量启用</button>
@@ -2703,6 +2751,42 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeProjectBatchTransferModal()">取消</button>
                 <button class="btn btn-primary" onclick="submitProjectBatchTransfer()">确认移交</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 权限配置模态框 -->
+    <div id="permissionConfigModal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-width:750px;width:90vw;">
+            <div class="modal-header">
+                <h3>🔐 权限配置 <span style="font-size:12px;color:#999;font-weight:normal;">（全平台生效）</span></h3>
+                <button class="modal-close" onclick="document.getElementById('permissionConfigModal').style.display='none'">&times;</button>
+            </div>
+            <div class="modal-body" style="max-height:70vh;overflow-y:auto;padding-top:0;">
+                <p style="color:#666;font-size:13px;margin:12px 0 14px;">配置各角色可见的菜单项，勾选表示该角色可查看对应菜单。修改后自动保存。</p>
+                <!-- 标签页切换 -->
+                <div id="permissionTabs" style="display:flex;gap:0;border-bottom:2px solid #e0e0e0;margin-bottom:0;">
+                    <button class="perm-tab-btn active" data-tab="sidebar" style="padding:8px 20px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">🍀 系统菜单权限</button>
+                    <button class="perm-tab-btn" data-tab="top" style="padding:8px 20px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">📋 项目菜单权限</button>
+                </div>
+                <table id="permissionConfigTable" style="width:100%;border-collapse:collapse;font-size:14px;">
+                    <thead>
+                        <tr style="background:#f5f7fa;">
+                            <th style="text-align:left;padding:10px 12px;border-bottom:2px solid #e0e0e0;min-width:180px;">菜单项</th>
+                            <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">系统管理员</th>
+                            <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">项目管理组织</th>
+                            <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">项目经理</th>
+                            <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">一般员工</th>
+                        </tr>
+                    </thead>
+                    <tbody id="permissionConfigBody">
+                        <!-- 由JS动态填充 -->
+                    </tbody>
+                </table>
+            </div>
+            <div style="padding:12px 24px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+                <span id="permissionSaveStatus" style="font-size:13px;color:#28a745;"></span>
+                <button class="btn btn-secondary" onclick="document.getElementById('permissionConfigModal').style.display='none'">关闭</button>
             </div>
         </div>
     </div>

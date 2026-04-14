@@ -176,6 +176,40 @@ class MessageManager:
         except Exception:
             return False
 
+    def batch_mark_as_read_by_uuids(self, uuids, user_id):
+        """批量标记消息为已读"""
+        if not uuids:
+            return 0
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(uuids))
+                cursor.execute(
+                    f'UPDATE messages SET is_read = 1 WHERE uuid IN ({placeholders}) AND receiver_id = ?',
+                    (*uuids, user_id)
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception:
+            return 0
+
+    def batch_delete_by_uuids(self, uuids, user_id):
+        """批量删除消息"""
+        if not uuids:
+            return 0
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(uuids))
+                cursor.execute(
+                    f'DELETE FROM messages WHERE uuid IN ({placeholders}) AND receiver_id = ?',
+                    (*uuids, user_id)
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception:
+            return 0
+
 
 # 全局实例
 message_manager = MessageManager()

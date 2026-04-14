@@ -61,3 +61,14 @@ def project_access_required(f):
             return error
         return f(*args, **kwargs)
     return decorated
+
+
+def pmo_admin_required(f):
+    """装饰器：要求用户角色为 PMO 或管理员"""
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if current_user.role not in ('admin', 'pmo'):
+            return jsonify({'status': 'error', 'message': '仅PMO和管理员有权执行此操作'}), 403
+        return f(*args, **kwargs)
+    return decorated

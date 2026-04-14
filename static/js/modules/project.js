@@ -3494,51 +3494,47 @@ export async function handleImportPackageInModal(e) {
 }
 
 /**
- * 显示项目按钮
+ * 显示项目按钮（结合权限系统）
  */
 export function showProjectButtons() {
     const user = getCurrentUser();
-    const isContractor = user && user.role === 'contractor';
+    if (!user) return;
     
-    const menus = [
+    // 所有项目操作顶部菜单
+    const topMenus = [
         'documentRequirementsMenu', 'documentManagementMenu', 
-        'acceptanceMenu'
+        'generateReportBtn', 'packageProjectBtn',
+        'acceptanceMenu', 'archiveAndApprovalMenu'
     ];
     
-    menus.forEach(menuId => {
-        const menu = document.getElementById(menuId);
-        if (!menu) return;
-        if (isContractor && (menuId === 'documentRequirementsMenu' || menuId === 'acceptanceMenu')) {
-            menu.style.display = 'none';
-        } else {
-            menu.style.display = 'inline-block';
-        }
+    // 先全部设为可见，再让权限系统 _applyMenuPermissions 控制细粒度
+    topMenus.forEach(menuId => {
+        const el = document.getElementById(menuId);
+        if (el) el.style.display = 'inline-block';
     });
     
-    // 显示备份项目按钮
-    const packageProjectBtn = document.getElementById('packageProjectBtn');
-    if (packageProjectBtn) {
-        packageProjectBtn.style.display = isContractor ? 'none' : 'inline-block';
-    }
+    // 异步加载权限并应用（覆盖上面的粗粒度显示）
+    import('./auth.js').then(auth => {
+        if (typeof auth.updateRoleBasedUI === 'function') {
+            auth.updateRoleBasedUI();
+        }
+    });
 }
 
 /**
  * 隐藏项目按钮
  */
 export function hideProjectButtons() {
-    const menus = [
-        'documentRequirementsMenu', 'documentManagementMenu', 
-        'acceptanceMenu'
+    const topMenus = [
+        'documentRequirementsMenu', 'documentManagementMenu',
+        'generateReportBtn', 'packageProjectBtn', 
+        'acceptanceMenu', 'archiveAndApprovalMenu'
     ];
     
-    menus.forEach(menuId => {
-        const menu = document.getElementById(menuId);
-        if (menu) menu.style.display = 'none';
+    topMenus.forEach(menuId => {
+        const el = document.getElementById(menuId);
+        if (el) el.style.display = 'none';
     });
-    
-    // 隐藏备份项目按钮
-    const packageProjectBtn = document.getElementById('packageProjectBtn');
-    if (packageProjectBtn) packageProjectBtn.style.display = 'none';
 }
 
 /**

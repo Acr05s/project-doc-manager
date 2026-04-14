@@ -82,6 +82,36 @@ def delete_message(message_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@message_bp.route('/batch-read', methods=['POST'])
+@login_required
+def batch_mark_read():
+    """批量标记消息为已读"""
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids', [])
+        if not ids or not isinstance(ids, list):
+            return jsonify({'status': 'error', 'message': '缺少消息ID列表'}), 400
+        count = message_manager.batch_mark_as_read_by_uuids(ids, int(current_user.id))
+        return jsonify({'status': 'success', 'message': f'已标记 {count} 条消息为已读', 'count': count})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@message_bp.route('/batch-delete', methods=['POST'])
+@login_required
+def batch_delete():
+    """批量删除消息"""
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids', [])
+        if not ids or not isinstance(ids, list):
+            return jsonify({'status': 'error', 'message': '缺少消息ID列表'}), 400
+        count = message_manager.batch_delete_by_uuids(ids, int(current_user.id))
+        return jsonify({'status': 'success', 'message': f'已删除 {count} 条消息', 'count': count})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @message_bp.route('/send', methods=['POST'])
 @login_required
 def send_message():

@@ -20,7 +20,7 @@ const roleMap = {
     'admin': '系统管理员',
     'pmo': '项目管理组织',
     'project_admin': '项目经理',
-    'contractor': '普通员工'
+    'contractor': '一般员工'
 };
 
 const statusMap = {
@@ -163,13 +163,19 @@ export async function loadUserManagementList() {
             roleSelect.style.fontSize = '12px';
             roleSelect.style.borderRadius = '4px';
             roleSelect.style.border = '1px solid #ccc';
-            
-            const roles = [
-                { value: 'admin', label: '系统管理员' },
-                { value: 'pmo', label: '项目管理组织' },
-                { value: 'project_admin', label: '项目经理' },
-                { value: 'contractor', label: '普通员工' }
-            ];
+
+            const isProjectAdmin = authState.user?.role === 'project_admin';
+            const roles = isProjectAdmin
+                ? [
+                    { value: 'project_admin', label: '项目经理' },
+                    { value: 'contractor', label: '一般员工' }
+                ]
+                : [
+                    { value: 'admin', label: '系统管理员' },
+                    { value: 'pmo', label: '项目管理组织' },
+                    { value: 'project_admin', label: '项目经理' },
+                    { value: 'contractor', label: '一般员工' }
+                ];
             
             roles.forEach(role => {
                 const option = document.createElement('option');

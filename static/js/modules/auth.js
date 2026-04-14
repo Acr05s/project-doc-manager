@@ -121,7 +121,7 @@ function updateAuthUI() {
             'admin': '系统管理员',
             'pmo': '项目管理组织',
             'project_admin': '项目经理',
-            'contractor': '普通员工'
+            'contractor': '一般员工'
         };
         const roleLabel = roleMap[authState.user.role] || authState.user.role;
         const orgLabel = authState.user.organization ? authState.user.organization : '';
@@ -199,14 +199,39 @@ function updateAuthUI() {
 }
 
 /**
+ * 缓存的菜单权限配置
+ */
+let _cachedPermissions = null;
+
+/**
+ * 获取菜单权限配置（带缓存，平台级）
+ */
+async function fetchMenuPermissions(forceRefresh = false) {
+    if (_cachedPermissions && !forceRefresh) return _cachedPermissions;
+    try {
+        const resp = await fetch('/api/settings/permissions');
+        const data = await resp.json();
+        if (data.status === 'success') {
+            _cachedPermissions = data.data;
+        }
+    } catch (e) { /* ignore */ }
+    return _cachedPermissions;
+}
+
+/**
+ * 检查角色是否有某菜单的权限
+ */
+function hasMenuPermission(permissions, menuKey, role) {
+    if (!permissions || !permissions[menuKey]) return false;
+    return permissions[menuKey].roles.includes(role);
+}
+
+/**
  * 根据用户角色更新页面功能显示
  */
-export function updateRoleBasedUI() {
+export async function updateRoleBasedUI() {
     const role = authState.user?.role;
     const isAdmin = role === 'admin';
-    const isPMO = role === 'pmo';
-    const isProjectAdmin = role === 'project_admin';
-    const isContractor = role === 'contractor';
     const isPending = authState.user?.status === 'pending';
 
     // messageCenterBtn已废弃，始终隐藏
@@ -225,139 +250,15 @@ export function updateRoleBasedUI() {
         return;
     }
 
-    // 顶部功能菜单
-    const documentRequirementsMenu = document.getElementById('documentRequirementsMenu');
-    const generateReportBtn = document.getElementById('generateReportBtn');
-    const packageProjectBtn = document.getElementById('packageProjectBtn');
-    const acceptanceMenu = document.getElementById('acceptanceMenu');
+    // 获取权限配置
+    const permissions = await fetchMenuPermissions();
 
-    if (isContractor) {
-        // 承建单位普通用户：隐藏高级功能
-        if (documentRequirementsMenu) documentRequirementsMenu.style.display = 'none';
-        if (generateReportBtn) generateReportBtn.style.display = 'none';
-        if (packageProjectBtn) packageProjectBtn.style.display = 'none';
-        if (acceptanceMenu) acceptanceMenu.style.display = 'none';
-    }
-    
-    // 系统管理菜单（侧边栏）
-    const canSeeSystemMenu = isAdmin || isPMO || isProjectAdmin;
-    const systemManagementBtn = document.getElementById('systemManagementBtn');
-    if (systemManagementBtn) {
-        systemManagementBtn.style.display = canSeeSystemMenu ? 'inline-block' : 'none';
-    }
+    // 应用所有菜单权限（含二级菜单）
+    _applyMenuPermissions(permissions);
 
-    // 四叶草按钮显示控制
-    const sidebarCloverBtn = document.getElementById('sidebarCloverBtn');
-    if (sidebarCloverBtn) {
-        sidebarCloverBtn.style.display = canSeeSystemMenu ? 'flex' : 'none';
-    }
-
-    // 启动菜单通知角标定期刷新
-    if (canSeeSystemMenu) {
-        refreshMenuBadges();
-        if (!window._menuBadgeInterval) {
-            window._menuBadgeInterval = setInterval(refreshMenuBadges, 30000);
-        }
-    }
-
+    // 侧边栏事件委托
     const systemManagementDropdown = document.getElementById('systemManagementDropdown');
     if (systemManagementDropdown) {
-        const existingSysSettings = document.getElementById('systemSettingsMenuItem');
-        const existingUserApproval = document.getElementById('userApprovalBtn');
-        const existingUserMgmt = document.getElementById('userManagementMenuItem');
-        const existingOrgMgmt = document.getElementById('orgManagementMenuItem');
-        const existingProjectMgmt = document.getElementById('projectManagementMenuItem');
-        const existingLogMgmt = document.getElementById('logManagementMenuItem');
-
-        if (!canSeeSystemMenu) {
-            if (existingSysSettings) existingSysSettings.remove();
-            if (existingUserApproval) existingUserApproval.remove();
-            if (existingUserMgmt) existingUserMgmt.remove();
-            if (existingOrgMgmt) existingOrgMgmt.remove();
-            if (existingProjectMgmt) existingProjectMgmt.remove();
-            if (existingLogMgmt) existingLogMgmt.remove();
-        } else {
-            if (isAdmin) {
-                // admin 保留系统设置和用户审核（已在 HTML 中静态存在）
-            } else if (isPMO) {
-                // PMO：业务管理员，移除系统设置，保留用户审核、用户管理、承建单位管理、项目管理、日志管理
-                if (existingSysSettings) existingSysSettings.remove();
-                if (!existingUserMgmt) {
-                    const userMgmtA = document.createElement('a');
-                    userMgmtA.href = '#';
-                    userMgmtA.className = 'sidebar-menu-item';
-                    userMgmtA.id = 'userManagementMenuItem';
-                    userMgmtA.textContent = '👤 用户管理';
-                    systemManagementDropdown.appendChild(userMgmtA);
-                }
-                if (!existingOrgMgmt) {
-                    const orgMgmtA = document.createElement('a');
-                    orgMgmtA.href = '#';
-                    orgMgmtA.className = 'sidebar-menu-item';
-                    orgMgmtA.id = 'orgManagementMenuItem';
-                    orgMgmtA.textContent = '🏢 承建单位管理';
-                    systemManagementDropdown.appendChild(orgMgmtA);
-                }
-                if (!existingProjectMgmt) {
-                    const projectMgmtA = document.createElement('a');
-                    projectMgmtA.href = '#';
-                    projectMgmtA.className = 'sidebar-menu-item';
-                    projectMgmtA.id = 'projectManagementMenuItem';
-                    projectMgmtA.textContent = '📁 项目管理';
-                    systemManagementDropdown.appendChild(projectMgmtA);
-                }
-            } else if (isProjectAdmin) {
-                // 项目经理：移除系统设置，保留用户审核、项目管理和日志管理
-                if (existingSysSettings) existingSysSettings.remove();
-                if (existingUserMgmt) existingUserMgmt.remove();
-                if (existingOrgMgmt) existingOrgMgmt.remove();
-                if (!existingProjectMgmt) {
-                    const projectMgmtA = document.createElement('a');
-                    projectMgmtA.href = '#';
-                    projectMgmtA.className = 'sidebar-menu-item';
-                    projectMgmtA.id = 'projectManagementMenuItem';
-                    projectMgmtA.textContent = '📁 项目管理';
-                    systemManagementDropdown.appendChild(projectMgmtA);
-                }
-            } else {
-                // 普通用户：只保留日志管理
-                if (existingSysSettings) existingSysSettings.remove();
-                if (existingUserApproval) existingUserApproval.remove();
-                if (existingUserMgmt) existingUserMgmt.remove();
-                if (existingOrgMgmt) existingOrgMgmt.remove();
-                if (existingProjectMgmt) existingProjectMgmt.remove();
-            }
-
-            if (isAdmin) {
-                if (!existingUserMgmt) {
-                    const userMgmtA = document.createElement('a');
-                    userMgmtA.href = '#';
-                    userMgmtA.className = 'sidebar-menu-item';
-                    userMgmtA.id = 'userManagementMenuItem';
-                    userMgmtA.textContent = '👤 用户管理';
-                    systemManagementDropdown.appendChild(userMgmtA);
-                }
-
-                if (!existingOrgMgmt) {
-                    const orgMgmtA = document.createElement('a');
-                    orgMgmtA.href = '#';
-                    orgMgmtA.className = 'sidebar-menu-item';
-                    orgMgmtA.id = 'orgManagementMenuItem';
-                    orgMgmtA.textContent = '🏢 承建单位管理';
-                    systemManagementDropdown.appendChild(orgMgmtA);
-                }
-            }
-
-            if (!existingLogMgmt) {
-                const logMgmtA = document.createElement('a');
-                logMgmtA.href = '#';
-                logMgmtA.className = 'sidebar-menu-item';
-                logMgmtA.id = 'logManagementMenuItem';
-                logMgmtA.textContent = '📋 日志管理';
-                systemManagementDropdown.appendChild(logMgmtA);
-            }
-        }
-
         // 使用事件委托绑定菜单项点击，避免动态元素绑定失效
         if (!systemManagementDropdown._hasClickDelegate) {
             systemManagementDropdown._hasClickDelegate = true;
@@ -392,6 +293,9 @@ export function updateRoleBasedUI() {
                     case 'logManagementMenuItem':
                         import('./admin.js').then(m => m.openLogManagementModal());
                         break;
+                    case 'permissionConfigMenuItem':
+                        openPermissionConfigModal();
+                        break;
                 }
             });
         }
@@ -401,8 +305,258 @@ export function updateRoleBasedUI() {
     const deletedProjectsSection = document.querySelector('.deleted-projects-section');
     
     if (deletedProjectsSection) {
-        deletedProjectsSection.style.display = (isAdmin || isProjectAdmin) ? 'block' : 'none';
+        deletedProjectsSection.style.display = (isAdmin || role === 'project_admin') ? 'block' : 'none';
     }
+}
+
+/**
+ * 打开权限配置模态框（双标签页：系统菜单 / 项目菜单）
+ */
+async function openPermissionConfigModal() {
+    const modal = document.getElementById('permissionConfigModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    const tbody = document.getElementById('permissionConfigBody');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#999;">加载中...</td></tr>';
+
+    // 强制刷新权限数据
+    const permissions = await fetchMenuPermissions(true);
+    if (!permissions) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#c00;">加载权限配置失败</td></tr>';
+        return;
+    }
+
+    const roles = ['admin', 'pmo', 'project_admin', 'contractor'];
+    let currentTab = 'sidebar'; // 默认显示系统菜单权限
+
+    // 按系统真实菜单顺序展示，确保父子项紧邻
+    const menuOrderByGroup = {
+        top: [
+            'documentRequirementsMenu',
+            'editRequirementsBtn',
+            'manageVersionsBtn',
+            'clearRequirementsBtn',
+            'documentManagementMenu',
+            'zipUploadBtn',
+            'deleteProjectBtn',
+            'cleanupDuplicatesBtn',
+            'generateReportBtn',
+            'packageProjectBtn',
+            'acceptanceMenu',
+            'generateReportMenuItem',
+            'confirmAcceptanceBtn',
+            'downloadPackageBtn',
+            'archiveAndApprovalMenu',
+            'openArchiveConfigBtn',
+            'viewArchiveRequestsBtn',
+            'viewApprovalHistoryBtn'
+        ],
+        sidebar: [
+            'systemSettingsMenuItem',
+            'userApprovalBtn',
+            'archiveApprovalBtn',
+            'approvalHistoryBtn',
+            'userManagementMenuItem',
+            'orgManagementMenuItem',
+            'projectManagementMenuItem'
+        ]
+    };
+
+    function getOrderedEntries(group) {
+        const entries = Object.entries(permissions).filter(([, d]) => d.group === group);
+        const order = menuOrderByGroup[group] || [];
+        const orderMap = new Map(order.map((id, idx) => [id, idx]));
+        return entries.sort(([aKey], [bKey]) => {
+            const aIdx = orderMap.has(aKey) ? orderMap.get(aKey) : Number.MAX_SAFE_INTEGER;
+            const bIdx = orderMap.has(bKey) ? orderMap.get(bKey) : Number.MAX_SAFE_INTEGER;
+            if (aIdx !== bIdx) return aIdx - bIdx;
+            return aKey.localeCompare(bKey, 'zh-Hans-CN');
+        });
+    }
+
+    function renderTab(group, targetBody) {
+        currentTab = group;
+        targetBody.innerHTML = '';
+
+        // 过滤并按菜单顺序渲染
+        const orderedEntries = getOrderedEntries(group);
+        let isFirstParent = true;
+        for (const [menuKey, menuData] of orderedEntries) {
+            const isChild = !!menuData.parent;
+
+            // 父菜单前插入浅色分隔线（第一个父菜单除外）
+            if (!isChild && !isFirstParent) {
+                const sepTr = document.createElement('tr');
+                const sepTd = document.createElement('td');
+                sepTd.colSpan = roles.length + 1;
+                sepTd.style.cssText = 'padding:0;height:2px;background:linear-gradient(to right,#d0daea,#e8edf5,#d0daea);border:none;';
+                sepTr.appendChild(sepTd);
+                targetBody.appendChild(sepTr);
+            }
+            if (!isChild) isFirstParent = false;
+
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid #f0f0f0';
+            if (isChild) tr.style.background = '#fafbfc';
+            const indent = isChild ? 'padding-left:36px;color:#555;font-size:13px;' : 'padding:8px 12px;font-weight:500;';
+            let cells = `<td style="padding:8px 12px;${indent}">${isChild ? '└ ' : ''}${menuData.label}</td>`;
+            roles.forEach(r => {
+                const checked = menuData.roles.includes(r) ? 'checked' : '';
+                cells += `<td style="text-align:center;padding:8px 12px;"><input type="checkbox" data-menu="${menuKey}" data-role="${r}" ${checked} style="width:18px;height:18px;cursor:pointer;"></td>`;
+            });
+            tr.innerHTML = cells;
+            targetBody.appendChild(tr);
+        }
+
+        if (!targetBody.children.length) {
+            targetBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#999;">暂无配置项</td></tr>';
+        }
+
+        // 更新标签页高亮
+        document.querySelectorAll('.perm-tab-btn').forEach(btn => {
+            if (btn.dataset.tab === group) {
+                btn.classList.add('active');
+                btn.style.color = '#1a73e8';
+                btn.style.borderBottomColor = '#1a73e8';
+            } else {
+                btn.classList.remove('active');
+                btn.style.color = '#666';
+                btn.style.borderBottomColor = 'transparent';
+            }
+        });
+    }
+
+    // 初始渲染
+    renderTab('sidebar', tbody);
+
+    // 标签页点击
+    document.querySelectorAll('.perm-tab-btn').forEach(btn => {
+        btn.onclick = () => {
+            const body = document.getElementById('permissionConfigBody');
+            if (body) renderTab(btn.dataset.tab, body);
+        };
+    });
+
+    // 实时保存：每个checkbox变化时自动保存
+    let saveTimer = null;
+    const statusEl = document.getElementById('permissionSaveStatus');
+
+    // 使用 onchange 覆盖旧处理器，避免重复绑定
+    tbody.onchange = (e) => {
+        if (e.target.type !== 'checkbox') return;
+        // 高亮当前已编辑行
+        const row = e.target.closest('tr');
+        if (row && !row.dataset.edited) {
+            row.dataset.edited = '1';
+            const isChild = row.style.background === 'rgb(250, 251, 252)' || row.style.background === '#fafbfc';
+            row.style.background = isChild ? '#fffbe6' : '#fff8e1';
+            row.style.boxShadow = 'inset 3px 0 0 #f0a500';
+            row.style.transition = 'background 0.2s';
+        }
+        if (saveTimer) clearTimeout(saveTimer);
+        if (statusEl) { statusEl.textContent = '保存中...'; statusEl.style.color = '#999'; }
+        saveTimer = setTimeout(() => _savePermissionsFromTable(tbody, statusEl), 300);
+    };
+}
+
+/**
+ * 从表格收集权限数据并保存（仅更新当前标签页的数据，保留其他标签页）
+ */
+async function _savePermissionsFromTable(tbody, statusEl) {
+    // 从当前标签页的 checkbox 收集
+    const checkboxes = tbody.querySelectorAll('input[type="checkbox"]');
+    const tabPermissions = {};
+    checkboxes.forEach(cb => {
+        const menu = cb.dataset.menu;
+        const role = cb.dataset.role;
+        if (!tabPermissions[menu]) tabPermissions[menu] = { roles: [] };
+        if (cb.checked) tabPermissions[menu].roles.push(role);
+    });
+
+    // 合并：用缓存中的完整数据 + 当前标签页的修改
+    const mergedPermissions = {};
+    if (_cachedPermissions) {
+        for (const [key, val] of Object.entries(_cachedPermissions)) {
+            mergedPermissions[key] = { roles: [...val.roles] };
+        }
+    }
+    // 用当前标签页数据覆盖对应的 key
+    for (const [key, val] of Object.entries(tabPermissions)) {
+        mergedPermissions[key] = val;
+    }
+
+    try {
+        const resp = await fetch('/api/settings/permissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(mergedPermissions)
+        });
+        const data = await resp.json();
+        if (data.status === 'success') {
+            _cachedPermissions = data.data;
+            if (statusEl) { statusEl.textContent = '✓ 已保存'; statusEl.style.color = '#28a745'; }
+            // 刷新菜单显示（不影响项目状态）
+            _applyMenuPermissions();
+        } else {
+            if (statusEl) { statusEl.textContent = '保存失败'; statusEl.style.color = '#dc3545'; }
+            showNotification('保存失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = '保存失败'; statusEl.style.color = '#dc3545'; }
+        showNotification('保存失败: ' + e.message, 'error');
+    }
+}
+
+/**
+ * 仅刷新菜单显示，不重新加载权限（避免影响项目状态）
+ * @param {Object} permissions - 权限配置，不传时使用缓存
+ */
+function _applyMenuPermissions(permissions) {
+    const role = authState.user?.role;
+    const isAdmin = role === 'admin';
+    permissions = permissions || _cachedPermissions;
+    if (!permissions || !role) return;
+
+    // 判断是否有项目打开（顶部项目菜单仅在项目打开时显示）
+    const hasProject = !!(window._appState?.currentProjectId || document.querySelector('.cycle-nav-item[data-cycle]'));
+
+    // 遍历所有权限项，对每个元素应用显示/隐藏
+    for (const [menuKey, menuData] of Object.entries(permissions)) {
+        const el = document.getElementById(menuKey);
+        if (el) {
+            if (menuData.group === 'top') {
+                // 顶部菜单：仅在有项目打开且有权限时显示
+                el.style.display = (hasProject && hasMenuPermission(permissions, menuKey, role)) ? '' : 'none';
+            } else {
+                el.style.display = hasMenuPermission(permissions, menuKey, role) ? '' : 'none';
+            }
+        }
+    }
+
+    // 侧边栏菜单项列表（用于判断四叶草是否显示）
+    const sidebarMenus = Object.entries(permissions)
+        .filter(([, d]) => d.group === 'sidebar' && !d.parent)
+        .map(([k]) => k);
+
+    // 四叶草和系统管理按钮
+    const canSeeAnySidebarMenu = sidebarMenus.some(key => hasMenuPermission(permissions, key, role));
+    const systemManagementBtn = document.getElementById('systemManagementBtn');
+    if (systemManagementBtn) systemManagementBtn.style.display = canSeeAnySidebarMenu ? 'inline-block' : 'none';
+    const sidebarCloverBtn = document.getElementById('sidebarCloverBtn');
+    if (sidebarCloverBtn) sidebarCloverBtn.style.display = canSeeAnySidebarMenu ? 'flex' : 'none';
+
+    // 启动菜单通知角标定期刷新
+    if (canSeeAnySidebarMenu) {
+        refreshMenuBadges();
+        if (!window._menuBadgeInterval) {
+            window._menuBadgeInterval = setInterval(refreshMenuBadges, 30000);
+        }
+    }
+
+    // 权限配置菜单项（仅admin）
+    const permissionConfigMenuItem = document.getElementById('permissionConfigMenuItem');
+    if (permissionConfigMenuItem) permissionConfigMenuItem.style.display = isAdmin ? '' : 'none';
 }
 
 /**

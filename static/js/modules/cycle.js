@@ -23,6 +23,8 @@ export function renderCycles() {
     if (!appState.projectConfig || !appState.projectConfig.cycles || appState.projectConfig.cycles.length === 0) {
         console.log('无可用周期');
         elements.cycleNavList.innerHTML = '<span class="placeholder">无可用周期</span>';
+        const searchBox = document.getElementById('cycleSearchBox');
+        if (searchBox) searchBox.style.display = 'none';
         return;
     }
 
@@ -240,6 +242,9 @@ export async function loadCycleProgresses(cycles, docsData) {
         });
     });
 
+    // 初始化周期搜索（当前生效模块）
+    initCycleSearch();
+
     // 不自动选中任何周期，让用户手动选择
     const currentCycle = appState.currentCycle;
     if (currentCycle) {
@@ -267,6 +272,223 @@ export async function loadCycleProgresses(cycles, docsData) {
             `;
         }
     }
+}
+
+/**
+ * 初始化周期文档搜索框
+ */
+function initCycleSearch() {
+    const searchBox = document.getElementById('cycleSearchBox');
+    const searchTrigger = document.getElementById('cycleSearchTrigger');
+    const searchPanel = document.getElementById('cycleSearchPanel');
+    const searchInput = document.getElementById('cycleSearchInput');
+    const searchDropdown = document.getElementById('cycleSearchDropdown');
+    const searchClear = document.getElementById('cycleSearchClear');
+    const searchResultInfo = document.getElementById('cycleSearchResultInfo');
+    if (!searchBox || !searchTrigger || !searchPanel || !searchInput || !searchDropdown) return;
+
+    // 打开项目后显示搜索入口
+    searchBox.style.display = '';
+
+    // 构建搜索索引：周期 -> 文档类型 -> 文档名
+    const searchIndex = [];
+    const cycles = appState.projectConfig?.cycles || [];
+    const documents = appState.projectConfig?.documents || {};
+    cycles.forEach(cycle => {
+        const docsInfo = documents[cycle];
+        if (!docsInfo || !Array.isArray(docsInfo.required_docs)) return;
+        docsInfo.required_docs.forEach(doc => {
+            const docType = (doc.doc_type || doc.category || '要求文档').toString();
+            const docName = (doc.name || '').toString();
+            if (!docName) return;
+            searchIndex.push({ cycle, docType, docName });
+        });
+    });
+
+    let activeIndex = -1;
+    let filteredResults = [];
+    let debounceTimer = null;
+
+    const escapeReg = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const highlight = (text, keyword) => {
+        if (!keyword) return text;
+        const escaped = escapeReg(keyword);
+        return text.replace(new RegExp(`(${escaped})`, 'gi'), '<mark>$1</mark>');
+    };
+
+    function renderDropdown(items, keyword) {
+        if (!items.length) {
+            searchDropdown.innerHTML = '<div class="cycle-search-no-result">未找到匹配的文档</div>';
+            if (searchResultInfo) {
+                searchResultInfo.textContent = '无匹配结果';
+                searchResultInfo.style.display = '';
+            }
+            return;
+        }
+
+        const grouped = {};
+        items.forEach(item => {
+            if (!grouped[item.cycle]) grouped[item.cycle] = [];
+            grouped[item.cycle].push(item);
+        });
+
+        if (searchResultInfo) {
+            searchResultInfo.textContent = keyword ? `找到 ${items.length} 个匹配项` : `共 ${items.length} 个文档`;
+            searchResultInfo.style.display = '';
+        }
+
+        let html = '';
+        let globalIdx = 0;
+        cycles.forEach(cycle => {
+            if (!grouped[cycle]) return;
+            html += `<div class="cycle-search-group-header">📁 ${cycle}（${grouped[cycle].length}）</div>`;
+            grouped[cycle].forEach(item => {
+                const pathText = `${highlight(item.docType, keyword)} › ${highlight(item.docName, keyword)}`;
+                html += `<div class="cycle-search-item${globalIdx === activeIndex ? ' active' : ''}" data-index="${globalIdx}" data-cycle="${item.cycle}" data-doc="${item.docName}">
+                    <div class="search-path">
+                        <span class="search-cycle-tag">${item.cycle}</span>
+                        <span class="search-path-sep">›</span>
+                        <span class="search-doc-name">${pathText}</span>
+                    </div>
+                </div>`;
+                globalIdx++;
+            });
+        });
+
+        searchDropdown.innerHTML = html;
+        searchDropdown.querySelectorAll('.cycle-search-item').forEach(el => {
+            el.addEventListener('click', () => navigateToCycleDoc(el.dataset.cycle, el.dataset.doc));
+        });
+    }
+
+    function doSearch() {
+        const keyword = searchInput.value.trim().toLowerCase();
+        if (searchClear) searchClear.style.display = keyword ? '' : 'none';
+
+        if (!keyword) {
+            filteredResults = [...searchIndex];
+            activeIndex = -1;
+            renderDropdown(filteredResults, '');
+            return;
+        }
+
+        filteredResults = searchIndex.filter(item =>
+            item.cycle.toLowerCase().includes(keyword) ||
+            item.docType.toLowerCase().includes(keyword) ||
+            item.docName.toLowerCase().includes(keyword)
+        );
+        activeIndex = -1;
+        renderDropdown(filteredResults, keyword);
+    }
+
+    function closePanel() {
+        searchPanel.classList.remove('show');
+        searchTrigger.classList.remove('active');
+        searchInput.value = '';
+        if (searchClear) searchClear.style.display = 'none';
+        filteredResults = [];
+        activeIndex = -1;
+    }
+
+    function navigateToCycleDoc(cycle, docName) {
+        closePanel();
+        // 若已在当前周期，避免 selectCycle 的“再次点击取消选中”逻辑
+        if (appState.currentCycle !== cycle) {
+            selectCycle(cycle);
+        } else {
+            renderCycleDocuments(cycle);
+        }
+
+        const targetText = (docName || '').replace(/\s+/g, '');
+
+        // 轮询等待文档列表渲染完成后定位，提升跳转成功率
+        const tryLocateAndHighlight = (attempt = 0) => {
+            const rows = document.querySelectorAll('.doc-row');
+            for (const row of rows) {
+                const docTypeEl = row.querySelector('.doc-type');
+                if (!docTypeEl) continue;
+                const currentText = (docTypeEl.textContent || '').replace(/\s+/g, '');
+                if (currentText === targetText || currentText.includes(targetText)) {
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    row.style.transition = 'background 0.3s';
+                    row.style.background = '#fff3cd';
+                    setTimeout(() => { row.style.background = ''; }, 2000);
+                    return;
+                }
+            }
+
+            if (attempt < 8) {
+                setTimeout(() => tryLocateAndHighlight(attempt + 1), 150);
+            }
+        };
+
+        setTimeout(() => tryLocateAndHighlight(0), 120);
+    }
+
+    searchTrigger.onclick = (e) => {
+        e.stopPropagation();
+        if (searchPanel.classList.contains('show')) {
+            closePanel();
+        } else {
+            searchPanel.classList.add('show');
+            searchTrigger.classList.add('active');
+            filteredResults = [...searchIndex];
+            renderDropdown(filteredResults, '');
+            setTimeout(() => searchInput.focus(), 50);
+        }
+    };
+
+    searchInput.oninput = () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(doSearch, 200);
+    };
+
+    searchInput.onkeydown = (e) => {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (!filteredResults.length) return;
+            activeIndex = Math.min(activeIndex + 1, filteredResults.length - 1);
+            renderDropdown(filteredResults, searchInput.value.trim());
+            const activeEl = searchDropdown.querySelector('.cycle-search-item.active');
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!filteredResults.length) return;
+            activeIndex = Math.max(activeIndex - 1, 0);
+            renderDropdown(filteredResults, searchInput.value.trim());
+            const activeEl = searchDropdown.querySelector('.cycle-search-item.active');
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeIndex >= 0 && activeIndex < filteredResults.length) {
+                const item = filteredResults[activeIndex];
+                navigateToCycleDoc(item.cycle, item.docName);
+            }
+        } else if (e.key === 'Escape') {
+            closePanel();
+        }
+    };
+
+    if (searchClear) {
+        searchClear.onclick = () => {
+            searchInput.value = '';
+            searchClear.style.display = 'none';
+            filteredResults = [...searchIndex];
+            activeIndex = -1;
+            renderDropdown(filteredResults, '');
+            searchInput.focus();
+        };
+    }
+
+    if (searchBox._outsideClickHandler) {
+        document.removeEventListener('click', searchBox._outsideClickHandler);
+    }
+    searchBox._outsideClickHandler = (e) => {
+        if (!searchBox.contains(e.target)) {
+            closePanel();
+        }
+    };
+    document.addEventListener('click', searchBox._outsideClickHandler);
 }
 
 /**

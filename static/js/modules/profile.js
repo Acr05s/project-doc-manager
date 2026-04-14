@@ -57,7 +57,7 @@ export async function openProfileModal() {
             const profileEmail = document.getElementById('profileEmail');
             if (profileUsername) profileUsername.value = u.username || '';
             if (profileRole) {
-                const roleMap = { 'admin': '系统管理员', 'pmo': '项目管理组织', 'project_admin': '项目经理', 'contractor': '普通员工' };
+                const roleMap = { 'admin': '系统管理员', 'pmo': '项目管理组织', 'project_admin': '项目经理', 'contractor': '一般员工' };
                 profileRole.value = roleMap[u.role] || u.role || '';
             }
             if (profileOrg) profileOrg.value = u.organization || '';

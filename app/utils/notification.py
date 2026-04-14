@@ -82,7 +82,7 @@ def notify_user_registered(username, email, organization, role):
     """通知用户注册成功（发送给注册者）"""
     if not email:
         return
-    role_map = {'contractor': '普通员工', 'project_admin': '项目经理', 'pmo': '项目管理组织'}
+    role_map = {'contractor': '一般员工', 'project_admin': '项目经理', 'pmo': '项目管理组织'}
     role_label = role_map.get(role, role)
     subject = '【项目资料管理平台】注册成功通知'
     content = f'''您好 {username}，

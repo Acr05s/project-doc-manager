@@ -2,7 +2,7 @@
 
 from flask import Blueprint
 from flask_login import login_required
-from .utils import init_doc_manager, project_access_required
+from .utils import init_doc_manager, project_access_required, pmo_admin_required
 from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects, get_archive_stats, bulk_approve_archive_requests
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements, get_document_directories, create_document_directory, delete_document_directory
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
@@ -34,7 +34,7 @@ project_bp.route('/batch/delete', methods=['POST'])(login_required(batch_delete_
 project_bp.route('/batch/update', methods=['POST'])(login_required(batch_update_projects))
 project_bp.route('/batch/status', methods=['POST'])(login_required(batch_update_project_status))
 project_bp.route('/all', methods=['GET'])(login_required(list_all_projects))
-project_bp.route('/load', methods=['POST'])(login_required(load_project_config))
+project_bp.route('/load', methods=['POST'])(pmo_admin_required(load_project_config))
 project_bp.route('/requirements/list', methods=['GET'])(login_required(list_requirements_configs))
 project_bp.route('/export-requirements', methods=['GET'])(login_required(export_requirements))
 project_bp.route('/deleted/list', methods=['GET'])(login_required(list_deleted_projects))
@@ -56,7 +56,7 @@ project_bp.route('/<project_id>', methods=['PUT'])(project_access_required(updat
 project_bp.route('/<project_id>/config', methods=['PATCH'])(project_access_required(update_project_config))
 project_bp.route('/<project_id>', methods=['DELETE'])(project_access_required(delete_project))
 project_bp.route('/<project_id>/transfer', methods=['POST'])(project_access_required(initiate_project_transfer))
-project_bp.route('/<project_id>/apply-requirements', methods=['POST'])(project_access_required(apply_requirements_to_project_route))
+project_bp.route('/<project_id>/apply-requirements', methods=['POST'])(pmo_admin_required(apply_requirements_to_project_route))
 project_bp.route('/<project_id>/restore', methods=['POST'])(login_required(restore_project))
 project_bp.route('/<project_id>/permanent-delete', methods=['DELETE'])(login_required(permanent_delete_project))
 project_bp.route('/<project_id>/structure', methods=['POST'])(project_access_required(update_project_structure))
@@ -69,10 +69,10 @@ project_bp.route('/<project_id>/verify-files', methods=['GET'])(project_access_r
 project_bp.route('/<project_id>/clean-invalid-files', methods=['POST'])(project_access_required(clean_invalid_files))
 project_bp.route('/<project_id>/download-package', methods=['GET'])(project_access_required(download_project_package))
 project_bp.route('/<project_id>/versions', methods=['GET'])(project_access_required(list_config_versions))
-project_bp.route('/<project_id>/versions', methods=['POST'])(project_access_required(save_config_version))
+project_bp.route('/<project_id>/versions', methods=['POST'])(pmo_admin_required(save_config_version))
 project_bp.route('/<project_id>/versions/<version_filename>', methods=['GET'])(project_access_required(load_config_version))
-project_bp.route('/<project_id>/versions/<version_filename>/switch', methods=['POST'])(project_access_required(switch_config_version))
-project_bp.route('/<project_id>/versions/<version_filename>', methods=['DELETE'])(project_access_required(delete_config_version))
+project_bp.route('/<project_id>/versions/<version_filename>/switch', methods=['POST'])(pmo_admin_required(switch_config_version))
+project_bp.route('/<project_id>/versions/<version_filename>', methods=['DELETE'])(pmo_admin_required(delete_config_version))
 project_bp.route('/<project_id>/versions/<version_filename>/export', methods=['GET'])(project_access_required(export_config_version))
 project_bp.route('/<project_id>/apply-template/<template_id>', methods=['POST'])(project_access_required(apply_template_to_project))
 project_bp.route('/<project_id>/package-full', methods=['POST'])(project_access_required(package_full_project))

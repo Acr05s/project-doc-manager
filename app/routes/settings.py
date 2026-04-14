@@ -293,3 +293,109 @@ def test_smtp_connection():
         return jsonify({'status': 'error', 'message': '无法连接到SMTP服务器，请检查地址和端口'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'连接失败: {str(e)}'})
+
+
+# ================== 权限配置（平台级） ==================
+
+PERMISSIONS_FILE = Path(__file__).parent.parent.parent / 'permissions.json'
+
+# 默认菜单权限配置（项目菜单=顶部, 系统菜单=侧边栏, 含二级子菜单）
+DEFAULT_MENU_PERMISSIONS = {
+    # ── 项目菜单（顶部，打开项目后显示） ──
+    'documentRequirementsMenu': {'label': '📄 文档需求', 'roles': ['admin', 'pmo'], 'group': 'top'},
+    'editRequirementsBtn': {'label': '✏️ 编辑文档需求', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
+    'manageVersionsBtn': {'label': '🔄 切换配置版本', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
+    'clearRequirementsBtn': {'label': '🗑️ 删除当前需求', 'roles': ['admin'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
+    'documentManagementMenu': {'label': '📋 文档导入与匹配', 'roles': ['admin', 'pmo', 'project_admin', 'contractor'], 'group': 'top'},
+    'zipUploadBtn': {'label': '📥 导入文档', 'roles': ['admin', 'pmo', 'project_admin', 'contractor'], 'group': 'top', 'parent': 'documentManagementMenu'},
+    'deleteProjectBtn': {'label': '🔄 重新匹配文件管理', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'documentManagementMenu'},
+    'cleanupDuplicatesBtn': {'label': '🧹 清理重复文档', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'documentManagementMenu'},
+    'generateReportBtn': {'label': '📊 生成报告', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
+    'packageProjectBtn': {'label': '📦 备份项目', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
+    'acceptanceMenu': {'label': '✅ 验收项目文件', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
+    'generateReportMenuItem': {'label': '📊 生成报告', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'acceptanceMenu'},
+    'confirmAcceptanceBtn': {'label': '✅ 确认验收', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'acceptanceMenu'},
+    'downloadPackageBtn': {'label': '📦 打包下载', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'acceptanceMenu'},
+    'archiveAndApprovalMenu': {'label': '📋 文档归档与审批', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
+    'openArchiveConfigBtn': {'label': '⚙️ 配置审批流程', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
+    'viewArchiveRequestsBtn': {'label': '📨 查看审批请求', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
+    'viewApprovalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
+    # ── 系统菜单（侧边栏，🍀四叶草） ──
+    'systemSettingsMenuItem': {'label': '⚙️ 系统设置', 'roles': ['admin'], 'group': 'sidebar'},
+    'userApprovalBtn': {'label': '👤 用户审核', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
+    'archiveApprovalBtn': {'label': '📋 文档归档审批', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
+    'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
+    'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
+    'orgManagementMenuItem': {'label': '🏢 承建单位管理', 'roles': ['admin', 'pmo'], 'group': 'sidebar'},
+    'projectManagementMenuItem': {'label': '📁 项目管理', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
+}
+
+
+def load_permissions():
+    """加载权限配置（平台级）"""
+    import copy
+    permissions = copy.deepcopy(DEFAULT_MENU_PERMISSIONS)
+    if PERMISSIONS_FILE.exists():
+        try:
+            with open(PERMISSIONS_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            for key, val in saved.items():
+                if key in permissions:
+                    permissions[key]['roles'] = val.get('roles', permissions[key]['roles'])
+        except Exception:
+            pass
+    return permissions
+
+
+def save_permissions(permissions):
+    """保存权限配置（平台级）"""
+    try:
+        with open(PERMISSIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(permissions, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"保存权限配置失败: {e}", flush=True)
+        return False
+
+
+@settings_bp.route('/api/settings/permissions', methods=['GET'])
+def get_permissions():
+    """获取菜单权限配置（平台级）"""
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return jsonify({'status': 'error', 'message': '未登录'}), 401
+        permissions = load_permissions()
+        return jsonify({'status': 'success', 'data': permissions})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@settings_bp.route('/api/settings/permissions', methods=['POST'])
+def update_permissions():
+    """更新菜单权限配置（仅admin，平台级）"""
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated or current_user.role != 'admin':
+            return jsonify({'status': 'error', 'message': '权限不足，仅管理员可修改'}), 403
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': '无效的数据'}), 400
+
+        # 加载当前权限
+        permissions = load_permissions()
+        all_roles = ['admin', 'pmo', 'project_admin', 'contractor']
+
+        for menu_key, menu_data in data.items():
+            if menu_key in permissions:
+                roles = menu_data.get('roles', [])
+                valid_roles = [r for r in roles if r in all_roles]
+                permissions[menu_key]['roles'] = valid_roles
+
+        if save_permissions(permissions):
+            return jsonify({'status': 'success', 'message': '权限配置已保存', 'data': permissions})
+        else:
+            return jsonify({'status': 'error', 'message': '保存失败'}), 500
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500

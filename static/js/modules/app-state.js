@@ -26,6 +26,9 @@ export let appState = {
     sessionId: null             // 当前会话ID
 };
 
+// 暴露到window供auth.js等无import的模块访问
+window._appState = appState;
+
 // 生成唯一会话ID（不再持久化到localStorage，刷新后自动失效）
 function generateSessionId() {
     return 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);

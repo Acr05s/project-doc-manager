@@ -6,7 +6,7 @@
 import { appState, elements, initSession } from './app-state.js';
 import { authState } from './auth.js';
 import { setupEventListeners, initDocModalResizer, showProjectButtons, hideProjectButtons, showNotification, toggleOperationLog, refreshOperationLog, closeConfirmModal, showConfirmModal, closeInputModal, applySystemSettingsToPage } from './ui.js';
-import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDashboardStats, getReportTypes, getReportData, getMessages, getUnreadMessageCount, markMessageAsRead, markAllMessagesAsRead, deleteMessage, respondProjectTransfer, sendMessageToApprovers, getPendingUsers, approveUserAccount, rejectUserAccount } from './api.js';
+import { loadProjectsList, loadProject, saveProject, deleteProject, loadProjectConfig, importJson, exportJson, packageProject, importPackage, confirmAcceptance, downloadPackage, getDashboardStats, getReportTypes, getReportData, getMessages, getUnreadMessageCount, markMessageAsRead, markAllMessagesAsRead, deleteMessage, batchMarkMessagesAsRead, batchDeleteMessages, respondProjectTransfer, sendMessageToApprovers, getPendingUsers, approveUserAccount, rejectUserAccount } from './api.js';
 import { handleUploadDocument, handleFileSelect, handleEditDocument, handleDeleteDocument, handleReplaceDocument, loadUploadedDocuments, renderCycleDocuments, previewDocument, openUploadModal, openEditModal, archiveDocument, unarchiveDocument, generateReport } from './document.js';
 import { renderProjectsList, selectProject, handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, handleSaveProject, handlePackageProject, handleImportPackage, handleConfirmAcceptance, handleDownloadPackage, handleRematchFileManagement, handleAddCycle, handleRenameCycle, handleDeleteCycle, handleAddDoc, handleDeleteDoc, populateProjectManageSelects, populateDocSelect, resetImportPackageModal, openProjectSelectModal, closeProjectSelectModal, handleOpenProject, handleSoftDeleteProject, handleRestoreProject, handlePermanentDeleteProject, toggleDeletedProjects, openNewProjectModal, handlePackageFileSelect, handlePackageFileSelectInModal, handleImportPackageInModal } from './project.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
@@ -114,9 +114,10 @@ function renderOverviewReport(data) {
     const accTotal = acc.accepted + acc.partial + acc.pending || 1;
     const docsTotal = docs.complete + docs.partial + docs.empty || 1;
     
-    // 获取用户角色
+    // 获取用户角色和组织
     const { authState } = window;
     const userRole = authState?.user?.role || '';
+    const userOrganization = authState?.user?.organization || '';
     
     let cardsHTML = `
         <div class="dashboard-card primary">
@@ -127,8 +128,9 @@ function renderOverviewReport(data) {
             </div>
         </div>`;
     
-    // 只有非 contractor 角色显示承建单位卡片
-    if (userRole !== 'contractor') {
+    // 只有 admin 和 pmo 角色显示承建单位卡片
+    // project_admin 和 contractor 角色不显示
+    if (userRole === 'admin' || userRole === 'pmo') {
         cardsHTML += `
             <div class="dashboard-card success">
                 <div class="card-icon">🏢</div>
@@ -306,19 +308,29 @@ function renderProjectsReport(data) {
 }
 
 function renderOrganizationsReport(data) {
-    const orgs = data.organizations || [];
+    // 获取用户角色和组织
+    const { authState } = window;
+    const userRole = authState?.user?.role || '';
+    const userOrganization = authState?.user?.organization || '';
+    
+    // 过滤组织数据：project_admin 只能看到本单位的数据
+    let orgs = data.organizations || [];
+    if (userRole === 'project_admin' && userOrganization) {
+        orgs = orgs.filter(org => org.name === userOrganization);
+    }
+    
     return `
         <div class="dashboard-cards">
             <div class="dashboard-card primary">
                 <div class="card-icon">🏢</div>
                 <div class="card-info">
                     <div class="card-value">${orgs.length}</div>
-                    <div class="card-label">承建单位数</div>
+                    <div class="card-label">${userRole === 'project_admin' ? '本单位' : '承建单位数'}</div>
                 </div>
             </div>
         </div>
         <div class="chart-box" style="margin-top: 20px;">
-            <h3>承建单位统计</h3>
+            <h3>${userRole === 'project_admin' ? '本单位统计' : '承建单位统计'}</h3>
             <div class="org-table">
                 <div class="org-header">
                     <span>单位名称</span>
@@ -573,17 +585,30 @@ async function handleArchiveApprovalMessageClick(message) {
         await loadMessages();
     }
     closeMessageModal();
-    // 打开归档审批界面
-    try {
-        const m = await import('./archive-approval.js');
-        m.openArchiveApprovalModal();
-    } catch (e) {
-        console.error('打开审批界面失败:', e);
-        // 降级为导航到项目
+    const isPending = (message.title || '').includes('待审批');
+    const isApprover = ['admin', 'pmo', 'project_admin'].includes(authState.user?.role);
+    if (isPending && isApprover) {
+        // 待审批消息 + 审批角色：打开审批界面
+        try {
+            const m = await import('./archive-approval.js');
+            m.openArchiveApprovalModal();
+        } catch (e) {
+            console.error('打开审批界面失败:', e);
+            if (projectId) {
+                let cycle = null;
+                if (message.content) {
+                    const match = message.content.match(/周期\s*["""」]([^"""」]+)["""」]/);
+                    if (match) cycle = match[1];
+                }
+                navigateToProject(projectId, cycle);
+            }
+        }
+    } else {
+        // 已完成/已驳回/阶段通知/一般员工：导航到项目文档
         if (projectId) {
             let cycle = null;
             if (message.content) {
-                const match = message.content.match(/周期\s*["""]([^"""]+)["""]/);
+                const match = message.content.match(/周期\s*["""」]([^"""」]+)["""」]/);
                 if (match) cycle = match[1];
             }
             navigateToProject(projectId, cycle);
@@ -593,8 +618,8 @@ async function handleArchiveApprovalMessageClick(message) {
 
 function navigateToProject(projectId, cycle) {
     if (!projectId) return;
-    // 更新URL参数并触发项目加载
-    const url = new URL(window.location);
+    // 仅保留白名单参数，避免把无关参数带入URL
+    const url = new URL(window.location.origin + window.location.pathname);
     url.searchParams.set('project', projectId);
     if (cycle) {
         url.searchParams.set('cycle', cycle);
@@ -624,6 +649,8 @@ export async function initMessageCenter() {
     if (headerCenter) {
         headerCenter.style.display = 'flex';
     }
+    // 初始化批量操作工具栏
+    initMsgBatchToolbar();
     setInterval(refreshUnreadCount, 30000);
     setInterval(refreshHeaderMarquee, 60000);
 }
@@ -649,11 +676,12 @@ async function refreshHeaderMarquee() {
     const marqueeText = document.getElementById('marqueeText');
     if (!marqueeText) return;
     try {
-        const result = await getMessages(null, 10, 0);
+        // 仅滚动未读消息
+        const result = await getMessages(false, 10, 0);
         const marqueeWrap = document.getElementById('marqueeWrap');
         if (result.status === 'success' && result.messages && result.messages.length > 0) {
             const texts = result.messages.slice(0, 5).map(m => {
-                const prefix = m.is_read ? '' : '🔴 ';
+                const prefix = '🔴 ';
                 return prefix + m.title + '：' + (m.content || '').substring(0, 40);
             });
             marqueeText.textContent = texts.join('　　｜　　');
@@ -765,6 +793,7 @@ function renderMessageList(messages) {
     const container = document.getElementById('messageListContainer');
     if (!messages.length) {
         container.innerHTML = '<p class="empty-tip">暂无消息</p>';
+        updateMsgBatchUI();
         return;
     }
 
@@ -772,28 +801,41 @@ function renderMessageList(messages) {
         const isTransfer = m.related_type === 'project_transfer' && !m.is_read;
         const isUserApproval = m.type === 'approval' && m.related_type === 'user' && !m.is_read;
         const isArchiveApproval = m.related_type === 'archive_approval';
+        // 区分审批消息状态：只有标题含"待审批"才是待处理
+        const isArchivePending = isArchiveApproval && (m.title || '').includes('待审批');
+        const isArchiveDone = isArchiveApproval && !isArchivePending;
         const clickable = m.related_type === 'user' || m.related_type === 'project_transfer' || m.related_type === 'project' || m.related_type === 'archive_approval';
+        // 确定审批消息的按钮文案和样式
+        let archiveBtnHtml = '';
+        if (isArchivePending && ['admin','pmo','project_admin'].includes(authState.user?.role)) {
+            archiveBtnHtml = `<button class="btn btn-sm btn-primary msg-archive-goto-btn" data-id="${m.id}" data-related="${m.related_id || ''}" data-action="approve">去审批</button>`;
+        } else if (isArchiveApproval) {
+            archiveBtnHtml = `<button class="btn btn-sm btn-outline-secondary msg-archive-goto-btn" data-id="${m.id}" data-related="${m.related_id || ''}" data-action="view" style="border:1px solid #ccc;background:#fff;color:#555;">查看文档</button>`;
+        }
         return `
         <div class="message-item ${m.is_read ? 'read' : 'unread'}${clickable ? ' clickable' : ''}" data-id="${m.id}">
-            <div class="message-header">
-                <span class="message-title">${m.title}</span>
-                <span class="message-time">${new Date(m.created_at).toLocaleString()}</span>
-            </div>
-            <div class="message-content">${m.content}</div>
-            <div class="message-actions">
-                ${isTransfer ? `
-                    <button class="btn btn-sm btn-success msg-transfer-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">同意接受</button>
-                    <button class="btn btn-sm btn-secondary msg-transfer-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
-                ` : ''}
-                ${isUserApproval ? `
-                    <button class="btn btn-sm btn-success msg-user-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">审批通过</button>
-                    <button class="btn btn-sm btn-danger msg-user-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
-                ` : ''}
-                ${isArchiveApproval ? `
-                    <button class="btn btn-sm btn-primary msg-archive-goto-btn" data-id="${m.id}" data-related="${m.related_id || ''}">去审批</button>
-                ` : ''}
-                ${!m.is_read && !isTransfer && !isUserApproval ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
-                <button class="btn btn-sm btn-secondary msg-del-btn" data-id="${m.id}">删除</button>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+                <input type="checkbox" class="msg-item-checkbox" data-id="${m.id}" onclick="event.stopPropagation()">
+                <div style="flex:1;min-width:0;">
+                    <div class="message-header">
+                        <span class="message-title">${m.title}</span>
+                        <span class="message-time">${new Date(m.created_at).toLocaleString()}</span>
+                    </div>
+                    <div class="message-content">${m.content}</div>
+                    <div class="message-actions">
+                        ${isTransfer ? `
+                            <button class="btn btn-sm btn-success msg-transfer-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">同意接受</button>
+                            <button class="btn btn-sm btn-secondary msg-transfer-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
+                        ` : ''}
+                        ${isUserApproval ? `
+                            <button class="btn btn-sm btn-success msg-user-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">审批通过</button>
+                            <button class="btn btn-sm btn-danger msg-user-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
+                        ` : ''}
+                        ${archiveBtnHtml}
+                        ${!m.is_read && !isTransfer && !isUserApproval ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
+                        <button class="btn btn-sm btn-secondary msg-del-btn" data-id="${m.id}">删除</button>
+                    </div>
+                </div>
             </div>
         </div>
     `}).join('');
@@ -882,19 +924,35 @@ function renderMessageList(messages) {
             }
         });
     });
-    // 绑定归档审批"查看文档"按钮
+    // 绑定归档审批按钮（区分"去审批"和"查看文档"）
     container.querySelectorAll('.msg-archive-goto-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const id = btn.dataset.id;
+            const action = btn.dataset.action;
             await markMessageAsRead(id);
             await loadMessages();
             closeMessageModal();
-            try {
-                const m = await import('./archive-approval.js');
-                m.openArchiveApprovalModal();
-            } catch (err) {
-                console.error('打开审批界面失败:', err);
+            if (action === 'approve') {
+                // 待审批：打开审批界面
+                try {
+                    const m = await import('./archive-approval.js');
+                    m.openArchiveApprovalModal();
+                } catch (err) {
+                    console.error('打开审批界面失败:', err);
+                }
+            } else {
+                // 已完成/已驳回/阶段通知：导航到对应项目文档
+                const msg = messagesCache.find(m => m.id === id);
+                if (msg) {
+                    const projectId = msg.related_id;
+                    let cycle = null;
+                    if (msg.content) {
+                        const match = msg.content.match(/周期\s*["""」]([^"""」]+)["""」]/);
+                        if (match) cycle = match[1];
+                    }
+                    navigateToProject(projectId, cycle);
+                }
             }
         });
     });
@@ -916,6 +974,79 @@ function renderMessageList(messages) {
             }
         });
     });
+    // 绑定复选框变更事件
+    container.querySelectorAll('.msg-item-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateMsgBatchUI);
+    });
+}
+
+function getSelectedMsgIds() {
+    const checkboxes = document.querySelectorAll('.msg-item-checkbox:checked');
+    return Array.from(checkboxes).map(cb => cb.dataset.id);
+}
+
+function updateMsgBatchUI() {
+    const selected = getSelectedMsgIds();
+    const countEl = document.getElementById('msgSelectedCount');
+    const batchReadBtn = document.getElementById('msgBatchRead');
+    const batchDeleteBtn = document.getElementById('msgBatchDelete');
+    const selectAllCb = document.getElementById('msgSelectAll');
+    if (countEl) countEl.textContent = `已选 ${selected.length} 条`;
+    if (batchReadBtn) batchReadBtn.disabled = selected.length === 0;
+    if (batchDeleteBtn) batchDeleteBtn.disabled = selected.length === 0;
+    // 更新全选状态
+    const allCbs = document.querySelectorAll('.msg-item-checkbox');
+    if (selectAllCb && allCbs.length > 0) {
+        selectAllCb.checked = selected.length === allCbs.length;
+        selectAllCb.indeterminate = selected.length > 0 && selected.length < allCbs.length;
+    }
+}
+
+function initMsgBatchToolbar() {
+    const selectAllCb = document.getElementById('msgSelectAll');
+    if (selectAllCb) {
+        selectAllCb.addEventListener('change', () => {
+            const checked = selectAllCb.checked;
+            document.querySelectorAll('.msg-item-checkbox').forEach(cb => { cb.checked = checked; });
+            updateMsgBatchUI();
+        });
+    }
+    const invertBtn = document.getElementById('msgInvertSelect');
+    if (invertBtn) {
+        invertBtn.addEventListener('click', () => {
+            document.querySelectorAll('.msg-item-checkbox').forEach(cb => { cb.checked = !cb.checked; });
+            updateMsgBatchUI();
+        });
+    }
+    const batchReadBtn = document.getElementById('msgBatchRead');
+    if (batchReadBtn) {
+        batchReadBtn.addEventListener('click', async () => {
+            const ids = getSelectedMsgIds();
+            if (!ids.length) return;
+            const result = await batchMarkMessagesAsRead(ids);
+            if (result.status === 'success') {
+                showNotification(result.message || `已标记 ${ids.length} 条为已读`, 'success');
+                await loadMessages();
+            } else {
+                showNotification(result.message || '操作失败', 'error');
+            }
+        });
+    }
+    const batchDeleteBtn = document.getElementById('msgBatchDelete');
+    if (batchDeleteBtn) {
+        batchDeleteBtn.addEventListener('click', async () => {
+            const ids = getSelectedMsgIds();
+            if (!ids.length) return;
+            if (!confirm(`确定要删除选中的 ${ids.length} 条消息吗？`)) return;
+            const result = await batchDeleteMessages(ids);
+            if (result.status === 'success') {
+                showNotification(result.message || `已删除 ${ids.length} 条消息`, 'success');
+                await loadMessages();
+            } else {
+                showNotification(result.message || '操作失败', 'error');
+            }
+        });
+    }
 }
 
 export async function initApp() {
@@ -1002,6 +1133,14 @@ export async function initApp() {
     const urlParams = new URLSearchParams(window.location.search);
     const projectId = urlParams.get('project');
     const urlCycle = urlParams.get('cycle');
+
+    // 仅保留白名单参数，避免URL暴露无关业务参数造成误解
+    const cleanUrl = new URL(window.location.origin + window.location.pathname);
+    if (projectId) cleanUrl.searchParams.set('project', projectId);
+    if (urlCycle) cleanUrl.searchParams.set('cycle', urlCycle);
+    if (cleanUrl.toString() !== window.location.href) {
+        window.history.replaceState({}, '', cleanUrl.toString());
+    }
     console.log('URL中的projectId:', projectId, 'cycle:', urlCycle);
 
     if (projectId) {

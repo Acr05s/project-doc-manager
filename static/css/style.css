@@ -42,7 +42,7 @@ body {
     align-items: center;
     box-shadow: var(--shadow);
     flex-wrap: nowrap;
-    overflow-x: visible;
+    overflow: visible;
     position: relative;
     z-index: 100;
     gap: 12px;
@@ -460,6 +460,10 @@ body {
     padding: 10px 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     position: relative;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
 }
 
 .cycle-nav-list {
@@ -468,21 +472,80 @@ body {
     align-items: center;
     gap: 15px;
     justify-content: center;
+    flex: 1;
 }
 
-/* 周期文档搜索框 */
+/* 周期文档搜索框 - Excel筛选风格 */
 .cycle-search-box {
-    position: absolute;
-    top: 8px;
-    right: 20px;
+    position: relative;
+    top: auto;
+    right: auto;
     z-index: 100;
-    width: 260px;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 2px;
+}
+
+.cycle-search-trigger {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: #fff;
+    border: 1px solid #bbb;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #555;
+    transition: all 0.2s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.cycle-search-trigger:hover {
+    border-color: #4a90d9;
+    color: #4a90d9;
+    background: #f0f6ff;
+}
+
+.cycle-search-trigger.active {
+    border-color: #4a90d9;
+    color: #4a90d9;
+    background: #e8f0fe;
+}
+
+.cycle-search-panel {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    width: 380px;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    z-index: 200;
+    overflow: hidden;
+}
+
+.cycle-search-panel.show {
+    display: block;
+}
+
+.cycle-search-panel-header {
+    padding: 8px 10px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .cycle-search-input-wrapper {
     position: relative;
     display: flex;
     align-items: center;
+    flex: 1;
 }
 
 .cycle-search-icon {
@@ -491,11 +554,12 @@ body {
     font-size: 13px;
     pointer-events: none;
     z-index: 1;
+    color: #999;
 }
 
 .cycle-search-input {
     width: 100%;
-    padding: 6px 28px 6px 30px;
+    padding: 5px 28px 5px 28px;
     border: 1px solid #ccc;
     border-radius: 4px;
     font-size: 13px;
@@ -523,19 +587,17 @@ body {
     color: #333;
 }
 
+.cycle-search-result-info {
+    padding: 4px 10px;
+    font-size: 11px;
+    color: #999;
+    background: #fafafa;
+    border-bottom: 1px solid #eee;
+}
+
 .cycle-search-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    margin-top: 2px;
-    background: #fff;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    max-height: 320px;
+    max-height: 400px;
     overflow-y: auto;
-    z-index: 200;
 }
 
 .cycle-search-dropdown::-webkit-scrollbar {
@@ -548,25 +610,27 @@ body {
 }
 
 .cycle-search-group-header {
-    padding: 6px 10px;
+    padding: 5px 10px;
     font-size: 12px;
     font-weight: 600;
-    color: #666;
-    background: #f5f5f5;
-    border-bottom: 1px solid #eee;
+    color: #4a90d9;
+    background: #f0f6ff;
+    border-bottom: 1px solid #e0e8f5;
     position: sticky;
     top: 0;
+    z-index: 1;
 }
 
 .cycle-search-item {
-    padding: 8px 12px;
+    padding: 7px 12px 7px 20px;
     cursor: pointer;
     font-size: 13px;
     border-bottom: 1px solid #f0f0f0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     transition: background 0.15s;
+    color: #333;
 }
 
 .cycle-search-item:last-child {
@@ -578,14 +642,29 @@ body {
     background: #e8f0fe;
 }
 
+.cycle-search-item .search-path {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
 .cycle-search-item .search-cycle-tag {
     flex-shrink: 0;
     font-size: 11px;
-    padding: 1px 6px;
+    padding: 1px 5px;
     border-radius: 3px;
-    background: #e9ecef;
-    color: #555;
+    background: #e0ecf8;
+    color: #3a7bc8;
     white-space: nowrap;
+    font-weight: 500;
+}
+
+.cycle-search-item .search-path-sep {
+    color: #bbb;
+    font-size: 11px;
+    flex-shrink: 0;
 }
 
 .cycle-search-item .search-doc-name {
@@ -602,7 +681,7 @@ body {
 }
 
 .cycle-search-no-result {
-    padding: 12px;
+    padding: 20px 12px;
     text-align: center;
     color: #999;
     font-size: 13px;
@@ -1997,6 +2076,12 @@ body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     margin-top: 5px;
     overflow: hidden;
+}
+
+/* 右侧区域下拉菜单右对齐，防止超出屏幕 */
+.header-right .dropdown-menu {
+    left: auto;
+    right: 0;
 }
 
 .dropdown-menu.show {
