@@ -42,6 +42,8 @@ backup_20260411121914/
 /uploads/
 /logs/
 *.log
+/data/*.db
+/data/**/*.db
 
 # Build outputs
 installer/
