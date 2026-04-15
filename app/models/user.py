@@ -372,16 +372,6 @@ class UserManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(project_id, cycle, doc_category, directory_path),
                     FOREIGN KEY (created_by) REFERENCES users(id)
-                            # 安全加固：给高频查询创建索引（幂等，重复运行无副作用）
-                            cursor.execute(
-                                'CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time '
-                                'ON login_attempts(ip_address, attempt_time)'
-                            )
-                            cursor.execute(
-                                'CREATE INDEX IF NOT EXISTS idx_ip_blacklist_ip '
-                                'ON ip_blacklist(ip_address)'
-                            )
-                            conn.commit()
                 )
             ''')
             conn.commit()
