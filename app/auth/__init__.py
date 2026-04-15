@@ -7,6 +7,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from app.models.user import user_manager
 from app.models.message import message_manager
 import json
+from app.utils.security import get_real_ip, is_rate_limited
+from datetime import datetime, timedelta
 
 # 创建认证蓝图
 auth_bp = Blueprint('auth', __name__)
@@ -21,18 +23,6 @@ def load_user(user_id):
     return user_manager.get_user_by_id(int(user_id))
 
 
-def get_real_ip():
-    """获取真实IP地址"""
-    ip = request.headers.get('X-Forwarded-For')
-    if ip:
-        ip = ip.split(',')[0].strip()
-    else:
-        ip = request.headers.get('X-Real-IP')
-    if not ip:
-        ip = request.remote_addr
-    return ip
-
-
 def is_strong_password(password):
     if not password or len(password) < 8:
         return False
@@ -45,22 +35,56 @@ def check_ip_blacklist():
     return user_manager.is_ip_blocked(ip)
 
 
+# ---------------------------------------------------------------------------
+# 暴力破解分级封禁
+# ---------------------------------------------------------------------------
+_BAN_TIERS = [
+    # (1 小时内失败次数, 封禁分钟数, 日志原因)
+    (15, 24 * 60, '高频暴力破解，自动封禁 24 小时'),
+    (5,  30,      '多次登录失败，自动封禁 30 分钟'),
+]
+
+
+def _apply_brute_force_ban(ip: str, failed: int):
+    """按失败次数决定临时封禁时长，返回封禁提示或 None。"""
+    for threshold, minutes, reason in _BAN_TIERS:
+        if failed >= threshold:
+            unblock_at = (datetime.now() + timedelta(minutes=minutes)).isoformat()
+            user_manager.add_ip_to_blacklist(ip, reason, None, unblock_at=unblock_at)
+            label = '24 小时' if minutes >= 1440 else f'{minutes} 分钟'
+            return f'登录失败次数过多，IP 已被临时封禁 {label}'
+    return None
+
+
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """登录"""
+    ip = get_real_ip()
+
     if check_ip_blacklist():
-        return jsonify({'status': 'error', 'message': 'IP地址已被限制访问'})
-    
+        if request.method == 'POST':
+            return jsonify({'status': 'error', 'message': 'IP 地址已被限制访问'}), 403
+        return render_template('login.html')
+
     if request.method == 'POST':
-        data = request.get_json()
-        username = data.get('username')
-        password = data.get('password')
-        
-        ip = get_real_ip()
-        
+        # 内存限流：同一 IP 每分钟最多 20 次登录尝试
+        if is_rate_limited(ip + ':login', limit=20, window_seconds=60):
+            return jsonify({'status': 'error', 'message': '请求过于频繁，请稍后再试'}), 429
+
+        data = request.get_json(silent=True) or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+
+        # 输入校验
+        if not username or not password:
+            return jsonify({'status': 'error', 'message': '用户名和密码不能为空'})
+        if len(username) > 64:
+            return jsonify({'status': 'error', 'message': '用户名过长'})
+        if len(password) > 256:
+            return jsonify({'status': 'error', 'message': '密码过长'})
+
         user = user_manager.get_user_by_username(username)
         if user and check_password_hash(user.password_hash, password):
-            # 检查用户状态
             if user.status != 'active':
                 user_manager.add_login_attempt(username, ip, False)
                 status_messages = {
@@ -68,16 +92,14 @@ def login():
                     'inactive': '账户已被禁用或注销，请联系管理员',
                     'pending': '账户正在审核中，请等待管理员批准'
                 }
-                # 明确处理未知状态
                 if user.status not in status_messages:
                     return jsonify({'status': 'error', 'message': f'账户状态异常: {user.status}'})
                 return jsonify({'status': 'error', 'message': status_messages[user.status]})
 
-            
-            # 只有 active 状态的用户才能登录
-            login_user(user)
+            login_user(user, remember=False)
             user_manager.add_operation_log(user.id, user.username, 'login', ip_address=ip)
             user_manager.add_login_attempt(username, ip, True)
+            user_manager.clear_failed_login_attempts(ip)
             return jsonify({
                 'status': 'success',
                 'message': '登录成功',
@@ -93,12 +115,14 @@ def login():
             })
         else:
             user_manager.add_login_attempt(username, ip, False)
-            failed_attempts = user_manager.get_failed_login_attempts(ip)
-            if failed_attempts >= 5:
-                user_manager.add_ip_to_blacklist(ip, f'连续登录失败{failed_attempts}次', None)
-                return jsonify({'status': 'error', 'message': '登录失败次数过多，IP已被限制'})
-            return jsonify({'status': 'error', 'message': '用户名或密码错误'})
-    
+            failed = user_manager.get_failed_login_attempts(ip, minutes=60)
+            ban_msg = _apply_brute_force_ban(ip, failed)
+            if ban_msg:
+                return jsonify({'status': 'error', 'message': ban_msg}), 403
+            remaining = max(0, 5 - failed)
+            tip = f'，再失败 {remaining} 次将被临时封禁' if remaining > 0 else ''
+            return jsonify({'status': 'error', 'message': f'用户名或密码错误{tip}'})
+
     return render_template('login.html')
 
 
@@ -115,7 +139,16 @@ def logout():
 @auth_bp.route('/register', methods=['POST'])
 def register():
     """公开注册"""
-    data = request.get_json()
+    ip = get_real_ip()
+
+    if check_ip_blacklist():
+        return jsonify({'status': 'error', 'message': 'IP 地址已被限制访问'}), 403
+
+    # 内存限流：同一 IP 每小时最多注册 5 次
+    if is_rate_limited(ip + ':register', limit=5, window_seconds=3600):
+        return jsonify({'status': 'error', 'message': '注册请求过于频繁，请 1 小时后再试'}), 429
+
+    data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
     password_confirm = data.get('password_confirm', '').strip()

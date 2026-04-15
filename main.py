@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any, Optional
 from flask import Flask
 from flask_cors import CORS
+import os as _os_env
 
 # 配置日志
 logging.basicConfig(
@@ -33,15 +34,29 @@ def create_app(config: Optional[Dict] = None) -> Flask:
                 template_folder=template_dir,
                 static_folder='static')
     
-    # 添加CORS支持
-    CORS(app)
-    
-    # 移除文件大小限制（设为None表示无限制）
-    app.config['MAX_CONTENT_LENGTH'] = None
+    # ── 安全加固：Secret Key（环境变量 > 持久化文件 > 自动生成）───────────
+    from app.utils.security import load_or_create_secret_key, register_security_hooks
+    from datetime import timedelta
+    app.config['SECRET_KEY'] = load_or_create_secret_key()
+
+    # ── 安全加固：Session Cookie 标志 ────────────────────────────────────
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SECURE'] = _os_env.environ.get('HTTPS', '').lower() in ('1', 'true', 'yes')
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+
+    # ── CORS（按需限制来源，通过环境变量 CORS_ORIGINS 配置，逗号分隔）───────
+    _cors_origins = _os_env.environ.get('CORS_ORIGINS', '')
+    if _cors_origins:
+        CORS(app, origins=[o.strip() for o in _cors_origins.split(',')], supports_credentials=True)
+    else:
+        CORS(app, origins='*', supports_credentials=False)
+
+    # ── 安全加固：请求体大小上限（4 GB，支持大文件分片上传，防 DoS）────────
+    app.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024 * 1024
     # 使用绝对路径，避免因启动目录不同导致数据目录错误
     app.config['UPLOAD_FOLDER'] = _os.path.join(BASE_DIR, 'uploads')
-    app.config['SECRET_KEY'] = 'doc_manager_secret_key'
-    
+
     # 分片上传配置
     app.config['CHUNK_SIZE'] = 1024 * 1024 * 10  # 每个分片10MB
     app.config['TEMP_FOLDER'] = _os.path.join(BASE_DIR, 'uploads', 'temp_chunks')
@@ -60,7 +75,10 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     # 初始化认证模块
     from app.auth import init_auth
     init_auth(app)
-    
+
+    # ── 安全加固：全局 IP 封堵 & 安全响应头（在认证初始化后注册）────────────
+    register_security_hooks(app)
+
     # 初始化路由
     from app.routes.main_routes import main_bp, init_doc_manager as init_main_manager
     from app.routes.projects import project_bp, init_doc_manager as init_project_manager

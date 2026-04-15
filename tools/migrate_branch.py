@@ -35,7 +35,7 @@ SETTINGS_PATH = PROJECT_ROOT / 'settings.json'
 PROJECTS_DIR = PROJECT_ROOT / 'projects'
 
 # 最新迁移版本
-LATEST_MIGRATION_VERSION = 6
+LATEST_MIGRATION_VERSION = 8
 
 # ============================================================================
 # 版本差异检测
@@ -370,6 +370,32 @@ def ensure_database(db_path):
                     cursor.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
                     print('  + users.display_name')
                 cursor.execute('INSERT INTO migration_versions (version) VALUES (6)')
+                print('  完成')
+
+
+            # ==================== 迁移版本 7: archive_approvals.request_type ====================
+            if current_version < 7:
+                print('执行迁移 v7: 归档审批表添加 request_type 字段...')
+                cursor.execute('PRAGMA table_info(archive_approvals)')
+                existing = {row[1] for row in cursor.fetchall()}
+                if 'request_type' not in existing:
+                    cursor.execute("ALTER TABLE archive_approvals ADD COLUMN request_type TEXT DEFAULT 'archive'")
+                    print('  + archive_approvals.request_type')
+                cursor.execute('INSERT INTO migration_versions (version) VALUES (7)')
+                print('  完成')
+
+            # ==================== 迁移版本 8: 安全相关性能索引 ====================
+            if current_version < 8:
+                print('执行迁移 v8: 创建安全相关性能索引...')
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time '
+                    'ON login_attempts(ip_address, attempt_time)'
+                )
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_ip_blacklist_ip '
+                    'ON ip_blacklist(ip_address)'
+                )
+                cursor.execute('INSERT INTO migration_versions (version) VALUES (8)')
                 print('  完成')
 
             conn.commit()
