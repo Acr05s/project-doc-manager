@@ -461,9 +461,6 @@ body {
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     position: relative;
     z-index: 50;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
 }
 
 .cycle-nav-list {
@@ -472,18 +469,14 @@ body {
     align-items: center;
     gap: 15px;
     justify-content: center;
-    flex: 1;
 }
 
 /* 周期文档搜索框 - Excel筛选风格 */
 .cycle-search-box {
-    position: relative;
-    top: auto;
-    right: auto;
+    position: absolute;
+    top: 6px;
+    right: 10px;
     z-index: 100;
-    flex-shrink: 0;
-    align-self: flex-start;
-    margin-top: 2px;
 }
 
 .cycle-search-trigger {
@@ -1727,6 +1720,13 @@ body {
     border-spacing: 0;
     background: white;
     border-radius: 8px;
+    table-layout: fixed;
+}
+
+/* 列宽拖拽手柄 */
+.col-resize-handle:hover,
+.col-resize-handle:active {
+    background: rgba(255, 255, 255, 0.4) !important;
 }
 
 .documents-table thead {

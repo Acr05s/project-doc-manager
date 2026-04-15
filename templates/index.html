@@ -1516,10 +1516,15 @@
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;">
+                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;" onchange="document.getElementById('watermarkOpacityRow').style.display=this.checked?'flex':'none'">
                             <span>开启全局动态水印</span>
                         </label>
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，界面将显示“用户名 + 姓名 + 所属组织 + 当前时间”的动态水印</small>
+                        <div id="watermarkOpacityRow" style="margin-top: 10px; display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            <label style="font-size: 13px; color: #555; white-space: nowrap;">水印深度：</label>
+                            <input type="range" id="watermarkOpacity" min="5" max="60" value="15" style="width: 160px; cursor: pointer;" oninput="document.getElementById('watermarkOpacityValue').textContent=this.value">
+                            <span id="watermarkOpacityValue" style="font-size: 13px; color: #333; min-width: 28px;">15</span><span style="font-size: 13px; color: #555;">%</span>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label for="logRetentionDays">操作日志保留天数：</label>

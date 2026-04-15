@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { authState } from './auth.js';
-import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal } from './ui.js';
+import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal, initResizableColumns } from './ui.js';
 import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers, getApprovalHistory } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 import { buildDisplayRequirementText, buildUploadAttributeSchema, getCustomAttributeDefinitions, getPredefinedAttributeLabelMap } from './attribute-definitions.js';
@@ -942,7 +942,13 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     `;
     
     elements.contentArea.innerHTML = html;
-    
+
+    // 初始化文档列表表格的列宽拖拽功能
+    const docTable = elements.contentArea.querySelector('.documents-table');
+    if (docTable) {
+        initResizableColumns(docTable, 'docs_table_col_widths');
+    }
+
     // 绑定主页面文档树形目录的折叠/展开事件
     // 注意：使用 Array.from + find 代替 querySelector，避免路径含中文/括号等特殊字符时选择器失效
     document.querySelectorAll('.main-doc-dir-header').forEach(header => {

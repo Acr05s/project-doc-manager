@@ -1210,19 +1210,22 @@ export async function applySystemSettingsToPage() {
     }
 }
 
-function ensureWatermarkLayer() {
+function ensureWatermarkLayer(opacity) {
     let layer = document.getElementById('globalWatermarkLayer');
     if (!layer) {
         layer = document.createElement('div');
         layer.id = 'globalWatermarkLayer';
         layer.style.position = 'fixed';
         layer.style.inset = '0';
-        layer.style.zIndex = '90';
         layer.style.pointerEvents = 'none';
-        layer.style.opacity = '0.16';
         layer.style.backgroundRepeat = 'repeat';
         layer.style.backgroundPosition = '0 0';
         document.body.appendChild(layer);
+    }
+    // 水印必须覆盖在所有元素（包括模态框、菜单）之上
+    layer.style.zIndex = '2147483647';
+    if (opacity !== undefined) {
+        layer.style.opacity = String(Math.max(0.02, Math.min(1, opacity)));
     }
     return layer;
 }
@@ -1250,7 +1253,7 @@ function buildWatermarkImage(text) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '16px Microsoft YaHei';
-    ctx.fillStyle = 'rgba(60, 60, 60, 0.38)';
+    ctx.fillStyle = 'rgba(60, 60, 60, 0.9)';
     ctx.fillText(text, 0, 0);
     return canvas.toDataURL('image/png');
 }
@@ -1268,13 +1271,17 @@ function applyDynamicWatermark(settings) {
         return;
     }
 
+    // watermark_opacity 存储为 5-60 的整数，转成 0-1 浮点
+    const opacityPct = Number(settings?.watermark_opacity ?? 15);
+    const opacity = Math.max(0.02, Math.min(1, opacityPct / 100));
+
     const user = getCurrentUser();
     const username = user?.username || 'unknown';
     const displayName = user?.display_name || user?.username || '-';
     const org = user?.organization || '-';
 
     const render = () => {
-        const layer = ensureWatermarkLayer();
+        const layer = ensureWatermarkLayer(opacity);
         const text = `${username} | ${displayName} | ${org} | ${formatNow()}`;
         layer.style.backgroundImage = `url(${buildWatermarkImage(text)})`;
         layer.style.display = 'block';
@@ -1333,6 +1340,15 @@ async function loadSystemSettings() {
             const watermarkEnabled = document.getElementById('watermarkEnabled');
             if (watermarkEnabled) {
                 watermarkEnabled.checked = !!settings.watermark_enabled;
+                const opacityRow = document.getElementById('watermarkOpacityRow');
+                if (opacityRow) opacityRow.style.display = settings.watermark_enabled ? 'flex' : 'none';
+            }
+            const watermarkOpacity = document.getElementById('watermarkOpacity');
+            const watermarkOpacityValue = document.getElementById('watermarkOpacityValue');
+            if (watermarkOpacity) {
+                const opacityVal = Number(settings.watermark_opacity ?? 15);
+                watermarkOpacity.value = opacityVal;
+                if (watermarkOpacityValue) watermarkOpacityValue.textContent = opacityVal;
             }
 
             agreementMarkdownDraft = settings.agreement_markdown || '';
@@ -1410,6 +1426,10 @@ async function saveSystemSettings() {
         const watermarkEnabled = document.getElementById('watermarkEnabled');
         if (watermarkEnabled) {
             settings.watermark_enabled = watermarkEnabled.checked;
+        }
+        const watermarkOpacity = document.getElementById('watermarkOpacity');
+        if (watermarkOpacity) {
+            settings.watermark_opacity = parseInt(watermarkOpacity.value, 10) || 15;
         }
 
         const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
@@ -2506,4 +2526,89 @@ async function testSmtpConnection() {
             resultEl.style.color = '#dc3545';
         }
     }
+}
+
+/**
+ * 为表格列添加拖拽调整宽度功能
+ * @param {HTMLTableElement} tableEl - 目标表格元素
+ * @param {string} [storageKey] - sessionStorage 存储键名，用于记住列宽
+ */
+export function initResizableColumns(tableEl, storageKey) {
+    if (!tableEl) return;
+    const ths = tableEl.querySelectorAll('thead tr th');
+    if (!ths.length) return;
+
+    // 恢复上次保存的列宽
+    if (storageKey) {
+        try {
+            const saved = JSON.parse(sessionStorage.getItem(storageKey));
+            if (Array.isArray(saved)) {
+                ths.forEach((th, i) => {
+                    if (saved[i]) th.style.width = saved[i];
+                });
+            }
+        } catch (_) {}
+    }
+
+    // 给每个有效列（非最后列）添加 resize 手柄
+    ths.forEach((th, i) => {
+        if (i === ths.length - 1) return; // 最后一列不加手柄
+
+        // 避免重复初始化
+        if (th.querySelector('.col-resize-handle')) return;
+
+        th.style.position = 'relative';
+        th.style.userSelect = 'none';
+
+        const handle = document.createElement('div');
+        handle.className = 'col-resize-handle';
+        handle.style.cssText = (
+            'position:absolute;right:0;top:0;bottom:0;width:6px;' +
+            'cursor:col-resize;z-index:1;background:transparent;'
+        );
+        th.appendChild(handle);
+
+        let startX = 0;
+        let startWidth = 0;
+        let nextTh = null;
+        let nextStartWidth = 0;
+
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            startX = e.clientX;
+            startWidth = th.offsetWidth;
+            nextTh = ths[i + 1] || null;
+            nextStartWidth = nextTh ? nextTh.offsetWidth : 0;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+
+            function onMouseMove(e) {
+                const dx = e.clientX - startX;
+                const newWidth = Math.max(60, startWidth + dx);
+                th.style.width = newWidth + 'px';
+                // 相邻列同步收缩/扩张
+                if (nextTh) {
+                    const newNextWidth = Math.max(60, nextStartWidth - dx);
+                    nextTh.style.width = newNextWidth + 'px';
+                }
+            }
+
+            function onMouseUp() {
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+                // 持久化列宽
+                if (storageKey) {
+                    try {
+                        const widths = Array.from(ths).map(t => t.style.width || '');
+                        sessionStorage.setItem(storageKey, JSON.stringify(widths));
+                    } catch (_) {}
+                }
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    });
 }
