@@ -220,13 +220,21 @@ def get_archive_approvers(project_id):
         approval_chain = project_config.get('archive_approval_chain', [])
 
         # 如果提供了 approval_id，按当前阶段过滤审批人
-        if approval_id and approval_chain:
+        if approval_id:
             approval = user_manager.get_archive_approval_by_uuid(approval_id)
             if approval:
                 current_stage = approval.get('current_stage', 1)
                 stage_idx = current_stage - 1
+                # 优先使用记录内的 approval_stages（兼容提交时动态调整过的审批链）
+                stages_source = approval.get('approval_stages') or []
+                if isinstance(stages_source, str):
+                    try:
+                        stages_source = json.loads(stages_source)
+                    except Exception:
+                        stages_source = []
+                effective_chain = stages_source if stages_source else approval_chain
                 print(f'[DEBUG] Filtering approvers for stage {current_stage} (idx={stage_idx})', file=sys.stderr, flush=True)
-                stage_approvers = get_next_stage_approvers(project_id, stage_idx, approval_chain, project_config)
+                stage_approvers = get_next_stage_approvers(project_id, stage_idx, effective_chain, project_config)
                 print(f'[DEBUG] Found {len(stage_approvers)} stage-filtered approvers', file=sys.stderr, flush=True)
                 return jsonify({'status': 'success', 'approvers': stage_approvers, 'current_stage': current_stage})
 
@@ -345,6 +353,13 @@ def submit_archive_request(project_id):
         approval_id = result['id']
         approval_uuid = result['uuid']
 
+        # 写入第一阶段处理人，便于前端流程提示
+        if approval_stages:
+            first_ids = [str(a.get('internal_id') or a.get('id')) for a in level_1_approvers]
+            first_names = [a.get('display_name') or a.get('username') or '' for a in level_1_approvers]
+            approval_stages[0]['assigned_to_id'] = ','.join([x for x in first_ids if x])
+            approval_stages[0]['assigned_to_username'] = '、'.join([x for x in first_names if x])
+
         # 更新approval_stages到数据库
         import sqlite3
         from pathlib import Path
@@ -396,12 +411,15 @@ def submit_archive_request(project_id):
 
         print(f'[DEBUG] {type_label} request created successfully - approval_uuid: {approval_uuid}', file=sys.stderr, flush=True)
 
+        first_role = (approval_stages[0].get('required_role') if approval_stages else '')
+        first_role_label = {'project_admin': '项目经理', 'pmo': '项目管理组织', 'pmo_leader': 'PMO负责人', 'admin': '管理员'}.get(first_role, '下一阶段审批人')
+
         return jsonify({
             'status': 'success',
             'approval_id': approval_uuid,
             'current_stage': 1,
             'total_stages': len(approval_stages),
-            'message': f'{type_label}审批请求已提交，等待项目经理审批'
+            'message': f'{type_label}审批请求已提交，等待{first_role_label}审批'
         })
 
     except Exception as e:
@@ -527,6 +545,7 @@ def approve_archive_request(project_id):
         approver_id = data.get('approver_id')
         approval_code = data.get('approval_code', '')
         new_approval_code = data.get('new_approval_code', '')
+        complete_now = bool(data.get('complete_now', False))
 
         if not approval_id:
             return jsonify({'status': 'error', 'message': '缺少审批ID'}), 400
@@ -603,6 +622,27 @@ def approve_archive_request(project_id):
         if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
             return jsonify({'status': 'error', 'message': '审批阶段异常'}), 400
 
+        # 强制按当前阶段角色/组织审批（admin 可越级）
+        current_stage = approval_stages[current_stage_idx]
+        required_role = (current_stage.get('required_role') or '').strip()
+        org_match = (current_stage.get('org_match') or '').strip()
+        if approver.role != 'admin':
+            allowed_roles = [required_role]
+            if required_role == 'pmo':
+                allowed_roles = ['pmo', 'pmo_leader']
+            if required_role and approver.role not in allowed_roles:
+                return jsonify({'status': 'error', 'message': '当前审批阶段与审批人角色不匹配'}), 403
+
+            approver_org = (getattr(approver, 'organization', '') or '').strip()
+            project_org = (project_config.get('party_b') or '').strip()
+            if org_match == 'party_b' and project_org and approver_org and approver_org != project_org:
+                return jsonify({'status': 'error', 'message': '当前审批阶段要求项目经理（承建单位）审批'}), 403
+            if org_match == 'pmo' and approver_org != 'PMO':
+                return jsonify({'status': 'error', 'message': '当前审批阶段要求PMO组织审批'}), 403
+
+        if complete_now and approver.role != 'admin' and required_role != 'pmo_leader':
+            return jsonify({'status': 'error', 'message': '仅PMO负责人可直接完成归档'}), 403
+
         # 更新当前阶段为已批准
         approval_stages[current_stage_idx]['status'] = 'approved'
         approval_stages[current_stage_idx]['approved_by_id'] = actual_approver_id
@@ -614,6 +654,24 @@ def approve_archive_request(project_id):
         # 记录流程历史：阶段通过
         role_label = {'project_admin': '项目经理', 'pmo': 'PMO', 'pmo_leader': 'PMO负责人', 'admin': '管理员'}.get(approval_stages[current_stage_idx].get('required_role', ''), f'Level{current_stage_idx+1}')
         append_stage_history(approval['id'], 'stage_approve', actual_approver_id, approver.username, stage=current_stage_idx + 1, detail=f'{role_label}审批通过（第{current_stage_idx+1}阶段）')
+
+        # PMO负责人可选择直接完成：将后续待审阶段标记为已通过（流程跳转）
+        if complete_now and not all(stage['status'] == 'approved' for stage in approval_stages):
+            for i in range(current_stage_idx + 1, len(approval_stages)):
+                if approval_stages[i].get('status') == 'pending':
+                    approval_stages[i]['status'] = 'approved'
+                    approval_stages[i]['approved_by_id'] = actual_approver_id
+                    approval_stages[i]['approved_by_username'] = approver.username
+                    approval_stages[i]['approved_at'] = now_with_timezone().strftime('%Y-%m-%d %H:%M:%S')
+                    approval_stages[i]['reject_reason'] = 'skipped_by_pmo_leader'
+                    append_stage_history(
+                        approval['id'],
+                        'stage_approve',
+                        actual_approver_id,
+                        approver.username,
+                        stage=i + 1,
+                        detail=f'PMO负责人选择直接完成，跳过第{i + 1}阶段'
+                    )
 
         # 检查是否所有阶段都已完成
         all_completed = all(stage['status'] == 'approved' for stage in approval_stages)
@@ -686,15 +744,22 @@ def approve_archive_request(project_id):
         else:
             # 还有更多阶段，通知下一阶段审批人
             next_stage_idx = current_stage_idx + 1
-            next_stage_config = approval_chain[next_stage_idx] if next_stage_idx < len(approval_chain) else None
+            # 以审批记录内阶段为准，避免动态链与项目配置链不一致
+            next_stage_config = approval_stages[next_stage_idx] if next_stage_idx < len(approval_stages) else None
 
             if not next_stage_config:
                 return jsonify({'status': 'error', 'message': '审批链配置不一致'}), 400
 
             # 获取下一阶段的审批人
-            next_approvers = get_next_stage_approvers(project_id, next_stage_idx, approval_chain, project_config)
+            next_approvers = get_next_stage_approvers(project_id, next_stage_idx, approval_stages, project_config)
             if not next_approvers:
                 return jsonify({'status': 'error', 'message': '未找到下一级审批人'}), 400
+            # 写入下一阶段处理人，便于前端提示
+            next_ids = [str(a.get('internal_id') or a.get('id')) for a in next_approvers]
+            next_names = [a.get('display_name') or a.get('username') or '' for a in next_approvers]
+            approval_stages[next_stage_idx]['assigned_to_id'] = ','.join([x for x in next_ids if x])
+            approval_stages[next_stage_idx]['assigned_to_username'] = '、'.join([x for x in next_names if x])
+
 
             print(f'[DEBUG] Moving to stage {next_stage_idx + 1}, found {len(next_approvers)} approvers', file=sys.stderr, flush=True)
 
@@ -732,7 +797,7 @@ def approve_archive_request(project_id):
             message_manager.send_message(
                 receiver_id=approval['requester_id'],
                 title=f'{type_label}申请已通过第一级审批',
-                content=f'您申请的 "{cycle}" 周期文档{type_label}（{doc_list}）已由 "{approver.username}" 审批通过，现等待项目管理组织审批。',
+                content=f'您申请的 "{cycle}" 周期文档{type_label}（{doc_list}）已由 "{approver.username}" 审批通过，现等待{next_role_label}审批。',
                 sender_id=actual_approver_id,
                 msg_type='archive_approval',
                 related_id=project_id,
@@ -816,6 +881,39 @@ def reject_archive_request(project_id):
             return jsonify({'status': 'error', 'message': '该请求已处理'}), 400
         if approval['project_id'] != project_id:
             return jsonify({'status': 'error', 'message': '审批请求与项目不匹配'}), 400
+
+        # 强制按当前阶段角色/组织驳回（admin 可越级）
+        doc_manager = get_doc_manager()
+        project_result = doc_manager.load_project(project_id)
+        if project_result.get('status') != 'success':
+            return jsonify({'status': 'error', 'message': '项目加载失败'}), 500
+        project_config = project_result.get('project', {})
+
+        approval_stages = approval.get('approval_stages') or []
+        if isinstance(approval_stages, str):
+            try:
+                approval_stages = json.loads(approval_stages)
+            except Exception:
+                approval_stages = []
+        current_stage_idx = approval.get('current_stage', 1) - 1
+        if approval_stages and 0 <= current_stage_idx < len(approval_stages):
+            current_stage = approval_stages[current_stage_idx]
+            required_role = (current_stage.get('required_role') or '').strip()
+            org_match = (current_stage.get('org_match') or '').strip()
+
+            if approver.role != 'admin':
+                allowed_roles = [required_role]
+                if required_role == 'pmo':
+                    allowed_roles = ['pmo', 'pmo_leader']
+                if required_role and approver.role not in allowed_roles:
+                    return jsonify({'status': 'error', 'message': '当前审批阶段与审批人角色不匹配'}), 403
+
+                approver_org = (getattr(approver, 'organization', '') or '').strip()
+                project_org = (project_config.get('party_b') or '').strip()
+                if org_match == 'party_b' and project_org and approver_org and approver_org != project_org:
+                    return jsonify({'status': 'error', 'message': '当前审批阶段要求项目经理（承建单位）审批'}), 403
+                if org_match == 'pmo' and approver_org != 'PMO':
+                    return jsonify({'status': 'error', 'message': '当前审批阶段要求PMO组织审批'}), 403
 
         user_manager.resolve_archive_approval(approval['id'], 'rejected', actual_approver_id, approver.username, reject_reason)
 

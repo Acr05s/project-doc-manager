@@ -392,7 +392,7 @@ export async function getApprovalHistory(projectId, approvalId) {
     }
 }
 
-export async function approveArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '') {
+export async function approveArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '', completeNow = false) {
     try {
         const response = await fetch(`/api/projects/${projectId}/archive-approve`, {
             method: 'POST',
@@ -401,7 +401,8 @@ export async function approveArchiveRequest(projectId, approvalId, approverId, a
                 approval_id: approvalId,
                 approver_id: approverId,
                 approval_code: approvalCode,
-                new_approval_code: newApprovalCode
+                new_approval_code: newApprovalCode,
+                complete_now: completeNow
             })
         });
         return await response.json();

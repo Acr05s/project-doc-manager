@@ -530,7 +530,7 @@ export async function handleArchiveApprovalReject() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 approval_id: approvalId,
-                reason: reason,
+                reject_reason: reason,
                 approver_id: codeResult.approver_id || '',
                 approval_code: codeResult.approval_code || ''
             })
@@ -552,7 +552,7 @@ export async function handleArchiveApprovalReject() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         approval_id: approvalId,
-                        reason: reason,
+                        reject_reason: reason,
                         approver_id: codeResult.approver_id || '',
                         approval_code: newCodeResult.approval_code,
                         new_approval_code: newCodeResult.new_approval_code

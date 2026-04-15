@@ -892,9 +892,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                     const currentStage = pendingRequest.current_stage || 1;
                                                     const stageLabels = stages.map((s, i) => {
                                                         const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : s.required_role === 'admin' ? '管理员' : s.required_role || ('Level'+(i+1));
-                                                        if (s.status === 'approved') return '<span style="color:#28a745;">✓ ' + roleName + '已审核</span>';
-                                                        if (s.status === 'rejected') return '<span style="color:#dc3545;">✗ ' + roleName + '已驳回</span>';
-                                                        return '<span style="color:#ffc107;">⏳ ' + roleName + '审批中</span>';
+                                                        const handlerName = s.approved_by_username || s.assigned_to_username || '待分配';
+                                                        if (s.status === 'approved') return '<span style="color:#28a745;" title="处理人: ' + escapeHtml(handlerName) + '">✓ ' + roleName + '已审核</span>';
+                                                        if (s.status === 'rejected') return '<span style="color:#dc3545;" title="处理人: ' + escapeHtml(handlerName) + '">✗ ' + roleName + '已驳回</span>';
+                                                        const pendingHint = (i + 1) === currentStage ? handlerName : '待上一阶段完成';
+                                                        return '<span style="color:#ffc107;" title="处理人: ' + escapeHtml(pendingHint) + '">⏳ ' + roleName + '审批中</span>';
                                                     });
                                                     return '<div style="margin-bottom:6px;font-size:12px;color:#555;line-height:1.8;">流程: ' + stageLabels.join(' → ') + '</div>';
                                                 }
@@ -912,6 +914,18 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 // admin 可以审批任何阶段，其他角色只能审批自己角色的阶段
                                                 if (currentStage && userRole !== 'admin' && currentStage.required_role !== userRole) return '';
                                                 if (currentStage && currentStage.status === 'approved') return '';
+                                                if (currentStage && currentStage.required_role === 'pmo_leader') {
+                                                    return `
+                                                    <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
+                                                        ✅ 同意流转
+                                                    </button>
+                                                    <button class="btn btn-primary btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                        ✅ 直接归档
+                                                    </button>
+                                                    <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                        ❌ 驳回
+                                                    </button>`;
+                                                }
                                                 return `
                                                 <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                     ✅ 审批通过
@@ -3181,8 +3195,8 @@ async function promptSelectApprovers(approvers) {
                 <div class="modal-header"><h3>选择审批人</h3></div>
                 <div class="modal-body">${html}</div>
                 <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end;">
-                    <button class="btn btn-secondary" id="approver-cancel-btn">取消</button>
-                    <button class="btn btn-primary" id="approver-confirm-btn">提交审核</button>
+                    <button type="button" class="btn btn-secondary" id="approver-cancel-btn">取消</button>
+                    <button type="button" class="btn btn-primary" id="approver-confirm-btn">提交审核</button>
                 </div>
             </div>
         `;
@@ -3211,6 +3225,24 @@ async function promptSelectApprovers(approvers) {
             modal.remove();
             resolve(checked);
         };
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+                resolve(null);
+            }
+        });
+
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                document.removeEventListener('keydown', escHandler);
+                if (document.body.contains(modal)) {
+                    modal.remove();
+                    resolve(null);
+                }
+            }
+        };
+        document.addEventListener('keydown', escHandler);
         console.log('[DEBUG] Event listeners attached');
     });
 }
@@ -3359,8 +3391,9 @@ async function quickApproveArchive(approvalId, action = 'approve') {
     const approvalCode = requireCode ? approvalInput.approval_code : '';
 
     let result;
-    if (action === 'approve') {
-        result = await approveArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode);
+    if (action === 'approve' || action === 'approve_finalize') {
+        const completeNow = action === 'approve_finalize';
+        result = await approveArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', completeNow);
     } else {
         result = await rejectArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', rejectReason);
     }
@@ -3374,10 +3407,11 @@ async function quickApproveArchive(approvalId, action = 'approve') {
         if (!updatedInput || !updatedInput.approval_code || !updatedInput.new_approval_code) {
             return { status: 'cancelled' };
         }
-        if (action === 'approve') {
+        if (action === 'approve' || action === 'approve_finalize') {
             result = await approveArchiveRequest(
                 appState.currentProjectId, approvalId,
-                updatedInput.approver_id, updatedInput.approval_code, updatedInput.new_approval_code
+                updatedInput.approver_id, updatedInput.approval_code, updatedInput.new_approval_code,
+                action === 'approve_finalize'
             );
         } else {
             result = await rejectArchiveRequest(
@@ -3797,7 +3831,7 @@ async function handleQuickApproveAction(approvalId, action, cycle) {
             // 所有阶段完成，文档已归档
             showNotification('🎉 所有审批完成，文档已归档', 'success');
             await renderCycleDocuments(cycle);
-            if (action === 'approve') {
+            if (action === 'approve' || action === 'approve_finalize') {
                 import('./cycle.js').then(module => { module.refreshCycleProgress(); });
             }
         } else if (result.status === 'stage_approved') {
@@ -3933,14 +3967,15 @@ async function showApprovalTimeline(approvalId, cycle, overrideProjectId) {
     if (stages.length > 0) {
         stagesHtml = '<div class="timeline-stages-bar">';
         stages.forEach((s, i) => {
-            const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'admin' ? '管理员' : `Level${i+1}`;
+            const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : s.required_role === 'admin' ? '管理员' : `Level${i+1}`;
             let stageColor = '#e9ecef';
             let stageIcon = '⏳';
             let textColor = '#666';
             if (s.status === 'approved') { stageColor = '#d4edda'; stageIcon = '✓'; textColor = '#155724'; }
             else if (s.status === 'rejected') { stageColor = '#f8d7da'; stageIcon = '✗'; textColor = '#721c24'; }
+            const handlerName = s.approved_by_username || s.assigned_to_username || '待分配';
             const arrow = i < stages.length - 1 ? '<span class="stage-arrow">→</span>' : '';
-            stagesHtml += `<span class="stage-badge" style="background:${stageColor};color:${textColor};">${stageIcon} ${roleName}</span>${arrow}`;
+            stagesHtml += `<span class="stage-badge" title="处理人: ${escapeHtml(handlerName)}" style="background:${stageColor};color:${textColor};">${stageIcon} ${roleName}</span>${arrow}`;
         });
         stagesHtml += '</div>';
     }
@@ -3971,15 +4006,27 @@ async function showApprovalTimeline(approvalId, cycle, overrideProjectId) {
                 <div style="font-weight:600;margin-bottom:10px;font-size:14px;">流程时间线</div>
                 ${timelineHtml}
             </div>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end;padding:0 20px 15px;">
+                <button type="button" class="btn btn-secondary" id="closeTimelineModalBtn">取消</button>
+            </div>
         </div>
     `;
     document.body.appendChild(modal);
 
     // 添加点击关闭
-    document.getElementById('closeTimelineModal').addEventListener('click', () => modal.remove());
+    const closeTimeline = () => modal.remove();
+    document.getElementById('closeTimelineModal').addEventListener('click', closeTimeline);
+    document.getElementById('closeTimelineModalBtn').addEventListener('click', closeTimeline);
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.remove();
+        if (e.target === modal) closeTimeline();
     });
+    const escHandler = (e) => {
+        if (e.key === 'Escape') {
+            document.removeEventListener('keydown', escHandler);
+            closeTimeline();
+        }
+    };
+    document.addEventListener('keydown', escHandler);
 }
 
 /**
