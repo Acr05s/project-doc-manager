@@ -44,6 +44,7 @@ backup_20260411121914/
 *.log
 /data/*.db
 /data/**/*.db
+/settings.json
 
 # Build outputs
 installer/
