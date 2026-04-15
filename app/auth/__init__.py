@@ -146,7 +146,7 @@ def login():
 
             security = _get_security_settings()
             expire_days = int((security or {}).get('password_expire_days', 0) or 0)
-            pwd_expired = user_manager.is_password_expired(user.id, expire_days) if expire_days > 0 else False
+            pwd_expired = user_manager.is_password_expired(user.id, expire_days)
 
             return jsonify({
                 'status': 'success',
@@ -619,7 +619,7 @@ def change_current_user_password():
     user = user_manager.get_user_by_id(current_user.id)
     if not check_password_hash(user.password_hash, old_password):
         return jsonify({'status': 'error', 'message': '旧密码错误'})
-    result = user_manager.update_password(current_user.id, generate_password_hash(new_password))
+    result = user_manager.update_password(current_user.id, generate_password_hash(new_password), force_expired=False)
     if result['status'] == 'success':
         ip = get_real_ip()
         user_manager.add_operation_log(current_user.id, current_user.username, 'change_password', None, None, None, ip)
@@ -777,7 +777,7 @@ def admin_reset_password(user_id):
     new_password = data.get('new_password', '')
     if len(new_password) < 6:
         return jsonify({'status': 'error', 'message': '密码长度至少6位'})
-    result = user_manager.update_password(target.id, generate_password_hash(new_password))
+    result = user_manager.update_password(target.id, generate_password_hash(new_password), force_expired=True)
     if result['status'] == 'success':
         ip = get_real_ip()
         user_manager.add_operation_log(current_user.id, current_user.username, 'reset_password', str(target.uuid), None, None, ip)
@@ -1069,6 +1069,7 @@ def admin_get_logs():
     limit = request.args.get('limit', 200, type=int)
     offset = request.args.get('offset', 0, type=int)
     operation_type = request.args.get('type', '').strip() or None
+    operation_types = [t.strip() for t in (request.args.get('types', '') or '').split(',') if t.strip()]
     username = request.args.get('username', '').strip() or None
 
     user_ids = None
@@ -1083,6 +1084,7 @@ def admin_get_logs():
         limit=limit,
         offset=offset,
         operation_type=operation_type,
+        operation_types=operation_types,
         username=username,
         user_ids=user_ids
     )

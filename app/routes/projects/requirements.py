@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from flask import request, jsonify, Response
 from .utils import get_doc_manager
+import openpyxl
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -198,5 +200,119 @@ def delete_document_directory(project_id):
 
         return jsonify(result)
     except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def preview_excel_file():
+    """预览Excel文件内容 - 用户可自定义行列含义"""
+    try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'status': 'error', 'message': '未获取到文件'}), 400
+        
+        # 保存临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+        
+        # 读取Excel文件
+        wb = openpyxl.load_workbook(tmp_path)
+        sheets = wb.sheetnames
+        
+        # 获取第一个sheet的前20行数据作为预览
+        ws = wb[sheets[0]]
+        preview_data = []
+        max_col = 0
+        
+        for idx, row in enumerate(ws.iter_rows(max_row=20, values_only=True), 1):
+            preview_data.append({
+                'row_num': idx,
+                'values': list(row)
+            })
+            max_col = max(max_col, len([v for v in row if v is not None]))
+        
+        # 删除临时文件
+        Path(tmp_path).unlink(missing_ok=True)
+        
+        return jsonify({
+            'status': 'success',
+            'sheets': sheets,
+            'preview': preview_data,
+            'max_col': max_col
+        })
+    except Exception as e:
+        logger.error(f"预览Excel文件失败: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def parse_excel_with_mapping():
+    """根据用户定义的列映射解析Excel文件"""
+    try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'status': 'error', 'message': '未获取到文件'}), 400
+        
+        # 获取列映射配置
+        mapping = request.form.get('mapping')
+        if not mapping:
+            return jsonify({'status': 'error', 'message': '未指定列映射'}), 400
+        
+        try:
+            mapping = json.loads(mapping)
+        except json.JSONDecodeError:
+            return jsonify({'status': 'error', 'message': '列映射格式错误'}), 400
+        
+        # 保存临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+        
+        # 读取Excel文件
+        wb = openpyxl.load_workbook(tmp_path)
+        sheet_name = request.form.get('sheet_name', wb.sheetnames[0])
+        ws = wb[sheet_name]
+        
+        # 根据映射解析数据
+        header_row = int(request.form.get('header_row', 1))
+        start_row = int(request.form.get('start_row', 2))
+        
+        parsed_data = {
+            'cycles': {},
+            'requirements': [],
+            'mapping_used': mapping
+        }
+        
+        # 读取数据
+        for row_idx, row in enumerate(ws.iter_rows(min_row=start_row, values_only=True), start_row):
+            row_data = {}
+            
+            # 根据映射填充数据
+            for col_letter, field_name in mapping.items():
+                # 将列字母转换为列号 (A=1, B=2...)
+                col_num = ord(col_letter.upper()) - ord('A') + 1
+                if col_num <= len(row):
+                    value = row[col_num - 1]
+                    if value is not None:
+                        row_data[field_name] = str(value).strip()
+            
+            # 如果有周期字段，分组数据
+            if 'cycle' in row_data:
+                cycle = row_data['cycle']
+                if cycle not in parsed_data['cycles']:
+                    parsed_data['cycles'][cycle] = []
+                parsed_data['cycles'][cycle].append(row_data)
+            else:
+                parsed_data['requirements'].append(row_data)
+        
+        # 删除临时文件
+        Path(tmp_path).unlink(missing_ok=True)
+        
+        return jsonify({
+            'status': 'success',
+            'data': parsed_data,
+            'rows_processed': row_idx - start_row + 1
+        })
+    except Exception as e:
+        logger.error(f"解析Excel文件失败: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

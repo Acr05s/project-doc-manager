@@ -28,6 +28,8 @@ def upload_document():
         other_seal = request.form.get('other_seal', '')
         project_id = request.form.get('project_id', None)
         project_name = request.form.get('project_name', None)
+        source_dir = (request.form.get('source_dir') or '').strip()
+        root_directory = (request.form.get('root_directory') or '').strip()
         
         if not all([file, cycle, doc_name]):
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
@@ -37,7 +39,8 @@ def upload_document():
             'file', 'cycle', 'doc_name', 'doc_date', 'sign_date', 'signer',
             'no_signature', 'has_seal', 'party_a_seal', 'party_b_seal',
             'no_seal', 'other_seal', 'project_id', 'project_name',
-            'chunkIndex', 'totalChunks', 'fileName', 'file_id', 'chunk', 'filename', 'fileId'
+            'chunkIndex', 'totalChunks', 'fileName', 'file_id', 'chunk', 'filename', 'fileId',
+            'source_dir', 'root_directory'
         }
         custom_attributes = {}
         for key in request.form:
@@ -61,8 +64,18 @@ def upload_document():
             party_b_seal=party_b_seal, 
             no_seal=no_seal, 
             other_seal=other_seal,
-            project_name=project_name
+            project_name=project_name,
+            source_dir=source_dir,
+            root_directory=root_directory
         )
+
+        normalized_directory = '/'
+        if source_dir and source_dir not in ('/', '.'):
+            normalized_directory = source_dir if source_dir.startswith('/') else f"/{source_dir}"
+
+        if result.get('status') == 'success':
+            result['directory'] = normalized_directory
+            result['root_directory'] = root_directory
         
         # 上传成功后，将文档添加到documents_db中
         if result.get('status') == 'success':
@@ -90,7 +103,8 @@ def upload_document():
                 'source': 'upload',
                 'file_size': result.get('size'),
                 'doc_id': doc_id,
-                'directory': result.get('directory') or '/',  # 目录：默认根目录
+                'directory': normalized_directory,  # 目录：默认根目录
+                'root_directory': root_directory,
                 'custom_attrs': custom_attributes  # 自定义属性
             }
             
@@ -137,6 +151,8 @@ def upload_chunk():
         doc_name = request.form.get('doc_name')
         project_id = request.form.get('project_id')
         project_name = request.form.get('project_name')
+        source_dir = (request.form.get('source_dir') or '').strip()
+        root_directory = (request.form.get('root_directory') or '').strip()
         
         # 检查必要参数（注意：chunk_index 可能为 0，不能用 all()）
         if file is None or chunk_index is None or total_chunks is None or not file_name or not cycle or not doc_name:
@@ -187,7 +203,8 @@ def merge_chunks():
             'file', 'cycle', 'doc_name', 'doc_date', 'sign_date', 'signer',
             'no_signature', 'has_seal', 'party_a_seal', 'party_b_seal',
             'no_seal', 'other_seal', 'project_id', 'project_name',
-            'chunkIndex', 'totalChunks', 'fileName', 'file_id', 'chunk', 'filename', 'fileId'
+            'chunkIndex', 'totalChunks', 'fileName', 'file_id', 'chunk', 'filename', 'fileId',
+            'source_dir', 'root_directory'
         }
         custom_attributes = {}
         for key in request.form:
@@ -254,8 +271,18 @@ def merge_chunks():
             party_b_seal=party_b_seal, 
             no_seal=no_seal, 
             other_seal=other_seal,
-            project_name=project_name
+            project_name=project_name,
+            source_dir=source_dir,
+            root_directory=root_directory
         )
+
+        normalized_directory = '/'
+        if source_dir and source_dir not in ('/', '.'):
+            normalized_directory = source_dir if source_dir.startswith('/') else f"/{source_dir}"
+
+        if result.get('status') == 'success':
+            result['directory'] = normalized_directory
+            result['root_directory'] = root_directory
         
         # 清理临时文件
         import shutil
@@ -287,7 +314,8 @@ def merge_chunks():
                 'source': 'upload',
                 'file_size': result.get('size'),
                 'doc_id': doc_id,
-                'directory': result.get('directory') or '/',  # 目录：默认根目录
+                'directory': normalized_directory,  # 目录：默认根目录
+                'root_directory': root_directory,
                 'custom_attrs': custom_attributes  # 自定义属性
             }
             

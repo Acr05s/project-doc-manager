@@ -779,10 +779,15 @@ export async function deleteSingleProject(projectId) {
 // ============== 日志管理 ==============
 let logMgmtOffset = 0;
 const logMgmtLimit = 50;
+let logMgmtPresetTypes = [];
+let logMgmtLockTypeFilter = false;
 
-export function openLogManagementModal() {
+export function openLogManagementModal(options = {}) {
     const modal = document.getElementById('logManagementModal');
     if (modal) {
+        logMgmtPresetTypes = Array.isArray(options.types) ? options.types.filter(Boolean) : [];
+        logMgmtLockTypeFilter = !!options.lockTypeFilter;
+
         // 根据角色调整UI
         const isContractor = authState.user?.role === 'contractor';
         const usernameFilterWrap = document.getElementById('logUsernameFilter')?.parentElement;
@@ -792,11 +797,34 @@ export function openLogManagementModal() {
         } else if (document.getElementById('logUsernameFilter')) {
             document.getElementById('logUsernameFilter').disabled = false;
         }
+
+        const logTypeFilter = document.getElementById('logTypeFilter');
+        if (logTypeFilter) {
+            if (options.type) {
+                logTypeFilter.value = options.type;
+            }
+            if (logMgmtLockTypeFilter) {
+                logTypeFilter.value = '';
+                logTypeFilter.disabled = true;
+                logTypeFilter.title = '当前为用户审批历史视图，已固定操作类型';
+            } else {
+                logTypeFilter.disabled = false;
+                logTypeFilter.title = '';
+            }
+        }
+
         modal.classList.add('show');
         modal.style.display = 'block';
         logMgmtOffset = 0;
         loadLogManagementList();
     }
+}
+
+export function openUserApprovalHistoryModal() {
+    openLogManagementModal({
+        types: ['approve_user', 'reject_user'],
+        lockTypeFilter: true
+    });
 }
 
 export function closeLogManagementModal() {
@@ -827,6 +855,7 @@ export async function loadLogManagementList(append = false) {
             limit: logMgmtLimit,
             offset: logMgmtOffset,
             type: typeFilter || undefined,
+            types: logMgmtPresetTypes,
             username: usernameFilter || undefined
         });
 

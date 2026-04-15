@@ -152,7 +152,8 @@ class ExportManager:
                             
                             # 添加到ZIP
                             if directory and directory != '/':
-                                arcname = f"{cycle_name}/{doc_name}/{directory}/{filename}"
+                                clean_directory = str(directory).strip('/\\')
+                                arcname = f"{cycle_name}/{doc_name}/{clean_directory}/{filename}" if clean_directory else f"{cycle_name}/{doc_name}/{filename}"
                             else:
                                 arcname = f"{cycle_name}/{doc_name}/{filename}"
                             zipf.write(file_path, arcname)

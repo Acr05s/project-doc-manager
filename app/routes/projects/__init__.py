@@ -4,7 +4,7 @@ from flask import Blueprint
 from flask_login import login_required
 from .utils import init_doc_manager, project_access_required, pmo_admin_required
 from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects, get_archive_stats, bulk_approve_archive_requests
-from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements, get_document_directories, create_document_directory, delete_document_directory
+from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements, get_document_directories, create_document_directory, delete_document_directory, preview_excel_file, parse_excel_with_mapping
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
 from .export import export_project, import_project, import_project_file, package_project, import_package, download_package, import_project_chunk, import_project_merge, package_full_project, preview_import_package, import_from_preview, preview_package_chunk, preview_package_merge
@@ -15,9 +15,13 @@ from .templates import list_templates, save_template, load_template, delete_temp
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
 from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request, get_approval_history, get_all_approval_history
+from .modules import modules_bp
 
 # 创建蓝图
 project_bp = Blueprint('project', __name__)
+
+# 注册子蓝图
+project_bp.register_blueprint(modules_bp)
 
 # ===== 不含 project_id 的路由：仅需 login_required =====
 project_bp.route('/list', methods=['GET'])(login_required(list_projects))
@@ -37,6 +41,8 @@ project_bp.route('/all', methods=['GET'])(login_required(list_all_projects))
 project_bp.route('/load', methods=['POST'])(pmo_admin_required(load_project_config))
 project_bp.route('/requirements/list', methods=['GET'])(login_required(list_requirements_configs))
 project_bp.route('/export-requirements', methods=['GET'])(login_required(export_requirements))
+project_bp.route('/excel/preview', methods=['POST'])(login_required(preview_excel_file))
+project_bp.route('/excel/parse', methods=['POST'])(login_required(parse_excel_with_mapping))
 project_bp.route('/deleted/list', methods=['GET'])(login_required(list_deleted_projects))
 project_bp.route('/import', methods=['POST'])(login_required(import_project))
 project_bp.route('/import/file', methods=['POST'])(login_required(import_project_file))

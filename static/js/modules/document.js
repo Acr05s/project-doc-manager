@@ -6174,6 +6174,20 @@ async function uploadDocumentFile(file) {
     formData.append('project_name', appState.projectConfig ? appState.projectConfig.name : '');
     formData.append('cycle', appState.currentCycle);
     formData.append('doc_name', appState.currentDocument);
+
+    // 目录上传时带上相对目录和根目录，便于后端记录并在打包时还原目录结构
+    const relativePath = (file.webkitRelativePath || '').replace(/\\/g, '/');
+    if (relativePath) {
+        const pathParts = relativePath.split('/').filter(Boolean);
+        if (pathParts.length > 0) {
+            formData.append('root_directory', pathParts[0]);
+        }
+        if (pathParts.length > 2) {
+            formData.append('source_dir', pathParts.slice(1, -1).join('/'));
+        } else {
+            formData.append('source_dir', '/');
+        }
+    }
     
     const response = await fetch('/api/documents/upload', {
         method: 'POST',
