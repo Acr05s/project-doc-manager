@@ -568,7 +568,7 @@ async function refreshMenuBadges() {
 
     // 获取待审核用户数
     try {
-        const resp = await fetch('/api/users/pending');
+        const resp = await fetch('/pending-users');
         const data = await resp.json();
         const count = (data.status === 'success' && Array.isArray(data.users)) ? data.users.length : 0;
         const badge = document.getElementById('userApprovalBadge');

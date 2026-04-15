@@ -57,14 +57,20 @@ async function loadPendingUsers() {
         users.forEach(user => {
             const roleMap = { 'contractor': '一般员工', 'project_admin': '项目经理', 'pmo': '项目管理组织', 'admin': '系统管理员' };
             const roleLabel = roleMap[user.role] || user.role;
+            const safeUserId = escapeJsString(user.id || '');
+            const safeUsername = escapeJsString(user.username || '');
+            const safeRole = escapeJsString(user.role || '');
+            const safeOrg = escapeJsString(user.organization || '');
+            const safeEmail = escapeJsString(user.email || '');
+            const safeCreatedAt = escapeJsString(user.created_at || '');
             html += `<tr>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(user.display_name ? user.username + '（' + user.display_name + '）' : user.username)}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${roleLabel}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(user.organization || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${user.created_at || '-'}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd; text-align:center;">`;
-            html += `<button class="btn btn-success btn-sm" onclick="openAuditConfirmModal(${user.id}, '${escapeHtml(user.username)}', '${escapeHtml(user.role)}', '${escapeHtml(user.organization || '')}', '${escapeHtml(user.email || '')}', '${user.created_at || ''}', 'approve')" style="margin-right:6px;">通过</button>`;
-            html += `<button class="btn btn-danger btn-sm" onclick="openAuditConfirmModal(${user.id}, '${escapeHtml(user.username)}', '${escapeHtml(user.role)}', '${escapeHtml(user.organization || '')}', '${escapeHtml(user.email || '')}', '${user.created_at || ''}', 'reject')">拒绝</button>`;
+            html += `<button class="btn btn-success btn-sm" onclick="openAuditConfirmModal('${safeUserId}', '${safeUsername}', '${safeRole}', '${safeOrg}', '${safeEmail}', '${safeCreatedAt}', 'approve')" style="margin-right:6px;">通过</button>`;
+            html += `<button class="btn btn-danger btn-sm" onclick="openAuditConfirmModal('${safeUserId}', '${safeUsername}', '${safeRole}', '${safeOrg}', '${safeEmail}', '${safeCreatedAt}', 'reject')">拒绝</button>`;
             html += `</td>`;
             html += `</tr>`;
         });
@@ -154,4 +160,12 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeJsString(text) {
+    return String(text)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
 }

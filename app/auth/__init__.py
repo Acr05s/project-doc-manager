@@ -277,6 +277,7 @@ def list_organizations():
 
 
 @auth_bp.route('/pending-users', methods=['GET'])
+@auth_bp.route('/api/users/pending', methods=['GET'])
 @login_required
 def get_pending_users():
     """获取待审核用户列表"""
@@ -292,6 +293,7 @@ def get_pending_users():
 
 
 @auth_bp.route('/approve-user', methods=['POST'])
+@auth_bp.route('/api/approve-user', methods=['POST'])
 @login_required
 def approve_user():
     """审核通过用户"""
@@ -341,6 +343,7 @@ def approve_user():
 
 
 @auth_bp.route('/reject-user', methods=['POST'])
+@auth_bp.route('/api/reject-user', methods=['POST'])
 @login_required
 def reject_user():
     """拒绝用户"""
@@ -461,7 +464,47 @@ def manage_blacklist():
             else:
                 return jsonify({'status': 'error', 'message': '移除失败'})
     
-    return jsonify({'status': 'success', 'blacklist': []})
+    return jsonify({'status': 'success', 'blacklist': user_manager.get_ip_blacklist(include_expired=False)})
+
+
+@auth_bp.route('/api/security/blacklist', methods=['GET'])
+@login_required
+def list_ip_blacklist_api():
+    """获取当前有效 IP 黑名单（仅管理员）"""
+    if current_user.role != 'admin':
+        return jsonify({'status': 'error', 'message': '权限不足'}), 403
+    return jsonify({'status': 'success', 'blacklist': user_manager.get_ip_blacklist(include_expired=False)})
+
+
+@auth_bp.route('/api/security/blacklist/unblock', methods=['POST'])
+@login_required
+def unblock_ip_api():
+    """管理员解封指定 IP（用于误封恢复）"""
+    if current_user.role != 'admin':
+        return jsonify({'status': 'error', 'message': '权限不足'}), 403
+
+    data = request.get_json(silent=True) or {}
+    ip_address = (data.get('ip_address') or '').strip()
+    if not ip_address:
+        return jsonify({'status': 'error', 'message': 'ip_address 不能为空'}), 400
+
+    success = user_manager.remove_ip_from_blacklist(ip_address)
+    if success:
+        # 解封后清理该 IP 失败计数，避免刚解封再次被立即触发封禁
+        user_manager.clear_failed_login_attempts(ip_address)
+        ip = get_real_ip()
+        user_manager.add_operation_log(
+            current_user.id,
+            current_user.username,
+            'remove_ip_blacklist',
+            ip_address,
+            None,
+            'api_unblock',
+            ip
+        )
+        return jsonify({'status': 'success', 'message': 'IP 解封成功'})
+
+    return jsonify({'status': 'error', 'message': '解封失败或该 IP 不在黑名单中'}), 400
 
 
 @auth_bp.route('/api/me', methods=['GET'])
