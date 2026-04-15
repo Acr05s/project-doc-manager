@@ -1505,6 +1505,20 @@
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">关闭后，审批归档操作将不再要求输入审批安全码验证</small>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="forceAgreementOnLogin" style="width: 18px; height: 18px;">
+                            <span>登录前强制阅读使用与保密协议（10秒）</span>
+                        </label>
+                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，用户访问登录页时必须阅读 10 秒协议并同意后才可登录</small>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;">
+                            <span>开启全局动态水印</span>
+                        </label>
+                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，界面将显示“用户名 + 姓名 + 所属组织 + 当前时间”的动态水印</small>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label for="logRetentionDays">操作日志保留天数：</label>
                         <input type="number" id="logRetentionDays" class="form-control" placeholder="30" min="1" max="3650" value="30">
                         <small style="color: #666; font-size: 12px;">超过此天数的日志将自动导出归档，并从数据库中删除</small>
@@ -2526,6 +2540,7 @@
                     <option value="">批量角色</option>
                     <option value="admin">系统管理员</option>
                     <option value="pmo">项目管理组织</option>
+                    <option value="pmo_leader">PMO负责人</option>
                     <option value="project_admin">项目经理</option>
                     <option value="contractor">一般员工</option>
                 </select>
@@ -2757,7 +2772,7 @@
 
     <!-- 权限配置模态框 -->
     <div id="permissionConfigModal" class="modal" style="display:none;">
-        <div class="modal-content" style="max-width:750px;width:90vw;">
+        <div class="modal-content" style="max-width:860px;width:92vw;">
             <div class="modal-header">
                 <h3>🔐 权限配置 <span style="font-size:12px;color:#999;font-weight:normal;">（全平台生效）</span></h3>
                 <button class="modal-close" onclick="document.getElementById('permissionConfigModal').style.display='none'">&times;</button>
@@ -2775,6 +2790,7 @@
                             <th style="text-align:left;padding:10px 12px;border-bottom:2px solid #e0e0e0;min-width:180px;">菜单项</th>
                             <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">系统管理员</th>
                             <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">项目管理组织</th>
+                            <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">PMO负责人</th>
                             <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">项目经理</th>
                             <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e0e0e0;">一般员工</th>
                         </tr>

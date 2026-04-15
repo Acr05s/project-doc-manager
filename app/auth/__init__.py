@@ -184,12 +184,17 @@ def _notify_user_approvers(user_id, username, organization_name, is_new_org, rol
     """通知用户审批人"""
     try:
         if role == 'pmo':
-            # PMO 注册：仅通知 admin 审核
-            approvers = user_manager.get_users_by_roles(['admin'])
+            # PMO 注册：优先通知 PMO 负责人审核，无负责人时回退 admin
+            approvers = [
+                u for u in user_manager.get_users_by_roles(['pmo_leader'])
+                if u.get('status') == 'active' and (u.get('organization') or '').strip() == 'PMO'
+            ]
+            if not approvers:
+                approvers = [u for u in user_manager.get_users_by_roles(['admin']) if u.get('status') == 'active']
             for approver in approvers:
                 message_manager.send_message(
                     receiver_id=approver['id'],
-                    title='新用户待审批（PMO注册）',
+                    title='新用户待审批（PMO成员注册）',
                     content=f'用户 "{username}" 申请注册为 PMO 成员，请尽快审核。',
                     msg_type='approval',
                     related_id=str(user_id),
@@ -242,7 +247,7 @@ def list_organizations():
 @login_required
 def get_pending_users():
     """获取待审核用户列表"""
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     
     org = getattr(current_user, 'organization', None)
@@ -257,7 +262,7 @@ def get_pending_users():
 @login_required
 def approve_user():
     """审核通过用户"""
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     
     data = request.get_json()
@@ -274,6 +279,10 @@ def approve_user():
     if current_user.role == 'project_admin':
         if target.organization != current_user.organization or target.role != 'contractor':
             return jsonify({'status': 'error', 'message': '只能审核本单位的普通用户'}), 403
+    # pmo_leader 只能审核 PMO 成员
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能审核PMO组织成员'}), 403
     
     result = user_manager.approve_user(target.id, int(current_user.id))
     if result['status'] == 'success':
@@ -302,7 +311,7 @@ def approve_user():
 @login_required
 def reject_user():
     """拒绝用户"""
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     
     data = request.get_json()
@@ -318,6 +327,9 @@ def reject_user():
     if current_user.role == 'project_admin':
         if target.organization != current_user.organization or target.role != 'contractor':
             return jsonify({'status': 'error', 'message': '只能审核本单位的普通用户'}), 403
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能审核PMO组织成员'}), 403
     
     result = user_manager.reject_user(target.id, int(current_user.id))
     if result['status'] == 'success':
@@ -537,10 +549,28 @@ def deactivate_current_user():
         logout_user()
     return jsonify(result)
 
+
+def _is_pmo_user(user):
+    """判断目标用户是否属于 PMO 组织成员（含负责人）"""
+    if not user:
+        return False
+    org = (getattr(user, 'organization', '') or '').strip()
+    role = (getattr(user, 'role', '') or '').strip()
+    return org == 'PMO' and role in ('pmo', 'pmo_leader')
+
+
+def _filter_pmo_user_ids(user_ids):
+    """过滤出 PMO 组织成员对应的用户ID"""
+    pmo_user_ids = {
+        u['id'] for u in user_manager.get_users_by_organization('PMO')
+        if u.get('role') in ('pmo', 'pmo_leader')
+    }
+    return [uid for uid in user_ids if uid in pmo_user_ids]
+
 @auth_bp.route('/api/admin/users', methods=['GET'])
 @login_required
 def admin_list_users():
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     keyword = request.args.get('keyword', '').strip()
     status = request.args.get('status', '').strip()
@@ -549,6 +579,9 @@ def admin_list_users():
     if current_user.role == 'project_admin':
         my_org = getattr(current_user, 'organization', '') or ''
         users = [u for u in users if (u.organization or '') == my_org]
+    # pmo_leader 只能查看 PMO 组织成员
+    if current_user.role == 'pmo_leader':
+        users = [u for u in users if (u.organization or '') == 'PMO' and (u.role in ('pmo', 'pmo_leader'))]
     return jsonify({
         'status': 'success',
         'users': [
@@ -568,7 +601,7 @@ def admin_list_users():
 @auth_bp.route('/api/admin/users/<user_id>/reset-password', methods=['POST'])
 @login_required
 def admin_reset_password(user_id):
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     target = user_manager.get_user_by_uuid(user_id)
     if not target:
@@ -578,6 +611,9 @@ def admin_reset_password(user_id):
         my_org = getattr(current_user, 'organization', '') or ''
         if (target.organization or '') != my_org:
             return jsonify({'status': 'error', 'message': '只能操作本单位用户'}), 403
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能操作PMO组织成员'}), 403
     data = request.get_json()
     new_password = data.get('new_password', '')
     if len(new_password) < 6:
@@ -592,7 +628,7 @@ def admin_reset_password(user_id):
 @auth_bp.route('/api/admin/users/<user_id>/reset-approval-code', methods=['POST'])
 @login_required
 def admin_reset_approval_code(user_id):
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     target = user_manager.get_user_by_uuid(user_id)
     if not target:
@@ -602,6 +638,9 @@ def admin_reset_approval_code(user_id):
         my_org = getattr(current_user, 'organization', '') or ''
         if (target.organization or '') != my_org:
             return jsonify({'status': 'error', 'message': '只能操作本单位用户'}), 403
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能操作PMO组织成员'}), 403
     result = user_manager.reset_approval_code_to_password(target.id)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -611,7 +650,7 @@ def admin_reset_approval_code(user_id):
 @auth_bp.route('/api/admin/users/<user_id>/role', methods=['POST'])
 @login_required
 def admin_update_user_role(user_id):
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     target = user_manager.get_user_by_uuid(user_id)
     if not target:
@@ -629,6 +668,11 @@ def admin_update_user_role(user_id):
             return jsonify({'status': 'error', 'message': '只能操作本单位用户'}), 403
         if new_role not in ('project_admin', 'contractor'):
             return jsonify({'status': 'error', 'message': '无权设置该角色'}), 403
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能操作PMO组织成员'}), 403
+        if new_role not in ('pmo', 'pmo_leader'):
+            return jsonify({'status': 'error', 'message': '无权设置该角色'}), 403
     result = user_manager.update_user_role(target.id, new_role)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -638,7 +682,7 @@ def admin_update_user_role(user_id):
 @auth_bp.route('/api/admin/users/<user_id>/status', methods=['POST'])
 @login_required
 def admin_toggle_user_status(user_id):
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     target = user_manager.get_user_by_uuid(user_id)
     if not target:
@@ -648,6 +692,9 @@ def admin_toggle_user_status(user_id):
         my_org = getattr(current_user, 'organization', '') or ''
         if (target.organization or '') != my_org:
             return jsonify({'status': 'error', 'message': '只能操作本单位用户'}), 403
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能操作PMO组织成员'}), 403
     result = user_manager.toggle_user_status(target.id)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -657,7 +704,7 @@ def admin_toggle_user_status(user_id):
 @auth_bp.route('/api/admin/users/<user_id>', methods=['DELETE'])
 @login_required
 def admin_delete_user(user_id):
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     target = user_manager.get_user_by_uuid(user_id)
     if not target:
@@ -669,6 +716,9 @@ def admin_delete_user(user_id):
         my_org = getattr(current_user, 'organization', '') or ''
         if (target.organization or '') != my_org:
             return jsonify({'status': 'error', 'message': '只能操作本单位用户'}), 403
+    if current_user.role == 'pmo_leader':
+        if not _is_pmo_user(target):
+            return jsonify({'status': 'error', 'message': '只能操作PMO组织成员'}), 403
     result = user_manager.delete_user(target.id)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -742,7 +792,7 @@ def admin_delete_organization():
 @auth_bp.route('/api/admin/users/batch-delete', methods=['POST'])
 @login_required
 def admin_batch_delete_users():
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     data = request.get_json()
     user_uuids = data.get('user_ids', [])
@@ -759,6 +809,10 @@ def admin_batch_delete_users():
         user_ids = [uid for uid in user_ids if uid in org_user_ids]
         if not user_ids:
             return jsonify({'status': 'error', 'message': '所选用户均不属于本单位'}), 403
+    if current_user.role == 'pmo_leader':
+        user_ids = _filter_pmo_user_ids(user_ids)
+        if not user_ids:
+            return jsonify({'status': 'error', 'message': '所选用户均不属于PMO组织'}), 403
     result = user_manager.batch_delete_users(user_ids)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -768,7 +822,7 @@ def admin_batch_delete_users():
 @auth_bp.route('/api/admin/users/batch-role', methods=['POST'])
 @login_required
 def admin_batch_update_user_roles():
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     data = request.get_json()
     user_uuids = data.get('user_ids', [])
@@ -787,6 +841,12 @@ def admin_batch_update_user_roles():
         user_ids = [uid for uid in user_ids if uid in org_user_ids]
         if not user_ids:
             return jsonify({'status': 'error', 'message': '所选用户均不属于本单位'}), 403
+    if current_user.role == 'pmo_leader':
+        if new_role not in ('pmo', 'pmo_leader'):
+            return jsonify({'status': 'error', 'message': '无权设置该角色'}), 403
+        user_ids = _filter_pmo_user_ids(user_ids)
+        if not user_ids:
+            return jsonify({'status': 'error', 'message': '所选用户均不属于PMO组织'}), 403
     result = user_manager.batch_update_user_roles(user_ids, new_role)
     if result['status'] == 'success':
         ip = get_real_ip()
@@ -796,7 +856,7 @@ def admin_batch_update_user_roles():
 @auth_bp.route('/api/admin/users/batch-status', methods=['POST'])
 @login_required
 def admin_batch_update_user_status():
-    if current_user.role not in ('admin', 'pmo', 'project_admin'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     data = request.get_json()
     user_uuids = data.get('user_ids', [])
@@ -811,6 +871,10 @@ def admin_batch_update_user_status():
         user_ids = [uid for uid in user_ids if uid in org_user_ids]
         if not user_ids:
             return jsonify({'status': 'error', 'message': '所选用户均不属于本单位'}), 403
+    if current_user.role == 'pmo_leader':
+        user_ids = _filter_pmo_user_ids(user_ids)
+        if not user_ids:
+            return jsonify({'status': 'error', 'message': '所选用户均不属于PMO组织'}), 403
     result = user_manager.batch_update_user_status(user_ids, new_status)
     if result['status'] == 'success':
         ip = get_real_ip()

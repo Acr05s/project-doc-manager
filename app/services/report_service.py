@@ -90,8 +90,8 @@ class ReportService:
     
     def _load_all_project_details(self):
         """加载所有项目详情（根据用户权限过滤）"""
-        # 管理员和PMO可以看到所有项目
-        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', None):
+        # 管理员、PMO、PMO负责人可以看到所有项目
+        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', 'pmo_leader', None):
             accessible = self.doc_manager.get_user_accessible_projects(
                 self.user_context['id'],
                 self.user_context['role'],
@@ -120,8 +120,8 @@ class ReportService:
         """平台概览报表"""
         projects = self._load_all_project_details()
         
-        # 管理员和PMO看到全部承建单位，其他角色只看到涉及自己的
-        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', None):
+        # 管理员、PMO、PMO负责人看到全部承建单位，其他角色只看到涉及自己的
+        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', 'pmo_leader', None):
             org_set = set()
             for p in projects:
                 pb = p['config'].get('party_b', '')
@@ -221,7 +221,7 @@ class ReportService:
 
         # 非管理员/PMO 只能看到本单位数据
         my_org = None
-        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', None):
+        if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', 'pmo_leader', None):
             my_org = self.user_context.get('organization', '') or ''
 
         if my_org is not None:

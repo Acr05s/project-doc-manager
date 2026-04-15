@@ -89,7 +89,7 @@ async function loadPendingArchiveApprovals() {
             let stageDisplay = '未知';
             if (archiveApprovalStages.length > 0) {
                 const statuses = archiveApprovalStages.map((s, i) => {
-                    const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'admin' ? '管理员' : `Level${s.level || i + 1}`;
+                    const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : s.required_role === 'admin' ? '管理员' : `Level${s.level || i + 1}`;
                     if (s.status === 'approved') return `✓ ${roleName}已审核`;
                     if (s.status === 'rejected') return `✗ ${roleName}已驳回`;
                     return `⏳ ${roleName}审批`;
@@ -284,7 +284,7 @@ async function promptArchiveApprovalCode(projectId, approvalId) {
                 type: 'select',
                 options: approvers.map(a => ({
                     value: String(a.id),
-                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : a.role === 'pmo_leader' ? 'PMO负责人' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
                 })),
                 placeholder: '请选择你的身份'
             });

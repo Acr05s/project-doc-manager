@@ -134,7 +134,13 @@ def api_update_settings():
         current_settings = load_settings()
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled']
+        allowed_fields = [
+            'system_name', 'author', 'description',
+            'fast_preview_threshold', 'email_notification_enabled',
+            'require_approval_code', 'log_retention_days', 'timezone',
+            'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption',
+            'force_agreement_on_login', 'watermark_enabled'
+        ]
         for field in allowed_fields:
             if field in data:
                 current_settings[field] = data[field]

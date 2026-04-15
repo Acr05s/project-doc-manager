@@ -115,7 +115,7 @@ def approve_project():
         if not current_user.is_authenticated:
             return jsonify({'status': 'error', 'message': '请先登录'}), 401
         
-        if current_user.role not in ('admin', 'pmo', 'project_admin'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
             return jsonify({'status': 'error', 'message': '权限不足，只有项目经理或管理员可以审批项目'}), 403
         
         result = doc_manager.projects.approve_project(project_id, int(current_user.id))
@@ -309,7 +309,7 @@ def initiate_project_transfer(project_id):
         creator_id = project_config.get('creator_id')
 
         can_transfer = False
-        if user_role in ('admin', 'pmo'):
+        if user_role in ('admin', 'pmo', 'pmo_leader'):
             can_transfer = True
         elif user_role == 'project_admin' and user_org == from_org:
             # 项目经理可以移交本单位项目
@@ -390,7 +390,7 @@ def respond_project_transfer():
         is_target_admin = False
         if current_user.role == 'project_admin' and user_org == transfer['to_org']:
             is_target_admin = True
-        elif current_user.role in ('admin', 'pmo'):
+        elif current_user.role in ('admin', 'pmo', 'pmo_leader'):
             is_target_admin = True
         if not is_target_admin:
             return jsonify({'status': 'error', 'message': '只有目标单位的项目经理可以处理该移交申请'}), 403
@@ -475,7 +475,7 @@ def respond_project_transfer():
 def batch_delete_projects():
     """批量删除项目"""
     try:
-        if current_user.role not in ('admin', 'pmo'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
             return jsonify({'status': 'error', 'message': '权限不足'}), 403
         data = request.get_json()
         project_ids = data.get('project_ids', [])
@@ -505,7 +505,7 @@ def batch_delete_projects():
 def batch_update_projects():
     """批量更新项目字段（如 party_b）"""
     try:
-        if current_user.role not in ('admin', 'pmo'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
             return jsonify({'status': 'error', 'message': '权限不足'}), 403
         data = request.get_json()
         project_ids = data.get('project_ids', [])
@@ -531,7 +531,7 @@ def batch_update_projects():
 def batch_update_project_status():
     """批量更新项目状态（启用/停用/审批）"""
     try:
-        if current_user.role not in ('admin', 'pmo'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
             return jsonify({'status': 'error', 'message': '权限不足'}), 403
         data = request.get_json()
         project_ids = data.get('project_ids', [])
@@ -558,7 +558,7 @@ def list_all_projects():
     """列出所有项目（管理员/PMO）或本单位项目（项目经理）"""
     try:
         doc_manager = get_doc_manager()
-        if current_user.role in ('admin', 'pmo'):
+        if current_user.role in ('admin', 'pmo', 'pmo_leader'):
             projects = doc_manager.projects.list_all()
         elif current_user.role == 'project_admin':
             user_id = int(current_user.id)
@@ -629,7 +629,7 @@ def get_archive_stats():
 
             # 获取用户相关的某些统计（基于角色）
             user_stats = {}
-            if user_role in ('project_admin', 'pmo'):
+            if user_role in ('project_admin', 'pmo', 'pmo_leader'):
                 # 该用户作为审批人需要处理的请求
                 cursor.execute('''
                     SELECT COUNT(*) as count FROM archive_approvals
@@ -661,7 +661,7 @@ def bulk_approve_archive_requests():
     批量批准或驳回归档请求（Phase 10）
     """
     try:
-        if current_user.role not in ('admin', 'pmo', 'project_admin'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
             return jsonify({'status': 'error', 'message': '权限不足'}), 403
 
         data = request.get_json() or {}
@@ -739,3 +739,4 @@ def bulk_approve_archive_requests():
         import traceback
         traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
+

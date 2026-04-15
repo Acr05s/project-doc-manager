@@ -231,10 +231,103 @@
             font-size: 12px;
             color: rgba(255, 255, 255, 0.4);
         }
+
+        .agreement-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(3, 9, 18, 0.7);
+            backdrop-filter: blur(3px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .agreement-modal {
+            width: min(760px, 96vw);
+            max-height: 88vh;
+            overflow: auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+            color: #1f2a37;
+        }
+
+        .agreement-header {
+            padding: 16px 18px;
+            border-bottom: 1px solid #e8edf3;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .agreement-body {
+            padding: 14px 18px;
+            font-size: 14px;
+            line-height: 1.72;
+        }
+
+        .agreement-body h3 {
+            margin: 10px 0 8px;
+            font-size: 15px;
+            color: #0f4a8a;
+        }
+
+        .agreement-actions {
+            padding: 12px 18px 16px;
+            border-top: 1px solid #e8edf3;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .agreement-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .agreement-btn.deny {
+            background: #eef3f8;
+            color: #2d3a4d;
+        }
+
+        .agreement-btn.accept {
+            background: #1668dc;
+            color: #fff;
+        }
+
+        .agreement-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
     </style>
 </head>
 <body>
     <canvas id="universe"></canvas>
+
+    <div id="agreementOverlay" class="agreement-overlay">
+        <div class="agreement-modal">
+            <div class="agreement-header">使用与保密协议确认</div>
+            <div class="agreement-body">
+                <h3>一、系统使用协议</h3>
+                <p>1) 本系统仅用于项目资料管理、审批与验收相关工作，禁止用于与业务无关的用途。</p>
+                <p>2) 登录账户仅限本人使用，不得借用、共享或转交他人操作。</p>
+                <p>3) 用户需对自身操作行为负责，系统将保留完整操作日志用于审计追溯。</p>
+                <h3>二、保密协议</h3>
+                <p>1) 系统中的项目资料、审批信息、组织信息及用户数据均属于受控信息。</p>
+                <p>2) 未经授权，不得复制、外传、截图传播或对外披露任何涉密内容。</p>
+                <p>3) 如发现数据泄露风险、账号异常或违规使用行为，应立即上报管理员。</p>
+                <p style="margin-top:10px;color:#8b1d1d;background:#fff3f3;padding:8px 10px;border-radius:6px;border:1px solid #ffd2d2;">继续登录即视为您已阅读并同意上述使用与保密条款。</p>
+            </div>
+            <div class="agreement-actions">
+                <button type="button" id="agreementDenyBtn" class="agreement-btn deny">不同意并离开</button>
+                <button type="button" id="agreementAcceptBtn" class="agreement-btn accept" disabled>请阅读 10 秒</button>
+            </div>
+        </div>
+    </div>
     
     <div class="auth-container">
         <div class="auth-card">
@@ -444,6 +537,59 @@
             const msg = document.getElementById('message');
             msg.style.display = 'none';
         }
+
+        // ==================== 登录前协议确认 ====================
+        let agreementAccepted = false;
+
+        async function initLoginAgreementGate() {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                const enabled = data?.status === 'success' && !!data?.data?.force_agreement_on_login;
+                if (!enabled) {
+                    agreementAccepted = true;
+                    return;
+                }
+
+                const overlay = document.getElementById('agreementOverlay');
+                const acceptBtn = document.getElementById('agreementAcceptBtn');
+                const denyBtn = document.getElementById('agreementDenyBtn');
+                if (!overlay || !acceptBtn || !denyBtn) {
+                    agreementAccepted = true;
+                    return;
+                }
+
+                overlay.style.display = 'flex';
+                let remain = 10;
+                acceptBtn.disabled = true;
+                acceptBtn.textContent = `请阅读 ${remain} 秒`;
+
+                const timer = setInterval(() => {
+                    remain -= 1;
+                    if (remain > 0) {
+                        acceptBtn.textContent = `请阅读 ${remain} 秒`;
+                        return;
+                    }
+                    clearInterval(timer);
+                    acceptBtn.disabled = false;
+                    acceptBtn.textContent = '我已阅读并同意';
+                }, 1000);
+
+                acceptBtn.addEventListener('click', () => {
+                    agreementAccepted = true;
+                    overlay.style.display = 'none';
+                });
+
+                denyBtn.addEventListener('click', () => {
+                    window.location.href = 'about:blank';
+                });
+            } catch (e) {
+                // 设置读取失败时不阻断登录，避免故障放大
+                agreementAccepted = true;
+            }
+        }
+
+        initLoginAgreementGate();
         
         // ==================== 加载承建单位列表 ====================
         const orgSelect = document.getElementById('reg-organization-select');
@@ -508,6 +654,11 @@
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             hideMessage();
+
+            if (!agreementAccepted) {
+                showMessage('请先阅读并同意使用与保密协议', 'error');
+                return;
+            }
             
             const username = document.getElementById('login-username').value.trim();
             const password = document.getElementById('login-password').value;

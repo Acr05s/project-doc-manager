@@ -19,6 +19,7 @@ import { showNotification, showConfirmModal, showInputModal } from './ui.js';
 const roleMap = {
     'admin': '系统管理员',
     'pmo': '项目管理组织',
+    'pmo_leader': 'PMO负责人',
     'project_admin': '项目经理',
     'contractor': '一般员工'
 };
@@ -165,14 +166,21 @@ export async function loadUserManagementList() {
             roleSelect.style.border = '1px solid #ccc';
 
             const isProjectAdmin = authState.user?.role === 'project_admin';
+            const isPmoLeader = authState.user?.role === 'pmo_leader';
             const roles = isProjectAdmin
                 ? [
                     { value: 'project_admin', label: '项目经理' },
                     { value: 'contractor', label: '一般员工' }
                 ]
+                : isPmoLeader
+                ? [
+                    { value: 'pmo', label: '项目管理组织' },
+                    { value: 'pmo_leader', label: 'PMO负责人' }
+                ]
                 : [
                     { value: 'admin', label: '系统管理员' },
                     { value: 'pmo', label: '项目管理组织' },
+                    { value: 'pmo_leader', label: 'PMO负责人' },
                     { value: 'project_admin', label: '项目经理' },
                     { value: 'contractor', label: '一般员工' }
                 ];

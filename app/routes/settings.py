@@ -27,6 +27,8 @@ def load_settings():
         'version': '1.0.0',
         'author': '项目验收团队',
         'description': '项目全生命周期文档管理系统',
+        'force_agreement_on_login': False,
+        'watermark_enabled': False,
         'log_retention_days': 30,
         'timezone': 'Asia/Shanghai'
     }
@@ -198,7 +200,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'watermark_enabled']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)
@@ -302,32 +304,32 @@ PERMISSIONS_FILE = Path(__file__).parent.parent.parent / 'permissions.json'
 # 默认菜单权限配置（项目菜单=顶部, 系统菜单=侧边栏, 含二级子菜单）
 DEFAULT_MENU_PERMISSIONS = {
     # ── 项目菜单（顶部，打开项目后显示） ──
-    'documentRequirementsMenu': {'label': '📄 文档需求', 'roles': ['admin', 'pmo'], 'group': 'top'},
-    'editRequirementsBtn': {'label': '✏️ 编辑文档需求', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
-    'manageVersionsBtn': {'label': '🔄 切换配置版本', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
+    'documentRequirementsMenu': {'label': '📄 文档需求', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'top'},
+    'editRequirementsBtn': {'label': '✏️ 编辑文档需求', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
+    'manageVersionsBtn': {'label': '🔄 切换配置版本', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
     'clearRequirementsBtn': {'label': '🗑️ 删除当前需求', 'roles': ['admin'], 'group': 'top', 'parent': 'documentRequirementsMenu'},
-    'documentManagementMenu': {'label': '📋 文档导入与匹配', 'roles': ['admin', 'pmo', 'project_admin', 'contractor'], 'group': 'top'},
-    'zipUploadBtn': {'label': '📥 导入文档', 'roles': ['admin', 'pmo', 'project_admin', 'contractor'], 'group': 'top', 'parent': 'documentManagementMenu'},
-    'deleteProjectBtn': {'label': '🔄 重新匹配文件管理', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'documentManagementMenu'},
-    'cleanupDuplicatesBtn': {'label': '🧹 清理重复文档', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'documentManagementMenu'},
-    'generateReportBtn': {'label': '📊 生成报告', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
-    'packageProjectBtn': {'label': '📦 备份项目', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
-    'acceptanceMenu': {'label': '✅ 验收项目文件', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
-    'generateReportMenuItem': {'label': '📊 生成报告', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'acceptanceMenu'},
-    'confirmAcceptanceBtn': {'label': '✅ 确认验收', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'acceptanceMenu'},
-    'downloadPackageBtn': {'label': '📦 打包下载', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'acceptanceMenu'},
-    'archiveAndApprovalMenu': {'label': '📋 文档归档与审批', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top'},
-    'openArchiveConfigBtn': {'label': '⚙️ 配置审批流程', 'roles': ['admin', 'pmo'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
-    'viewArchiveRequestsBtn': {'label': '📨 查看审批请求', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
-    'viewApprovalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
+    'documentManagementMenu': {'label': '📋 文档导入与匹配', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], 'group': 'top'},
+    'zipUploadBtn': {'label': '📥 导入文档', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], 'group': 'top', 'parent': 'documentManagementMenu'},
+    'deleteProjectBtn': {'label': '🔄 重新匹配文件管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top', 'parent': 'documentManagementMenu'},
+    'cleanupDuplicatesBtn': {'label': '🧹 清理重复文档', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'top', 'parent': 'documentManagementMenu'},
+    'generateReportBtn': {'label': '📊 生成报告', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top'},
+    'packageProjectBtn': {'label': '📦 备份项目', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top'},
+    'acceptanceMenu': {'label': '✅ 验收项目文件', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top'},
+    'generateReportMenuItem': {'label': '📊 生成报告', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top', 'parent': 'acceptanceMenu'},
+    'confirmAcceptanceBtn': {'label': '✅ 确认验收', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'top', 'parent': 'acceptanceMenu'},
+    'downloadPackageBtn': {'label': '📦 打包下载', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top', 'parent': 'acceptanceMenu'},
+    'archiveAndApprovalMenu': {'label': '📋 文档归档与审批', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top'},
+    'openArchiveConfigBtn': {'label': '⚙️ 配置审批流程', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
+    'viewArchiveRequestsBtn': {'label': '📨 查看审批请求', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
+    'viewApprovalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'top', 'parent': 'archiveAndApprovalMenu'},
     # ── 系统菜单（侧边栏，🍀四叶草） ──
     'systemSettingsMenuItem': {'label': '⚙️ 系统设置', 'roles': ['admin'], 'group': 'sidebar'},
-    'userApprovalBtn': {'label': '👤 用户审核', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
-    'archiveApprovalBtn': {'label': '📋 文档归档审批', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
-    'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
-    'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
-    'orgManagementMenuItem': {'label': '🏢 承建单位管理', 'roles': ['admin', 'pmo'], 'group': 'sidebar'},
-    'projectManagementMenuItem': {'label': '📁 项目管理', 'roles': ['admin', 'pmo', 'project_admin'], 'group': 'sidebar'},
+    'userApprovalBtn': {'label': '👤 用户审核', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'archiveApprovalBtn': {'label': '📋 文档归档审批', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'orgManagementMenuItem': {'label': '🏢 承建单位管理', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'sidebar'},
+    'projectManagementMenuItem': {'label': '📁 项目管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
 }
 
 
@@ -344,6 +346,12 @@ def load_permissions():
                     permissions[key]['roles'] = val.get('roles', permissions[key]['roles'])
         except Exception:
             pass
+
+    # 兼容旧权限文件：若菜单已授权 PMO，则默认同步授权 PMO负责人
+    for key, cfg in permissions.items():
+        roles = cfg.get('roles', [])
+        if 'pmo' in roles and 'pmo_leader' not in roles:
+            cfg['roles'] = roles + ['pmo_leader']
     return permissions
 
 
@@ -385,7 +393,7 @@ def update_permissions():
 
         # 加载当前权限
         permissions = load_permissions()
-        all_roles = ['admin', 'pmo', 'project_admin', 'contractor']
+        all_roles = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor']
 
         for menu_key, menu_data in data.items():
             if menu_key in permissions:

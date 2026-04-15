@@ -174,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function() {
         projectTitle.addEventListener('click', async function() {
             // 检查是否已登录
             const { hasRole } = await import('./modules/auth.js');
-            if (!hasRole(['admin', 'pmo', 'project_admin', 'contractor'])) {
+            if (!hasRole(['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'])) {
                 const { openLoginModal } = await import('./modules/auth.js');
                 openLoginModal();
                 return;

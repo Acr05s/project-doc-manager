@@ -130,7 +130,7 @@ function renderOverviewReport(data) {
     
     // 只有 admin 和 pmo 角色显示承建单位卡片
     // project_admin 和 contractor 角色不显示
-    if (userRole === 'admin' || userRole === 'pmo') {
+    if (userRole === 'admin' || userRole === 'pmo' || userRole === 'pmo_leader') {
         cardsHTML += `
             <div class="dashboard-card success">
                 <div class="card-icon">🏢</div>
@@ -586,7 +586,7 @@ async function handleArchiveApprovalMessageClick(message) {
     }
     closeMessageModal();
     const isPending = (message.title || '').includes('待审批');
-    const isApprover = ['admin', 'pmo', 'project_admin'].includes(authState.user?.role);
+    const isApprover = ['admin', 'pmo', 'pmo_leader', 'project_admin'].includes(authState.user?.role);
     if (isPending && isApprover) {
         // 待审批消息 + 审批角色：打开审批界面
         try {

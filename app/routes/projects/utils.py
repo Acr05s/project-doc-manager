@@ -25,7 +25,7 @@ def check_project_access(project_id):
         return False, (jsonify({'status': 'error', 'message': '请先登录'}), 401)
 
     # admin 和 pmo 可以访问所有项目
-    if current_user.role in ('admin', 'pmo'):
+    if current_user.role in ('admin', 'pmo', 'pmo_leader'):
         return True, None
 
     user_id = int(current_user.id)
@@ -68,7 +68,7 @@ def pmo_admin_required(f):
     @wraps(f)
     @login_required
     def decorated(*args, **kwargs):
-        if current_user.role not in ('admin', 'pmo'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
             return jsonify({'status': 'error', 'message': '仅PMO和管理员有权执行此操作'}), 403
         return f(*args, **kwargs)
     return decorated

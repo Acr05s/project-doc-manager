@@ -861,7 +861,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 if (stages.length > 0) {
                                                     const currentStage = pendingRequest.current_stage || 1;
                                                     const stageLabels = stages.map((s, i) => {
-                                                        const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'admin' ? '管理员' : s.required_role || ('Level'+(i+1));
+                                                        const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : s.required_role === 'admin' ? '管理员' : s.required_role || ('Level'+(i+1));
                                                         if (s.status === 'approved') return '<span style="color:#28a745;">✓ ' + roleName + '已审核</span>';
                                                         if (s.status === 'rejected') return '<span style="color:#dc3545;">✗ ' + roleName + '已驳回</span>';
                                                         return '<span style="color:#ffc107;">⏳ ' + roleName + '审批中</span>';
@@ -875,7 +875,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                             </button>
                                             ${(() => {
                                                 const userRole = authState.user?.role;
-                                                if (!['admin','pmo','project_admin'].includes(userRole)) return '';
+                                                if (!['admin','pmo','pmo_leader','project_admin'].includes(userRole)) return '';
                                                 const stages = pendingRequest.approval_stages || [];
                                                 const currentStageIdx = (pendingRequest.current_stage || 1) - 1;
                                                 const currentStage = stages[currentStageIdx];
@@ -3182,7 +3182,7 @@ async function promptApprovalCodeForArchive(message, requireNewCode = false, app
                 type: 'select',
                 options: approvers.map(a => ({
                     value: String(a.id),
-                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
+                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'admin' ? '系统管理员' : a.role === 'pmo' ? '项目管理组织' : a.role === 'pmo_leader' ? 'PMO负责人' : '项目经理'}${a.organization ? ' - ' + a.organization : ''}）`
                 })),
                 placeholder: '请选择你的身份'
             });

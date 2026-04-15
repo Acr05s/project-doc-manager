@@ -526,6 +526,12 @@ class UserManager:
                     'SELECT id, username, role, created_at, organization, email, uuid, display_name FROM users WHERE status = ? ORDER BY created_at',
                     ('pending',)
                 )
+            elif viewer_role == 'pmo_leader':
+                # PMO 负责人只能审核 PMO 组织成员
+                cursor.execute(
+                    'SELECT id, username, role, created_at, organization, email, uuid, display_name FROM users WHERE status = ? AND organization = ? AND role IN (?, ?) ORDER BY created_at',
+                    ('pending', 'PMO', 'pmo', 'pmo_leader')
+                )
             elif viewer_role == 'project_admin':
                 # 项目经理只能看到同组织的 contractor 待审核用户
                 cursor.execute(

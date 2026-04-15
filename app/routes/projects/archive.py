@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 
 # ===== 多级审批 Helper 函数 =====
 
-def initialize_approval_stages(project_config):
+def initialize_approval_stages(project_config, approval_chain=None):
     """根据项目配置初始化审批阶段结构"""
     approval_mode = project_config.get('archive_approval_mode', 'two_level')
-    approval_chain = project_config.get('archive_approval_chain', [])
+    if approval_chain is None:
+        approval_chain = project_config.get('archive_approval_chain', [])
 
     stages = []
     for stage_config in approval_chain:
@@ -71,6 +72,16 @@ def get_next_stage_approvers(project_id, current_stage, approval_chain, project_
             user_org = (approver.get('organization') or '').strip()
             project_org = (project_config.get('party_b') or '').strip()
             if project_org and user_org and user_org != project_org:
+                continue
+        elif org_match == 'pmo':
+            user_org = (approver.get('organization') or '').strip()
+            if user_org != 'PMO':
+                continue
+
+        # PMO负责人角色固定在 PMO 组织内审批
+        if required_role == 'pmo_leader':
+            user_org = (approver.get('organization') or '').strip()
+            if user_org != 'PMO':
                 continue
 
         result.append({
@@ -216,7 +227,7 @@ def get_archive_approvers(project_id):
                 return jsonify({'status': 'success', 'approvers': stage_approvers, 'current_stage': current_stage})
 
         # 无 approval_id 或无审批链：返回所有符合条件的审批人（兼容旧逻辑）
-        approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'project_admin'])
+        approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'pmo_leader', 'project_admin'])
         print(f'[DEBUG] Found {len(approvers) if approvers else 0} approvers with roles (fallback)', file=sys.stderr, flush=True)
 
         party_b = (project_config.get('party_b', '') or '').strip()
@@ -283,8 +294,26 @@ def submit_archive_request(project_id):
         project_name = project_config.get('name', project_id)
         approval_chain = project_config.get('archive_approval_chain', [])
 
+        # PMO普通成员发起时，增加 PMO负责人 前置审核阶段
+        requester_role = getattr(current_user, 'role', '')
+        requester_org = (getattr(current_user, 'organization', '') or '').strip()
+        if requester_role == 'pmo' and requester_org == 'PMO':
+            approval_chain = [
+                {
+                    'level': 1,
+                    'required_role': 'pmo_leader',
+                    'org_match': 'pmo'
+                }
+            ] + [
+                {
+                    **stage,
+                    'level': (stage.get('level', idx + 1) + 1)
+                }
+                for idx, stage in enumerate(approval_chain)
+            ]
+
         # 初始化audit approval_stages
-        approval_stages = initialize_approval_stages(project_config)
+        approval_stages = initialize_approval_stages(project_config, approval_chain)
         if not approval_stages:
             return jsonify({'status': 'error', 'message': '审批链配置错误'}), 400
 
@@ -516,7 +545,7 @@ def approve_archive_request(project_id):
         # 验证审批人权限
         if not approver:
             return jsonify({'status': 'error', 'message': '审批人不存在'}), 404
-        if approver.role not in ('admin', 'pmo', 'project_admin'):
+        if approver.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
 
         # 验证审批安全码（仅在系统要求时）
@@ -572,7 +601,7 @@ def approve_archive_request(project_id):
         print(f'[DEBUG] Stage {current_stage_idx + 1} approved by {approver.username}', file=sys.stderr, flush=True)
 
         # 记录流程历史：阶段通过
-        role_label = {'project_admin': '项目经理', 'pmo': 'PMO', 'admin': '管理员'}.get(approval_stages[current_stage_idx].get('required_role', ''), f'Level{current_stage_idx+1}')
+        role_label = {'project_admin': '项目经理', 'pmo': 'PMO', 'pmo_leader': 'PMO负责人', 'admin': '管理员'}.get(approval_stages[current_stage_idx].get('required_role', ''), f'Level{current_stage_idx+1}')
         append_stage_history(approval['id'], 'stage_approve', actual_approver_id, approver.username, stage=current_stage_idx + 1, detail=f'{role_label}审批通过（第{current_stage_idx+1}阶段）')
 
         # 检查是否所有阶段都已完成
@@ -674,12 +703,14 @@ def approve_archive_request(project_id):
                 doc_list += f'等{len(doc_names)}个文档'
 
             project_name = project_config.get('name', project_id)
+            next_role = (next_stage_config.get('required_role') or '').strip()
+            next_role_label = {'project_admin': '项目经理', 'pmo': '项目管理组织', 'pmo_leader': 'PMO负责人', 'admin': '管理员'}.get(next_role, '下一阶段审批人')
             for approver_info in next_approvers:
                 approver_next_id = approver_info.get('internal_id') or approver_info['id']
                 message_manager.send_message(
                     receiver_id=approver_next_id,
                     title=f'待审批：文档{type_label}申请',
-                    content=f'项目 "{project_name}" 周期 "{cycle}" 的文档{type_label}申请（{doc_list}）已通过项目经理审批，现需您（项目管理组织）审批。',
+                    content=f'项目 "{project_name}" 周期 "{cycle}" 的文档{type_label}申请（{doc_list}）已进入下一审批阶段，现需您（{next_role_label}）审批。',
                     sender_id=actual_approver_id,
                     msg_type='archive_approval',
                     related_id=project_id,
@@ -751,7 +782,7 @@ def reject_archive_request(project_id):
 
         if not approver:
             return jsonify({'status': 'error', 'message': '审批人不存在'}), 404
-        if approver.role not in ('admin', 'pmo', 'project_admin'):
+        if approver.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
 
         # 验证审批安全码（仅在系统要求时）
@@ -842,7 +873,7 @@ def archive_project_document(project_id):
             return jsonify({'status': 'error', 'message': '归档参数不完整'}), 400
         if not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
-        if current_user.role not in ('admin', 'pmo', 'project_admin'):
+        if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
             return jsonify({'status': 'error', 'message': '权限不足'}), 403
 
         user = user_manager.get_user_by_id(int(current_user.id))

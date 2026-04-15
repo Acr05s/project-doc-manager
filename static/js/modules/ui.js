@@ -39,6 +39,8 @@ import {
 } from './tree-editor.js';
 import { handleSaveTemplate } from './requirement-editor.js';
 
+let watermarkTimer = null;
+
 /**
  * 设置事件监听器
  */
@@ -1191,10 +1193,86 @@ export async function applySystemSettingsToPage() {
             _applySystemNameToPage(settings.system_name);
             // 存储到 appState 供其他地方使用
             appState.systemSettings = settings;
+            applyDynamicWatermark(settings);
         }
     } catch (error) {
         console.warn('初始化系统设置失败（不影响主流程）:', error);
     }
+}
+
+function ensureWatermarkLayer() {
+    let layer = document.getElementById('globalWatermarkLayer');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'globalWatermarkLayer';
+        layer.style.position = 'fixed';
+        layer.style.inset = '0';
+        layer.style.zIndex = '90';
+        layer.style.pointerEvents = 'none';
+        layer.style.opacity = '0.16';
+        layer.style.backgroundRepeat = 'repeat';
+        layer.style.backgroundPosition = '0 0';
+        document.body.appendChild(layer);
+    }
+    return layer;
+}
+
+function formatNow() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+}
+
+function buildWatermarkImage(text) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 420;
+    canvas.height = 240;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(-Math.PI / 7);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '16px Microsoft YaHei';
+    ctx.fillStyle = 'rgba(60, 60, 60, 0.38)';
+    ctx.fillText(text, 0, 0);
+    return canvas.toDataURL('image/png');
+}
+
+function applyDynamicWatermark(settings) {
+    const enabled = !!settings?.watermark_enabled;
+    const existing = document.getElementById('globalWatermarkLayer');
+
+    if (!enabled) {
+        if (watermarkTimer) {
+            clearInterval(watermarkTimer);
+            watermarkTimer = null;
+        }
+        if (existing) existing.remove();
+        return;
+    }
+
+    const user = getCurrentUser();
+    const username = user?.username || 'unknown';
+    const displayName = user?.display_name || user?.username || '-';
+    const org = user?.organization || '-';
+
+    const render = () => {
+        const layer = ensureWatermarkLayer();
+        const text = `${username} | ${displayName} | ${org} | ${formatNow()}`;
+        layer.style.backgroundImage = `url(${buildWatermarkImage(text)})`;
+        layer.style.display = 'block';
+    };
+
+    render();
+    if (watermarkTimer) clearInterval(watermarkTimer);
+    watermarkTimer = setInterval(render, 1000);
 }
 
 /**
@@ -1235,6 +1313,16 @@ async function loadSystemSettings() {
             const requireApprovalCode = document.getElementById('requireApprovalCode');
             if (requireApprovalCode) {
                 requireApprovalCode.checked = settings.require_approval_code !== false;
+            }
+
+            const forceAgreementOnLogin = document.getElementById('forceAgreementOnLogin');
+            if (forceAgreementOnLogin) {
+                forceAgreementOnLogin.checked = !!settings.force_agreement_on_login;
+            }
+
+            const watermarkEnabled = document.getElementById('watermarkEnabled');
+            if (watermarkEnabled) {
+                watermarkEnabled.checked = !!settings.watermark_enabled;
             }
 
             const logRetentionDays = document.getElementById('logRetentionDays');
@@ -1297,6 +1385,16 @@ async function saveSystemSettings() {
             settings.require_approval_code = requireApprovalCode.checked;
         }
 
+        const forceAgreementOnLogin = document.getElementById('forceAgreementOnLogin');
+        if (forceAgreementOnLogin) {
+            settings.force_agreement_on_login = forceAgreementOnLogin.checked;
+        }
+
+        const watermarkEnabled = document.getElementById('watermarkEnabled');
+        if (watermarkEnabled) {
+            settings.watermark_enabled = watermarkEnabled.checked;
+        }
+
         const logRetentionDays = document.getElementById('logRetentionDays');
         if (logRetentionDays) {
             const daysValue = parseInt(logRetentionDays.value, 10);
@@ -1337,6 +1435,8 @@ async function saveSystemSettings() {
             
             // 更新页面标题
             _applySystemNameToPage(settings.system_name);
+            appState.systemSettings = result.data || settings;
+            applyDynamicWatermark(appState.systemSettings);
             
             closeModal(document.getElementById('systemSettingsModal'));
         } else {

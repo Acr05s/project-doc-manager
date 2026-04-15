@@ -120,6 +120,7 @@ function updateAuthUI() {
         const roleMap = {
             'admin': '系统管理员',
             'pmo': '项目管理组织',
+            'pmo_leader': 'PMO负责人',
             'project_admin': '项目经理',
             'contractor': '一般员工'
         };
@@ -318,16 +319,16 @@ async function openPermissionConfigModal() {
     modal.style.display = 'flex';
 
     const tbody = document.getElementById('permissionConfigBody');
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#999;">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">加载中...</td></tr>';
 
     // 强制刷新权限数据
     const permissions = await fetchMenuPermissions(true);
     if (!permissions) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#c00;">加载权限配置失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#c00;">加载权限配置失败</td></tr>';
         return;
     }
 
-    const roles = ['admin', 'pmo', 'project_admin', 'contractor'];
+    const roles = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'];
     let currentTab = 'sidebar'; // 默认显示系统菜单权限
 
     // 按系统真实菜单顺序展示，确保父子项紧邻
@@ -410,7 +411,7 @@ async function openPermissionConfigModal() {
         }
 
         if (!targetBody.children.length) {
-            targetBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#999;">暂无配置项</td></tr>';
+            targetBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无配置项</td></tr>';
         }
 
         // 更新标签页高亮
