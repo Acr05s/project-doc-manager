@@ -180,6 +180,38 @@ class UserManager:
                 # 迁移版本 4: 为外部暴露的表添加UUID列
                 if current_version < 4:
                     print("Running migration version 4: Adding UUID columns")
+
+                    # 兼容老库：先确保 messages 表存在，避免后续 ALTER TABLE 失败
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS messages (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            sender_id INTEGER,
+                            receiver_id INTEGER NOT NULL,
+                            title TEXT NOT NULL,
+                            content TEXT NOT NULL,
+                            type TEXT DEFAULT 'system',
+                            is_read INTEGER DEFAULT 0,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            related_id TEXT,
+                            related_type TEXT
+                        )
+                    ''')
+
+                    # 兼容老库：先确保 project_transfers 表存在
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS project_transfers (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            project_id TEXT NOT NULL,
+                            project_name TEXT,
+                            from_org TEXT,
+                            to_org TEXT NOT NULL,
+                            status TEXT DEFAULT 'pending',
+                            created_by INTEGER,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            accepted_by INTEGER,
+                            accepted_at TIMESTAMP
+                        )
+                    ''')
                     
                     # 为 users 表添加 uuid 列
                     cursor.execute('PRAGMA table_info(users)')
