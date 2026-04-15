@@ -1156,6 +1156,11 @@ export function setupEventListeners() {
         checkUpdateBtn.addEventListener('click', checkSystemUpdate);
     }
 
+    // 供模板内联 onchange 调用
+    if (typeof window !== 'undefined') {
+        window.toggleEmailConfigEditable = toggleEmailConfigEditable;
+    }
+
     // 设置标签页切换
     document.querySelectorAll('.settings-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1171,6 +1176,21 @@ export function setupEventListeners() {
                 tabContent.classList.add('active');
             }
         });
+    });
+}
+
+function toggleEmailConfigEditable(enabled) {
+    document.querySelectorAll('.email-config-input').forEach((el) => {
+        const shouldDisable = !enabled;
+        if (el.tagName === 'BUTTON') {
+            el.disabled = shouldDisable;
+            el.style.opacity = shouldDisable ? '0.6' : '';
+            el.style.cursor = shouldDisable ? 'not-allowed' : '';
+        } else {
+            el.disabled = shouldDisable;
+            el.style.backgroundColor = shouldDisable ? '#f3f4f6' : '';
+            el.style.color = shouldDisable ? '#999' : '';
+        }
     });
 }
 
@@ -1325,11 +1345,7 @@ async function loadSystemSettings() {
             const emailNotificationEnabled = document.getElementById('emailNotificationEnabled');
             if (emailNotificationEnabled) {
                 emailNotificationEnabled.checked = !!settings.email_notification_enabled;
-            }
-
-            const requireApprovalCode = document.getElementById('requireApprovalCode');
-            if (requireApprovalCode) {
-                requireApprovalCode.checked = settings.require_approval_code !== false;
+                toggleEmailConfigEditable(emailNotificationEnabled.checked);
             }
 
             const forceAgreementOnLogin = document.getElementById('forceAgreementOnLogin');
@@ -1366,6 +1382,23 @@ async function loadSystemSettings() {
             const systemTimezone = document.getElementById('systemTimezone');
             if (systemTimezone) {
                 systemTimezone.value = settings.timezone || 'Asia/Shanghai';
+            }
+
+            const passwordMinLength = document.getElementById('passwordMinLength');
+            if (passwordMinLength) {
+                passwordMinLength.value = Number(settings.password_min_length ?? 8);
+            }
+            const passwordRequireLetterDigit = document.getElementById('passwordRequireLetterDigit');
+            if (passwordRequireLetterDigit) {
+                passwordRequireLetterDigit.checked = settings.password_require_letter_digit !== false;
+            }
+            const approvalCodeMustDifferFromPassword = document.getElementById('approvalCodeMustDifferFromPassword');
+            if (approvalCodeMustDifferFromPassword) {
+                approvalCodeMustDifferFromPassword.checked = settings.approval_code_must_differ_from_password !== false;
+            }
+            const passwordExpireDays = document.getElementById('passwordExpireDays');
+            if (passwordExpireDays) {
+                passwordExpireDays.value = Number(settings.password_expire_days ?? 0);
             }
 
             // 填充邮件配置
@@ -1412,11 +1445,8 @@ async function saveSystemSettings() {
         if (emailNotificationEnabled) {
             settings.email_notification_enabled = emailNotificationEnabled.checked;
         }
-
-        const requireApprovalCode = document.getElementById('requireApprovalCode');
-        if (requireApprovalCode) {
-            settings.require_approval_code = requireApprovalCode.checked;
-        }
+        // 审批安全码默认关闭，不在日常设置流程中暴露
+        settings.require_approval_code = false;
 
         const forceAgreementOnLogin = document.getElementById('forceAgreementOnLogin');
         if (forceAgreementOnLogin) {
@@ -1447,6 +1477,23 @@ async function saveSystemSettings() {
         const systemTimezone = document.getElementById('systemTimezone');
         if (systemTimezone) {
             settings.timezone = systemTimezone.value || 'Asia/Shanghai';
+        }
+
+        const passwordMinLength = document.getElementById('passwordMinLength');
+        if (passwordMinLength) {
+            settings.password_min_length = Math.max(6, parseInt(passwordMinLength.value, 10) || 8);
+        }
+        const passwordRequireLetterDigit = document.getElementById('passwordRequireLetterDigit');
+        if (passwordRequireLetterDigit) {
+            settings.password_require_letter_digit = passwordRequireLetterDigit.checked;
+        }
+        const approvalCodeMustDifferFromPassword = document.getElementById('approvalCodeMustDifferFromPassword');
+        if (approvalCodeMustDifferFromPassword) {
+            settings.approval_code_must_differ_from_password = approvalCodeMustDifferFromPassword.checked;
+        }
+        const passwordExpireDays = document.getElementById('passwordExpireDays');
+        if (passwordExpireDays) {
+            settings.password_expire_days = Math.max(0, parseInt(passwordExpireDays.value, 10) || 0);
         }
 
         // SMTP 邮件配置

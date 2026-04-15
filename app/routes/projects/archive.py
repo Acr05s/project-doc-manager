@@ -534,7 +534,10 @@ def approve_archive_request(project_id):
         # 检查系统设置是否要求审批安全码
         from app.routes.settings import load_settings
         settings = load_settings()
-        require_code = settings.get('require_approval_code', True)
+        require_code = settings.get('require_approval_code', False)
+        code_diff_pwd = settings.get('approval_code_must_differ_from_password', True)
+        min_len = int(settings.get('password_min_length', 8) or 8)
+        require_mix = bool(settings.get('password_require_letter_digit', True))
 
         if require_code and not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
@@ -559,8 +562,12 @@ def approve_archive_request(project_id):
                     return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
                 if not new_approval_code:
                     return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 200
-                if len(new_approval_code) < 8 or not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code):
-                    return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
+                if len(new_approval_code) < min_len:
+                    return jsonify({'status': 'error', 'message': f'审批安全码需至少{min_len}位'}), 400
+                if require_mix and (not any(c.isalpha() for c in new_approval_code) or not any(c.isdigit() for c in new_approval_code)):
+                    return jsonify({'status': 'error', 'message': f'审批安全码需至少{min_len}位，且必须包含字母和数字'}), 400
+                if code_diff_pwd and check_password_hash(approver.password_hash, new_approval_code):
+                    return jsonify({'status': 'error', 'message': '审批安全码不能与登录密码相同'}), 400
                 user_manager.update_approval_code(actual_approver_id, generate_password_hash(new_approval_code), needs_change=0)
             elif not approver.approval_code_hash or not check_password_hash(approver.approval_code_hash, approval_code):
                 return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400

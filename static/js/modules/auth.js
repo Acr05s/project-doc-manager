@@ -358,6 +358,7 @@ async function openPermissionConfigModal() {
             'userApprovalBtn',
             'archiveApprovalBtn',
             'approvalHistoryBtn',
+            'logManagementMenuItem',
             'userManagementMenuItem',
             'orgManagementMenuItem',
             'projectManagementMenuItem'

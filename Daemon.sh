@@ -23,6 +23,7 @@ LOG_DIR="$APP_DIR/logs"
 PID_FILE="$APP_DIR/.server.pid"
 PORT=5000
 THREADS=10
+HTTP_PROXY_OPT=""
 
 # 显示帮助信息
 show_help() {
@@ -42,7 +43,7 @@ show_help() {
     echo "  logs        View server logs (tail -f)"
     echo "  log         View recent logs (last 50 lines)"
     echo "  upgrade     Upgrade to latest version (git pull + restart)"
-    echo "  migrate     Migrate from main branch to target branch (auto backup + DB migrate)"
+    echo "  migrate     Migrate from current branch to target branch (auto backup + DB migrate)"
     echo "  enable      Install as system service (auto-start on boot)"
     echo "  disable     Remove system service"
     echo "  service     View service status"
@@ -53,13 +54,15 @@ show_help() {
     echo "Options:"
     echo "  -p, --port PORT     Set server port (default: 5000)"
     echo "  -t, --threads N     Set thread count (default: 10)"
+    echo "  -c, --http-proxy URL  Set HTTP/HTTPS proxy for git operations"
     echo ""
     echo "Examples:"
     echo "  ./Daemon.sh start           # Start server"
     echo "  ./Daemon.sh start -p 8080   # Start on port 8080"
     echo "  ./Daemon.sh install         # Install dependencies"
     echo "  ./Daemon.sh upgrade         # Upgrade to latest version"
-    echo "  ./Daemon.sh migrate                       # Migrate to feature/security-enhancements"
+    echo "  ./Daemon.sh upgrade -c http://192.168.100.2:7890"
+    echo "  ./Daemon.sh migrate                       # Migrate to main"
     echo "  ./Daemon.sh migrate feature/xxx            # Migrate to specified branch"
     echo "  ./Daemon.sh logs            # View logs in real-time"
     echo "  ./Daemon.sh install-lo      # Install LibreOffice headless"
@@ -439,6 +442,17 @@ cmd_upgrade() {
     
     # 保存当前服务器状态
     local WAS_RUNNING=false
+    local DB_BACKUP_FILE="$APP_DIR/data/users.db.upgrade.bak"
+    local SETTINGS_BACKUP_FILE="$APP_DIR/settings.json.upgrade.bak"
+
+    # 先备份运行时数据，避免 git 误覆盖
+    if [ -f "$APP_DIR/data/users.db" ]; then
+        cp "$APP_DIR/data/users.db" "$DB_BACKUP_FILE" 2>/dev/null || true
+    fi
+    if [ -f "$APP_DIR/settings.json" ]; then
+        cp "$APP_DIR/settings.json" "$SETTINGS_BACKUP_FILE" 2>/dev/null || true
+    fi
+
     if [ -f "$PID_FILE" ]; then
         PID=$(cat "$PID_FILE")
         if ps -p "$PID" > /dev/null 2>&1; then
@@ -465,13 +479,16 @@ cmd_upgrade() {
     fi
     
     echo -e "${BLUE}Current branch: $CURRENT_BRANCH${NC}"
+    if [ -n "$HTTP_PROXY_OPT" ]; then
+        echo -e "${BLUE}Git proxy: $HTTP_PROXY_OPT${NC}"
+    fi
     
-    if git pull --rebase origin "$CURRENT_BRANCH"; then
+    if HTTP_PROXY="$HTTP_PROXY_OPT" HTTPS_PROXY="$HTTP_PROXY_OPT" git pull --rebase origin "$CURRENT_BRANCH"; then
         echo -e "${GREEN}[OK] Code updated successfully!${NC}"
     else
         # 如果 rebase 失败，尝试使用 merge
         echo -e "${YELLOW}[WARN] Rebase failed, trying merge...${NC}"
-        if git pull --no-rebase origin "$CURRENT_BRANCH"; then
+        if HTTP_PROXY="$HTTP_PROXY_OPT" HTTPS_PROXY="$HTTP_PROXY_OPT" git pull --no-rebase origin "$CURRENT_BRANCH"; then
             echo -e "${GREEN}[OK] Code updated successfully (merged)!${NC}"
         else
             echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
@@ -482,6 +499,16 @@ cmd_upgrade() {
             fi
             exit 1
         fi
+    fi
+
+    # 升级后恢复运行时数据（以服务器本地为准）
+    if [ -f "$DB_BACKUP_FILE" ]; then
+        cp "$DB_BACKUP_FILE" "$APP_DIR/data/users.db" 2>/dev/null || true
+        rm -f "$DB_BACKUP_FILE" 2>/dev/null || true
+    fi
+    if [ -f "$SETTINGS_BACKUP_FILE" ]; then
+        cp "$SETTINGS_BACKUP_FILE" "$APP_DIR/settings.json" 2>/dev/null || true
+        rm -f "$SETTINGS_BACKUP_FILE" 2>/dev/null || true
     fi
     
     # 清除Python缓存
@@ -508,7 +535,7 @@ cmd_upgrade() {
 
 # 自动迁移分支（从 main 迁移到目标分支，含数据库迁移）
 cmd_migrate() {
-    local TARGET_BRANCH="${1:-feature/security-enhancements}"
+    local TARGET_BRANCH="${1:-main}"
 
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  Branch Migration Tool${NC}"
@@ -533,6 +560,9 @@ cmd_migrate() {
     CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null)
     echo -e "${BLUE}Current branch : ${CURRENT_BRANCH}${NC}"
     echo -e "${BLUE}Target  branch : ${TARGET_BRANCH}${NC}"
+    if [ -n "$HTTP_PROXY_OPT" ]; then
+        echo -e "${BLUE}Git proxy      : ${HTTP_PROXY_OPT}${NC}"
+    fi
     echo ""
 
     if [ "$CURRENT_BRANCH" = "$TARGET_BRANCH" ]; then
@@ -595,7 +625,7 @@ cmd_migrate() {
 
     # =============== 3. Fetch 远程分支 ===============
     echo -e "${YELLOW}[3/7] Fetching remote branches...${NC}"
-    if ! git fetch --all --prune; then
+    if ! HTTP_PROXY="$HTTP_PROXY_OPT" HTTPS_PROXY="$HTTP_PROXY_OPT" git fetch --all --prune; then
         echo -e "${RED}[ERROR] git fetch failed! Check your network.${NC}"
         rollback_migrate "$WAS_RUNNING"
         exit 1
@@ -614,8 +644,8 @@ cmd_migrate() {
             exit 1
         fi
         # 拉取最新代码
-        git pull origin "$TARGET_BRANCH" --ff-only 2>/dev/null || \
-        git pull origin "$TARGET_BRANCH" --no-rebase 2>/dev/null || true
+        HTTP_PROXY="$HTTP_PROXY_OPT" HTTPS_PROXY="$HTTP_PROXY_OPT" git pull origin "$TARGET_BRANCH" --ff-only 2>/dev/null || \
+        HTTP_PROXY="$HTTP_PROXY_OPT" HTTPS_PROXY="$HTTP_PROXY_OPT" git pull origin "$TARGET_BRANCH" --no-rebase 2>/dev/null || true
     elif git show-ref --verify --quiet "refs/remotes/origin/$TARGET_BRANCH" 2>/dev/null; then
         echo -e "${BLUE}  Remote branch found, creating local tracking branch...${NC}"
         if ! git checkout -b "$TARGET_BRANCH" "origin/$TARGET_BRANCH"; then
@@ -990,6 +1020,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -t|--threads)
             THREADS="$2"
+            shift 2
+            ;;
+        -c|--http-proxy)
+            HTTP_PROXY_OPT="$2"
             shift 2
             ;;
         -h|--help)

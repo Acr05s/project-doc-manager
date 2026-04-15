@@ -460,7 +460,8 @@ body {
     padding: 10px 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     position: relative;
-    z-index: 50;
+    z-index: 10450;
+    overflow: visible;
 }
 
 .cycle-nav-list {

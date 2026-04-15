@@ -14,6 +14,8 @@ import {
     fetchAdminLogs
 } from './api.js';
 import { authState } from './auth.js';
+import { appState } from './app-state.js';
+import { formatDateTimeDisplay } from './utils.js';
 import { showNotification, showConfirmModal, showInputModal } from './ui.js';
 
 const roleMap = {
@@ -845,9 +847,11 @@ export async function loadLogManagementList(append = false) {
         if (!append) tbody.innerHTML = '';
 
         result.logs.forEach(log => {
+            const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
+            const displayTime = formatDateTimeDisplay(log.operation_time, tz);
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td style="padding:8px;border-bottom:1px solid #eee;white-space:nowrap;">${log.operation_time || '-'}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;white-space:nowrap;">${displayTime}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${log.username || '-'}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${log.operation_type || '-'}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${log.details || ''}">${log.details || '-'}</td>

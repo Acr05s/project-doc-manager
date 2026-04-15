@@ -23,9 +23,35 @@ def load_user(user_id):
     return user_manager.get_user_by_id(int(user_id))
 
 
-def is_strong_password(password):
-    if not password or len(password) < 8:
+def _get_security_settings():
+    """读取系统安全设置，失败时回退到默认值。"""
+    defaults = {
+        'password_min_length': 8,
+        'password_require_letter_digit': True,
+        'approval_code_must_differ_from_password': True,
+        'require_approval_code': False,
+    }
+    try:
+        from app.routes.settings import load_settings
+        settings = load_settings() or {}
+        defaults.update({
+            'password_min_length': int(settings.get('password_min_length', defaults['password_min_length']) or defaults['password_min_length']),
+            'password_require_letter_digit': bool(settings.get('password_require_letter_digit', defaults['password_require_letter_digit'])),
+            'approval_code_must_differ_from_password': bool(settings.get('approval_code_must_differ_from_password', defaults['approval_code_must_differ_from_password'])),
+            'require_approval_code': bool(settings.get('require_approval_code', defaults['require_approval_code'])),
+        })
+    except Exception:
+        pass
+    if defaults['password_min_length'] < 6:
+        defaults['password_min_length'] = 6
+    return defaults
+
+
+def is_strong_password(password, min_length=8, require_letter_digit=True):
+    if not password or len(password) < min_length:
         return False
+    if not require_letter_digit:
+        return True
     return bool(re.search(r'[A-Za-z]', password) and re.search(r'[0-9]', password))
 
 
@@ -54,6 +80,23 @@ def _apply_brute_force_ban(ip: str, failed: int):
             label = '24 小时' if minutes >= 1440 else f'{minutes} 分钟'
             return f'登录失败次数过多，IP 已被临时封禁 {label}'
     return None
+
+
+def _parse_time_safe(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip().replace('T', ' ')
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text, fmt)
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
@@ -100,9 +143,18 @@ def login():
             user_manager.add_operation_log(user.id, user.username, 'login', ip_address=ip)
             user_manager.add_login_attempt(username, ip, True)
             user_manager.clear_failed_login_attempts(ip)
+
+            security = _get_security_settings()
+            expire_days = int((security or {}).get('password_expire_days', 0) or 0)
+            pwd_expired = False
+            if expire_days > 0:
+                base_time = _parse_time_safe(getattr(user, 'created_at', None))
+                if base_time is not None:
+                    pwd_expired = (datetime.now() - base_time).days >= expire_days
+
             return jsonify({
                 'status': 'success',
-                'message': '登录成功',
+                'message': '登录成功，请尽快修改密码' if pwd_expired else '登录成功',
                 'user': {
                     'id': user.uuid,
                     'username': user.username,
@@ -110,7 +162,12 @@ def login():
                     'organization': user.organization,
                     'status': user.status,
                     'email': user.email,
-                    'display_name': user.display_name
+                    'display_name': user.display_name,
+                    'password_expired': pwd_expired
+                },
+                'security': {
+                    'password_expire_days': expire_days,
+                    'password_expired': pwd_expired
                 }
             })
         else:
@@ -166,8 +223,17 @@ def register():
     elif not organization_name:
         return jsonify({'status': 'error', 'message': '请选择或输入承建单位'})
 
-    if len(password) < 6:
-        return jsonify({'status': 'error', 'message': '密码长度至少6位'})
+    security = _get_security_settings()
+    min_len = int(security.get('password_min_length', 8) or 8)
+    require_mix = bool(security.get('password_require_letter_digit', True))
+
+    if len(password) < min_len:
+        return jsonify({'status': 'error', 'message': f'密码长度至少{min_len}位'})
+
+    if not is_strong_password(password, min_len, require_mix):
+        if require_mix:
+            return jsonify({'status': 'error', 'message': f'密码需至少{min_len}位，且必须包含字母和数字'})
+        return jsonify({'status': 'error', 'message': f'密码需至少{min_len}位'})
 
     if password != password_confirm:
         return jsonify({'status': 'error', 'message': '两次输入的密码不一致'})
@@ -544,10 +610,16 @@ def change_current_user_password():
     new_password = data.get('new_password', '')
     if not old_password or not new_password:
         return jsonify({'status': 'error', 'message': '请填写旧密码和新密码'})
-    if len(new_password) < 6:
-        return jsonify({'status': 'error', 'message': '新密码长度至少6位'})
-    if not is_strong_password(new_password):
-        return jsonify({'status': 'error', 'message': '新密码需至少8位，且必须包含字母和数字'})
+    security = _get_security_settings()
+    min_len = int(security.get('password_min_length', 8) or 8)
+    require_mix = bool(security.get('password_require_letter_digit', True))
+
+    if len(new_password) < min_len:
+        return jsonify({'status': 'error', 'message': f'新密码长度至少{min_len}位'})
+    if not is_strong_password(new_password, min_len, require_mix):
+        if require_mix:
+            return jsonify({'status': 'error', 'message': f'新密码需至少{min_len}位，且必须包含字母和数字'})
+        return jsonify({'status': 'error', 'message': f'新密码需至少{min_len}位'})
     user = user_manager.get_user_by_id(current_user.id)
     if not check_password_hash(user.password_hash, old_password):
         return jsonify({'status': 'error', 'message': '旧密码错误'})
@@ -575,8 +647,15 @@ def verify_current_user_approval_code():
             return jsonify({'status': 'error', 'message': '审批安全码验证失败'}), 400
         if not new_code:
             return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需重新设置'}), 400
-        if not is_strong_password(new_code):
-            return jsonify({'status': 'error', 'message': '审批安全码需至少8位，且必须包含字母和数字'}), 400
+        security = _get_security_settings()
+        min_len = int(security.get('password_min_length', 8) or 8)
+        require_mix = bool(security.get('password_require_letter_digit', True))
+        if not is_strong_password(new_code, min_len, require_mix):
+            if require_mix:
+                return jsonify({'status': 'error', 'message': f'审批安全码需至少{min_len}位，且必须包含字母和数字'}), 400
+            return jsonify({'status': 'error', 'message': f'审批安全码需至少{min_len}位'}), 400
+        if security.get('approval_code_must_differ_from_password', True) and check_password_hash(user.password_hash, new_code):
+            return jsonify({'status': 'error', 'message': '审批安全码不能与登录密码相同'}), 400
         new_hash = generate_password_hash(new_code)
         result = user_manager.update_approval_code(current_user.id, new_hash, needs_change=0)
         if result['status'] == 'success':
@@ -597,8 +676,13 @@ def change_current_user_approval_code():
     new_code = data.get('new_code', '')
     if not current_code or not new_code:
         return jsonify({'status': 'error', 'message': '请输入当前审批码和新审批码'}), 400
-    if not is_strong_password(new_code):
-        return jsonify({'status': 'error', 'message': '新审批安全码需至少8位，且必须包含字母和数字'}), 400
+    security = _get_security_settings()
+    min_len = int(security.get('password_min_length', 8) or 8)
+    require_mix = bool(security.get('password_require_letter_digit', True))
+    if not is_strong_password(new_code, min_len, require_mix):
+        if require_mix:
+            return jsonify({'status': 'error', 'message': f'新审批安全码需至少{min_len}位，且必须包含字母和数字'}), 400
+        return jsonify({'status': 'error', 'message': f'新审批安全码需至少{min_len}位'}), 400
     user = user_manager.get_user_by_id(current_user.id)
     if not user:
         return jsonify({'status': 'error', 'message': '用户不存在'}), 404
@@ -608,6 +692,9 @@ def change_current_user_approval_code():
     else:
         if not user.approval_code_hash or not check_password_hash(user.approval_code_hash, current_code):
             return jsonify({'status': 'error', 'message': '当前审批码错误'}), 400
+    if security.get('approval_code_must_differ_from_password', True) and check_password_hash(user.password_hash, new_code):
+        return jsonify({'status': 'error', 'message': '审批安全码不能与登录密码相同'}), 400
+
     new_hash = generate_password_hash(new_code)
     result = user_manager.update_approval_code(current_user.id, new_hash, needs_change=0)
     if result['status'] == 'success':

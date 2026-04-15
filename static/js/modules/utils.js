@@ -25,6 +25,39 @@ export function formatDate(dateString) {
 }
 
 /**
+ * 统一格式化日期时间：yyyy-MM-dd HH:mm:ss（无 T）
+ */
+export function formatDateTimeDisplay(dateString, timezone = 'Asia/Shanghai') {
+    if (!dateString) return '-';
+    let dateObj = null;
+
+    if (dateString instanceof Date) {
+        dateObj = dateString;
+    } else {
+        const normalized = String(dateString).replace(' ', 'T');
+        dateObj = new Date(normalized);
+    }
+
+    if (Number.isNaN(dateObj.getTime())) {
+        return String(dateString).replace('T', ' ');
+    }
+
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: timezone || 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).formatToParts(dateObj);
+
+    const get = (type) => parts.find(p => p.type === type)?.value || '00';
+    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
+/**
  * 生成唯一ID
  */
 export function generateId() {

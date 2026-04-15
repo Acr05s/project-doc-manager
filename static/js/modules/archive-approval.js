@@ -5,6 +5,8 @@
 import { showNotification, showInputModal } from './ui.js';
 import { getCurrentUser, authState } from './auth.js';
 import { getArchiveApprovers } from './api.js';
+import { appState } from './app-state.js';
+import { formatDateTimeDisplay } from './utils.js';
 
 let currentApprovalIdForConfirm = null;
 let currentApprovalActionForConfirm = null;
@@ -100,6 +102,8 @@ async function loadPendingArchiveApprovals() {
             // 项目名称显示：项目名称@承建单位
             const projectDisplayName = (approval.project_name || approval.project_id || '-') + (approval.party_b ? '@' + approval.party_b : '');
             const typeLabel = approval.request_type === 'not_involved' ? '🚫 不涉及' : '📦 归档';
+            const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
+            const createdAt = formatDateTimeDisplay(approval.created_at, tz);
 
             // 创建数据属性以存储完整的批准对象（Base64编码，支持中文）
             const approvalDataBase64 = btoa(encodeURIComponent(JSON.stringify(approval)));
@@ -110,7 +114,7 @@ async function loadPendingArchiveApprovals() {
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.cycle || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${escapeHtml(docDisplay || '-')}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd;">${escapeHtml(approval.requester_username || '-')}</td>`;
-            html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${approval.created_at || '-'}</td>`;
+            html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${createdAt}</td>`;
             html += `<td style="padding:10px; border:1px solid #ddd; font-size:12px;">${stageDisplay}</td>`;
             html += '<td style="padding:10px; border:1px solid #ddd; text-align:center;">';
             html += `<button class="btn btn-sm btn-success" onclick="openArchiveApprovalConfirmModal('${escapeHtml(approval.id)}', 'approve', '${approvalDataBase64}')" style="margin-right:5px;">批准</button>`;

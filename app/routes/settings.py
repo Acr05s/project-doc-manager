@@ -27,10 +27,22 @@ def load_settings():
         'version': '1.0.0',
         'author': '项目验收团队',
         'description': '项目全生命周期文档管理系统',
+        'email_notification_enabled': False,
+        'require_approval_code': False,
         'force_agreement_on_login': False,
         'agreement_markdown': '# 使用与保密协议\n\n## 一、系统使用协议\n\n1. 本系统仅用于项目资料管理、审批与验收相关工作，禁止用于与业务无关的用途。\n2. 登录账户仅限本人使用，不得借用、共享或转交他人操作。\n3. 用户需对自身操作行为负责，系统将保留完整操作日志用于审计追溯。\n\n## 二、保密协议\n\n1. 系统中的项目资料、审批信息、组织信息及用户数据均属于受控信息。\n2. 未经授权，不得复制、外传、截图传播或对外披露任何涉密内容。\n3. 如发现数据泄露风险、账号异常或违规使用行为，应立即上报管理员。\n\n> 继续登录即视为您已阅读并同意上述使用与保密条款。',
+        'password_min_length': 8,
+        'password_require_letter_digit': True,
+        'approval_code_must_differ_from_password': True,
+        'password_expire_days': 0,
         'watermark_enabled': False,
         'watermark_opacity': 15,
+        'smtp_host': '',
+        'smtp_port': 465,
+        'smtp_username': '',
+        'smtp_password': '',
+        'smtp_sender': '',
+        'smtp_encryption': 'ssl',
         'log_retention_days': 30,
         'timezone': 'Asia/Shanghai'
     }
@@ -202,7 +214,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)
@@ -329,6 +341,7 @@ DEFAULT_MENU_PERMISSIONS = {
     'userApprovalBtn': {'label': '👤 用户审核', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'archiveApprovalBtn': {'label': '📋 文档归档审批', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'logManagementMenuItem': {'label': '📝 操作日志', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], 'group': 'sidebar'},
     'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'orgManagementMenuItem': {'label': '🏢 承建单位管理', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'sidebar'},
     'projectManagementMenuItem': {'label': '📁 项目管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},

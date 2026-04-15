@@ -730,6 +730,7 @@
                 <a href="#" class="sidebar-menu-item" id="userApprovalBtn"><span>👤 用户审核</span><span class="menu-badge" id="userApprovalBadge" style="display:none;"></span></a>
                 <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn"><span>📋 文档归档审批</span><span class="menu-badge" id="archiveApprovalBadge" style="display:none;"></span></a>
                 <a href="#" class="sidebar-menu-item" id="approvalHistoryBtn"><span>📊 审批历史</span></a>
+                <a href="#" class="sidebar-menu-item" id="logManagementMenuItem"><span>📝 操作日志</span></a>
                 <a href="#" class="sidebar-menu-item" id="userManagementMenuItem"><span>👤 用户管理</span></a>
                 <a href="#" class="sidebar-menu-item" id="orgManagementMenuItem"><span>🏢 承建单位管理</span></a>
                 <a href="#" class="sidebar-menu-item" id="projectManagementMenuItem"><span>📁 项目管理</span></a>
@@ -1458,6 +1459,7 @@
             <div class="settings-tabs">
                 <button class="settings-tab-btn active" data-tab="basic">基本信息</button>
                 <button class="settings-tab-btn" data-tab="features">功能设置</button>
+                <button class="settings-tab-btn" data-tab="security">安全设置</button>
                 <button class="settings-tab-btn" data-tab="email">邮件配置</button>
                 <button class="settings-tab-btn" data-tab="update">系统更新</button>
             </div>
@@ -1492,17 +1494,13 @@
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="emailNotificationEnabled" style="width: 18px; height: 18px;">
+                            <input type="checkbox" id="emailNotificationEnabled" style="width: 18px; height: 18px;" onchange="window.toggleEmailConfigEditable && window.toggleEmailConfigEditable(this.checked)">
                             <span>开启邮件通知（注册/审核结果邮件提醒）</span>
                         </label>
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，系统将在用户注册、审核通过/拒绝时发送邮件通知（需配置 SMTP）</small>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="requireApprovalCode" style="width: 18px; height: 18px;" checked>
-                            <span>审批时要求输入安全码</span>
-                        </label>
-                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">关闭后，审批归档操作将不再要求输入审批安全码验证</small>
+                        <small style="color: #666; font-size: 12px; display: block;">审批安全码默认关闭（按需开启），日常流程无需修改该项。</small>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -1560,6 +1558,35 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 安全设置标签页 -->
+            <div id="settingsTab-security" class="settings-tab-content">
+                <div class="settings-section">
+                    <h3>系统安全设置</h3>
+                    <div class="form-group">
+                        <label for="passwordMinLength">密码最小长度：</label>
+                        <input type="number" id="passwordMinLength" class="form-control" min="6" max="64" value="8">
+                        <small style="color: #666; font-size: 12px;">用于注册、改密、安全码设置的最小长度约束</small>
+                    </div>
+                    <div class="form-group" style="margin-top: 14px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="passwordRequireLetterDigit" style="width: 18px; height: 18px;" checked>
+                            <span>密码必须同时包含字母和数字</span>
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-top: 14px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="approvalCodeMustDifferFromPassword" style="width: 18px; height: 18px;" checked>
+                            <span>审批安全码必须与登录密码不同</span>
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-top: 14px;">
+                        <label for="passwordExpireDays">密码有效期（天）：</label>
+                        <input type="number" id="passwordExpireDays" class="form-control" min="0" max="3650" value="0">
+                        <small style="color: #666; font-size: 12px;">0 表示不限制有效期</small>
+                    </div>
+                </div>
+            </div>
             
             <!-- 邮件配置标签页 -->
             <div id="settingsTab-email" class="settings-tab-content">
@@ -1568,34 +1595,34 @@
                     <small style="color: #999; display: block; margin-bottom: 15px;">配置邮件服务器后，系统可发送审批通知、用户注册通知等邮件</small>
                     <div class="form-group">
                         <label for="smtpHost">SMTP 服务器地址：</label>
-                        <input type="text" id="smtpHost" class="form-control" placeholder="如 smtp.qq.com、smtp.163.com">
+                        <input type="text" id="smtpHost" class="form-control email-config-input" placeholder="如 smtp.qq.com、smtp.163.com">
                     </div>
                     <div class="form-group">
                         <label for="smtpPort">SMTP 端口：</label>
-                        <input type="number" id="smtpPort" class="form-control" placeholder="465" min="1" max="65535" value="465">
+                        <input type="number" id="smtpPort" class="form-control email-config-input" placeholder="465" min="1" max="65535" value="465">
                     </div>
                     <div class="form-group">
                         <label for="smtpUsername">SMTP 用户名（邮箱地址）：</label>
-                        <input type="text" id="smtpUsername" class="form-control" placeholder="your@email.com">
+                        <input type="text" id="smtpUsername" class="form-control email-config-input" placeholder="your@email.com">
                     </div>
                     <div class="form-group">
                         <label for="smtpPassword">SMTP 密码/授权码：</label>
-                        <input type="password" id="smtpPassword" class="form-control" placeholder="邮箱授权码或密码">
+                        <input type="password" id="smtpPassword" class="form-control email-config-input" placeholder="邮箱授权码或密码">
                     </div>
                     <div class="form-group">
                         <label for="smtpSender">发件人名称：</label>
-                        <input type="text" id="smtpSender" class="form-control" placeholder="项目资料管理平台">
+                        <input type="text" id="smtpSender" class="form-control email-config-input" placeholder="项目资料管理平台">
                     </div>
                     <div class="form-group">
                         <label for="smtpEncryption">加密方式：</label>
-                        <select id="smtpEncryption" class="form-control">
+                        <select id="smtpEncryption" class="form-control email-config-input">
                             <option value="ssl">SSL（推荐，端口465）</option>
                             <option value="tls">STARTTLS（端口587）</option>
                             <option value="none">不加密（端口25）</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-top: 15px;">
-                        <button type="button" class="btn btn-info" onclick="testSmtpConnection()">测试邮件连接</button>
+                        <button type="button" class="btn btn-info email-config-input" onclick="testSmtpConnection()">测试邮件连接</button>
                         <span id="smtpTestResult" style="margin-left: 10px; font-size: 13px;"></span>
                     </div>
                 </div>
