@@ -60,7 +60,11 @@ def get_next_stage_approvers(project_id, current_stage, approval_chain, project_
     org_match = next_stage_config.get('org_match')
 
     # 获取具有指定角色的所有活跃用户
-    approvers = user_manager.get_users_by_roles([required_role])
+    # pmo 阶段同时包含 pmo_leader（PMO负责人也是PMO成员，可参与PMO阶段审批）
+    roles_to_query = [required_role]
+    if required_role == 'pmo':
+        roles_to_query = ['pmo', 'pmo_leader']
+    approvers = user_manager.get_users_by_roles(roles_to_query)
     result = []
 
     for approver in approvers:

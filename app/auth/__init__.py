@@ -981,7 +981,7 @@ def admin_batch_delete_organizations():
 @auth_bp.route('/api/admin/logs', methods=['GET'])
 @login_required
 def admin_get_logs():
-    if current_user.role not in ('admin', 'pmo', 'project_admin', 'contractor'):
+    if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'):
         return jsonify({'status': 'error', 'message': '权限不足'}), 403
     limit = request.args.get('limit', 200, type=int)
     offset = request.args.get('offset', 0, type=int)
@@ -994,7 +994,7 @@ def admin_get_logs():
     elif current_user.role == 'project_admin':
         org_users = user_manager.get_users_by_organization(current_user.organization)
         user_ids = [u['id'] for u in org_users] if org_users else []
-    # admin / pmo 不限制 user_ids
+    # admin / pmo / pmo_leader 不限制 user_ids
 
     result = user_manager.get_operation_logs(
         limit=limit,
