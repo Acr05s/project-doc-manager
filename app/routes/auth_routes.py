@@ -11,6 +11,18 @@ auth_routes_bp = Blueprint('auth_routes', __name__, url_prefix='/api/auth')
 def check_auth_status():
     """检查认证状态"""
     if current_user.is_authenticated:
+        password_expired = False
+        password_expire_days = 0
+        try:
+            from app.routes.settings import load_settings
+            from app.models.user import user_manager
+            settings = load_settings()
+            password_expire_days = int(settings.get('password_expire_days', 0) or 0)
+            if password_expire_days > 0:
+                password_expired = user_manager.is_password_expired(current_user.id, password_expire_days)
+        except Exception:
+            pass
+
         return jsonify({
             'status': 'success',
             'user': {
@@ -20,7 +32,12 @@ def check_auth_status():
                 'organization': getattr(current_user, 'organization', None),
                 'status': getattr(current_user, 'status', 'active'),
                 'email': getattr(current_user, 'email', None),
-                'display_name': getattr(current_user, 'display_name', None)
+                'display_name': getattr(current_user, 'display_name', None),
+                'password_expired': password_expired
+            },
+            'security': {
+                'password_expire_days': password_expire_days,
+                'password_expired': password_expired
             }
         })
     else:

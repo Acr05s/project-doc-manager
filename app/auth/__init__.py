@@ -146,11 +146,7 @@ def login():
 
             security = _get_security_settings()
             expire_days = int((security or {}).get('password_expire_days', 0) or 0)
-            pwd_expired = False
-            if expire_days > 0:
-                base_time = _parse_time_safe(getattr(user, 'created_at', None))
-                if base_time is not None:
-                    pwd_expired = (datetime.now() - base_time).days >= expire_days
+            pwd_expired = user_manager.is_password_expired(user.id, expire_days) if expire_days > 0 else False
 
             return jsonify({
                 'status': 'success',

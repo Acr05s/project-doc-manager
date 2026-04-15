@@ -3,6 +3,14 @@
  * static/js/modules/profile.js
  */
 
+let forcePasswordChangeRequired = false;
+let forcePasswordChangeMessage = '';
+
+export function setForcePasswordChangeRequired(required, message = '') {
+    forcePasswordChangeRequired = !!required;
+    forcePasswordChangeMessage = message || '密码已过期，请先修改密码后再继续';
+}
+
 function showProfileNotice(message, type = 'info') {
     const div = document.createElement('div');
     div.textContent = message;
@@ -44,7 +52,11 @@ export async function openProfileModal() {
     if (profileConfirmApprovalCode) profileConfirmApprovalCode.value = '';
 
     // 切换到基本信息标签页
-    switchProfileTab('profile-basic');
+    switchProfileTab(forcePasswordChangeRequired ? 'profile-password' : 'profile-basic');
+
+    if (forcePasswordChangeRequired) {
+        showProfileNotice(forcePasswordChangeMessage, 'error');
+    }
 
     try {
         const resp = await fetch('/api/me');
@@ -71,6 +83,10 @@ export async function openProfileModal() {
 }
 
 export function closeProfileModal() {
+    if (forcePasswordChangeRequired) {
+        showProfileNotice(forcePasswordChangeMessage || '请先修改密码', 'error');
+        return;
+    }
     const modal = document.getElementById('profileModal');
     if (modal) {
         modal.classList.remove('show');
@@ -81,6 +97,11 @@ export function closeProfileModal() {
 export function switchProfileTab(tabId) {
     const modal = document.getElementById('profileModal');
     if (!modal) return;
+
+    if (forcePasswordChangeRequired && tabId !== 'profile-password') {
+        showProfileNotice(forcePasswordChangeMessage || '请先修改密码', 'error');
+        return;
+    }
 
     // 切换按钮 active 状态
     modal.querySelectorAll('.settings-tab-btn').forEach(btn => {
@@ -150,6 +171,7 @@ export async function changeProfilePassword() {
         const data = await resp.json();
         if (data.status === 'success') {
             showProfileNotice(data.message || '密码修改成功', 'success');
+            setForcePasswordChangeRequired(false);
             if (oldInput) oldInput.value = '';
             if (newInput) newInput.value = '';
             if (confirmInput) confirmInput.value = '';

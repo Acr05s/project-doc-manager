@@ -9,6 +9,8 @@ import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadIm
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 import { buildDisplayRequirementText, buildUploadAttributeSchema, getCustomAttributeDefinitions, getPredefinedAttributeLabelMap } from './attribute-definitions.js';
 
+let isUploadingDocument = false;
+
 // 辅助函数：转义HTML
 function escapeHtml(text) {
     if (!text) return '';
@@ -22,6 +24,11 @@ function escapeHtml(text) {
  */
 export async function handleUploadDocument(e) {
     e.preventDefault();
+
+    if (isUploadingDocument) {
+        showNotification('正在上传中，请勿重复提交', 'warning');
+        return;
+    }
     
     const files = elements.fileInput.files;
     if (files.length === 0) {
@@ -34,15 +41,29 @@ export async function handleUploadDocument(e) {
         return;
     }
     
-    const docDate = elements.docDate.value;
-    const signDate = elements.signDate.value;
-    const signer = elements.signer.value;
-    const hasSeal = elements.hasSeal.checked;
-    const partyASeal = elements.partyASeal.checked;
-    const partyBSeal = elements.partyBSeal.checked;
-    const otherSeal = elements.otherSeal.value;
+    const docDateEl = document.getElementById('docDate');
+    const signDateEl = document.getElementById('signDate');
+    const signerEl = document.getElementById('signer');
+    const hasSealEl = document.getElementById('hasSeal');
+    const partyASealEl = document.getElementById('partyASeal');
+    const partyBSealEl = document.getElementById('partyBSeal');
+    const otherSealEl = document.getElementById('otherSeal');
+
+    const docDate = docDateEl ? docDateEl.value : '';
+    const signDate = signDateEl ? signDateEl.value : '';
+    const signer = signerEl ? signerEl.value : '';
+    const hasSeal = hasSealEl ? hasSealEl.checked : false;
+    const partyASeal = partyASealEl ? partyASealEl.checked : false;
+    const partyBSeal = partyBSealEl ? partyBSealEl.checked : false;
+    const otherSeal = otherSealEl ? otherSealEl.value : '';
     
     showLoading(true);
+    isUploadingDocument = true;
+    const uploadBtn = document.getElementById('uploadBtn');
+    if (uploadBtn) {
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = '上传中...';
+    }
     
     try {
         let successCount = 0;
@@ -96,13 +117,13 @@ export async function handleUploadDocument(e) {
         if (successCount > 0) {
             showNotification(`成功上传 ${successCount} 个文件${errorCount > 0 ? `，${errorCount} 个失败` : ''}`, successCount === files.length ? 'success' : 'warning');
             elements.fileInput.value = '';
-            elements.docDate.value = '';
-            elements.signDate.value = '';
-            elements.signer.value = '';
-            elements.hasSeal.checked = false;
-            elements.partyASeal.checked = false;
-            elements.partyBSeal.checked = false;
-            elements.otherSeal.value = '';
+            if (docDateEl) docDateEl.value = '';
+            if (signDateEl) signDateEl.value = '';
+            if (signerEl) signerEl.value = '';
+            if (hasSealEl) hasSealEl.checked = false;
+            if (partyASealEl) partyASealEl.checked = false;
+            if (partyBSealEl) partyBSealEl.checked = false;
+            if (otherSealEl) otherSealEl.value = '';
             // 清空已上传文件列表
             const uploadedFilesList = document.getElementById('uploadedFilesList');
             if (uploadedFilesList) {
@@ -122,6 +143,11 @@ export async function handleUploadDocument(e) {
         showNotification('上传失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
+        isUploadingDocument = false;
+        if (uploadBtn) {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = '✅ 确认归档';
+        }
     }
 }
 
@@ -200,6 +226,8 @@ export function showRecognitionResult(fileName, recognitionData) {
     // 显示签字信息
     if (recognitionData.signer) {
         recognitionHtml += `<span class="recognition-tag signature">签字: ${recognitionData.signer}</span>`;
+    } else if (recognitionData.signature_detected && !recognitionData.no_signature) {
+        recognitionHtml += '<span class="recognition-tag signature">有签名待确认</span>';
     }
     
     // 显示盖章信息
@@ -5946,17 +5974,19 @@ export function initDragAndDrop() {
         fileInput.click();
     };
     
-    // 文件选择后实时上传，以便后台识别信息
+    // 文件选择后仅更新待上传列表，实际上传由“确认归档”触发
     fileInput.onchange = async (e) => {
         const files = e.target.files;
         if (files.length > 0) {
+            const uploadedFilesList = document.getElementById('uploadedFilesList');
+            if (uploadedFilesList) {
+                uploadedFilesList.innerHTML = '';
+            }
             // 显示文件信息
             for (const file of files) {
                 showUploadedFile(file);
                 console.log('选择的文件:', file.name);
             }
-            // 实时上传文件
-            await handleUploadDocument({ preventDefault: () => {} });
         }
     };
     
@@ -6183,19 +6213,28 @@ export async function smartRecognizeDocument() {
             }
         }
         
-        // 模拟智能识别结果（实际项目中应该调用后端API）
-        const mockRecognitionData = {
-            doc_date: new Date().toISOString().split('T')[0],
-            sign_date: new Date().toISOString().split('T')[0],
-            signer: '张三',
-            has_seal: true,
-            party_a_seal: true,
-            party_b_seal: false,
-            no_seal: false,
-            no_signature: false,
-            other_seal: '',
-            doc_number: '2026-001'
-        };
+        const files = elements.fileInput?.files;
+        if (!files || files.length === 0) {
+            showNotification('请先选择文件后再识别', 'error');
+            return;
+        }
+
+        const firstFile = files[0];
+        const formData = new FormData();
+        formData.append('file', firstFile);
+        formData.append('party_a', appState.projectConfig?.party_a || '');
+        formData.append('party_b', appState.projectConfig?.party_b || '');
+        formData.append('requirement', requirement || '');
+
+        const resp = await fetch('/api/documents/smart-recognize', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await resp.json();
+        if (result.status !== 'success' || !result.data) {
+            throw new Error(result.message || '识别失败');
+        }
+        const recognitionData = result.data;
         
         // 自动填充识别结果（动态查找元素）
         const setValue = (id, value) => {
@@ -6209,25 +6248,25 @@ export async function smartRecognizeDocument() {
             }
         };
         
-        setValue('docDate', mockRecognitionData.doc_date);
-        setValue('signDate', mockRecognitionData.sign_date);
-        setValue('signer', mockRecognitionData.signer);
-        setValue('hasSeal', mockRecognitionData.has_seal);
-        setValue('partyASeal', mockRecognitionData.party_a_seal);
-        setValue('partyBSeal', mockRecognitionData.party_b_seal);
-        setValue('noSeal', mockRecognitionData.no_seal);
-        setValue('noSignature', mockRecognitionData.no_signature);
-        setValue('otherSeal', mockRecognitionData.other_seal);
-        setValue('docNumber', mockRecognitionData.doc_number);
+        setValue('docDate', recognitionData.doc_date);
+        setValue('signDate', recognitionData.sign_date);
+        setValue('signer', recognitionData.signer);
+        setValue('hasSeal', recognitionData.has_seal);
+        setValue('partyASeal', recognitionData.party_a_seal);
+        setValue('partyBSeal', recognitionData.party_b_seal);
+        setValue('noSeal', recognitionData.no_seal);
+        setValue('noSignature', recognitionData.no_signature);
+        setValue('otherSeal', recognitionData.other_seal);
+        setValue('docNumber', recognitionData.doc_number);
         
         // 更新上传文件列表中的识别结果
         uploadedFileItems.forEach(item => {
             const fileName = item.dataset.filename;
-            showRecognitionResult(fileName, mockRecognitionData);
+            showRecognitionResult(fileName, recognitionData);
         });
         
         // 显示识别结果模态框
-        showRecognitionResultModal(uploadedFileItems[0].dataset.filename, mockRecognitionData);
+        showRecognitionResultModal(uploadedFileItems[0].dataset.filename, recognitionData);
         
         showNotification('智能识别成功', 'success');
     } catch (error) {
@@ -6277,7 +6316,7 @@ function showRecognitionResultModal(fileName, recognitionData) {
                     </div>
                     <div class="result-item">
                         <label>签字人:</label>
-                        <span>${recognitionData.signer || '未识别'}</span>
+                        <span>${recognitionData.signer || (recognitionData.signature_detected && !recognitionData.no_signature ? '有签名待确认' : '未识别')}</span>
                     </div>
                     <div class="result-item">
                         <label>已盖章:</label>

@@ -103,6 +103,34 @@ def register_security_hooks(app):
         except Exception:
             # 数据库尚未初始化等极端情况：不阻断请求
             pass
+
+        # 登录后全局密码过期强制校验（除改密相关接口外）
+        try:
+            from flask_login import current_user
+            if current_user.is_authenticated:
+                # 白名单：登录/登出、认证状态、个人信息读取、改密接口
+                is_allowed = (
+                    path.startswith('/static/')
+                    or path == '/login'
+                    or path == '/logout'
+                    or path == '/api/auth/status'
+                    or (path == '/api/me' and request.method.upper() == 'GET')
+                    or (path == '/api/me/password' and request.method.upper() == 'POST')
+                )
+                if not is_allowed:
+                    from app.routes.settings import load_settings
+                    settings = load_settings()
+                    expire_days = int(settings.get('password_expire_days', 0) or 0)
+                    if expire_days > 0 and user_manager.is_password_expired(current_user.id, expire_days):
+                        if path.startswith('/api/'):
+                            return jsonify({
+                                'status': 'password_expired',
+                                'message': f'密码已过期（超过 {expire_days} 天），请先修改密码后继续操作',
+                                'expire_days': expire_days
+                            }), 403
+                        return None
+        except Exception:
+            pass
         return None
 
     @app.after_request

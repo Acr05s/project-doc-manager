@@ -374,6 +374,13 @@ class UserManager:
                     FOREIGN KEY (created_by) REFERENCES users(id)
                 )
             ''')
+
+            # 兼容历史库：补充密码更新时间列
+            cursor.execute('PRAGMA table_info(users)')
+            user_columns = {row[1] for row in cursor.fetchall()}
+            if 'password_updated_at' not in user_columns:
+                cursor.execute('ALTER TABLE users ADD COLUMN password_updated_at TIMESTAMP')
+                cursor.execute('UPDATE users SET password_updated_at = created_at WHERE password_updated_at IS NULL')
             conn.commit()
     
     def _row_to_user(self, row):
@@ -662,11 +669,35 @@ class UserManager:
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
-                cursor.execute('UPDATE users SET password_hash = ? WHERE id = ?', (new_password_hash, user_id))
+                cursor.execute(
+                    'UPDATE users SET password_hash = ?, password_updated_at = ? WHERE id = ?',
+                    (new_password_hash, now_with_timezone().strftime('%Y-%m-%d %H:%M:%S'), user_id)
+                )
                 conn.commit()
                 return {'status': 'success', 'message': '密码已重置'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
+
+    def is_password_expired(self, user_id, expire_days):
+        """检查用户密码是否过期。expire_days<=0 表示不过期。"""
+        try:
+            if not expire_days or int(expire_days) <= 0:
+                return False
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT COALESCE(password_updated_at, created_at) FROM users WHERE id = ?',
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return False
+
+                ref_text = str(row[0]).replace('T', ' ').split('.')[0]
+                ref_time = datetime.strptime(ref_text, '%Y-%m-%d %H:%M:%S')
+                return (now_with_timezone().replace(tzinfo=None) - ref_time).days >= int(expire_days)
+        except Exception:
+            return False
 
     def update_approval_code(self, user_id, approval_code_hash, needs_change=0):
         """更新用户审批安全码"""

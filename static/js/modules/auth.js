@@ -25,6 +25,14 @@ export async function checkAuthStatus() {
             authState.needsApproval = result.user.status === 'pending';
             updateAuthUI();
             updateRoleBasedUI();
+
+            if (result.security?.password_expired || result.user?.password_expired) {
+                import('./profile.js').then(m => {
+                    m.setForcePasswordChangeRequired(true, '密码已过期，请先修改密码再继续操作');
+                    m.openProfileModal();
+                    m.switchProfileTab('profile-password');
+                });
+            }
             return true;
         } else {
             authState.isAuthenticated = false;
@@ -70,7 +78,17 @@ export async function login(username, password) {
                 authResolveCallback();
                 authResolveCallback = null;
             }
-            return { success: true, message: result.message, needsApproval: !!result.needs_approval };
+            const passwordExpired = !!(result.security?.password_expired || result.user?.password_expired);
+            if (passwordExpired) {
+                import('./profile.js').then(m => {
+                    m.setForcePasswordChangeRequired(true, '密码已过期，请先修改密码再继续操作');
+                    m.openProfileModal();
+                    m.switchProfileTab('profile-password');
+                });
+            } else {
+                import('./profile.js').then(m => m.setForcePasswordChangeRequired(false));
+            }
+            return { success: true, message: result.message, needsApproval: !!result.needs_approval, passwordExpired };
         } else {
             return { success: false, message: result.message };
         }

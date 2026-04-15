@@ -1983,6 +1983,7 @@ class DocumentManager:
                 'doc_date': '',
                 'sign_date': '',
                 'signer': '',
+                'signature_detected': False,
                 'has_seal': False,
                 'party_a_seal': False,
                 'party_b_seal': False,
@@ -2002,6 +2003,9 @@ class DocumentManager:
             else:
                 # 对于其他格式，尝试通用文本识别
                 result = self._recognize_text(file_path, party_a, party_b, attributes_to_recognize)
+
+            if 'signature_detected' not in result:
+                result['signature_detected'] = bool(result.get('signer')) and not bool(result.get('no_signature'))
             
             return {
                 'status': 'success',
@@ -2016,6 +2020,7 @@ class DocumentManager:
                     'doc_date': '',
                     'sign_date': '',
                     'signer': '',
+                    'signature_detected': False,
                     'has_seal': False,
                     'party_a_seal': False,
                     'party_b_seal': False,
@@ -2033,6 +2038,7 @@ class DocumentManager:
             'doc_date': '',
             'sign_date': '',
             'signer': '',
+            'signature_detected': False,
             'has_seal': False,
             'party_a_seal': False,
             'party_b_seal': False,
@@ -2101,7 +2107,11 @@ class DocumentManager:
                             # 过滤掉过长的匹配
                             if len(signer) < 20 and not any(char in signer for char in ['【', '】', '[', ']']):
                                 result['signer'] = signer
+                                result['signature_detected'] = True
                                 break
+
+                if not result.get('signature_detected') and any(k in text for k in ['签字', '签名', '签署']):
+                    result['signature_detected'] = True
                 
                 # 识别盖章信息
                 if attributes_to_recognize.get('has_seal') or attributes_to_recognize.get('party_a_seal') or attributes_to_recognize.get('party_b_seal'):
@@ -2124,6 +2134,7 @@ class DocumentManager:
                 # 检查是否涉及签字/盖章
                 if '不涉及签字' in text or '无需签字' in text:
                     result['no_signature'] = True
+                    result['signature_detected'] = False
                 
                 if '不涉及盖章' in text or '无需盖章' in text:
                     result['no_seal'] = True

@@ -8,7 +8,7 @@ import { openEditProjectModal, closeEditProjectModal } from './modules/project.j
 import { openAuditConfirmModal, closeAuditConfirmModal } from './modules/user-approval.js';
 import {
     openProfileModal, closeProfileModal, switchProfileTab,
-    saveProfileEmail, changeProfilePassword, changeApprovalCode, deactivateAccount
+    saveProfileEmail, changeProfilePassword, changeApprovalCode, deactivateAccount, setForcePasswordChangeRequired
 } from './modules/profile.js';
 import {
     openUserManagementModal, closeUserManagementModal, loadUserManagementList,
@@ -83,6 +83,29 @@ if (typeof window !== 'undefined') {
     window.submitProjectTransfer = submitProjectTransfer;
     // pending approval
     window.sendApproverMessage = sendApproverMessage;
+}
+
+// 全局拦截：密码过期时强制拉起改密弹窗
+if (typeof window !== 'undefined' && !window.__passwordExpiryFetchWrapped) {
+    window.__passwordExpiryFetchWrapped = true;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+        const response = await originalFetch(...args);
+        try {
+            const cloned = response.clone();
+            if (cloned.status === 403) {
+                const data = await cloned.json();
+                if (data && data.status === 'password_expired') {
+                    setForcePasswordChangeRequired(true, data.message || '密码已过期，请先修改密码');
+                    openProfileModal();
+                    switchProfileTab('profile-password');
+                }
+            }
+        } catch (_) {
+            // 非 JSON 响应忽略
+        }
+        return response;
+    };
 }
 
 // 页面关闭或刷新时解锁项目
