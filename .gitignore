@@ -42,9 +42,9 @@ backup_20260411121914/
 /uploads/
 /logs/
 *.log
-/data/*.db
-/data/**/*.db
+/data/
 /settings.json
+/.secret_key
 
 # Build outputs
 installer/
