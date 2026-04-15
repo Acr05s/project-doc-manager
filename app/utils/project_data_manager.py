@@ -646,12 +646,14 @@ class ProjectDataManager:
             if requirements:
                 config['cycles'] = requirements.get('cycles', [])
                 config['custom_attribute_definitions'] = requirements.get('custom_attribute_definitions', [])
+                config['predefined_attribute_definitions'] = requirements.get('predefined_attribute_definitions', [])
                 config['_requirements_docs'] = requirements.get('documents', {})
             else:
                 requirements = self.load_requirements(project_name)
                 if requirements:
                     config['cycles'] = requirements.get('cycles', [])
                     config['custom_attribute_definitions'] = requirements.get('custom_attribute_definitions', [])
+                    config['predefined_attribute_definitions'] = requirements.get('predefined_attribute_definitions', [])
                     config['_requirements_docs'] = requirements.get('documents', {})
             
             # 加载 categories
@@ -1020,7 +1022,8 @@ class ProjectDataManager:
             requirements = {
                 'cycles': config.get('cycles', []),
                 'documents': {},
-                'custom_attribute_definitions': config.get('custom_attribute_definitions', [])
+                'custom_attribute_definitions': config.get('custom_attribute_definitions', []),
+                'predefined_attribute_definitions': config.get('predefined_attribute_definitions', [])
             }
             for cycle, cycle_info in config.get('documents', {}).items():
                 if isinstance(cycle_info, dict):

@@ -1481,7 +1481,8 @@ class ProjectManager:
                 'description': template.get('description', ''),
                 'cycles': template.get('cycles', []),
                 'documents': self._deep_copy_without_id(template.get('documents', {})),
-                'custom_attribute_definitions': template.get('custom_attribute_definitions', [])
+                'custom_attribute_definitions': template.get('custom_attribute_definitions', []),
+                'predefined_attribute_definitions': template.get('predefined_attribute_definitions', [])
             }
             
             logger.info(f"已导出模板: {template_id}，包含 {len(export_data.get('custom_attribute_definitions', []))} 个自定义属性定义")
@@ -1539,6 +1540,7 @@ class ProjectManager:
             
             # 获取自定义属性定义
             custom_attribute_definitions = template_data.get('custom_attribute_definitions', [])
+            predefined_attribute_definitions = template_data.get('predefined_attribute_definitions', [])
             
             # 创建公共模板目录
             common_dir = self.config.projects_folder / 'common'
@@ -1556,7 +1558,8 @@ class ProjectManager:
                 'created_time': datetime.now().isoformat(),
                 'cycles': cycles,
                 'documents': documents,
-                'custom_attribute_definitions': custom_attribute_definitions
+                'custom_attribute_definitions': custom_attribute_definitions,
+                'predefined_attribute_definitions': predefined_attribute_definitions
             }
             
             # 统计包含附加要求的文档数量

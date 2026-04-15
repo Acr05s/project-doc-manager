@@ -26,6 +26,8 @@ def save_draft(project_id):
         
         draft_data = {
             'tree_data': data.get('tree_data'),
+            'custom_attribute_definitions': data.get('custom_attribute_definitions', []),
+            'predefined_attribute_definitions': data.get('predefined_attribute_definitions', []),
             'saved_time': datetime.now().isoformat(),
             'version': 1
         }

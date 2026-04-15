@@ -139,7 +139,7 @@ def api_update_settings():
             'fast_preview_threshold', 'email_notification_enabled',
             'require_approval_code', 'log_retention_days', 'timezone',
             'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption',
-            'force_agreement_on_login', 'watermark_enabled'
+            'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled'
         ]
         for field in allowed_fields:
             if field in data:

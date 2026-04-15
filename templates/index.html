@@ -1510,6 +1510,9 @@
                             <span>登录前强制阅读使用与保密协议（10秒）</span>
                         </label>
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，用户访问登录页时必须阅读 10 秒协议并同意后才可登录</small>
+                        <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-info" onclick="openAgreementEditorModal()">编辑协议内容</button>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -1948,36 +1951,11 @@
                     <p class="attr-panel-hint">勾选该文档需要满足的附加要求</p>
                     
                     <div class="attr-group">
-                        <h4>签字盖章</h4>
-                        <div style="display: flex; flex-wrap: wrap; gap: 15px;">
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_party_a_sign"> 甲方签字
-                            </label>
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_party_b_sign"> 乙方签字
-                            </label>
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_party_a_seal"> 甲方盖章
-                            </label>
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_party_b_seal"> 乙方盖章
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="attr-group">
-                        <h4>日期/编号</h4>
-                        <div style="display: flex; flex-wrap: wrap; gap: 15px;">
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_need_doc_number"> 发文号
-                            </label>
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_need_doc_date"> 文档日期
-                            </label>
-                            <label class="attr-checkbox" style="margin: 0;">
-                                <input type="checkbox" id="attr_need_sign_date"> 签字日期
-                            </label>
-                        </div>
+                        <h4>
+                            预置附加项
+                            <button class="btn btn-sm btn-secondary" onclick="openPredefinedAttrEditorModal()" style="float: right; padding: 2px 8px; font-size: 12px;">编辑内容</button>
+                        </h4>
+                        <div id="predefinedAttributesContainer"></div>
                     </div>
                     
                     <div class="attr-group">
@@ -2250,6 +2228,51 @@
             <div style="margin-top: 20px; text-align: right;">
                 <button class="btn btn-secondary" onclick="closeCustomAttrModal()">取消</button>
                 <button class="btn btn-primary" onclick="confirmAddCustomAttr()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 协议内容编辑模态框 -->
+    <div id="agreementEditorModal" class="modal">
+        <div class="modal-content" style="max-width: 980px; width: 92%; max-height: 88vh; overflow-y: auto;">
+            <span class="close" onclick="closeAgreementEditorModal()">&times;</span>
+            <h2>编辑登录协议</h2>
+            <p style="color: #666; margin: 10px 0 18px;">支持 Markdown，保存后登录页将立即使用最新内容。</p>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 10px; flex-wrap: wrap;">
+                        <h3 style="margin: 0; font-size: 16px;">Markdown 内容</h3>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-info" onclick="document.getElementById('agreementImportFile').click()">导入 .md/.txt</button>
+                            <input type="file" id="agreementImportFile" accept=".md,.markdown,.txt" style="display:none;" onchange="importAgreementMarkdown(this)">
+                        </div>
+                    </div>
+                    <textarea id="agreementMarkdownInput" rows="20" style="width: 100%; min-height: 420px; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-family: Consolas, 'Courier New', monospace; resize: vertical;"></textarea>
+                </div>
+                <div>
+                    <h3 style="margin: 0 0 8px; font-size: 16px;">预览</h3>
+                    <div id="agreementMarkdownPreview" style="min-height: 420px; padding: 14px; border: 1px solid #ddd; border-radius: 6px; background: #fafbfc; overflow: auto;"></div>
+                </div>
+            </div>
+
+            <div class="modal-actions" style="justify-content: flex-end; margin-top: 18px; gap: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="closeAgreementEditorModal()">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveAgreementMarkdown()">保存协议内容</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 预置附加项编辑模态框 -->
+    <div id="predefinedAttrEditorModal" class="modal">
+        <div class="modal-content" style="max-width: 760px; width: 92%; max-height: 88vh; overflow-y: auto;">
+            <span class="close" onclick="closePredefinedAttrEditorModal()">&times;</span>
+            <h2>编辑预置附加项</h2>
+            <p style="color: #666; margin: 10px 0 18px;">这里只修改显示文案和说明，不改变底层校验键值；后续更多字段仍可继续通过“自定义属性”扩展。</p>
+            <div id="predefinedAttrEditorList"></div>
+            <div class="modal-actions" style="justify-content: flex-end; margin-top: 18px; gap: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="closePredefinedAttrEditorModal()">取消</button>
+                <button type="button" class="btn btn-primary" onclick="savePredefinedAttrDefinitions()">应用到当前需求</button>
             </div>
         </div>
     </div>

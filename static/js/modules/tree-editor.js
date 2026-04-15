@@ -8,6 +8,12 @@
 import { appState } from './app-state.js';
 import { showNotification, showLoading, openModal, closeModal, showConfirmModal } from './ui.js';
 import { renderCycles, renderInitialContent } from './cycle.js';
+import {
+    getDefaultPredefinedAttributeDefinitions,
+    getPredefinedAttributeGroups,
+    getPredefinedAttributeLabelMap,
+    buildCanonicalRequirementText
+} from './attribute-definitions.js';
 
 let currentTreeData = null;
 let selectedNode = null;
@@ -29,18 +35,23 @@ const DEFAULT_DOC_ATTRIBUTES = {
     need_sign_date: false
 };
 
-const ATTRIBUTE_LABELS = {
-    party_a_sign: '甲方签字',
-    party_b_sign: '乙方签字',
-    party_a_seal: '甲方盖章',
-    party_b_seal: '乙方盖章',
-    need_doc_number: '发文号',
-    need_doc_date: '文档日期',
-    need_sign_date: '签字日期'
-};
-
 // 自定义属性定义存储
 let customAttributeDefinitions = [];
+let predefinedAttributeDefinitions = getDefaultPredefinedAttributeDefinitions();
+
+function getCurrentPredefinedConfig() {
+    return {
+        predefined_attribute_definitions: predefinedAttributeDefinitions
+    };
+}
+
+function getCurrentAttributeLabelMap() {
+    return getPredefinedAttributeLabelMap(getCurrentPredefinedConfig());
+}
+
+function getEditablePredefinedDefinitions() {
+    return getPredefinedAttributeGroups(getCurrentPredefinedConfig());
+}
 
 // ==================== 自动保存 ====================
 
@@ -71,6 +82,7 @@ function saveDraftToLocal() {
     const draft = {
         treeData: currentTreeData,
         customAttributeDefinitions: customAttributeDefinitions,
+        predefinedAttributeDefinitions: predefinedAttributeDefinitions,
         savedTime: new Date().toISOString(),
         selectedNode: selectedNode
     };
@@ -99,7 +111,8 @@ async function saveDraftToServer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 tree_data: currentTreeData,
-                custom_attribute_definitions: customAttributeDefinitions
+                custom_attribute_definitions: customAttributeDefinitions,
+                predefined_attribute_definitions: predefinedAttributeDefinitions
             })
         });
         const result = await response.json();
@@ -246,6 +259,9 @@ async function checkForDraft() {
                     if (bestDraft.customAttributeDefinitions) {
                         customAttributeDefinitions = bestDraft.customAttributeDefinitions;
                     }
+                    if (bestDraft.predefinedAttributeDefinitions) {
+                        predefinedAttributeDefinitions = bestDraft.predefinedAttributeDefinitions;
+                    }
                     if (bestDraft.selectedNode) {
                         selectedNode = bestDraft.selectedNode;
                     }
@@ -253,6 +269,9 @@ async function checkForDraft() {
                     currentTreeData = bestDraft.tree_data;
                     if (bestDraft.custom_attribute_definitions) {
                         customAttributeDefinitions = bestDraft.custom_attribute_definitions;
+                    }
+                    if (bestDraft.predefined_attribute_definitions) {
+                        predefinedAttributeDefinitions = bestDraft.predefined_attribute_definitions;
                     }
                 }
                 renderTree();
@@ -363,6 +382,11 @@ function buildTreeData(config) {
         customAttributeDefinitions = config.custom_attribute_definitions;
     } else {
         customAttributeDefinitions = [];
+    }
+    if (config.predefined_attribute_definitions && Array.isArray(config.predefined_attribute_definitions)) {
+        predefinedAttributeDefinitions = config.predefined_attribute_definitions;
+    } else {
+        predefinedAttributeDefinitions = getDefaultPredefinedAttributeDefinitions();
     }
     console.log('[buildTreeData] customAttributeDefinitions:', customAttributeDefinitions);
 
@@ -542,6 +566,7 @@ function getAttributeTags(node) {
 
     const attrs = node.attributes || {};
     const tags = [];
+    const labelMap = getCurrentAttributeLabelMap();
     const icons = {
         party_a_sign: '✍️',
         party_b_sign: '✍️',
@@ -551,20 +576,11 @@ function getAttributeTags(node) {
         need_doc_date: '📅',
         need_sign_date: '✅'
     };
-    const shortLabels = {
-        party_a_sign: '甲方签字',
-        party_b_sign: '乙方签字',
-        party_a_seal: '甲方盖章',
-        party_b_seal: '乙方盖章',
-        need_doc_number: '发文号',
-        need_doc_date: '文档日期',
-        need_sign_date: '签字日期'
-    };
 
     // 内置属性
     for (const [key, val] of Object.entries(attrs)) {
         if (val && icons[key]) {
-            tags.push(`<span class="attr-tag" title="${shortLabels[key]}">${icons[key]}</span>`);
+            tags.push(`<span class="attr-tag" title="${escapeHtml(labelMap[key] || key)}">${icons[key]}</span>`);
         }
     }
     
@@ -1014,6 +1030,47 @@ window.deleteTreeNodes = function(nodeIds) {
 
 // ==================== 属性面板（附加要求） ====================
 
+function renderPredefinedAttributes(targetNodes) {
+    const container = document.getElementById('predefinedAttributesContainer');
+    if (!container) return;
+
+    const groups = getEditablePredefinedDefinitions();
+    const nodes = Array.isArray(targetNodes) ? targetNodes : [targetNodes];
+
+    container.innerHTML = groups.map(group => `
+        <div class="attr-subgroup" style="margin-bottom: 14px;">
+            <h4 style="margin: 0 0 8px; font-size: 13px; color: #555;">${escapeHtml(group.title)}</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
+                ${group.items.map(item => {
+                    const values = nodes.map(node => !!node?.attributes?.[item.key]);
+                    const allTrue = values.length > 0 && values.every(Boolean);
+                    const allFalse = values.length > 0 && values.every(value => !value);
+                    const mixed = !allTrue && !allFalse;
+                    return `
+                        <label class="attr-checkbox" style="margin: 0; display: flex; align-items: flex-start; gap: 8px; min-width: 180px;">
+                            <input type="checkbox" id="attr_${item.key}" ${allTrue ? 'checked' : ''} data-mixed="${mixed ? 'true' : 'false'}">
+                            <span>
+                                <span>${escapeHtml(item.label)}</span>
+                                ${item.description ? `<small style="display:block; color:#888; margin-top:2px;">${escapeHtml(item.description)}</small>` : ''}
+                            </span>
+                        </label>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `).join('');
+
+    groups.forEach(group => {
+        group.items.forEach(item => {
+            const checkbox = document.getElementById(`attr_${item.key}`);
+            if (checkbox && checkbox.dataset.mixed === 'true') {
+                checkbox.checked = false;
+                checkbox.indeterminate = true;
+            }
+        });
+    });
+}
+
 /**
  * 打开属性编辑面板（签字/盖章等附加要求）
  */
@@ -1024,16 +1081,15 @@ window.openAttributePanel = function(nodeId) {
     const panel = document.getElementById('attributePanel');
     if (!panel) return;
 
-    // 填充属性值
-    const attrs = node.attributes || {};
-    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
-        const checkbox = document.getElementById(`attr_${key}`);
-        if (checkbox) checkbox.checked = !!attrs[key];
-    }
+    renderPredefinedAttributes(node);
 
     // 备注
     const noteEl = document.getElementById('attrDocNote');
-    if (noteEl) noteEl.value = node.doc_note || '';
+    if (noteEl) {
+        noteEl.value = node.doc_note || '';
+        noteEl.disabled = false;
+        noteEl.placeholder = '可选的补充说明';
+    }
 
     // 渲染自定义属性
     renderCustomAttributes(node);
@@ -1077,7 +1133,8 @@ export function saveAttributes() {
             if (!node.attributes) node.attributes = {};
             
             // 更新内置属性（只更新已勾选的）
-            for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+            const labelMap = getCurrentAttributeLabelMap();
+            for (const key of Object.keys(labelMap)) {
                 const checkbox = document.getElementById(`attr_${key}`);
                 if (checkbox && checkbox.checked && !checkbox.indeterminate) {
                     node.attributes[key] = true;
@@ -1132,7 +1189,8 @@ export function saveAttributes() {
         if (!node.attributes) node.attributes = {};
         
         // 只更新界面上有的属性，保留其他属性
-        for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+        const labelMap = getCurrentAttributeLabelMap();
+        for (const key of Object.keys(labelMap)) {
             const checkbox = document.getElementById(`attr_${key}`);
             if (checkbox) node.attributes[key] = checkbox.checked;
         }
@@ -1170,12 +1228,14 @@ function updateAttributePreview(nodeId) {
     const attrs = node.attributes || {};
     const activeAttrs = [];
 
+    const labelMap = getCurrentAttributeLabelMap();
+
     // 显示内置属性
     Object.entries(attrs)
         .filter(([k, v]) => v)
         .forEach(([k, v]) => {
-            if (ATTRIBUTE_LABELS[k]) {
-                activeAttrs.push(ATTRIBUTE_LABELS[k]);
+            if (labelMap[k]) {
+                activeAttrs.push(labelMap[k]);
             }
         });
 
@@ -1771,28 +1831,8 @@ function openBatchAttributePanel(nodes) {
     
     const hintEl = panel.querySelector('.attr-panel-hint');
     if (hintEl) hintEl.textContent = '勾选属性将应用到所有选中文档，留空则保持原值不变';
-    
-    // 填充属性值（显示混合状态）
-    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
-        const checkbox = document.getElementById(`attr_${key}`);
-        if (!checkbox) continue;
-        
-        const values = nodes.map(n => n.attributes?.[key]);
-        const allTrue = values.every(v => v === true);
-        const allFalse = values.every(v => v === false || v === undefined);
-        
-        if (allTrue) {
-            checkbox.checked = true;
-            checkbox.indeterminate = false;
-        } else if (allFalse) {
-            checkbox.checked = false;
-            checkbox.indeterminate = false;
-        } else {
-            // 混合状态
-            checkbox.checked = false;
-            checkbox.indeterminate = true;
-        }
-    }
+
+    renderPredefinedAttributes(nodes);
     
     // 备注字段在批量模式下禁用
     const noteEl = document.getElementById('attrDocNote');
@@ -1949,17 +1989,7 @@ function setAllExpanded(node, expanded) {
  * 将 attributes 对象转换为 requirement 字符串
  */
 function attributesToRequirement(attributes) {
-    const requirements = [];
-    
-    if (attributes.party_a_sign) requirements.push('甲方签字');
-    if (attributes.party_b_sign) requirements.push('乙方签字');
-    if (attributes.party_a_seal) requirements.push('甲方盖章');
-    if (attributes.party_b_seal) requirements.push('乙方盖章');
-    if (attributes.need_doc_number) requirements.push('发文号');
-    if (attributes.need_doc_date) requirements.push('文档日期');
-    if (attributes.need_sign_date) requirements.push('签字日期');
-    
-    return requirements.join('、') || '';
+    return buildCanonicalRequirementText(attributes);
 }
 
 /**
@@ -1971,7 +2001,8 @@ function treeToConfig() {
     const config = {
         cycles: [],
         documents: {},
-        custom_attribute_definitions: customAttributeDefinitions
+        custom_attribute_definitions: customAttributeDefinitions,
+        predefined_attribute_definitions: predefinedAttributeDefinitions
     };
 
     if (!currentTreeData.children) return config;
@@ -2769,6 +2800,88 @@ window.collapseAllTree = collapseAll;
 
 // ==================== 自定义属性功能 ====================
 
+function rerenderAttributePanelAfterDefinitionChange() {
+    const panel = document.getElementById('attributePanel');
+    if (!panel || panel.style.display === 'none') return;
+
+    if (panel.dataset.batchMode === 'true') {
+        const nodeIds = JSON.parse(panel.dataset.editingNodeIds || '[]');
+        const nodes = nodeIds.map(id => findNode(currentTreeData, id)).filter(Boolean);
+        if (nodes.length > 1) {
+            renderPredefinedAttributes(nodes);
+            renderCustomAttributesForBatch(nodes);
+            return;
+        }
+    }
+
+    const nodeId = panel.dataset.editingNodeId;
+    if (!nodeId) return;
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+    renderPredefinedAttributes(node);
+    renderCustomAttributes(node);
+    updateAttributePreview(nodeId);
+}
+
+function renderPredefinedAttributeEditor() {
+    const container = document.getElementById('predefinedAttrEditorList');
+    if (!container) return;
+
+    container.innerHTML = getEditablePredefinedDefinitions().map(group => `
+        <div style="margin-bottom: 20px; padding: 14px; border: 1px solid #eceff3; border-radius: 8px; background: #fafbfd;">
+            <h3 style="margin: 0 0 12px; font-size: 15px;">${escapeHtml(group.title)}</h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                ${group.items.map(item => `
+                    <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: start; padding-top: 10px; border-top: 1px solid #eef2f6;">
+                        <div>
+                            <div style="font-weight: 600; color: #344054;">${escapeHtml(item.canonicalLabel)}</div>
+                            <div style="font-size: 12px; color: #98a2b3; margin-top: 4px;">内部键：${escapeHtml(item.key)}</div>
+                        </div>
+                        <div style="display: grid; gap: 8px;">
+                            <input type="text" id="predef_label_${item.key}" value="${escapeHtml(item.label)}" placeholder="显示名称" style="width: 100%; padding: 8px; border: 1px solid #d0d5dd; border-radius: 6px;">
+                            <textarea id="predef_desc_${item.key}" rows="2" placeholder="补充说明，可选" style="width: 100%; padding: 8px; border: 1px solid #d0d5dd; border-radius: 6px; resize: vertical;">${escapeHtml(item.description || '')}</textarea>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+export function openPredefinedAttrEditorModal() {
+    renderPredefinedAttributeEditor();
+    const modal = document.getElementById('predefinedAttrEditorModal');
+    if (modal) {
+        openModal(modal);
+    }
+}
+
+export function closePredefinedAttrEditorModal() {
+    const modal = document.getElementById('predefinedAttrEditorModal');
+    if (modal) {
+        closeModal(modal);
+    }
+}
+
+export function savePredefinedAttrDefinitions() {
+    predefinedAttributeDefinitions = getEditablePredefinedDefinitions().flatMap(group => group.items).map(item => ({
+        key: item.key,
+        canonicalLabel: item.canonicalLabel,
+        group: item.group,
+        label: document.getElementById(`predef_label_${item.key}`)?.value.trim() || item.label,
+        description: document.getElementById(`predef_desc_${item.key}`)?.value.trim() || ''
+    }));
+
+    closePredefinedAttrEditorModal();
+    rerenderAttributePanelAfterDefinitionChange();
+    renderTree();
+    if (selectedNode) {
+        selectNode(selectedNode);
+    }
+    markDirty();
+    showNotification('预置附加项内容已更新', 'success');
+}
+
 /**
  * 渲染自定义属性列表
  */
@@ -2925,3 +3038,6 @@ window.openCustomAttrModal = openCustomAttrModal;
 window.closeCustomAttrModal = closeCustomAttrModal;
 window.confirmAddCustomAttr = confirmAddCustomAttr;
 window.deleteCustomAttr = deleteCustomAttr;
+window.openPredefinedAttrEditorModal = openPredefinedAttrEditorModal;
+window.closePredefinedAttrEditorModal = closePredefinedAttrEditorModal;
+window.savePredefinedAttrDefinitions = savePredefinedAttrDefinitions;

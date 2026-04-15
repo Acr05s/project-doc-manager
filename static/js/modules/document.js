@@ -7,6 +7,7 @@ import { authState } from './auth.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal } from './ui.js';
 import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers, getApprovalHistory } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
+import { buildDisplayRequirementText, buildUploadAttributeSchema, getCustomAttributeDefinitions, getPredefinedAttributeLabelMap } from './attribute-definitions.js';
 
 // 辅助函数：转义HTML
 function escapeHtml(text) {
@@ -445,16 +446,17 @@ export async function handleDeleteDocument(docId, cycle, docName) {
  */
 function analyzeRequirementStatus(attributes, docsList) {
     if (!attributes || docsList.length === 0) return [];
+    const labelMap = getPredefinedAttributeLabelMap(appState.projectConfig);
     
     // 定义 attributes 到要求名称的映射
     const attrMap = [
-        { key: 'party_a_sign', name: '甲方签字' },
-        { key: 'party_b_sign', name: '乙方签字' },
-        { key: 'party_a_seal', name: '甲方盖章' },
-        { key: 'party_b_seal', name: '乙方盖章' },
-        { key: 'need_doc_date', name: '文档日期' },
-        { key: 'need_sign_date', name: '签字日期' },
-        { key: 'need_doc_number', name: '发文号' }
+        { key: 'party_a_sign', name: labelMap.party_a_sign || '甲方签字' },
+        { key: 'party_b_sign', name: labelMap.party_b_sign || '乙方签字' },
+        { key: 'party_a_seal', name: labelMap.party_a_seal || '甲方盖章' },
+        { key: 'party_b_seal', name: labelMap.party_b_seal || '乙方盖章' },
+        { key: 'need_doc_date', name: labelMap.need_doc_date || '文档日期' },
+        { key: 'need_sign_date', name: labelMap.need_sign_date || '签字日期' },
+        { key: 'need_doc_number', name: labelMap.need_doc_number || '发文号' }
     ];
     
     // 根据 attributes 确定需要检查哪些属性（只检查值为true的）
@@ -469,7 +471,7 @@ function analyzeRequirementStatus(attributes, docsList) {
     
     // 处理自定义属性（除了预定义的键之外的属性）
     const predefinedKeys = new Set(attrMap.map(attr => attr.key));
-    const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+    const customDefs = getCustomAttributeDefinitions(appState.projectConfig, { attributes });
     
     console.log('[analyzeRequirementStatus] appState.projectConfig:', appState.projectConfig);
     console.log('[analyzeRequirementStatus] appState.projectConfig?.custom_attribute_definitions:', appState.projectConfig?.custom_attribute_definitions);
@@ -1826,56 +1828,12 @@ function displayDocumentRequirements() {
             const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
             console.log('docInfo:', docInfo);
             if (docInfo) {
-                requirement = docInfo.requirement || '无特殊要求';
+                requirement = buildDisplayRequirementText(docInfo, appState.projectConfig);
                 console.log('requirement:', requirement);
-                // 解析附加属性
-                attributes = parseRequirementAttributes(requirement);
-                
-                // 辅助函数：生成友好的显示名称
-                const getFriendlyDisplayName = (key) => {
-                    const match = key.match(/^custom_\d+_(.+)$/);
-                    if (match) {
-                        return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                    }
-                    return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                };
-                
-                // 获取自定义属性定义（优先使用配置中的，如果没有则从attributes推断）
-                let customAttrDefs = appState.projectConfig?.custom_attribute_definitions || [];
-                
-                // 如果配置中没有自定义属性定义，但从docInfo.attributes中有自定义属性，动态构建定义
-                if (customAttrDefs.length === 0 && docInfo.attributes) {
-                    const predefinedAttrKeys = ['party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal', 
-                        'need_doc_number', 'need_doc_date', 'need_sign_date'];
-                    
-                    Object.keys(docInfo.attributes).forEach(attrKey => {
-                        if (!predefinedAttrKeys.includes(attrKey) && docInfo.attributes[attrKey] === true) {
-                            const displayName = getFriendlyDisplayName(attrKey);
-                            
-                            customAttrDefs.push({
-                                id: attrKey,
-                                name: displayName,
-                                type: 'checkbox'
-                            });
-                        }
-                    });
-                    
-                    console.log('[displayDocumentRequirements] 动态构建的自定义属性定义:', customAttrDefs);
+                attributes = buildUploadAttributeSchema(docInfo, appState.projectConfig);
+                if (attributes.length === 0) {
+                    attributes = parseRequirementAttributes(docInfo.requirement || requirement);
                 }
-                
-                // 添加自定义属性到表单
-                customAttrDefs.forEach(attrDef => {
-                    if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
-                        attributes.push({
-                            type: attrDef.type === 'checkbox' ? 'checkbox' : 'text',
-                            id: attrDef.id,
-                            name: attrDef.id,
-                            label: attrDef.name,
-                            placeholder: `输入${attrDef.name}`,
-                            isCustom: true
-                        });
-                    }
-                });
                 
                 console.log('attributes:', attributes);
             } else {
@@ -2821,54 +2779,18 @@ function generateDynamicEditForm(doc, cycle, docName) {
             console.log('[generateDynamicEditForm] docInfo:', docInfo);
             
             if (docInfo) {
-                requirement = docInfo.requirement || '无特殊要求';
-                // 解析附加属性
-                attributes = parseRequirementAttributes(requirement);
-                
-                // 添加自定义属性
-                console.log('[generateDynamicEditForm] custom_attribute_definitions:', appState.projectConfig.custom_attribute_definitions);
-                
-                // 获取自定义属性定义（优先使用配置中的，如果没有则从attributes推断）
-                let customAttrDefs = appState.projectConfig.custom_attribute_definitions || [];
-                
-                // 辅助函数：生成友好的显示名称
-                const getFriendlyDisplayName = (key) => {
-                    const match = key.match(/^custom_\d+_(.+)$/);
-                    if (match) {
-                        return match[1].replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                    }
-                    return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                };
-                
-                // 如果配置中没有自定义属性定义，但从docInfo.attributes中有自定义属性，动态构建定义
-                if (customAttrDefs.length === 0 && docInfo.attributes) {
-                    const predefinedAttrKeys = ['party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal', 
-                        'need_doc_number', 'need_doc_date', 'need_sign_date'];
-                    
-                    Object.keys(docInfo.attributes).forEach(attrKey => {
-                        if (!predefinedAttrKeys.includes(attrKey) && docInfo.attributes[attrKey] === true) {
-                            // 使用辅助函数生成显示名称
-                            const displayName = getFriendlyDisplayName(attrKey);
-                            
-                            customAttrDefs.push({
-                                id: attrKey,
-                                name: displayName,
-                                type: 'checkbox' // 默认为checkbox类型
-                            });
-                        }
-                    });
-                    
-                    console.log('[generateDynamicEditForm] 动态构建的自定义属性定义:', customAttrDefs);
+                requirement = buildDisplayRequirementText(docInfo, appState.projectConfig);
+                attributes = buildUploadAttributeSchema(docInfo, appState.projectConfig);
+                if (attributes.length === 0) {
+                    attributes = parseRequirementAttributes(docInfo.requirement || requirement);
                 }
-                
-                customAttrDefs.forEach(attrDef => {
+
+                getCustomAttributeDefinitions(appState.projectConfig, docInfo).forEach(attrDef => {
                     console.log('[generateDynamicEditForm] attrDef:', attrDef);
                     console.log('[generateDynamicEditForm] docInfo.attributes:', docInfo.attributes);
                     console.log('[generateDynamicEditForm] docInfo.attributes[attrDef.id]:', docInfo.attributes && docInfo.attributes[attrDef.id]);
                     
-                    // 检查文档是否有这个自定义属性的要求
-                    if (docInfo.attributes && docInfo.attributes[attrDef.id]) {
-                        // 根据类型创建属性配置
+                    if (docInfo.attributes && docInfo.attributes[attrDef.id] && !attributes.some(attr => attr.id === attrDef.id)) {
                         if (attrDef.type === 'checkbox') {
                             attributes.push({
                                 type: 'checkbox',

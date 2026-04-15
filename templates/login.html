@@ -273,6 +273,46 @@
             color: #0f4a8a;
         }
 
+        .agreement-body h1,
+        .agreement-body h2,
+        .agreement-body h4,
+        .agreement-body h5,
+        .agreement-body h6 {
+            margin: 12px 0 8px;
+            color: #0f4a8a;
+        }
+
+        .agreement-body p,
+        .agreement-body ul,
+        .agreement-body ol,
+        .agreement-body blockquote,
+        .agreement-body pre {
+            margin: 0 0 10px;
+        }
+
+        .agreement-body blockquote {
+            padding: 10px 12px;
+            border-left: 4px solid #1668dc;
+            background: #f4f8ff;
+            color: #35506e;
+            border-radius: 6px;
+        }
+
+        .agreement-body code {
+            background: #f0f3f6;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: Consolas, 'Courier New', monospace;
+        }
+
+        .agreement-body pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 12px;
+            border-radius: 8px;
+            overflow: auto;
+        }
+
         .agreement-actions {
             padding: 12px 18px 16px;
             border-top: 1px solid #e8edf3;
@@ -311,17 +351,7 @@
     <div id="agreementOverlay" class="agreement-overlay">
         <div class="agreement-modal">
             <div class="agreement-header">使用与保密协议确认</div>
-            <div class="agreement-body">
-                <h3>一、系统使用协议</h3>
-                <p>1) 本系统仅用于项目资料管理、审批与验收相关工作，禁止用于与业务无关的用途。</p>
-                <p>2) 登录账户仅限本人使用，不得借用、共享或转交他人操作。</p>
-                <p>3) 用户需对自身操作行为负责，系统将保留完整操作日志用于审计追溯。</p>
-                <h3>二、保密协议</h3>
-                <p>1) 系统中的项目资料、审批信息、组织信息及用户数据均属于受控信息。</p>
-                <p>2) 未经授权，不得复制、外传、截图传播或对外披露任何涉密内容。</p>
-                <p>3) 如发现数据泄露风险、账号异常或违规使用行为，应立即上报管理员。</p>
-                <p style="margin-top:10px;color:#8b1d1d;background:#fff3f3;padding:8px 10px;border-radius:6px;border:1px solid #ffd2d2;">继续登录即视为您已阅读并同意上述使用与保密条款。</p>
-            </div>
+            <div id="agreementBody" class="agreement-body"></div>
             <div class="agreement-actions">
                 <button type="button" id="agreementDenyBtn" class="agreement-btn deny">不同意并离开</button>
                 <button type="button" id="agreementAcceptBtn" class="agreement-btn accept" disabled>请阅读 10 秒</button>
@@ -541,11 +571,123 @@
         // ==================== 登录前协议确认 ====================
         let agreementAccepted = false;
 
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function applyInlineMarkdown(text) {
+            return escapeHtml(text)
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+                .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+                .replace(/_([^_]+)_/g, '<em>$1</em>');
+        }
+
+        function renderSimpleMarkdown(markdownText) {
+            const source = String(markdownText || '').replace(/\r\n/g, '\n');
+            if (!source.trim()) return '<p>暂无协议内容</p>';
+
+            const lines = source.split('\n');
+            const htmlParts = [];
+            const listBuffer = [];
+            let listType = null;
+            let inCodeBlock = false;
+            let codeLines = [];
+
+            const flushList = () => {
+                if (!listBuffer.length) return;
+                htmlParts.push(`<${listType}>${listBuffer.join('')}</${listType}>`);
+                listBuffer.length = 0;
+            };
+
+            for (const rawLine of lines) {
+                const trimmed = rawLine.trim();
+                if (trimmed.startsWith('```')) {
+                    flushList();
+                    listType = null;
+                    if (inCodeBlock) {
+                        htmlParts.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+                        codeLines = [];
+                        inCodeBlock = false;
+                    } else {
+                        inCodeBlock = true;
+                    }
+                    continue;
+                }
+
+                if (inCodeBlock) {
+                    codeLines.push(rawLine);
+                    continue;
+                }
+
+                if (!trimmed) {
+                    flushList();
+                    listType = null;
+                    continue;
+                }
+
+                const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+                if (headingMatch) {
+                    flushList();
+                    listType = null;
+                    const level = headingMatch[1].length;
+                    htmlParts.push(`<h${level}>${applyInlineMarkdown(headingMatch[2])}</h${level}>`);
+                    continue;
+                }
+
+                const quoteMatch = trimmed.match(/^>\s?(.*)$/);
+                if (quoteMatch) {
+                    flushList();
+                    listType = null;
+                    htmlParts.push(`<blockquote>${applyInlineMarkdown(quoteMatch[1])}</blockquote>`);
+                    continue;
+                }
+
+                const unorderedMatch = trimmed.match(/^[-*+]\s+(.+)$/);
+                if (unorderedMatch) {
+                    if (listType && listType !== 'ul') flushList();
+                    listType = 'ul';
+                    listBuffer.push(`<li>${applyInlineMarkdown(unorderedMatch[1])}</li>`);
+                    continue;
+                }
+
+                const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+                if (orderedMatch) {
+                    if (listType && listType !== 'ol') flushList();
+                    listType = 'ol';
+                    listBuffer.push(`<li>${applyInlineMarkdown(orderedMatch[1])}</li>`);
+                    continue;
+                }
+
+                flushList();
+                listType = null;
+                htmlParts.push(`<p>${applyInlineMarkdown(trimmed)}</p>`);
+            }
+
+            flushList();
+            if (inCodeBlock) {
+                htmlParts.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+            }
+
+            return htmlParts.join('');
+        }
+
         async function initLoginAgreementGate() {
             try {
                 const res = await fetch('/api/settings');
                 const data = await res.json();
                 const enabled = data?.status === 'success' && !!data?.data?.force_agreement_on_login;
+                const agreementBody = document.getElementById('agreementBody');
+                if (agreementBody) {
+                    agreementBody.innerHTML = renderSimpleMarkdown(data?.data?.agreement_markdown || '');
+                }
                 if (!enabled) {
                     agreementAccepted = true;
                     return;

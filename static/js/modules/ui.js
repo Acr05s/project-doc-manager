@@ -4,6 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { getCurrentUser } from './auth.js';
+import { renderSimpleMarkdown } from './markdown.js';
 import { 
     handleCreateProject, handleLoadProject, handleImportJson, handleExportJson, 
     handleSaveProject, handleClearRequirements, updateClearRequirementsBtnState,
@@ -40,6 +41,7 @@ import {
 import { handleSaveTemplate } from './requirement-editor.js';
 
 let watermarkTimer = null;
+let agreementMarkdownDraft = '';
 
 /**
  * 设置事件监听器
@@ -1140,6 +1142,14 @@ export function setupEventListeners() {
         saveSettingsBtn.addEventListener('click', saveSystemSettings);
     }
 
+    const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
+    if (agreementMarkdownInput) {
+        agreementMarkdownInput.addEventListener('input', () => {
+            agreementMarkdownDraft = agreementMarkdownInput.value;
+            renderAgreementMarkdownPreview(agreementMarkdownDraft);
+        });
+    }
+
     // 检查更新按钮
     const checkUpdateBtn = document.getElementById('checkUpdateBtn');
     if (checkUpdateBtn) {
@@ -1325,6 +1335,13 @@ async function loadSystemSettings() {
                 watermarkEnabled.checked = !!settings.watermark_enabled;
             }
 
+            agreementMarkdownDraft = settings.agreement_markdown || '';
+            const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
+            if (agreementMarkdownInput) {
+                agreementMarkdownInput.value = agreementMarkdownDraft;
+            }
+            renderAgreementMarkdownPreview(agreementMarkdownDraft);
+
             const logRetentionDays = document.getElementById('logRetentionDays');
             if (logRetentionDays) {
                 logRetentionDays.value = settings.log_retention_days || 30;
@@ -1394,6 +1411,12 @@ async function saveSystemSettings() {
         if (watermarkEnabled) {
             settings.watermark_enabled = watermarkEnabled.checked;
         }
+
+        const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
+        if (agreementMarkdownInput) {
+            agreementMarkdownDraft = agreementMarkdownInput.value;
+        }
+        settings.agreement_markdown = agreementMarkdownDraft;
 
         const logRetentionDays = document.getElementById('logRetentionDays');
         if (logRetentionDays) {
@@ -1466,6 +1489,84 @@ async function archiveLogsNow() {
             showNotification('归档请求失败', 'error');
         }
     });
+}
+
+function renderAgreementMarkdownPreview(markdownText) {
+    const preview = document.getElementById('agreementMarkdownPreview');
+    if (!preview) return;
+    preview.innerHTML = renderSimpleMarkdown(markdownText || '');
+}
+
+export function openAgreementEditorModal() {
+    const modal = document.getElementById('agreementEditorModal');
+    if (!modal) return;
+
+    agreementMarkdownDraft = appState.systemSettings?.agreement_markdown || agreementMarkdownDraft || '';
+    const input = document.getElementById('agreementMarkdownInput');
+    if (input) {
+        input.value = agreementMarkdownDraft;
+    }
+    renderAgreementMarkdownPreview(agreementMarkdownDraft);
+    openModal(modal);
+}
+
+export function closeAgreementEditorModal() {
+    const modal = document.getElementById('agreementEditorModal');
+    if (modal) {
+        closeModal(modal);
+    }
+}
+
+export async function saveAgreementMarkdown() {
+    const input = document.getElementById('agreementMarkdownInput');
+    agreementMarkdownDraft = input ? input.value : agreementMarkdownDraft;
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ agreement_markdown: agreementMarkdownDraft })
+        });
+        const result = await response.json();
+        if (result.status === 'success') {
+            appState.systemSettings = {
+                ...(appState.systemSettings || {}),
+                ...(result.data || {}),
+                agreement_markdown: agreementMarkdownDraft
+            };
+            showNotification('协议内容已保存', 'success');
+            closeAgreementEditorModal();
+        } else {
+            showNotification('保存失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('保存协议内容失败:', error);
+        showNotification('保存协议内容失败', 'error');
+    }
+}
+
+export async function importAgreementMarkdown(fileInput) {
+    const file = fileInput?.files?.[0];
+    if (!file) return;
+
+    try {
+        agreementMarkdownDraft = await file.text();
+        const input = document.getElementById('agreementMarkdownInput');
+        if (input) {
+            input.value = agreementMarkdownDraft;
+        }
+        renderAgreementMarkdownPreview(agreementMarkdownDraft);
+        showNotification('协议内容已导入', 'success');
+    } catch (error) {
+        console.error('导入协议内容失败:', error);
+        showNotification('协议导入失败', 'error');
+    } finally {
+        if (fileInput) {
+            fileInput.value = '';
+        }
+    }
 }
 
 /**
@@ -2352,6 +2453,10 @@ export function refreshAfterCleanup() {
 if (typeof window !== 'undefined') {
     window.archiveLogsNow = archiveLogsNow;
     window.importLogsFile = importLogsFile;
+    window.openAgreementEditorModal = openAgreementEditorModal;
+    window.closeAgreementEditorModal = closeAgreementEditorModal;
+    window.saveAgreementMarkdown = saveAgreementMarkdown;
+    window.importAgreementMarkdown = importAgreementMarkdown;
     window.testSmtpConnection = testSmtpConnection;
 }
 
