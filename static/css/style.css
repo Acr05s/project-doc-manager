@@ -460,8 +460,27 @@ body {
     padding: 10px 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     position: relative;
-    z-index: 10450;
+    z-index: 10;
     overflow: visible;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.cycle-nav-bar.hidden {
+    display: none !important;
+}
+
+#cycleNavToggleBtn {
+    padding: 4px 8px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .cycle-nav-list {
@@ -518,7 +537,7 @@ body {
     border: 1px solid #ccc;
     border-radius: 6px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.18);
-    z-index: 10400;
+    z-index: 30;
     overflow: hidden;
 }
 
@@ -1102,7 +1121,7 @@ body {
     width: 100%;
     height: 100%;
     background: rgba(0,0,0,0.5);
-    z-index: 10001;
+    z-index: 10050;
     justify-content: center;
     align-items: center;
 }
@@ -2069,7 +2088,7 @@ body {
     position: absolute;
     top: 100%;
     left: 0;
-    z-index: 10000;
+    z-index: 1001;
     min-width: 160px;
     background: white;
     border: 1px solid #dee2e6;
@@ -4689,6 +4708,15 @@ input[type="month"].compact-input {
     flex: 1;
     overflow-y: auto;
     padding: 8px 0;
+}
+
+.sidebar-menu-section {
+    padding: 10px 20px 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6c757d;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
 }
 
 .sidebar-menu-item {

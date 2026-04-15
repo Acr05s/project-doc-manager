@@ -339,6 +339,7 @@ DEFAULT_MENU_PERMISSIONS = {
     # ── 系统菜单（侧边栏，🍀四叶草） ──
     'systemSettingsMenuItem': {'label': '⚙️ 系统设置', 'roles': ['admin'], 'group': 'sidebar'},
     'userApprovalBtn': {'label': '👤 用户审核', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'userApprovalHistoryMenuItem': {'label': '👥 用户审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'archiveApprovalBtn': {'label': '📋 文档归档审批', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'logManagementMenuItem': {'label': '📝 操作日志', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], 'group': 'sidebar'},

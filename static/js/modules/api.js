@@ -581,6 +581,7 @@ export async function fetchAdminLogs(params = {}) {
         if (params.limit) query.set('limit', params.limit);
         if (params.offset) query.set('offset', params.offset);
         if (params.type) query.set('type', params.type);
+        if (Array.isArray(params.types) && params.types.length > 0) query.set('types', params.types.join(','));
         if (params.username) query.set('username', params.username);
         const response = await fetch(`/api/admin/logs?${query.toString()}`);
         return await response.json();

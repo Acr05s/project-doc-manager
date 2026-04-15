@@ -1600,7 +1600,11 @@ def download_project_package(project_id):
                         directory = file_info.get('directory', '')
                         if directory and directory != '/':
                             # 有子目录，添加目录层级
-                            archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{directory}/{final_name}"
+                            clean_directory = str(directory).strip('/\\')
+                            if clean_directory:
+                                archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{clean_directory}/{final_name}"
+                            else:
+                                archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{final_name}"
                         else:
                             # 无子目录
                             archive_path = f"{project_name}/{file_info['cycle']}/{file_info['doc_name']}/{final_name}"

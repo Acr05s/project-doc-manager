@@ -549,3 +549,42 @@ window.refreshAfterCleanup = function() {
         module.refreshAfterCleanup();
     });
 };
+
+/**
+ * 切换周期导航栏的显示/隐藏
+ */
+window.toggleCycleNavBar = function() {
+    const cycleNavBar = document.getElementById('cycleNavBar');
+    const toggleBtn = document.getElementById('cycleNavToggleBtn');
+    
+    if (!cycleNavBar || !toggleBtn) return;
+    
+    const isHidden = cycleNavBar.classList.contains('hidden');
+    
+    if (isHidden) {
+        // 显示周期栏
+        cycleNavBar.classList.remove('hidden');
+        toggleBtn.textContent = '隐藏 ▲';
+        toggleBtn.title = '点击隐藏周期栏';
+        localStorage.setItem('cycleNavBarVisible', 'true');
+    } else {
+        // 隐藏周期栏
+        cycleNavBar.classList.add('hidden');
+        toggleBtn.textContent = '显示 ▼';
+        toggleBtn.title = '点击显示周期栏';
+        localStorage.setItem('cycleNavBarVisible', 'false');
+    }
+};
+
+// 初始化周期栏可见性
+document.addEventListener('DOMContentLoaded', () => {
+    const isVisible = localStorage.getItem('cycleNavBarVisible') !== 'false';
+    const cycleNavBar = document.getElementById('cycleNavBar');
+    const toggleBtn = document.getElementById('cycleNavToggleBtn');
+    
+    if (!isVisible && cycleNavBar && toggleBtn) {
+        cycleNavBar.classList.add('hidden');
+        toggleBtn.textContent = '显示 ▼';
+        toggleBtn.title = '点击显示周期栏';
+    }
+});

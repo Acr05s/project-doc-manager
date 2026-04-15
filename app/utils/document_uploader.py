@@ -37,7 +37,8 @@ class DocumentUploader:
               party_b_seal: bool = False, no_seal: bool = False,
               other_seal: Optional[str] = None,
               category: Optional[str] = None,
-              project_name: Optional[str] = None) -> Dict[str, Any]:
+              project_name: Optional[str] = None,
+              **kwargs) -> Dict[str, Any]:
         """上传文档
         
         Args:
@@ -55,6 +56,7 @@ class DocumentUploader:
             other_seal: 其它盖章（标注）
             category: 分类名称
             project_name: 项目名称
+            **kwargs: 预留扩展参数（如 source_dir/root_directory）
             
         Returns:
             Dict: 上传结果

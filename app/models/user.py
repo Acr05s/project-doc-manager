@@ -79,7 +79,10 @@ class UserManager:
                     approved_at TIMESTAMP,
                     email TEXT,
                     approval_code_hash TEXT,
-                    approval_code_needs_change INTEGER DEFAULT 1
+                    approval_code_needs_change INTEGER DEFAULT 1,
+                    password_updated_at TIMESTAMP,
+                    must_change_password INTEGER DEFAULT 1,
+                    password_expiry_started_at TIMESTAMP
                 )
             ''')
             
@@ -381,6 +384,12 @@ class UserManager:
             if 'password_updated_at' not in user_columns:
                 cursor.execute('ALTER TABLE users ADD COLUMN password_updated_at TIMESTAMP')
                 cursor.execute('UPDATE users SET password_updated_at = created_at WHERE password_updated_at IS NULL')
+            if 'must_change_password' not in user_columns:
+                cursor.execute('ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0')
+                # 历史存量用户不强制首次改密，保持兼容
+                cursor.execute('UPDATE users SET must_change_password = 0 WHERE must_change_password IS NULL')
+            if 'password_expiry_started_at' not in user_columns:
+                cursor.execute('ALTER TABLE users ADD COLUMN password_expiry_started_at TIMESTAMP')
             conn.commit()
     
     def _row_to_user(self, row):
@@ -412,8 +421,8 @@ class UserManager:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'INSERT INTO users (username, password_hash, role, status, organization, email, uuid) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    (username, password_hash, role, status, organization, email, new_uuid)
+                    'INSERT INTO users (username, password_hash, role, status, organization, email, uuid, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (username, password_hash, role, status, organization, email, new_uuid, 1)
                 )
                 conn.commit()
                 return cursor.lastrowid
@@ -460,8 +469,8 @@ class UserManager:
 
                 new_uuid = str(uuid_module.uuid4())
                 cursor.execute(
-                    'INSERT INTO users (username, password_hash, role, status, organization, email, uuid, display_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (username, password_hash, role, status, org_name, email, new_uuid, display_name)
+                    'INSERT INTO users (username, password_hash, role, status, organization, email, uuid, display_name, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    (username, password_hash, role, status, org_name, email, new_uuid, display_name, 1)
                 )
                 conn.commit()
                 user_id = cursor.lastrowid
@@ -664,15 +673,24 @@ class UserManager:
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
 
-    def update_password(self, user_id, new_password_hash):
+    def update_password(self, user_id, new_password_hash, force_expired=False):
         """重置用户密码"""
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'UPDATE users SET password_hash = ?, password_updated_at = ? WHERE id = ?',
-                    (new_password_hash, now_with_timezone().strftime('%Y-%m-%d %H:%M:%S'), user_id)
-                )
+                now_text = now_with_timezone().strftime('%Y-%m-%d %H:%M:%S')
+                if force_expired:
+                    # 管理员重置后立即过期：必须强制用户改密，且不启动过期计时
+                    cursor.execute(
+                        'UPDATE users SET password_hash = ?, password_updated_at = ?, must_change_password = 1, password_expiry_started_at = NULL WHERE id = ?',
+                        (new_password_hash, now_text, user_id)
+                    )
+                else:
+                    # 用户自行改密后解除强制，并在首次改密时启动过期计时
+                    cursor.execute(
+                        'UPDATE users SET password_hash = ?, password_updated_at = ?, must_change_password = 0, password_expiry_started_at = COALESCE(password_expiry_started_at, ?) WHERE id = ?',
+                        (new_password_hash, now_text, now_text, user_id)
+                    )
                 conn.commit()
                 return {'status': 'success', 'message': '密码已重置'}
         except Exception as e:
@@ -681,19 +699,29 @@ class UserManager:
     def is_password_expired(self, user_id, expire_days):
         """检查用户密码是否过期。expire_days<=0 表示不过期。"""
         try:
-            if not expire_days or int(expire_days) <= 0:
-                return False
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'SELECT COALESCE(password_updated_at, created_at) FROM users WHERE id = ?',
+                    'SELECT must_change_password, password_expiry_started_at, password_updated_at, created_at FROM users WHERE id = ?',
                     (user_id,)
                 )
                 row = cursor.fetchone()
-                if not row or not row[0]:
+                if not row:
                     return False
 
-                ref_text = str(row[0]).replace('T', ' ').split('.')[0]
+                must_change = int(row[0] or 0)
+                if must_change == 1:
+                    return True
+
+                if not expire_days or int(expire_days) <= 0:
+                    return False
+
+                # 仅当用户完成首次强制改密后，才开始密码有效期计时
+                ref_raw = row[1] or row[2]
+                if not ref_raw:
+                    return False
+
+                ref_text = str(ref_raw).replace('T', ' ').split('.')[0]
                 ref_time = datetime.strptime(ref_text, '%Y-%m-%d %H:%M:%S')
                 return (now_with_timezone().replace(tzinfo=None) - ref_time).days >= int(expire_days)
         except Exception:
@@ -1226,13 +1254,14 @@ class UserManager:
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
 
-    def get_operation_logs(self, limit=200, offset=0, operation_type=None, username=None, user_ids=None):
+    def get_operation_logs(self, limit=200, offset=0, operation_type=None, operation_types=None, username=None, user_ids=None):
         """获取操作日志
         
         Args:
             limit: 每页数量
             offset: 偏移量
             operation_type: 操作类型筛选
+            operation_types: 多操作类型筛选列表（优先于 operation_type）
             username: 用户名模糊搜索
             user_ids: 用户ID列表，用于限制可见范围（如单位成员ID列表）
         """
@@ -1242,7 +1271,12 @@ class UserManager:
                 cursor = conn.cursor()
                 query = 'SELECT * FROM operation_logs WHERE 1=1'
                 params = []
-                if operation_type:
+                normalized_types = [str(t).strip() for t in (operation_types or []) if str(t).strip()]
+                if normalized_types:
+                    placeholders = ','.join('?' * len(normalized_types))
+                    query += f' AND operation_type IN ({placeholders})'
+                    params.extend(normalized_types)
+                elif operation_type:
                     query += ' AND operation_type = ?'
                     params.append(operation_type)
                 if username:
@@ -1274,7 +1308,11 @@ class UserManager:
                 # 获取总数
                 count_query = 'SELECT COUNT(*) as total FROM operation_logs WHERE 1=1'
                 count_params = []
-                if operation_type:
+                if normalized_types:
+                    placeholders = ','.join('?' * len(normalized_types))
+                    count_query += f' AND operation_type IN ({placeholders})'
+                    count_params.extend(normalized_types)
+                elif operation_type:
                     count_query += ' AND operation_type = ?'
                     count_params.append(operation_type)
                 if username:

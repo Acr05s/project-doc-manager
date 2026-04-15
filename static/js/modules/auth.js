@@ -300,6 +300,9 @@ export async function updateRoleBasedUI() {
                     case 'approvalHistoryBtn':
                         import('./document.js').then(m => m.showGlobalApprovalHistory());
                         break;
+                    case 'userApprovalHistoryMenuItem':
+                        import('./admin.js').then(m => m.openUserApprovalHistoryModal());
+                        break;
                     case 'userManagementMenuItem':
                         import('./admin.js').then(m => m.openUserManagementModal());
                         break;
@@ -308,6 +311,9 @@ export async function updateRoleBasedUI() {
                         break;
                     case 'projectManagementMenuItem':
                         import('./admin.js').then(m => m.openProjectManagementModal());
+                        break;
+                    case 'moduleManagementMenuItem':
+                        import('./module-management.js').then(m => m.openModuleManagementModal());
                         break;
                     case 'logManagementMenuItem':
                         import('./admin.js').then(m => m.openLogManagementModal());
@@ -372,14 +378,15 @@ async function openPermissionConfigModal() {
             'viewApprovalHistoryBtn'
         ],
         sidebar: [
-            'systemSettingsMenuItem',
+            'userManagementMenuItem',
+            'orgManagementMenuItem',
+            'projectManagementMenuItem',
             'userApprovalBtn',
+            'userApprovalHistoryMenuItem',
             'archiveApprovalBtn',
             'approvalHistoryBtn',
             'logManagementMenuItem',
-            'userManagementMenuItem',
-            'orgManagementMenuItem',
-            'projectManagementMenuItem'
+            'systemSettingsMenuItem'
         ]
     };
 

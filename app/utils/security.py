@@ -121,11 +121,14 @@ def register_security_hooks(app):
                     from app.routes.settings import load_settings
                     settings = load_settings()
                     expire_days = int(settings.get('password_expire_days', 0) or 0)
-                    if expire_days > 0 and user_manager.is_password_expired(current_user.id, expire_days):
+                    if user_manager.is_password_expired(current_user.id, expire_days):
+                        message = '密码已过期，请先修改密码后继续操作'
+                        if expire_days > 0:
+                            message = f'密码已过期（超过 {expire_days} 天），请先修改密码后继续操作'
                         if path.startswith('/api/'):
                             return jsonify({
                                 'status': 'password_expired',
-                                'message': f'密码已过期（超过 {expire_days} 天），请先修改密码后继续操作',
+                                'message': message,
                                 'expire_days': expire_days
                             }), 403
                         return None
