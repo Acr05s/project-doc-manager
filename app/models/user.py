@@ -1029,49 +1029,49 @@ class UserManager:
                 (ip_address, cutoff_time)
             )
             return cursor.fetchone()[0]
-    
-        def clear_failed_login_attempts(self, ip_address):
-            """登录成功后清除该 IP 的失败记录，重置失败计数器"""
-            try:
-                with sqlite3.connect(str(self.db_path)) as conn:
-                    conn.execute(
-                        'DELETE FROM login_attempts WHERE ip_address = ? AND success = 0',
-                        (ip_address,)
-                    )
-                    conn.commit()
-            except Exception:
-                pass
 
-        def cleanup_old_login_attempts(self, hours=24):
-            """清理超过 hours 小时的登录尝试记录（定期维护调用）"""
-            try:
-                from datetime import datetime, timedelta
-                cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
-                with sqlite3.connect(str(self.db_path)) as conn:
-                    conn.execute('DELETE FROM login_attempts WHERE attempt_time < ?', (cutoff,))
-                    conn.commit()
-            except Exception:
-                pass
-
-        def get_ip_blacklist(self, include_expired=False):
-            """获取 IP 黑名单列表，供管理页面展示"""
+    def clear_failed_login_attempts(self, ip_address):
+        """登录成功后清除该 IP 的失败记录，重置失败计数器"""
+        try:
             with sqlite3.connect(str(self.db_path)) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                if include_expired:
-                    cursor.execute(
-                        'SELECT id, ip_address, reason, blocked_at, blocked_by, unblock_at '
-                        'FROM ip_blacklist ORDER BY blocked_at DESC'
-                    )
-                else:
-                    now = now_with_timezone().isoformat()
-                    cursor.execute(
-                        'SELECT id, ip_address, reason, blocked_at, blocked_by, unblock_at '
-                        'FROM ip_blacklist WHERE unblock_at IS NULL OR unblock_at > ? '
-                        'ORDER BY blocked_at DESC',
-                        (now,)
-                    )
-                return [dict(row) for row in cursor.fetchall()]
+                conn.execute(
+                    'DELETE FROM login_attempts WHERE ip_address = ? AND success = 0',
+                    (ip_address,)
+                )
+                conn.commit()
+        except Exception:
+            pass
+
+    def cleanup_old_login_attempts(self, hours=24):
+        """清理超过 hours 小时的登录尝试记录（定期维护调用）"""
+        try:
+            from datetime import datetime, timedelta
+            cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute('DELETE FROM login_attempts WHERE attempt_time < ?', (cutoff,))
+                conn.commit()
+        except Exception:
+            pass
+
+    def get_ip_blacklist(self, include_expired=False):
+        """获取 IP 黑名单列表，供管理页面展示"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if include_expired:
+                cursor.execute(
+                    'SELECT id, ip_address, reason, blocked_at, blocked_by, unblock_at '
+                    'FROM ip_blacklist ORDER BY blocked_at DESC'
+                )
+            else:
+                now = now_with_timezone().isoformat()
+                cursor.execute(
+                    'SELECT id, ip_address, reason, blocked_at, blocked_by, unblock_at '
+                    'FROM ip_blacklist WHERE unblock_at IS NULL OR unblock_at > ? '
+                    'ORDER BY blocked_at DESC',
+                    (now,)
+                )
+            return [dict(row) for row in cursor.fetchall()]
 
     def add_archive_request(self, doc_id, project_id, requester_id):
         """添加归档申请"""
