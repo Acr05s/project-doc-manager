@@ -212,7 +212,10 @@ export async function approveProject(projectId) {
  */
 export async function getPendingUsers() {
     try {
-        const response = await fetch('/pending-users');
+        let response = await fetch('/api/users/pending');
+        if (response.status === 404) {
+            response = await fetch('/pending-users');
+        }
         return await response.json();
     } catch (error) {
         console.error('获取待审核用户失败:', error);
@@ -225,11 +228,18 @@ export async function getPendingUsers() {
  */
 export async function approveUserAccount(userId) {
     try {
-        const response = await fetch('/approve-user', {
+        let response = await fetch('/api/approve-user', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: userId })
         });
+        if (response.status === 404) {
+            response = await fetch('/approve-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+        }
         return await response.json();
     } catch (error) {
         console.error('审核用户失败:', error);
@@ -242,11 +252,18 @@ export async function approveUserAccount(userId) {
  */
 export async function rejectUserAccount(userId) {
     try {
-        const response = await fetch('/reject-user', {
+        let response = await fetch('/api/reject-user', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: userId })
         });
+        if (response.status === 404) {
+            response = await fetch('/reject-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+        }
         return await response.json();
     } catch (error) {
         console.error('拒绝用户失败:', error);
