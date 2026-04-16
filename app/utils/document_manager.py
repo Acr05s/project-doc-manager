@@ -945,6 +945,12 @@ class DocumentManager:
         if self.projects:
             return self.projects.delete_template(template_id)
         return {'status': 'error', 'message': '项目管理模块不可用'}
+
+    def update_template(self, template_id: str, template_name: str = None, description: str = None, template_data: Dict = None) -> Dict:
+        """更新指定模板"""
+        if self.projects:
+            return self.projects.update_template(template_id, template_name, description, template_data)
+        return {'status': 'error', 'message': '项目管理模块不可用'}
     
     def export_template(self, template_id: str) -> Optional[Dict]:
         """导出指定模板"""

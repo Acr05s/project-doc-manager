@@ -832,6 +832,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             }).join('')
                             : (doc.requirement ? `<span style="background: #fff3cd; padding: 3px 12px; border-radius: 4px; display: inline-block; text-align: center;">${doc.requirement}</span>` : '');
                         
+                        const docDescription = String(doc.doc_description || '').trim();
+                        const escapedDocDescription = escapeHtml(docDescription);
+
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
                         const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
                         
@@ -871,7 +874,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${statusTag}
-                                        <div class="doc-type" style="text-align: center;">${doc.name}</div>
+                                        <div class="doc-type" style="text-align: center;" ${docDescription ? `title="说明: ${escapedDocDescription}"` : ''}>${doc.name}${docDescription ? ' <span style="font-size:12px;color:#7a8798;cursor:help;" title="说明: ' + escapedDocDescription + '">ⓘ</span>' : ''}</div>
                                         <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">
                                             ${requirementHtml}
                                         </div>

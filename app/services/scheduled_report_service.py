@@ -81,6 +81,7 @@ class ScheduledReportService:
                 'in_app_message_enabled': True,
                 'login_popup_enabled': True,
                 'external_emails': [],
+                'recipient_user_ids': [],
                 'last_run_key': ''
             }
         cfg.setdefault('enabled', False)
@@ -92,8 +93,30 @@ class ScheduledReportService:
         cfg.setdefault('in_app_message_enabled', True)
         cfg.setdefault('login_popup_enabled', True)
         cfg.setdefault('external_emails', [])
+        cfg.setdefault('recipient_user_ids', [])
         cfg.setdefault('last_run_key', '')
         return cfg
+
+    def get_schedule_detail(self, project_id: str) -> Dict[str, Any]:
+        schedule = self.get_schedule(project_id)
+        project = self._load_project(project_id)
+        recipient_options = self._build_project_recipient_options(project)
+        active_ids = {int(opt.get('id')) for opt in recipient_options if opt.get('id')}
+        selected_ids = []
+        for x in schedule.get('recipient_user_ids', []) or []:
+            try:
+                uid = int(x)
+            except Exception:
+                continue
+            if uid in active_ids:
+                selected_ids.append(uid)
+        if not selected_ids:
+            selected_ids = [int(opt['id']) for opt in recipient_options if opt.get('recommended') and opt.get('id')]
+        schedule['recipient_user_ids'] = sorted(set(selected_ids))
+        return {
+            'schedule': schedule,
+            'recipient_options': recipient_options
+        }
 
     def update_schedule(self, project_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
@@ -121,6 +144,18 @@ class ScheduledReportService:
             cfg['include_pdf'] = bool(data.get('include_pdf', cfg['include_pdf']))
             cfg['in_app_message_enabled'] = bool(data.get('in_app_message_enabled', cfg.get('in_app_message_enabled', True)))
             cfg['login_popup_enabled'] = bool(data.get('login_popup_enabled', cfg.get('login_popup_enabled', True)))
+
+            ids = data.get('recipient_user_ids', cfg.get('recipient_user_ids', []))
+            recipient_user_ids: List[int] = []
+            if isinstance(ids, str):
+                ids = [x.strip() for x in ids.replace('，', ',').split(',') if x.strip()]
+            if isinstance(ids, list):
+                for x in ids:
+                    try:
+                        recipient_user_ids.append(int(x))
+                    except Exception:
+                        continue
+            cfg['recipient_user_ids'] = sorted(set(recipient_user_ids))
 
             ext = data.get('external_emails', cfg.get('external_emails', []))
             if isinstance(ext, str):
@@ -206,11 +241,9 @@ class ScheduledReportService:
         if not self.doc_manager:
             return {'status': 'error', 'message': '文档管理器未初始化'}
 
-        project_result = self.doc_manager.load_project(project_id)
-        if project_result.get('status') != 'success':
+        project = self._load_project(project_id)
+        if not project:
             return {'status': 'error', 'message': '项目加载失败'}
-
-        project = project_result.get('project', {})
         project_name = project.get('name', project_id)
         cfg = self.get_schedule(project_id)
         frequency = cfg.get('frequency', 'weekly')
@@ -369,40 +402,103 @@ class ScheduledReportService:
             'by_cycle': by_cycle
         }
 
+    def _load_project(self, project_id: str) -> Dict[str, Any]:
+        if not self.doc_manager:
+            return {}
+        project_result = self.doc_manager.load_project(project_id)
+        if project_result.get('status') != 'success':
+            return {}
+        project = project_result.get('project', {})
+        return project if isinstance(project, dict) else {}
+
+    def _build_project_recipient_options(self, project: Dict[str, Any]) -> List[Dict[str, Any]]:
+        options: List[Dict[str, Any]] = []
+        seen_ids = set()
+
+        def add_user(user: Dict[str, Any], source_label: str, recommended: bool = True):
+            if not isinstance(user, dict):
+                return
+            if user.get('status') != 'active':
+                return
+            uid = user.get('id')
+            if not uid:
+                return
+            try:
+                uid = int(uid)
+            except Exception:
+                return
+            if uid in seen_ids:
+                return
+            seen_ids.add(uid)
+            options.append({
+                'id': uid,
+                'username': str(user.get('username') or ''),
+                'display_name': str(user.get('display_name') or user.get('username') or ''),
+                'organization': str(user.get('organization') or ''),
+                'role': str(user.get('role') or ''),
+                'email': str(user.get('email') or ''),
+                'source': source_label,
+                'recommended': bool(recommended)
+            })
+
+        for user in user_manager.get_users_by_roles(['pmo', 'pmo_leader']) or []:
+            add_user(user, 'PMO', True)
+
+        party_b = (project.get('party_b') or '').strip()
+        for user in user_manager.get_users_by_roles(['project_admin']) or []:
+            if party_b:
+                user_org = (user.get('organization') or '').strip()
+                if user_org and user_org != party_b:
+                    continue
+            add_user(user, '项目经理', True)
+
+        manager_username = (project.get('manager') or '').strip()
+        if manager_username:
+            manager_user = user_manager.get_user_by_username(manager_username)
+            if manager_user and getattr(manager_user, 'status', '') == 'active':
+                add_user({
+                    'id': getattr(manager_user, 'id', None),
+                    'username': getattr(manager_user, 'username', ''),
+                    'display_name': getattr(manager_user, 'display_name', '') or getattr(manager_user, 'username', ''),
+                    'organization': getattr(manager_user, 'organization', ''),
+                    'role': getattr(manager_user, 'role', ''),
+                    'email': getattr(manager_user, 'email', ''),
+                    'status': getattr(manager_user, 'status', 'active')
+                }, '项目负责人', True)
+
+        options.sort(key=lambda x: (
+            0 if x.get('recommended') else 1,
+            str(x.get('role') or ''),
+            str(x.get('display_name') or x.get('username') or '')
+        ))
+        return options
+
     def _collect_recipient_targets(self, project: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, List[Any]]:
         recipients = set()
         user_ids = set()
 
-        pmo_users = user_manager.get_users_by_roles(['pmo', 'pmo_leader']) or []
-        for user in pmo_users:
-            email = (user.get('email') or '').strip()
-            if email and user.get('status') == 'active':
-                recipients.add(email)
-            if user.get('status') == 'active' and user.get('id'):
-                user_ids.add(int(user.get('id')))
+        recipient_options = self._build_project_recipient_options(project)
+        selected_ids: List[int] = []
+        active_ids = {int(opt.get('id')) for opt in recipient_options if opt.get('id')}
+        for x in cfg.get('recipient_user_ids', []) or []:
+            try:
+                uid = int(x)
+            except Exception:
+                continue
+            if uid in active_ids:
+                selected_ids.append(uid)
+        if not selected_ids:
+            selected_ids = [int(opt['id']) for opt in recipient_options if opt.get('recommended') and opt.get('id')]
 
-        party_b = (project.get('party_b') or '').strip()
-        pm_users = user_manager.get_users_by_roles(['project_admin']) or []
-        for user in pm_users:
-            if user.get('status') != 'active':
+        selected_set = set(selected_ids)
+        for opt in recipient_options:
+            uid = int(opt.get('id')) if opt.get('id') else None
+            if not uid or uid not in selected_set:
                 continue
-            user_org = (user.get('organization') or '').strip()
-            if party_b and user_org and user_org != party_b:
-                continue
-            email = (user.get('email') or '').strip()
+            user_ids.add(uid)
+            email = str(opt.get('email') or '').strip()
             if email:
                 recipients.add(email)
-            if user.get('id'):
-                user_ids.add(int(user.get('id')))
-
-        manager_username = (project.get('manager') or '').strip()
-        if manager_username:
-            user = user_manager.get_user_by_username(manager_username)
-            if user:
-                if getattr(user, 'email', ''):
-                    recipients.add(str(user.email).strip())
-                if getattr(user, 'id', None):
-                    user_ids.add(int(user.id))
 
         for email in cfg.get('external_emails', []) or []:
             s = str(email).strip()

@@ -22,6 +22,7 @@ let lastSelectedNode = null;  // 用于Shift范围选择
 let autoSaveTimer = null;
 let hasUnsavedChanges = false;
 let lastSaveTime = null;
+let splitImportPreviewData = null;
 
 // ==================== 默认附加属性模板 ====================
 
@@ -2216,6 +2217,7 @@ async function loadTemplateListForManage() {
                 </div>
                 <div class="template-actions">
                     <button class="btn btn-sm btn-primary" onclick="loadTemplateToTreeEditor('${t.id}')">加载</button>
+                    <button class="btn btn-sm btn-warning" onclick="openTemplateEditModal('${t.id}')">编辑</button>
                     <button class="btn btn-sm btn-info" onclick="exportTemplateFromManage('${t.id}')">导出</button>
                     <button class="btn btn-sm btn-danger" onclick="deleteTemplateConfirm('${t.id}', '${escapeHtml(t.name)}')">删除</button>
                 </div>
@@ -2249,6 +2251,91 @@ window.deleteTemplateConfirm = function(templateId, templateName) {
         }
     );
 };
+
+window.openTemplateEditModal = async function(templateId) {
+    const modal = document.getElementById('templateEditModal');
+    if (!modal) return;
+
+    showLoading(true);
+    try {
+        const response = await fetch(`/api/projects/templates/${templateId}`);
+        const result = await response.json();
+        if (result.status !== 'success') throw new Error(result.message || '加载模板失败');
+
+        const template = result.template || {};
+        const idEl = document.getElementById('templateEditId');
+        const nameEl = document.getElementById('templateEditName');
+        const descEl = document.getElementById('templateEditDescription');
+        const overrideEl = document.getElementById('templateEditOverrideData');
+
+        if (idEl) idEl.value = templateId;
+        if (nameEl) nameEl.value = template.name || '';
+        if (descEl) descEl.value = template.description || '';
+        if (overrideEl) overrideEl.checked = false;
+
+        openModal(modal);
+    } catch (error) {
+        showNotification('打开模板编辑失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+};
+
+window.closeTemplateEditModal = function() {
+    const modal = document.getElementById('templateEditModal');
+    if (modal) closeModal(modal);
+};
+
+async function handleTemplateEditSubmit(e) {
+    e.preventDefault();
+
+    const idEl = document.getElementById('templateEditId');
+    const nameEl = document.getElementById('templateEditName');
+    const descEl = document.getElementById('templateEditDescription');
+    const overrideEl = document.getElementById('templateEditOverrideData');
+
+    const templateId = idEl ? idEl.value : '';
+    const templateName = nameEl ? nameEl.value.trim() : '';
+    const description = descEl ? descEl.value.trim() : '';
+    const overrideData = !!(overrideEl && overrideEl.checked);
+
+    if (!templateId) {
+        showNotification('模板ID无效', 'error');
+        return;
+    }
+    if (!templateName) {
+        showNotification('模板名称不能为空', 'error');
+        return;
+    }
+
+    const payload = {
+        template_name: templateName,
+        description
+    };
+    if (overrideData) {
+        payload.template_data = treeToConfig();
+    }
+
+    showLoading(true);
+    try {
+        const response = await fetch(`/api/projects/templates/${templateId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (result.status !== 'success') {
+            throw new Error(result.message || '模板更新失败');
+        }
+        showNotification('模板已更新', 'success');
+        closeTemplateEditModal();
+        await loadTemplateListForManage();
+    } catch (error) {
+        showNotification('模板更新失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
 
 // ==================== 模板导入/导出功能 ====================
 
@@ -2485,6 +2572,32 @@ document.addEventListener('DOMContentLoaded', function() {
     if (form) {
         form.addEventListener('submit', handleImportTemplateForManage);
     }
+
+    const editForm = document.getElementById('templateEditForm');
+    if (editForm) {
+        editForm.addEventListener('submit', handleTemplateEditSubmit);
+    }
+
+    const importMode = document.getElementById('importModuleMode');
+    const importFile = document.getElementById('importModuleFile');
+    const splitPanel = document.getElementById('importModuleSplitPanel');
+    if (importMode) {
+        importMode.addEventListener('change', async () => {
+            const mode = importMode.value;
+            if (mode === 'split_select') {
+                await prepareSplitImportPreview();
+            } else if (splitPanel) {
+                splitPanel.style.display = 'none';
+            }
+        });
+    }
+    if (importFile) {
+        importFile.addEventListener('change', async () => {
+            if (importMode && importMode.value === 'split_select') {
+                await prepareSplitImportPreview();
+            }
+        });
+    }
 });
 
 // ==================== 导入/导出功能 ====================
@@ -2498,6 +2611,13 @@ export function openImportModuleModal() {
         // 重置表单
         const fileInput = document.getElementById('importModuleFile');
         if (fileInput) fileInput.value = '';
+        const modeSelect = document.getElementById('importModuleMode');
+        if (modeSelect) modeSelect.value = 'merge';
+        const splitPanel = document.getElementById('importModuleSplitPanel');
+        const splitList = document.getElementById('importModuleSplitList');
+        if (splitPanel) splitPanel.style.display = 'none';
+        if (splitList) splitList.innerHTML = '';
+        splitImportPreviewData = null;
         openModal(modal);
     }
 }
@@ -2507,8 +2627,134 @@ export function openImportModuleModal() {
  */
 export function closeImportModuleModal() {
     const modal = document.getElementById('importModuleModal');
+    const splitPanel = document.getElementById('importModuleSplitPanel');
+    if (splitPanel) splitPanel.style.display = 'none';
+    splitImportPreviewData = null;
     if (modal) closeModal(modal);
 }
+
+async function parseImportModuleFile(file) {
+    if (!file) {
+        throw new Error('未选择文件');
+    }
+    const lowerName = (file.name || '').toLowerCase();
+    if (lowerName.endsWith('.json')) {
+        const content = await file.text();
+        const importedData = JSON.parse(content);
+        if (!importedData.cycles || !Array.isArray(importedData.cycles)) {
+            throw new Error('无效的文档需求配置文件：缺少周期数据');
+        }
+        return importedData;
+    }
+    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await fetch('/api/projects/load', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+        if (result.status !== 'success') {
+            throw new Error(result.message || 'Excel文件解析失败');
+        }
+        return result.data;
+    }
+    throw new Error('不支持的文件格式，仅支持JSON和Excel文件');
+}
+
+function getSelectedCycleNodeForSplitImport() {
+    if (!selectedNode) return null;
+    const node = findNode(currentTreeData, selectedNode);
+    if (!node) return null;
+    if (node.type === 'cycle') return node;
+    if (node.type === 'document') {
+        const r = getParentAndSiblings(node.id);
+        if (r && r.parent && r.parent.type === 'cycle') {
+            return r.parent;
+        }
+    }
+    return null;
+}
+
+function normalizeImportedDoc(doc) {
+    if (typeof doc === 'object' && doc !== null) {
+        return JSON.parse(JSON.stringify(doc));
+    }
+    return { name: String(doc || '').trim() };
+}
+
+function collectSplitImportItems(importedData) {
+    const items = [];
+    const cycles = importedData?.cycles || [];
+    const docsMap = importedData?.documents || {};
+    cycles.forEach((cycleName) => {
+        const cycleData = docsMap[cycleName] || {};
+        const requiredDocs = Array.isArray(cycleData.required_docs) ? cycleData.required_docs : [];
+        requiredDocs.forEach((doc, index) => {
+            const docObj = normalizeImportedDoc(doc);
+            const docName = String(docObj.name || '').trim();
+            if (!docName) return;
+            items.push({
+                key: `${cycleName}::${docName}::${index}`,
+                sourceCycle: String(cycleName),
+                docName,
+                docData: docObj
+            });
+        });
+    });
+    return items;
+}
+
+async function prepareSplitImportPreview() {
+    const fileInput = document.getElementById('importModuleFile');
+    const panel = document.getElementById('importModuleSplitPanel');
+    const list = document.getElementById('importModuleSplitList');
+    if (!fileInput || !panel || !list) return;
+
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) {
+        splitImportPreviewData = null;
+        list.innerHTML = '<div style="font-size:12px;color:#777;">请先选择模板文件。</div>';
+        panel.style.display = 'block';
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const importedData = await parseImportModuleFile(file);
+        const items = collectSplitImportItems(importedData);
+        splitImportPreviewData = { importedData, items };
+
+        if (items.length === 0) {
+            list.innerHTML = '<div style="font-size:12px;color:#777;">模板中没有可导入的文档记录。</div>';
+        } else {
+            list.innerHTML = items.map((item) => `
+                <label style="display:flex;align-items:flex-start;gap:8px;padding:6px 4px;border-bottom:1px dashed #eef2f7;">
+                    <input type="checkbox" class="split-import-item" value="${escapeHtml(item.key)}" checked style="margin-top:3px;">
+                    <span style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                        <strong style="font-size:13px;color:#223;">${escapeHtml(item.docName)}</strong>
+                        <small style="font-size:11px;color:#667;">来源周期：${escapeHtml(item.sourceCycle)}</small>
+                    </span>
+                </label>
+            `).join('');
+        }
+
+        panel.style.display = 'block';
+    } catch (error) {
+        splitImportPreviewData = null;
+        list.innerHTML = `<div style="font-size:12px;color:#c33;">解析失败：${escapeHtml(error.message)}</div>`;
+        panel.style.display = 'block';
+        showNotification('拆分预览生成失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+window.toggleSplitImportSelectAll = function(checked) {
+    document.querySelectorAll('#importModuleSplitList .split-import-item').forEach((el) => {
+        el.checked = !!checked;
+    });
+};
 
 /**
  * 确认导入模块
@@ -2526,36 +2772,100 @@ export async function confirmImportModule() {
     const mode = modeSelect ? modeSelect.value : 'merge';
     
     try {
-        let importedData;
-        
-        if (file.name.endsWith('.json')) {
-            // 处理JSON文件
-            const content = await file.text();
-            importedData = JSON.parse(content);
-            
-            // 验证数据结构
-            if (!importedData.cycles || !Array.isArray(importedData.cycles)) {
-                showNotification('无效的文档需求配置文件：缺少周期数据', 'error');
+        const importedData = await parseImportModuleFile(file);
+
+        if (mode === 'split_select') {
+            if (!splitImportPreviewData || !Array.isArray(splitImportPreviewData.items)) {
+                await prepareSplitImportPreview();
+            }
+            if (!splitImportPreviewData || !Array.isArray(splitImportPreviewData.items)) {
+                showNotification('拆分导入预览未准备好，请重试', 'error');
                 return;
             }
-        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-            // 处理Excel文件
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            const response = await fetch('/api/projects/load', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
-            if (result.status !== 'success') {
-                throw new Error(result.message || 'Excel文件解析失败');
+
+            const checkedKeys = new Set(
+                Array.from(document.querySelectorAll('#importModuleSplitList .split-import-item:checked'))
+                    .map(el => el.value)
+            );
+            if (checkedKeys.size === 0) {
+                showNotification('请至少勾选一条记录', 'warning');
+                return;
             }
-            
-            importedData = result.data;
-        } else {
-            showNotification('不支持的文件格式，仅支持JSON和Excel文件', 'error');
+
+            const selectedCycleNode = getSelectedCycleNodeForSplitImport();
+            const forceCycleName = selectedCycleNode ? selectedCycleNode.name : '';
+
+            // 按目标周期分组导入
+            splitImportPreviewData.items.forEach((item) => {
+                if (!checkedKeys.has(item.key)) return;
+                const targetCycleName = forceCycleName || item.sourceCycle;
+                let targetCycleNode = currentTreeData.children.find(c => c.type === 'cycle' && c.name === targetCycleName);
+                if (!targetCycleNode) {
+                    targetCycleNode = {
+                        id: `cycle_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        name: targetCycleName,
+                        type: 'cycle',
+                        expanded: true,
+                        children: []
+                    };
+                    currentTreeData.children.push(targetCycleNode);
+                }
+
+                const exists = targetCycleNode.children.some(c => c.type === 'document' && c.name === item.docName);
+                if (exists) return;
+
+                const docData = normalizeImportedDoc(item.docData);
+                const docNode = {
+                    id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    name: docData.name,
+                    type: 'document',
+                    expanded: false,
+                    children: [],
+                    attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docData.attributes || {}) },
+                    doc_note: docData.doc_note || '',
+                    filename_template: docData.filename_template || '',
+                    match_keywords: docData.match_keywords || [],
+                    exclude_keywords: docData.exclude_keywords || []
+                };
+
+                if (Array.isArray(docData.children)) {
+                    docData.children.forEach((child, childIdx) => {
+                        if (child && child.type === 'folder') {
+                            const folderNode = {
+                                id: `folder_${Date.now()}_${childIdx}_${Math.random().toString(36).slice(2, 8)}`,
+                                name: child.name || '新目录',
+                                type: 'folder',
+                                expanded: false,
+                                children: [],
+                                attributes: child.attributes || {},
+                                filename_template: child.filename_template || '',
+                                match_keywords: child.match_keywords || [],
+                                exclude_keywords: child.exclude_keywords || []
+                            };
+                            const childFiles = Array.isArray(child.files) ? child.files : [];
+                            childFiles.forEach((f, fileIdx) => {
+                                const fileData = typeof f === 'object' ? f : { name: f };
+                                folderNode.children.push({
+                                    id: `file_${Date.now()}_${childIdx}_${fileIdx}_${Math.random().toString(36).slice(2, 8)}`,
+                                    name: fileData.name || '文件',
+                                    type: 'file',
+                                    children: [],
+                                    match_keywords: fileData.match_keywords || [],
+                                    exclude_keywords: fileData.exclude_keywords || []
+                                });
+                            });
+                            docNode.children.push(folderNode);
+                        }
+                    });
+                }
+
+                targetCycleNode.children.push(docNode);
+            });
+
+            renderTree();
+            markDirty();
+            closeImportModuleModal();
+            showNotification('拆分导入完成', 'success');
             return;
         }
         

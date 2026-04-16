@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # Project Document Manager - Linux/Mac Daemon
-# Version: 2.1.1B
+# Version: 3.0.1
 # Features: start, install, restart, stop, logs, upgrade
 # ============================================================================
 
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # 基础配置
 APP_NAME="Project Document Manager"
-VERSION="2.1.1B"
+VERSION="3.0.1"
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$APP_DIR/venv"
 LOG_DIR="$APP_DIR/logs"
@@ -521,6 +521,11 @@ cmd_upgrade() {
     echo ""
     echo -e "${YELLOW}Updating dependencies...${NC}"
     cmd_install
+
+    # 执行数据库迁移（升级后自动执行）
+    echo ""
+    echo -e "${YELLOW}Running database migration...${NC}"
+    run_db_migrate
     
     # 启动服务器
     echo ""

@@ -6,9 +6,9 @@
     <title>项目文档管理中心</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026040813">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2026041610">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026040813"></script>
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=2026041610"></script>
     <style>
         /* 文件完整性检查模态框样式 */
         .file-check-content {
@@ -776,6 +776,7 @@
             <!-- 周期栏隐藏按钮 -->
             <button id="cycleNavToggleBtn" title="隐藏/显示周期栏" onclick="toggleCycleNavBar()">隐藏 ▲</button>
         </div>
+        <button id="cycleNavRestoreBtn" class="cycle-nav-restore-btn" title="显示周期栏" onclick="toggleCycleNavBar()" style="display:none;">显示周期栏 ▼</button>
 
         <!-- 主容器 -->
         <div class="main-layout">
@@ -1391,11 +1392,11 @@
 
     <!-- 定时报告任务弹窗 -->
     <div id="scheduledReportModal" class="modal">
-        <div class="modal-content" style="max-width:760px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2);">
+        <div class="modal-content" style="max-width:860px; max-height:86vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
             <span class="close" onclick="closeScheduledReportModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务</h2>
             <input type="hidden" id="scheduledReportProjectId">
-            <form id="scheduledReportForm" style="padding:16px 18px 18px;">
+            <form id="scheduledReportForm" style="padding:16px 18px 18px; overflow-y:auto;">
                 <div class="form-group">
                     <label style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
                         <span>应用项目（可多选）</span>
@@ -1407,7 +1408,15 @@
                     <div id="scheduledProjectList" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; max-height:180px; overflow:auto; border:1px solid #d7e3f3; border-radius:8px; padding:10px; background:#fbfdff;">
                         <div style="grid-column:1 / -1; color:#777; font-size:13px;">加载项目中...</div>
                     </div>
-                    <div style="font-size:12px; color:#566; margin-top:6px;">已选择 <span id="scheduledSelectedProjectCount">0</span> 个项目。保存和“立即发送”会对所选项目批量生效。</div>
+                    <div style="font-size:12px; color:#566; margin-top:6px;">已选择 <span id="scheduledSelectedProjectCount">0</span> 个项目。可为每个项目单独选择收件人。</div>
+                </div>
+
+                <div class="form-group" style="background:#f8fbff; border:1px solid #d9e8fb; border-radius:10px; padding:12px;">
+                    <label for="scheduledConfigProjectId" style="font-weight:600;">当前配置项目</label>
+                    <select id="scheduledConfigProjectId" style="margin-top:8px;">
+                        <option value="">-- 请先从上方选择项目 --</option>
+                    </select>
+                    <div style="font-size:12px; color:#567; margin-top:6px;">保存默认只针对当前配置项目；如需统一覆盖多个项目，请使用“批量应用到所选项目”。</div>
                 </div>
 
                 <div class="form-group">
@@ -1463,17 +1472,26 @@
                     <div style="font-size:12px;color:#666;margin-top:6px;">开启后会同时写入站内信，并在用户会话首次登录时弹出提醒。</div>
                 </div>
 
-                <div class="form-group">
-                    <label>外部抄送邮箱（逗号分隔，可选）</label>
-                    <textarea id="scheduledExternalEmails" rows="2" placeholder="example1@domain.com, example2@domain.com"></textarea>
-                    <div style="font-size:12px;color:#666;margin-top:6px;">系统默认发送给 PMO成员与对应项目经理；本处用于补充项目外部联系人邮箱。</div>
+                <div class="form-group" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px;">
+                    <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px; min-height:120px;">
+                        <label style="font-weight:600;">站内信/邮件收件人（项目级）</label>
+                        <div id="scheduledRecipientUserList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:150px; overflow:auto;">
+                            <div style="font-size:12px; color:#777;">请选择“当前配置项目”后加载收件人</div>
+                        </div>
+                    </div>
+                    <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fffdf9; padding:10px; min-height:120px;">
+                        <label>外部抄送邮箱（逗号分隔，可选）</label>
+                        <textarea id="scheduledExternalEmails" rows="3" placeholder="example1@domain.com, example2@domain.com" style="margin-top:8px;"></textarea>
+                        <div style="font-size:12px;color:#666;margin-top:6px;">用于补充项目外部联系人邮箱，和左侧项目级收件人一起生效。</div>
+                    </div>
                 </div>
 
                 <div style="display:flex;justify-content:space-between;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3;">
                     <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即发送所选项目</button>
                     <div>
                         <button type="button" class="btn btn-secondary" onclick="closeScheduledReportModal()">取消</button>
-                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存到所选项目</button>
+                        <button type="button" class="btn btn-info" onclick="applyScheduledReportConfigToSelected()" style="margin-left:10px;">批量应用到所选项目</button>
+                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存当前配置项目</button>
                     </div>
                 </div>
             </form>
@@ -1630,14 +1648,35 @@
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;" onchange="document.getElementById('watermarkOpacityRow').style.display=this.checked?'flex':'none'">
+                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;" onchange="document.getElementById('watermarkOpacityRow').style.display=this.checked?'flex':'none';document.getElementById('watermarkFieldRow').style.display=this.checked?'flex':'none'">
                             <span>开启全局动态水印</span>
                         </label>
-                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，界面将显示“用户名 + 姓名 + 所属组织 + 当前时间”的动态水印</small>
+                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，界面将显示动态水印，内容可按需勾选组合</small>
                         <div id="watermarkOpacityRow" style="margin-top: 10px; display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
                             <label style="font-size: 13px; color: #555; white-space: nowrap;">水印深度：</label>
                             <input type="range" id="watermarkOpacity" min="5" max="60" value="15" style="width: 160px; cursor: pointer;" oninput="document.getElementById('watermarkOpacityValue').textContent=this.value">
                             <span id="watermarkOpacityValue" style="font-size: 13px; color: #333; min-width: 28px;">15</span><span style="font-size: 13px; color: #555;">%</span>
+                        </div>
+                        <div id="watermarkFieldRow" style="margin-top: 10px; display: none; flex-direction: column; gap: 8px;">
+                            <label style="font-size: 13px; color: #555;">水印内容：</label>
+                            <div style="display: flex; flex-wrap: wrap; gap: 10px 16px;">
+                                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #333;">
+                                    <input type="checkbox" id="watermarkFieldUsername" value="username" checked>
+                                    <span>用户名</span>
+                                </label>
+                                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #333;">
+                                    <input type="checkbox" id="watermarkFieldDisplayName" value="display_name" checked>
+                                    <span>姓名</span>
+                                </label>
+                                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #333;">
+                                    <input type="checkbox" id="watermarkFieldOrganization" value="organization" checked>
+                                    <span>组织</span>
+                                </label>
+                                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #333;">
+                                    <input type="checkbox" id="watermarkFieldDatetime" value="datetime" checked>
+                                    <span>日期时间</span>
+                                </label>
+                            </div>
                         </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
@@ -2286,6 +2325,38 @@
         </div>
     </div>
 
+    <!-- 模板编辑模态框 -->
+    <div id="templateEditModal" class="modal">
+        <div class="modal-content modal-sm">
+            <span class="close" onclick="closeTemplateEditModal()">&times;</span>
+            <h2>编辑模板</h2>
+
+            <form id="templateEditForm">
+                <input type="hidden" id="templateEditId">
+                <div class="form-group">
+                    <label>模板名称 *</label>
+                    <input type="text" id="templateEditName" required placeholder="请输入模板名称" style="width: 100%;">
+                </div>
+                <div class="form-group">
+                    <label>模板描述</label>
+                    <textarea id="templateEditDescription" rows="3" placeholder="可选的模板说明" style="width: 100%;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="templateEditOverrideData">
+                        <span>使用当前编辑器内容覆盖模板结构（周期/文档）</span>
+                    </label>
+                    <small style="color:#666;display:block;margin-top:6px;">不勾选时仅更新模板名称和描述。</small>
+                </div>
+
+                <div class="modal-actions" style="margin-top: 15px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeTemplateEditModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">保存修改</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- 版本信息模态框 -->
     <div id="versionModal" class="modal">
         <div class="modal-content" style="max-width: 800px; width: 90%;">
@@ -2342,8 +2413,21 @@
                 <label>导入方式：</label>
                 <select id="importModuleMode" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     <option value="merge">合并到当前配置（保留现有内容）</option>
+                    <option value="split_select">拆分导入（选择模板中的一条或多条记录）</option>
                     <option value="replace">替换当前配置（删除现有内容）</option>
                 </select>
+            </div>
+
+            <div id="importModuleSplitPanel" style="display:none; margin-top: 12px; border: 1px solid #eee; border-radius: 6px; padding: 10px; background: #fafcff;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <strong>可选导入记录</strong>
+                    <div style="display:flex;gap:8px;">
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="toggleSplitImportSelectAll(true)">全选</button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="toggleSplitImportSelectAll(false)">清空</button>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#666;margin:6px 0 8px;">拆分导入支持将模板中的某一条或多条文档记录导入当前编辑树。</div>
+                <div id="importModuleSplitList" style="max-height: 220px; overflow-y: auto; border: 1px solid #e6edf5; border-radius: 4px; padding: 8px; background: #fff;"></div>
             </div>
             
             <div style="margin-top: 20px; text-align: right;">

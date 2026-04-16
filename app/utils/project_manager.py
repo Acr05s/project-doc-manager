@@ -1367,6 +1367,7 @@ class ProjectManager:
                         'name': template.get('name', template_file.stem),
                         'description': template.get('description', ''),
                         'created_time': template.get('created_time', ''),
+                        'updated_time': template.get('updated_time', ''),
                         'cycle_count': len(template.get('cycles', [])),
                         'document_count': sum(len(docs.get('required_docs', [])) 
                                              for docs in template.get('documents', {}).values())
@@ -1374,8 +1375,8 @@ class ProjectManager:
                 except Exception as e:
                     logger.warning(f"读取模板文件失败: {template_file} - {e}")
             
-            # 按创建时间倒序排序
-            templates.sort(key=lambda x: x.get('created_time', ''), reverse=True)
+            # 按更新时间（无则创建时间）倒序排序
+            templates.sort(key=lambda x: (x.get('updated_time') or x.get('created_time') or ''), reverse=True)
             
             return {'status': 'success', 'templates': templates}
             
@@ -1433,6 +1434,61 @@ class ProjectManager:
             
         except Exception as e:
             logger.error(f"删除需求模板失败: {e}")
+            return {'status': 'error', 'message': str(e)}
+
+    def update_template(
+        self,
+        template_id: str,
+        template_name: str = None,
+        description: str = None,
+        template_data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """更新指定模板（名称/描述/内容）。
+
+        Args:
+            template_id: 模板ID
+            template_name: 可选，新模板名称
+            description: 可选，新模板描述
+            template_data: 可选，新模板数据（cycles/documents/...）
+
+        Returns:
+            Dict: 更新结果
+        """
+        try:
+            template_path = self.config.projects_folder / 'common' / f"{template_id}.json"
+            if not template_path.exists():
+                return {'status': 'error', 'message': '模板不存在'}
+
+            with open(template_path, 'r', encoding='utf-8') as f:
+                template = json.load(f)
+
+            if template_name is not None:
+                template['name'] = str(template_name).strip()
+            if description is not None:
+                template['description'] = str(description).strip()
+
+            if template_data is not None:
+                template['cycles'] = template_data.get('cycles', template.get('cycles', []))
+                template['documents'] = template_data.get('documents', template.get('documents', {}))
+                if 'custom_attribute_definitions' in template_data:
+                    template['custom_attribute_definitions'] = template_data.get('custom_attribute_definitions', [])
+                if 'predefined_attribute_definitions' in template_data:
+                    template['predefined_attribute_definitions'] = template_data.get('predefined_attribute_definitions', [])
+
+            template['updated_time'] = datetime.now().isoformat()
+
+            with open(template_path, 'w', encoding='utf-8') as f:
+                json.dump(template, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"已更新需求模板: {template_id}")
+            return {
+                'status': 'success',
+                'message': '模板已更新',
+                'template_id': template_id,
+                'template_name': template.get('name', '')
+            }
+        except Exception as e:
+            logger.error(f"更新需求模板失败: {e}")
             return {'status': 'error', 'message': str(e)}
     
     def export_template(self, template_id: str) -> Optional[Dict[str, Any]]:

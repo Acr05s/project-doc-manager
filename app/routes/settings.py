@@ -37,6 +37,7 @@ def load_settings():
         'password_expire_days': 0,
         'watermark_enabled': False,
         'watermark_opacity': 15,
+        'watermark_content_fields': ['username', 'display_name', 'organization', 'datetime'],
         'smtp_host': '',
         'smtp_port': 465,
         'smtp_username': '',
@@ -215,7 +216,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)
@@ -233,6 +234,18 @@ def update_settings():
                 print(f"[update_settings] >>> Updated current_settings[{field}] = {current_settings[field]}", flush=True)
             else:
                 print(f"[update_settings] Field not in data: {field}", flush=True)
+
+        # 水印字段白名单化，避免写入非法值
+        wm_fields = current_settings.get('watermark_content_fields', ['username', 'display_name', 'organization', 'datetime'])
+        if isinstance(wm_fields, str):
+            wm_fields = [x.strip() for x in wm_fields.split(',') if x.strip()]
+        if not isinstance(wm_fields, list):
+            wm_fields = ['username', 'display_name', 'organization', 'datetime']
+        allowed_wm_fields = {'username', 'display_name', 'organization', 'datetime'}
+        wm_fields = [str(x).strip() for x in wm_fields if str(x).strip() in allowed_wm_fields]
+        if not wm_fields:
+            wm_fields = ['username', 'display_name', 'organization', 'datetime']
+        current_settings['watermark_content_fields'] = wm_fields
         
         print(f"[update_settings] After update: {current_settings}", flush=True)
         

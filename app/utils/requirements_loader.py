@@ -112,6 +112,13 @@ class RequirementsLoader:
                             val = row.iloc[3]
                             if pd.notna(val):
                                 doc_requirement = str(val).strip()
+
+                        # 获取文档说明（第五列）
+                        doc_description = ''
+                        if len(df.columns) > 4:
+                            val = row.iloc[4]
+                            if pd.notna(val):
+                                doc_description = str(val).strip()
                         
                         # 智能标准化文档要求
                         doc_requirement = self._standardize_requirement(doc_requirement)
@@ -120,6 +127,7 @@ class RequirementsLoader:
                             'index': len(project_config['documents'][current_cycle]['required_docs']) + 1,
                             'name': doc_name,
                             'requirement': doc_requirement,
+                            'doc_description': doc_description,
                             'status': 'pending'
                         })
                 except Exception as row_error:

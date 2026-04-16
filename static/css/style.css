@@ -483,6 +483,25 @@ body {
     flex-shrink: 0;
 }
 
+.cycle-nav-restore-btn {
+    position: fixed;
+    top: 72px;
+    right: 12px;
+    z-index: 1200;
+    padding: 6px 10px;
+    background: #667eea;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.cycle-nav-restore-btn:hover {
+    background: #5468cf;
+}
+
 .cycle-nav-list {
     display: flex;
     flex-wrap: wrap;

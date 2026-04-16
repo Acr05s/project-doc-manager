@@ -27,7 +27,7 @@ import {
     openTransferProjectModal, closeTransferProjectModal, submitProjectTransfer
 } from './modules/project.js';
 import {
-    closeScheduledReportModal, runScheduledReportNow
+    closeScheduledReportModal, runScheduledReportNow, applyScheduledReportConfigToSelected
 } from './modules/scheduled-reports.js';
 
 // 将返回看板函数挂载到全局
@@ -87,6 +87,7 @@ if (typeof window !== 'undefined') {
     // scheduled reports
     window.closeScheduledReportModal = closeScheduledReportModal;
     window.runScheduledReportNow = runScheduledReportNow;
+    window.applyScheduledReportConfigToSelected = applyScheduledReportConfigToSelected;
     // pending approval
     window.sendApproverMessage = sendApproverMessage;
 }
@@ -567,6 +568,7 @@ window.refreshAfterCleanup = function() {
 window.toggleCycleNavBar = function() {
     const cycleNavBar = document.getElementById('cycleNavBar');
     const toggleBtn = document.getElementById('cycleNavToggleBtn');
+    const restoreBtn = document.getElementById('cycleNavRestoreBtn');
     
     if (!cycleNavBar || !toggleBtn) return;
     
@@ -577,12 +579,14 @@ window.toggleCycleNavBar = function() {
         cycleNavBar.classList.remove('hidden');
         toggleBtn.textContent = '隐藏 ▲';
         toggleBtn.title = '点击隐藏周期栏';
+        if (restoreBtn) restoreBtn.style.display = 'none';
         localStorage.setItem('cycleNavBarVisible', 'true');
     } else {
         // 隐藏周期栏
         cycleNavBar.classList.add('hidden');
         toggleBtn.textContent = '显示 ▼';
         toggleBtn.title = '点击显示周期栏';
+        if (restoreBtn) restoreBtn.style.display = 'block';
         localStorage.setItem('cycleNavBarVisible', 'false');
     }
 };
@@ -592,10 +596,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const isVisible = localStorage.getItem('cycleNavBarVisible') !== 'false';
     const cycleNavBar = document.getElementById('cycleNavBar');
     const toggleBtn = document.getElementById('cycleNavToggleBtn');
+    const restoreBtn = document.getElementById('cycleNavRestoreBtn');
     
     if (!isVisible && cycleNavBar && toggleBtn) {
         cycleNavBar.classList.add('hidden');
         toggleBtn.textContent = '显示 ▼';
         toggleBtn.title = '点击显示周期栏';
+        if (restoreBtn) restoreBtn.style.display = 'block';
+    } else if (restoreBtn) {
+        restoreBtn.style.display = 'none';
     }
 });

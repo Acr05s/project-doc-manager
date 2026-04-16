@@ -1190,6 +1190,44 @@ export function setupEventListeners() {
 }
 
 function toggleEmailConfigEditable(enabled) {
+    function toggleWatermarkConfigRows(enabled) {
+        const opacityRow = document.getElementById('watermarkOpacityRow');
+        if (opacityRow) opacityRow.style.display = enabled ? 'flex' : 'none';
+        const fieldRow = document.getElementById('watermarkFieldRow');
+        if (fieldRow) fieldRow.style.display = enabled ? 'flex' : 'none';
+    }
+
+    function getWatermarkFieldSelectionFromDom() {
+        const mapping = [
+            { id: 'watermarkFieldUsername', value: 'username' },
+            { id: 'watermarkFieldDisplayName', value: 'display_name' },
+            { id: 'watermarkFieldOrganization', value: 'organization' },
+            { id: 'watermarkFieldDatetime', value: 'datetime' }
+        ];
+        const selected = mapping
+            .filter(item => {
+                const el = document.getElementById(item.id);
+                return !!el && !!el.checked;
+            })
+            .map(item => item.value);
+        return selected.length > 0 ? selected : ['username', 'display_name', 'organization', 'datetime'];
+    }
+
+    function applyWatermarkFieldSelectionToDom(fields) {
+        const selected = new Set(Array.isArray(fields) && fields.length > 0
+            ? fields
+            : ['username', 'display_name', 'organization', 'datetime']);
+        const mapping = [
+            { id: 'watermarkFieldUsername', value: 'username' },
+            { id: 'watermarkFieldDisplayName', value: 'display_name' },
+            { id: 'watermarkFieldOrganization', value: 'organization' },
+            { id: 'watermarkFieldDatetime', value: 'datetime' }
+        ];
+        mapping.forEach(item => {
+            const el = document.getElementById(item.id);
+            if (el) el.checked = selected.has(item.value);
+        });
+    }
     document.querySelectorAll('.email-config-input').forEach((el) => {
         const shouldDisable = !enabled;
         if (el.tagName === 'BUTTON') {
@@ -1309,13 +1347,28 @@ function applyDynamicWatermark(settings) {
     const username = user?.username || 'unknown';
     const displayName = user?.display_name || user?.username || '-';
     const org = user?.organization || '-';
+    const selectedFieldsRaw = settings?.watermark_content_fields;
+    const selectedFields = Array.isArray(selectedFieldsRaw) && selectedFieldsRaw.length > 0
+        ? selectedFieldsRaw
+        : ['username', 'display_name', 'organization', 'datetime'];
 
     const render = () => {
         const layer = ensureWatermarkLayer(opacity);
-        const text = `${username} | ${displayName} | ${org} | ${formatNow()}`;
+        const parts = [];
+        if (selectedFields.includes('username')) parts.push(username);
+        if (selectedFields.includes('display_name')) parts.push(displayName);
+        if (selectedFields.includes('organization')) parts.push(org);
+        if (selectedFields.includes('datetime')) parts.push(formatNow());
+        const text = parts.length > 0 ? parts.join(' | ') : `${username} | ${displayName} | ${org} | ${formatNow()}`;
         layer.style.backgroundImage = `url(${buildWatermarkImage(text)})`;
         layer.style.display = 'block';
     };
+    const watermarkEnabled = document.getElementById('watermarkEnabled');
+    if (watermarkEnabled) {
+        watermarkEnabled.addEventListener('change', () => {
+            toggleWatermarkConfigRows(!!watermarkEnabled.checked);
+        });
+    }
 
     render();
     if (watermarkTimer) clearInterval(watermarkTimer);
@@ -1371,8 +1424,7 @@ async function loadSystemSettings() {
             const watermarkEnabled = document.getElementById('watermarkEnabled');
             if (watermarkEnabled) {
                 watermarkEnabled.checked = !!settings.watermark_enabled;
-                const opacityRow = document.getElementById('watermarkOpacityRow');
-                if (opacityRow) opacityRow.style.display = settings.watermark_enabled ? 'flex' : 'none';
+                toggleWatermarkConfigRows(!!settings.watermark_enabled);
             }
             const watermarkOpacity = document.getElementById('watermarkOpacity');
             const watermarkOpacityValue = document.getElementById('watermarkOpacityValue');
@@ -1381,6 +1433,7 @@ async function loadSystemSettings() {
                 watermarkOpacity.value = opacityVal;
                 if (watermarkOpacityValue) watermarkOpacityValue.textContent = opacityVal;
             }
+            applyWatermarkFieldSelectionToDom(settings.watermark_content_fields);
 
             agreementMarkdownDraft = settings.agreement_markdown || '';
             const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
@@ -1481,6 +1534,7 @@ async function saveSystemSettings() {
         if (watermarkOpacity) {
             settings.watermark_opacity = parseInt(watermarkOpacity.value, 10) || 15;
         }
+        settings.watermark_content_fields = getWatermarkFieldSelectionFromDom();
 
         const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
         if (agreementMarkdownInput) {

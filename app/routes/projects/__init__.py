@@ -11,7 +11,7 @@ from .export import export_project, import_project, import_project_file, package
 from .acceptance import confirm_cycle_acceptance, download_project_package, verify_project_files, clean_invalid_files
 from .logs import get_operation_logs, get_external_logs
 from .versions import list_config_versions, save_config_version, load_config_version, switch_config_version, delete_config_version, export_config_version
-from .templates import list_templates, save_template, load_template, delete_template, apply_template_to_project, export_template, import_template
+from .templates import list_templates, save_template, load_template, delete_template, update_template, apply_template_to_project, export_template, import_template
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
 from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request, get_approval_history, get_all_approval_history
@@ -113,6 +113,7 @@ project_bp.route('/<project_id>/document-directories', methods=['DELETE'])(proje
 project_bp.route('/templates', methods=['GET'])(login_required(list_templates))
 project_bp.route('/templates', methods=['POST'])(login_required(save_template))
 project_bp.route('/templates/<template_id>', methods=['GET'])(login_required(load_template))
+project_bp.route('/templates/<template_id>', methods=['PUT'])(login_required(update_template))
 project_bp.route('/templates/<template_id>', methods=['DELETE'])(login_required(delete_template))
 project_bp.route('/templates/<template_id>/export', methods=['GET'])(login_required(export_template))
 project_bp.route('/templates/import', methods=['POST'])(login_required(import_template))

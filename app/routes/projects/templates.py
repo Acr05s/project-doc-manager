@@ -133,6 +133,36 @@ def delete_template(template_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def update_template(template_id):
+    """更新指定模板（名称/描述/内容）。"""
+    try:
+        doc_manager = get_doc_manager()
+        data = request.get_json() or {}
+
+        template_name = data.get('template_name')
+        description = data.get('description')
+        template_data = data.get('template_data')
+
+        if template_name is not None and not str(template_name).strip():
+            return jsonify({'status': 'error', 'message': '模板名称不能为空'}), 400
+
+        if template_data is not None:
+            is_valid, error_msg = validate_template_data(template_data)
+            if not is_valid:
+                return jsonify({'status': 'error', 'message': f'模板数据验证失败: {error_msg}'}), 400
+
+        result = doc_manager.update_template(
+            template_id=template_id,
+            template_name=str(template_name).strip() if template_name is not None else None,
+            description=str(description).strip() if description is not None else None,
+            template_data=template_data
+        )
+        code = 200 if result.get('status') == 'success' else 400
+        return jsonify(result), code
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def export_template(template_id):
     """导出指定模板为JSON文件"""
     try:

@@ -14,8 +14,8 @@ def _is_pmo_plus() -> bool:
 def get_project_report_schedule(project_id):
     """获取项目定时报告配置。"""
     try:
-        schedule = scheduled_report_service.get_schedule(project_id)
-        return jsonify({'status': 'success', 'data': schedule})
+        detail = scheduled_report_service.get_schedule_detail(project_id)
+        return jsonify({'status': 'success', 'data': detail.get('schedule', {}), 'recipient_options': detail.get('recipient_options', [])})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
