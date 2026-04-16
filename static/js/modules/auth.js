@@ -221,6 +221,19 @@ function updateAuthUI() {
  * 缓存的菜单权限配置
  */
 let _cachedPermissions = null;
+const ALL_PERMISSION_ROLES = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'];
+const SAFE_FALLBACK_PERMISSIONS = {
+    scheduledReportTaskMenuItem: { roles: ['admin', 'pmo', 'pmo_leader'], group: 'sidebar', label: '🗓️ 定时报告任务' },
+    systemSettingsMenuItem: { roles: ['admin'], group: 'sidebar', label: '⚙️ 系统设置' },
+    userManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '👤 用户管理' },
+    orgManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader'], group: 'sidebar', label: '🏢 承建单位管理' },
+    projectManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📁 项目管理' },
+    userApprovalBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '👤 用户审核' },
+    userApprovalHistoryMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '👥 用户审批历史' },
+    archiveApprovalBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📋 文档归档审批' },
+    approvalHistoryBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📊 审批历史' },
+    logManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], group: 'sidebar', label: '📝 操作日志' }
+};
 
 /**
  * 获取菜单权限配置（带缓存，平台级）
@@ -232,8 +245,14 @@ async function fetchMenuPermissions(forceRefresh = false) {
         const data = await resp.json();
         if (data.status === 'success') {
             _cachedPermissions = data.data;
+        } else if (!_cachedPermissions) {
+            _cachedPermissions = { ...SAFE_FALLBACK_PERMISSIONS };
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        if (!_cachedPermissions) {
+            _cachedPermissions = { ...SAFE_FALLBACK_PERMISSIONS };
+        }
+    }
     return _cachedPermissions;
 }
 
@@ -243,6 +262,90 @@ async function fetchMenuPermissions(forceRefresh = false) {
 function hasMenuPermission(permissions, menuKey, role) {
     if (!permissions || !permissions[menuKey]) return false;
     return permissions[menuKey].roles.includes(role);
+}
+
+function _extractMenuLabel(element) {
+    if (!element) return '';
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll('.menu-badge').forEach(node => node.remove());
+    return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function _collectRuntimeMenuDefinitions() {
+    const defs = {};
+    const order = { top: [], sidebar: [] };
+    const excludedIds = new Set([
+        'systemManagementBtn',
+        'documentRequirementsBtn',
+        'documentManagementBtn',
+        'acceptanceBtn',
+        'archiveAndApprovalBtn',
+        'permissionConfigMenuItem'
+    ]);
+
+    const addDef = (el, group) => {
+        const id = el?.id;
+        if (!id || excludedIds.has(id)) return;
+        if (!/(Menu|Btn|MenuItem)$/.test(id)) return;
+
+        let parent = null;
+        if (group === 'top' && el.closest('.dropdown-menu')) {
+            const parentDropdown = el.closest('.dropdown');
+            parent = parentDropdown ? parentDropdown.id : null;
+        }
+
+        const label = _extractMenuLabel(el) || id;
+        defs[id] = {
+            label,
+            group,
+            parent: parent || undefined
+        };
+        order[group].push(id);
+    };
+
+    document.querySelectorAll('.header-right [id]').forEach(el => addDef(el, 'top'));
+    document.querySelectorAll('#systemManagementDropdown .sidebar-menu-item[id]').forEach(el => addDef(el, 'sidebar'));
+    return { defs, order };
+}
+
+function _buildMergedPermissions(basePermissions) {
+    const permissions = {};
+    if (basePermissions) {
+        for (const [key, val] of Object.entries(basePermissions)) {
+            permissions[key] = {
+                label: val.label || key,
+                group: val.group || 'sidebar',
+                roles: Array.isArray(val.roles) ? [...val.roles] : []
+            };
+            if (val.parent) {
+                permissions[key].parent = val.parent;
+            }
+        }
+    }
+
+    const runtime = _collectRuntimeMenuDefinitions();
+    for (const [id, meta] of Object.entries(runtime.defs)) {
+        if (!permissions[id]) {
+            permissions[id] = {
+                label: meta.label,
+                group: meta.group,
+                roles: meta.parent && permissions[meta.parent]
+                    ? [...(permissions[meta.parent].roles || ['admin'])]
+                    : ['admin']
+            };
+            if (meta.parent) {
+                permissions[id].parent = meta.parent;
+            }
+        } else {
+            permissions[id].label = meta.label || permissions[id].label;
+            permissions[id].group = meta.group || permissions[id].group;
+            if (meta.parent) {
+                permissions[id].parent = meta.parent;
+            }
+        }
+    }
+
+    return { permissions, order: runtime.order };
 }
 
 /**
@@ -355,47 +458,14 @@ async function openPermissionConfigModal() {
         return;
     }
 
-    const roles = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'];
+    const roles = [...ALL_PERMISSION_ROLES];
     let currentTab = 'sidebar'; // 默认显示系统菜单权限
-
-    // 按系统真实菜单顺序展示，确保父子项紧邻
-    const menuOrderByGroup = {
-        top: [
-            'documentRequirementsMenu',
-            'editRequirementsBtn',
-            'manageVersionsBtn',
-            'clearRequirementsBtn',
-            'documentManagementMenu',
-            'zipUploadBtn',
-            'deleteProjectBtn',
-            'cleanupDuplicatesBtn',
-            'generateReportBtn',
-            'packageProjectBtn',
-            'acceptanceMenu',
-            'generateReportMenuItem',
-            'confirmAcceptanceBtn',
-            'downloadPackageBtn',
-            'archiveAndApprovalMenu',
-            'openArchiveConfigBtn',
-            'viewArchiveRequestsBtn',
-            'viewApprovalHistoryBtn'
-        ],
-        sidebar: [
-            'userManagementMenuItem',
-            'orgManagementMenuItem',
-            'projectManagementMenuItem',
-            'userApprovalBtn',
-            'userApprovalHistoryMenuItem',
-            'archiveApprovalBtn',
-            'approvalHistoryBtn',
-            'scheduledReportTaskMenuItem',
-            'logManagementMenuItem',
-            'systemSettingsMenuItem'
-        ]
-    };
+    const merged = _buildMergedPermissions(permissions);
+    const mergedPermissions = merged.permissions;
+    const menuOrderByGroup = merged.order;
 
     function getOrderedEntries(group) {
-        const entries = Object.entries(permissions).filter(([, d]) => d.group === group);
+        const entries = Object.entries(mergedPermissions).filter(([, d]) => d.group === group);
         const order = menuOrderByGroup[group] || [];
         const orderMap = new Map(order.map((id, idx) => [id, idx]));
         return entries.sort(([aKey], [bKey]) => {
@@ -428,6 +498,10 @@ async function openPermissionConfigModal() {
             if (!isChild) isFirstParent = false;
 
             const tr = document.createElement('tr');
+            tr.dataset.menu = menuKey;
+            tr.dataset.group = menuData.group || group;
+            tr.dataset.label = menuData.label || menuKey;
+            tr.dataset.parent = menuData.parent || '';
             tr.style.borderBottom = '1px solid #f0f0f0';
             if (isChild) tr.style.background = '#fafbfc';
             const indent = isChild ? 'padding-left:36px;color:#555;font-size:13px;' : 'padding:8px 12px;font-weight:500;';
@@ -501,7 +575,15 @@ async function _savePermissionsFromTable(tbody, statusEl) {
     checkboxes.forEach(cb => {
         const menu = cb.dataset.menu;
         const role = cb.dataset.role;
-        if (!tabPermissions[menu]) tabPermissions[menu] = { roles: [] };
+        const row = cb.closest('tr');
+        if (!tabPermissions[menu]) {
+            tabPermissions[menu] = {
+                roles: [],
+                label: row?.dataset.label || menu,
+                group: row?.dataset.group || 'sidebar',
+                parent: row?.dataset.parent || undefined
+            };
+        }
         if (cb.checked) tabPermissions[menu].roles.push(role);
     });
 
@@ -509,7 +591,14 @@ async function _savePermissionsFromTable(tbody, statusEl) {
     const mergedPermissions = {};
     if (_cachedPermissions) {
         for (const [key, val] of Object.entries(_cachedPermissions)) {
-            mergedPermissions[key] = { roles: [...val.roles] };
+            mergedPermissions[key] = {
+                roles: [...(val.roles || [])],
+                label: val.label || key,
+                group: val.group || 'sidebar'
+            };
+            if (val.parent) {
+                mergedPermissions[key].parent = val.parent;
+            }
         }
     }
     // 用当前标签页数据覆盖对应的 key

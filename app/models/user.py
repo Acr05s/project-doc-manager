@@ -454,7 +454,7 @@ class UserManager:
                 cursor = conn.cursor()
                 cursor.execute(
                     'INSERT INTO users (username, password_hash, role, status, organization, email, uuid, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (username, password_hash, role, status, organization, email, new_uuid, 1)
+                    (username, password_hash, role, status, organization, email, new_uuid, 0)
                 )
                 conn.commit()
                 return cursor.lastrowid
@@ -502,7 +502,7 @@ class UserManager:
                 new_uuid = str(uuid_module.uuid4())
                 cursor.execute(
                     'INSERT INTO users (username, password_hash, role, status, organization, email, uuid, display_name, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    (username, password_hash, role, status, org_name, email, new_uuid, display_name, 1)
+                    (username, password_hash, role, status, org_name, email, new_uuid, display_name, 0)
                 )
                 conn.commit()
                 user_id = cursor.lastrowid
@@ -600,7 +600,7 @@ class UserManager:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'UPDATE users SET status = ?, approver_id = ?, approved_at = ? WHERE id = ? AND status = ?',
+                    'UPDATE users SET status = ?, approver_id = ?, approved_at = ?, must_change_password = 0 WHERE id = ? AND status = ?',
                     ('active', approver_id, now_with_timezone().isoformat(), user_id, 'pending')
                 )
                 if cursor.rowcount == 0:
@@ -668,11 +668,11 @@ class UserManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f'SELECT id, username, role, organization, status, uuid, display_name FROM users WHERE role IN ({placeholders})',
+                f'SELECT id, username, role, organization, status, uuid, display_name, email FROM users WHERE role IN ({placeholders})',
                 roles
             )
             return [
-                {'id': row[0], 'username': row[1], 'role': row[2], 'organization': row[3], 'status': row[4], 'uuid': row[5], 'display_name': row[6]}
+                {'id': row[0], 'username': row[1], 'role': row[2], 'organization': row[3], 'status': row[4], 'uuid': row[5], 'display_name': row[6], 'email': row[7]}
                 for row in cursor.fetchall()
             ]
     

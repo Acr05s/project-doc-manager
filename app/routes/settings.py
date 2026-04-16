@@ -354,6 +354,7 @@ DEFAULT_MENU_PERMISSIONS = {
 def load_permissions():
     """加载权限配置（平台级）"""
     import copy
+    all_roles = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor']
     permissions = copy.deepcopy(DEFAULT_MENU_PERMISSIONS)
     if PERMISSIONS_FILE.exists():
         try:
@@ -361,7 +362,25 @@ def load_permissions():
                 saved = json.load(f)
             for key, val in saved.items():
                 if key in permissions:
-                    permissions[key]['roles'] = val.get('roles', permissions[key]['roles'])
+                    roles = val.get('roles', permissions[key]['roles'])
+                    permissions[key]['roles'] = [r for r in roles if r in all_roles]
+                    if val.get('label'):
+                        permissions[key]['label'] = str(val.get('label'))
+                    if val.get('group') in ('top', 'sidebar'):
+                        permissions[key]['group'] = val.get('group')
+                    if 'parent' in val:
+                        permissions[key]['parent'] = val.get('parent')
+                else:
+                    roles = [r for r in val.get('roles', []) if r in all_roles]
+                    group = val.get('group') if val.get('group') in ('top', 'sidebar') else 'sidebar'
+                    dynamic_item = {
+                        'label': str(val.get('label') or key),
+                        'roles': roles,
+                        'group': group
+                    }
+                    if val.get('parent'):
+                        dynamic_item['parent'] = str(val.get('parent'))
+                    permissions[key] = dynamic_item
         except Exception:
             pass
 
@@ -435,10 +454,33 @@ def update_permissions():
         all_roles = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor']
 
         for menu_key, menu_data in data.items():
-            if menu_key in permissions:
-                roles = menu_data.get('roles', [])
-                valid_roles = [r for r in roles if r in all_roles]
+            if not isinstance(menu_data, dict):
+                continue
+            roles = menu_data.get('roles', [])
+            valid_roles = [r for r in roles if r in all_roles]
+
+            group = menu_data.get('group') if menu_data.get('group') in ('top', 'sidebar') else None
+            parent = menu_data.get('parent')
+            label = menu_data.get('label')
+
+            if menu_key not in permissions:
+                permissions[menu_key] = {
+                    'label': str(label or menu_key),
+                    'roles': valid_roles,
+                    'group': group or 'sidebar'
+                }
+                if parent:
+                    permissions[menu_key]['parent'] = str(parent)
+            else:
                 permissions[menu_key]['roles'] = valid_roles
+                if label:
+                    permissions[menu_key]['label'] = str(label)
+                if group:
+                    permissions[menu_key]['group'] = group
+                if parent:
+                    permissions[menu_key]['parent'] = str(parent)
+                elif 'parent' in permissions[menu_key] and parent == '':
+                    permissions[menu_key].pop('parent', None)
 
         if save_permissions(permissions):
             return jsonify({'status': 'success', 'message': '权限配置已保存', 'data': permissions})

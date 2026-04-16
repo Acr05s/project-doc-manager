@@ -39,7 +39,8 @@ def run_project_report_now(project_id):
         if not _is_pmo_plus():
             return jsonify({'status': 'error', 'message': '仅PMO及以上角色可手动执行'}), 403
 
-        result = scheduled_report_service.run_now(project_id)
+        requester_user_id = int(getattr(current_user, 'id', 0) or 0)
+        result = scheduled_report_service.run_now(project_id, requester_user_id=requester_user_id)
         code = 200 if result.get('status') == 'success' else 400
         return jsonify(result), code
     except Exception as e:

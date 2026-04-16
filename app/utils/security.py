@@ -114,6 +114,9 @@ def register_security_hooks(app):
                     or path == '/login'
                     or path == '/logout'
                     or path == '/api/auth/status'
+                    or (path == '/api/version' and request.method.upper() == 'GET')
+                    or (path == '/api/settings/permissions' and request.method.upper() in ('GET', 'POST'))
+                    or (path.startswith('/api/messages/') and request.method.upper() in ('GET', 'POST', 'DELETE'))
                     or (path == '/api/me' and request.method.upper() == 'GET')
                     or (path == '/api/me/password' and request.method.upper() == 'POST')
                 )

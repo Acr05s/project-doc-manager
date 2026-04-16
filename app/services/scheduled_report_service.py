@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.models.user import user_manager
+from app.models.message import message_manager
 from app.routes.settings import now_with_timezone
 from app.utils.notification import send_email
 
@@ -77,6 +78,8 @@ class ScheduledReportService:
                 'weekday': 1,
                 'day_of_month': 1,
                 'include_pdf': True,
+                'in_app_message_enabled': True,
+                'login_popup_enabled': True,
                 'external_emails': [],
                 'last_run_key': ''
             }
@@ -86,6 +89,8 @@ class ScheduledReportService:
         cfg.setdefault('weekday', 1)
         cfg.setdefault('day_of_month', 1)
         cfg.setdefault('include_pdf', True)
+        cfg.setdefault('in_app_message_enabled', True)
+        cfg.setdefault('login_popup_enabled', True)
         cfg.setdefault('external_emails', [])
         cfg.setdefault('last_run_key', '')
         return cfg
@@ -114,6 +119,8 @@ class ScheduledReportService:
                 cfg['day_of_month'] = 1
 
             cfg['include_pdf'] = bool(data.get('include_pdf', cfg['include_pdf']))
+            cfg['in_app_message_enabled'] = bool(data.get('in_app_message_enabled', cfg.get('in_app_message_enabled', True)))
+            cfg['login_popup_enabled'] = bool(data.get('login_popup_enabled', cfg.get('login_popup_enabled', True)))
 
             ext = data.get('external_emails', cfg.get('external_emails', []))
             if isinstance(ext, str):
@@ -128,8 +135,8 @@ class ScheduledReportService:
             self._save_schedules()
             return cfg
 
-    def run_now(self, project_id: str) -> Dict[str, Any]:
-        return self._run_project_report(project_id, manual=True)
+    def run_now(self, project_id: str, requester_user_id: Optional[int] = None) -> Dict[str, Any]:
+        return self._run_project_report(project_id, manual=True, requester_user_id=requester_user_id)
 
     def _scheduler_loop(self):
         while not self._stop_event.is_set():
@@ -195,7 +202,7 @@ class ScheduledReportService:
             return now.strftime('W%Y-%W')
         return now.strftime('M%Y-%m')
 
-    def _run_project_report(self, project_id: str, manual: bool = False) -> Dict[str, Any]:
+    def _run_project_report(self, project_id: str, manual: bool = False, requester_user_id: Optional[int] = None) -> Dict[str, Any]:
         if not self.doc_manager:
             return {'status': 'error', 'message': '文档管理器未初始化'}
 
@@ -210,9 +217,14 @@ class ScheduledReportService:
         period_start, period_end = self._calc_period(now_with_timezone(), frequency)
 
         metrics = self._build_metrics(project_id, project, period_start, period_end)
-        recipients = self._collect_recipients(project, cfg)
-        if not recipients:
-            return {'status': 'error', 'message': '未配置可用收件人邮箱'}
+        targets = self._collect_recipient_targets(project, cfg)
+        recipients = targets.get('emails', [])
+        site_receiver_ids = targets.get('user_ids', [])
+        if manual and requester_user_id and requester_user_id not in site_receiver_ids:
+            site_receiver_ids.append(int(requester_user_id))
+            site_receiver_ids = sorted(set(site_receiver_ids))
+        if not recipients and not (cfg.get('in_app_message_enabled', True) and site_receiver_ids):
+            return {'status': 'error', 'message': '未配置可用收件人（邮箱或站内信）'}
 
         subject = f"【项目定时报告】{project_name} - {'周报' if frequency == 'weekly' else '月报'}"
         text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics)
@@ -225,15 +237,31 @@ class ScheduledReportService:
 
         success_count = 0
         errors = []
-        for email in recipients:
-            result = send_email(email, subject, text_content, html_content=html_content, attachments=attachments)
-            if result.get('status') == 'success':
-                success_count += 1
-            else:
-                errors.append(f"{email}: {result.get('message', '发送失败')}")
+        if recipients:
+            for email in recipients:
+                result = send_email(email, subject, text_content, html_content=html_content, attachments=attachments)
+                if result.get('status') == 'success':
+                    success_count += 1
+                else:
+                    errors.append(f"{email}: {result.get('message', '发送失败')}")
 
-        status = 'success' if success_count > 0 else 'error'
-        message = f"发送成功 {success_count}/{len(recipients)}"
+        site_sent_count = 0
+        if cfg.get('in_app_message_enabled', True):
+            run_key = self._build_run_key(cfg, now_with_timezone())
+            site_sent_count = self._send_site_messages(
+                receiver_ids=site_receiver_ids,
+                project_id=project_id,
+                project_name=project_name,
+                frequency=frequency,
+                period_start=period_start,
+                period_end=period_end,
+                metrics=metrics,
+                run_key=run_key,
+                popup_enabled=bool(cfg.get('login_popup_enabled', True))
+            )
+
+        status = 'success' if (success_count > 0 or site_sent_count > 0) else 'error'
+        message = f"邮件成功 {success_count}/{len(recipients)}，站内信 {site_sent_count}/{len(site_receiver_ids)}"
         if errors:
             message += '；' + '；'.join(errors[:3])
 
@@ -257,6 +285,9 @@ class ScheduledReportService:
         return {'status': status, 'message': message, 'success_count': success_count, 'total': len(recipients)}
 
     def _calc_period(self, now: datetime, frequency: str) -> Tuple[datetime, datetime]:
+        # 统一为本地无时区时间，避免与解析出的历史时间（通常为无时区）比较时报错。
+        if getattr(now, 'tzinfo', None) is not None:
+            now = now.replace(tzinfo=None)
         if frequency == 'monthly':
             return now - timedelta(days=30), now
         return now - timedelta(days=7), now
@@ -338,14 +369,17 @@ class ScheduledReportService:
             'by_cycle': by_cycle
         }
 
-    def _collect_recipients(self, project: Dict[str, Any], cfg: Dict[str, Any]) -> List[str]:
+    def _collect_recipient_targets(self, project: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, List[Any]]:
         recipients = set()
+        user_ids = set()
 
         pmo_users = user_manager.get_users_by_roles(['pmo', 'pmo_leader']) or []
         for user in pmo_users:
             email = (user.get('email') or '').strip()
             if email and user.get('status') == 'active':
                 recipients.add(email)
+            if user.get('status') == 'active' and user.get('id'):
+                user_ids.add(int(user.get('id')))
 
         party_b = (project.get('party_b') or '').strip()
         pm_users = user_manager.get_users_by_roles(['project_admin']) or []
@@ -358,19 +392,69 @@ class ScheduledReportService:
             email = (user.get('email') or '').strip()
             if email:
                 recipients.add(email)
+            if user.get('id'):
+                user_ids.add(int(user.get('id')))
 
         manager_username = (project.get('manager') or '').strip()
         if manager_username:
             user = user_manager.get_user_by_username(manager_username)
-            if user and getattr(user, 'email', ''):
-                recipients.add(str(user.email).strip())
+            if user:
+                if getattr(user, 'email', ''):
+                    recipients.add(str(user.email).strip())
+                if getattr(user, 'id', None):
+                    user_ids.add(int(user.id))
 
         for email in cfg.get('external_emails', []) or []:
             s = str(email).strip()
             if s:
                 recipients.add(s)
 
-        return sorted([x for x in recipients if '@' in x])
+        return {
+            'emails': sorted([x for x in recipients if '@' in x]),
+            'user_ids': sorted(user_ids)
+        }
+
+    def _send_site_messages(
+        self,
+        receiver_ids: List[int],
+        project_id: str,
+        project_name: str,
+        frequency: str,
+        period_start: datetime,
+        period_end: datetime,
+        metrics: Dict[str, Any],
+        run_key: str,
+        popup_enabled: bool
+    ) -> int:
+        if not receiver_ids:
+            return 0
+        title = f"【{project_name}】{'周报' if frequency == 'weekly' else '月报'}已生成"
+        content = (
+            f"项目：{project_name}\n"
+            f"类型：{'周报' if frequency == 'weekly' else '月报'}\n"
+            f"统计区间：{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}\n"
+            f"上传审核通过：{metrics.get('uploads', 0)}\n"
+            f"归档通过：{metrics.get('archived', 0)}\n"
+            f"归档率：{metrics.get('archive_rate', 0.0)}%\n"
+            f"可在消息中心查看详情。"
+        )
+        msg_type = 'scheduled_report_popup' if popup_enabled else 'scheduled_report'
+        sent_count = 0
+        for receiver_id in receiver_ids:
+            try:
+                message_manager.send_message(
+                    receiver_id=int(receiver_id),
+                    title=title,
+                    content=content,
+                    sender_id=0,
+                    msg_type=msg_type,
+                    related_id=project_id,
+                    related_type='project'
+                )
+                sent_count += 1
+            except Exception as e:
+                logger.warning(f'[ScheduledReportService] send site message failed for user {receiver_id}: {e}')
+        return sent_count
 
     def _build_email_content(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any]) -> Tuple[str, str]:
         title = '周报' if frequency == 'weekly' else '月报'
@@ -389,13 +473,13 @@ class ScheduledReportService:
         )
 
         rows = ''
-        for cycle, val in sorted(by_cycle.items(), key=lambda x: x[0]):
+        for cycle, val in sorted(by_cycle.items(), key=lambda x: str(x[0])):
             c_uploads = val.get('uploads', 0)
             c_archived = val.get('archived', 0)
             c_rate = round((c_archived / c_uploads) * 100, 2) if c_uploads > 0 else 0.0
             bar_width = max(1, min(100, int(c_rate)))
             rows += (
-                f"<tr><td style='padding:6px 8px;border:1px solid #ddd'>{cycle}</td>"
+            f"<tr><td style='padding:6px 8px;border:1px solid #ddd'>{str(cycle)}</td>"
                 f"<td style='padding:6px 8px;border:1px solid #ddd'>{c_uploads}</td>"
                 f"<td style='padding:6px 8px;border:1px solid #ddd'>{c_archived}</td>"
                 f"<td style='padding:6px 8px;border:1px solid #ddd'>"
@@ -470,7 +554,7 @@ class ScheduledReportService:
             y -= 14
 
             by_cycle = metrics.get('by_cycle', {})
-            for cycle, val in sorted(by_cycle.items(), key=lambda x: x[0]):
+            for cycle, val in sorted(by_cycle.items(), key=lambda x: str(x[0])):
                 if y < 80:
                     c.showPage()
                     c.setFont('STSong-Light', 9)

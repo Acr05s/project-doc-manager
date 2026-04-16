@@ -6,9 +6,49 @@
 let forcePasswordChangeRequired = false;
 let forcePasswordChangeMessage = '';
 
+function showForcePasswordReminder() {
+    if (!forcePasswordChangeRequired) return;
+    const id = 'forcePasswordReminder';
+    let reminder = document.getElementById(id);
+    if (!reminder) {
+        reminder = document.createElement('div');
+        reminder.id = id;
+        reminder.style.position = 'fixed';
+        reminder.style.top = '70px';
+        reminder.style.left = '16px';
+        reminder.style.zIndex = '10010';
+        reminder.style.background = '#fff3cd';
+        reminder.style.color = '#8a6d3b';
+        reminder.style.border = '1px solid #ffe69c';
+        reminder.style.borderRadius = '8px';
+        reminder.style.padding = '8px 10px';
+        reminder.style.boxShadow = '0 4px 10px rgba(0,0,0,.12)';
+        reminder.style.display = 'flex';
+        reminder.style.alignItems = 'center';
+        reminder.style.gap = '8px';
+        document.body.appendChild(reminder);
+    }
+    reminder.innerHTML = `
+        <span style="font-size:12px;">🔐 密码已过期，请尽快修改</span>
+        <button id="forcePasswordReminderBtn" style="border:none;background:#0d6efd;color:#fff;border-radius:4px;padding:4px 8px;font-size:12px;cursor:pointer;">去修改</button>
+    `;
+    const btn = document.getElementById('forcePasswordReminderBtn');
+    if (btn) {
+        btn.onclick = () => openProfileModal();
+    }
+}
+
+function hideForcePasswordReminder() {
+    const reminder = document.getElementById('forcePasswordReminder');
+    if (reminder) reminder.remove();
+}
+
 export function setForcePasswordChangeRequired(required, message = '') {
     forcePasswordChangeRequired = !!required;
     forcePasswordChangeMessage = message || '密码已过期，请先修改密码后再继续';
+    if (!forcePasswordChangeRequired) {
+        hideForcePasswordReminder();
+    }
 }
 
 function showProfileNotice(message, type = 'info') {
@@ -32,8 +72,9 @@ function showProfileNotice(message, type = 'info') {
 export async function openProfileModal() {
     const modal = document.getElementById('profileModal');
     if (!modal) return;
+    hideForcePasswordReminder();
     modal.classList.add('show');
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
 
     // 清空密码与注销确认输入框
     const profileOldPassword = document.getElementById('profileOldPassword');
@@ -83,14 +124,13 @@ export async function openProfileModal() {
 }
 
 export function closeProfileModal() {
-    if (forcePasswordChangeRequired) {
-        showProfileNotice(forcePasswordChangeMessage || '请先修改密码', 'error');
-        return;
-    }
     const modal = document.getElementById('profileModal');
     if (modal) {
         modal.classList.remove('show');
         modal.style.display = 'none';
+    }
+    if (forcePasswordChangeRequired) {
+        showForcePasswordReminder();
     }
 }
 
@@ -172,6 +212,7 @@ export async function changeProfilePassword() {
         if (data.status === 'success') {
             showProfileNotice(data.message || '密码修改成功', 'success');
             setForcePasswordChangeRequired(false);
+            hideForcePasswordReminder();
             if (oldInput) oldInput.value = '';
             if (newInput) newInput.value = '';
             if (confirmInput) confirmInput.value = '';

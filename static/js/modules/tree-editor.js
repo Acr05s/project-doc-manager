@@ -714,7 +714,8 @@ function bindTreeEvents() {
     setupDragAndDrop();
 
     // 属性面板 checkbox 实时联动预览
-    for (const key of Object.keys(ATTRIBUTE_LABELS)) {
+    const labelMap = getCurrentAttributeLabelMap();
+    for (const key of Object.keys(labelMap)) {
         const checkbox = document.getElementById(`attr_${key}`);
         if (checkbox && !checkbox._bound) {
             checkbox._bound = true;
@@ -2300,7 +2301,7 @@ async function handleImportTemplateForManage(e) {
     const description = descInput?.value.trim();
     
     if (!file) {
-        showNotification('请选择JSON文件', 'error');
+        showNotification('请选择模板文件（JSON/Excel）', 'error');
         return;
     }
     
@@ -2311,15 +2312,36 @@ async function handleImportTemplateForManage(e) {
     
     showLoading(true);
     try {
-        // 读取文件内容
-        const fileContent = await file.text();
         let templateData;
-        
-        // 检查JSON语法
-        try {
-            templateData = JSON.parse(fileContent);
-        } catch (jsonError) {
-            showNotification(`JSON语法错误: ${jsonError.message}`, 'error');
+        const lowerName = (file.name || '').toLowerCase();
+        if (lowerName.endsWith('.json')) {
+            const fileContent = await file.text();
+            try {
+                templateData = JSON.parse(fileContent);
+            } catch (jsonError) {
+                showNotification(`JSON语法错误: ${jsonError.message}`, 'error');
+                showLoading(false);
+                return;
+            }
+        } else if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch('/api/projects/load', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            if (result.status !== 'success' || !result.data) {
+                showNotification(result.message || 'Excel模板解析失败', 'error');
+                showLoading(false);
+                return;
+            }
+            templateData = {
+                cycles: result.data.cycles || [],
+                documents: result.data.documents || {}
+            };
+        } else {
+            showNotification('仅支持 JSON、Excel（.xlsx/.xls）模板文件', 'error');
             showLoading(false);
             return;
         }

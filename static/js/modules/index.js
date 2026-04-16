@@ -28,6 +28,8 @@ export * from './utils.js';
 // 报表配置缓存
 let reportConfigsCache = [];
 let currentReportType = 'overview';
+let lastUnreadCountSnapshot = null;
+const shownScheduledPopupIds = new Set();
 
 /**
  * 渲染首页看板
@@ -651,13 +653,117 @@ export async function initMessageCenter() {
     }
     // 初始化批量操作工具栏
     initMsgBatchToolbar();
-    setInterval(refreshUnreadCount, 30000);
+    setInterval(async () => {
+        await refreshUnreadCount();
+        await maybeShowScheduledReportLoginPopup();
+    }, 30000);
     setInterval(refreshHeaderMarquee, 60000);
+    await maybeShowScheduledReportLoginPopup();
+}
+
+function escapeHtml(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function maybeShowScheduledReportLoginPopup() {
+    if (!authState?.isAuthenticated || !authState?.user) {
+        return;
+    }
+
+    try {
+        const result = await getMessages(false, 50, 0);
+        if (result.status !== 'success' || !Array.isArray(result.messages)) {
+            return;
+        }
+        const popupMessages = result.messages.filter(m => m && m.type === 'scheduled_report_popup');
+        if (!popupMessages.length) {
+            return;
+        }
+        const newPopupMessages = popupMessages.filter(m => m.id && !shownScheduledPopupIds.has(m.id));
+        if (!newPopupMessages.length) {
+            return;
+        }
+        newPopupMessages.forEach(m => shownScheduledPopupIds.add(m.id));
+        renderScheduledReportLoginPopup(newPopupMessages);
+    } catch (_) {
+        // ignore
+    }
+}
+
+function renderScheduledReportLoginPopup(messages) {
+    let modal = document.getElementById('scheduledReportLoginPopupModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'scheduledReportLoginPopupModal';
+        modal.className = 'modal';
+        modal.style.display = 'none';
+        document.body.appendChild(modal);
+    }
+
+    const listHtml = messages.slice(0, 8).map(m => {
+        const title = escapeHtml(m.title || '周报/月报提醒');
+        const content = escapeHtml((m.content || '').replace(/\n/g, ' ').slice(0, 140));
+        const timeText = m.created_at ? escapeHtml(new Date(m.created_at).toLocaleString()) : '';
+        return `
+            <div style="padding:10px 12px; border:1px solid #e4ebf5; border-radius:8px; background:#fff; margin-bottom:8px;">
+                <div style="font-size:13px; color:#153a6b; font-weight:600;">${title}</div>
+                <div style="font-size:12px; color:#6c7b90; margin-top:4px;">${timeText}</div>
+                <div style="font-size:12px; color:#445; margin-top:6px; line-height:1.5;">${content}</div>
+            </div>
+        `;
+    }).join('');
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:640px; border-radius:12px; border:1px solid #dbe7f5; box-shadow:0 20px 50px rgba(8,36,74,.25);">
+            <span class="close" id="scheduledReportPopupCloseBtn">&times;</span>
+            <h2 style="margin:0; padding:14px 16px; background:linear-gradient(135deg,#f8fbff,#edf5ff); border-bottom:1px solid #dde8f6;">📬 周报/月报提醒</h2>
+            <div style="padding:14px 16px; max-height:340px; overflow:auto; background:#f9fcff;">
+                ${listHtml}
+            </div>
+            <div style="padding:12px 16px; border-top:1px solid #e6eef8; display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn btn-secondary" id="scheduledReportPopupLaterBtn">稍后查看</button>
+                <button type="button" class="btn btn-primary" id="scheduledReportPopupOpenMsgBtn">打开消息中心</button>
+            </div>
+        </div>
+    `;
+
+    const closePopup = () => {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+    };
+
+    const closeBtn = document.getElementById('scheduledReportPopupCloseBtn');
+    if (closeBtn) {
+        closeBtn.onclick = closePopup;
+    }
+    const laterBtn = document.getElementById('scheduledReportPopupLaterBtn');
+    if (laterBtn) {
+        laterBtn.onclick = closePopup;
+    }
+    const openMsgBtn = document.getElementById('scheduledReportPopupOpenMsgBtn');
+    if (openMsgBtn) {
+        openMsgBtn.onclick = async () => {
+            closePopup();
+            await openMessageModal();
+        };
+    }
+
+    modal.classList.add('show');
+    modal.style.display = 'block';
 }
 
 async function refreshUnreadCount() {
     const result = await getUnreadMessageCount();
     const count = result.status === 'success' ? result.count : 0;
+    if (lastUnreadCountSnapshot !== null && count > lastUnreadCountSnapshot) {
+        showNotification(`你有 ${count} 条未读消息`, 'info');
+    }
+    lastUnreadCountSnapshot = count;
     // 更新原始badge
     const badge = document.getElementById('messageBadge');
     if (badge) {

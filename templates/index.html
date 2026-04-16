@@ -1391,11 +1391,25 @@
 
     <!-- 定时报告任务弹窗 -->
     <div id="scheduledReportModal" class="modal">
-        <div class="modal-content" style="max-width:560px;">
+        <div class="modal-content" style="max-width:760px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2);">
             <span class="close" onclick="closeScheduledReportModal()">&times;</span>
-            <h2>定时报告任务</h2>
+            <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务</h2>
             <input type="hidden" id="scheduledReportProjectId">
-            <form id="scheduledReportForm">
+            <form id="scheduledReportForm" style="padding:16px 18px 18px;">
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <span>应用项目（可多选）</span>
+                        <span style="display:flex; gap:6px;">
+                            <button type="button" class="btn btn-secondary btn-sm" id="scheduledProjectSelectAllBtn" style="padding:4px 8px; font-size:12px;">全选</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="scheduledProjectClearBtn" style="padding:4px 8px; font-size:12px;">清空</button>
+                        </span>
+                    </label>
+                    <div id="scheduledProjectList" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; max-height:180px; overflow:auto; border:1px solid #d7e3f3; border-radius:8px; padding:10px; background:#fbfdff;">
+                        <div style="grid-column:1 / -1; color:#777; font-size:13px;">加载项目中...</div>
+                    </div>
+                    <div style="font-size:12px; color:#566; margin-top:6px;">已选择 <span id="scheduledSelectedProjectCount">0</span> 个项目。保存和“立即发送”会对所选项目批量生效。</div>
+                </div>
+
                 <div class="form-group">
                     <div style="display:flex;align-items:center;gap:8px;">
                         <input type="checkbox" id="scheduledReportEnabled">
@@ -1442,16 +1456,24 @@
                 </div>
 
                 <div class="form-group">
-                    <label>外部抄送邮箱（逗号分隔，可选）</label>
-                    <textarea id="scheduledExternalEmails" rows="2" placeholder="example1@domain.com, example2@domain.com"></textarea>
-                    <div style="font-size:12px;color:#666;margin-top:6px;">系统默认发送给 PMO成员 与 项目经理，本处可追加外部邮箱。</div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="scheduledLoginPopupEnabled" checked>
+                        <label for="scheduledLoginPopupEnabled" style="display:inline;margin:0;">在发送时间后，用户首次登录弹出周报/月报提醒</label>
+                    </div>
+                    <div style="font-size:12px;color:#666;margin-top:6px;">开启后会同时写入站内信，并在用户会话首次登录时弹出提醒。</div>
                 </div>
 
-                <div style="display:flex;justify-content:space-between;gap:10px;">
-                    <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即发送一次</button>
+                <div class="form-group">
+                    <label>外部抄送邮箱（逗号分隔，可选）</label>
+                    <textarea id="scheduledExternalEmails" rows="2" placeholder="example1@domain.com, example2@domain.com"></textarea>
+                    <div style="font-size:12px;color:#666;margin-top:6px;">系统默认发送给 PMO成员与对应项目经理；本处用于补充项目外部联系人邮箱。</div>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3;">
+                    <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即发送所选项目</button>
                     <div>
                         <button type="button" class="btn btn-secondary" onclick="closeScheduledReportModal()">取消</button>
-                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存配置</button>
+                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存到所选项目</button>
                     </div>
                 </div>
             </form>
@@ -2216,7 +2238,7 @@
                 </div>
                 <div class="form-group">
                     <label>选择JSON文件 *</label>
-                    <input type="file" id="importTemplateFile" accept=".json" required style="width: 100%;">
+                    <input type="file" id="importTemplateFile" accept=".json,.xlsx,.xls" required style="width: 100%;">
                 </div>
                 <div id="importTemplatePreview" class="import-template-preview" style="display: none; margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; max-height: 200px; overflow-y: auto;">
                 </div>

@@ -129,12 +129,17 @@ window.addEventListener('beforeunload', async () => {
 // 加载版本信息
 function loadVersionInfo() {
     fetch('/api/version')
-        .then(response => response.text())
-        .then(data => {
-            const lines = data.split('\n');
-            const version = lines[0].trim();
+        .then(async (response) => {
+            const text = await response.text();
+            return { ok: response.ok, text };
+        })
+        .then(({ ok, text }) => {
+            const lines = String(text || '').split('\n');
+            const version = (lines[0] || '').trim();
             const appVersion = document.getElementById('appVersion');
-            if (appVersion) {
+            const maybeJson = version.startsWith('{') || version.startsWith('[');
+            const validVersion = /^\d+(\.\d+){1,3}/.test(version);
+            if (appVersion && ok && !maybeJson && validVersion) {
                 appVersion.textContent = `v${version}`;
             }
         })
