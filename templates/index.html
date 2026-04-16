@@ -1398,13 +1398,12 @@
         </div>
     </div>
 
-    <!-- 定时报告任务弹窗 -->
+    <!-- 定时报告任务管理弹窗 -->
     <div id="scheduledReportModal" class="modal">
-        <div class="modal-content" style="max-width:860px; max-height:86vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
+        <div class="modal-content" style="max-width:980px; max-height:88vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
             <span class="close" onclick="closeScheduledReportModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务管理</h2>
             <input type="hidden" id="scheduledReportProjectId">
-            <input type="hidden" id="scheduledEditingTaskId">
             <form id="scheduledReportForm" style="padding:16px 18px 18px; overflow-y:auto;">
                 <div class="form-group">
                     <label style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -1425,23 +1424,42 @@
                     <select id="scheduledConfigProjectId" style="margin-top:8px;">
                         <option value="">-- 请先从上方选择项目 --</option>
                     </select>
-                    <div style="font-size:12px; color:#567; margin-top:6px;">每个项目可维护多个定时任务（日报/周报/月报），支持启停、编辑和删除。</div>
+                    <div style="font-size:12px; color:#567; margin-top:6px;">列表支持：启用/停用、编辑、删除、批量启用、批量删除；点击“新建任务”打开独立编辑弹窗。</div>
                 </div>
 
                 <div class="form-group" style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
                         <label style="font-weight:600; margin:0;">任务列表</label>
-                        <button type="button" class="btn btn-info btn-sm" id="scheduledTaskNewBtn">+ 新建任务</button>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary btn-sm" id="scheduledTaskSelectAllBtn">全选</button>
+                            <button type="button" class="btn btn-warning btn-sm" id="scheduledTaskBatchEnableBtn">批量启用</button>
+                            <button type="button" class="btn btn-danger btn-sm" id="scheduledTaskBatchDeleteBtn">批量删除</button>
+                            <button type="button" class="btn btn-info btn-sm" id="scheduledTaskNewBtn">+ 新建任务</button>
+                        </div>
                     </div>
-                    <div id="scheduledTaskList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:190px; overflow:auto;">
+                    <div id="scheduledTaskList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:420px; overflow:auto;">
                         <div style="font-size:12px; color:#777;">请选择“当前配置项目”后加载任务</div>
                     </div>
                 </div>
 
+                <div style="display:flex;justify-content:flex-end;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3;">
+                    <button type="button" class="btn btn-secondary" onclick="closeScheduledReportModal()">关闭</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 新建/编辑 定时任务弹窗 -->
+    <div id="scheduledTaskEditorModal" class="modal">
+        <div class="modal-content" style="max-width:920px; max-height:88vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
+            <span class="close" onclick="closeScheduledTaskEditorModal()">&times;</span>
+            <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">新建/编辑定时任务</h2>
+            <input type="hidden" id="scheduledEditingTaskId">
+            <input type="hidden" id="scheduledEditorProjectId">
+            <form id="scheduledTaskEditorForm" style="padding:16px 18px 18px; overflow-y:auto;">
                 <div class="form-group" style="background:#fffdf8; border:1px solid #efe2c8; border-radius:8px; padding:10px;">
                     <label for="scheduledTaskName" style="font-weight:600;">任务名称</label>
                     <input type="text" id="scheduledTaskName" maxlength="40" placeholder="例如：周报任务、月报任务、日报任务" style="margin-top:8px;">
-                    <div style="font-size:12px; color:#8a6d3b; margin-top:6px;">保存时：有任务ID则编辑，没任务ID则创建新任务。</div>
                 </div>
 
                 <div class="form-group">
@@ -1452,7 +1470,15 @@
                 </div>
 
                 <div class="form-group">
-                    <label>报告频率</label>
+                    <label>任务类型</label>
+                    <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
+                        <label style="display:inline;"><input type="radio" name="scheduledTaskType" value="periodic" checked> 周期性</label>
+                        <label style="display:inline;"><input type="radio" name="scheduledTaskType" value="one_time"> 一次性</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>报告频率（周期性有效）</label>
                     <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
                         <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="daily"> 每日（日报）</label>
                         <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="weekly" checked> 每周（周报）</label>
@@ -1460,12 +1486,12 @@
                     </div>
                 </div>
 
-                <div class="form-group" style="display:flex; gap:10px;">
-                    <div style="flex:1;">
+                <div class="form-group" style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:200px;">
                         <label>发送时间</label>
                         <input type="time" id="scheduledSendTime" value="09:00">
                     </div>
-                    <div style="flex:1;" id="scheduledWeekdayWrap">
+                    <div style="flex:1; min-width:200px;" id="scheduledWeekdayWrap">
                         <label>周几发送</label>
                         <select id="scheduledWeekday">
                             <option value="1">周一</option>
@@ -1477,9 +1503,13 @@
                             <option value="7">周日</option>
                         </select>
                     </div>
-                    <div style="flex:1; display:none;" id="scheduledMonthdayWrap">
+                    <div style="flex:1; min-width:200px; display:none;" id="scheduledMonthdayWrap">
                         <label>每月日期</label>
                         <input type="number" min="1" max="28" id="scheduledDayOfMonth" value="1">
+                    </div>
+                    <div style="flex:1; min-width:200px; display:none;" id="scheduledRunDateWrap">
+                        <label>一次性执行日期</label>
+                        <input type="date" id="scheduledRunDate">
                     </div>
                 </div>
 
@@ -1493,29 +1523,27 @@
                 <div class="form-group">
                     <div style="display:flex;align-items:center;gap:8px;">
                         <input type="checkbox" id="scheduledLoginPopupEnabled" checked>
-                        <label for="scheduledLoginPopupEnabled" style="display:inline;margin:0;">在发送时间后，用户首次登录弹出周报/月报提醒</label>
+                        <label for="scheduledLoginPopupEnabled" style="display:inline;margin:0;">在发送时间后，用户首次登录弹出提醒</label>
                     </div>
-                    <div style="font-size:12px;color:#666;margin-top:6px;">开启后会同时写入站内信，并在用户会话首次登录时弹出提醒。</div>
                 </div>
 
                 <div class="form-group" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px;">
                     <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px; min-height:120px;">
-                        <label style="font-weight:600;">站内信/邮件收件人（项目级）</label>
-                        <div id="scheduledRecipientUserList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:150px; overflow:auto;">
+                        <label style="font-weight:600;">承建单位/PMO 收件人</label>
+                        <div id="scheduledRecipientUserList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:200px; overflow:auto;">
                             <div style="font-size:12px; color:#777;">请选择“当前配置项目”后加载收件人</div>
                         </div>
                     </div>
                     <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fffdf9; padding:10px; min-height:120px;">
-                        <label>外部抄送邮箱（逗号分隔，可选）</label>
-                        <textarea id="scheduledExternalEmails" rows="3" placeholder="example1@domain.com, example2@domain.com" style="margin-top:8px;"></textarea>
-                        <div style="font-size:12px;color:#666;margin-top:6px;">用于补充项目外部联系人邮箱，和左侧项目级收件人一起生效。</div>
+                        <label>外部收件人（逗号分隔，可选）</label>
+                        <textarea id="scheduledExternalEmails" rows="4" placeholder="example1@domain.com, example2@domain.com" style="margin-top:8px;"></textarea>
                     </div>
                 </div>
 
                 <div style="display:flex;justify-content:space-between;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3;">
                     <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即执行当前任务</button>
                     <div>
-                        <button type="button" class="btn btn-secondary" onclick="closeScheduledReportModal()">取消</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeScheduledTaskEditorModal()">取消</button>
                         <button type="submit" class="btn btn-success" style="margin-left:10px;">保存任务</button>
                     </div>
                 </div>

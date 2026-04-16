@@ -74,17 +74,21 @@ class ScheduledReportService:
             'task_id': uuid4().hex,
             'project_id': project_id,
             'task_name': task_name or '定时报告任务',
+            'task_type': 'periodic',
             'enabled': False,
             'frequency': 'weekly',
             'send_time': '09:00',
             'weekday': 1,
             'day_of_month': 1,
+            'run_date': '',
             'include_pdf': True,
             'in_app_message_enabled': True,
             'login_popup_enabled': True,
             'external_emails': [],
             'recipient_user_ids': [],
             'last_run_key': '',
+            'run_count': 0,
+            'last_run_at': '',
             'created_at': now_iso,
             'updated_at': now_iso,
         }
@@ -101,8 +105,15 @@ class ScheduledReportService:
         if not merged['task_name']:
             merged['task_name'] = '定时报告任务'
 
+        task_type = str(merged.get('task_type', 'periodic')).strip().lower()
+        if task_type not in ('one_time', 'periodic'):
+            task_type = 'periodic'
+        merged['task_type'] = task_type
+
         merged['enabled'] = bool(merged.get('enabled', False))
         frequency = str(merged.get('frequency', 'weekly')).strip().lower()
+        if task_type == 'one_time':
+            frequency = 'daily'
         if frequency not in ('daily', 'weekly', 'monthly'):
             frequency = 'weekly'
         merged['frequency'] = frequency
@@ -120,6 +131,7 @@ class ScheduledReportService:
             merged['day_of_month'] = min(28, max(1, int(merged.get('day_of_month', 1))))
         except Exception:
             merged['day_of_month'] = 1
+        merged['run_date'] = str(merged.get('run_date') or '').strip()
 
         merged['include_pdf'] = bool(merged.get('include_pdf', True))
         merged['in_app_message_enabled'] = bool(merged.get('in_app_message_enabled', True))
@@ -147,6 +159,11 @@ class ScheduledReportService:
         merged['external_emails'] = ext
 
         merged['last_run_key'] = str(merged.get('last_run_key') or '')
+        try:
+            merged['run_count'] = max(0, int(merged.get('run_count', 0)))
+        except Exception:
+            merged['run_count'] = 0
+        merged['last_run_at'] = str(merged.get('last_run_at') or '')
         merged['created_at'] = str(merged.get('created_at') or base['created_at'])
         merged['updated_at'] = now_with_timezone().isoformat()
         return merged
@@ -288,7 +305,41 @@ class ScheduledReportService:
                 cfg = tasks[0]
         if cfg is None:
             cfg = self.get_schedule(project_id)
-        return self._run_project_report(project_id, cfg=cfg, manual=True, requester_user_id=requester_user_id)
+        result = self._run_project_report(project_id, cfg=cfg, manual=True, requester_user_id=requester_user_id)
+        self._mark_task_run_result(
+            project_id=project_id,
+            task_id=str(cfg.get('task_id') or ''),
+            success=result.get('status') == 'success',
+            run_key=self._build_run_key(cfg, now_with_timezone()),
+        )
+        return result
+
+    def _mark_task_run_result(self, project_id: str, task_id: str, success: bool, run_key: str = ''):
+        if not task_id:
+            return
+        with self._lock:
+            current_tasks = self._get_project_tasks_locked(project_id)
+            changed = False
+            for idx, current in enumerate(current_tasks):
+                if str(current.get('task_id')) != str(task_id):
+                    continue
+                if success:
+                    if run_key:
+                        current['last_run_key'] = run_key
+                    current['last_run_at'] = now_with_timezone().isoformat()
+                    try:
+                        current['run_count'] = int(current.get('run_count', 0)) + 1
+                    except Exception:
+                        current['run_count'] = 1
+                    if str(current.get('task_type', 'periodic')) == 'one_time':
+                        current['enabled'] = False
+                current['updated_at'] = now_with_timezone().isoformat()
+                current_tasks[idx] = self._normalize_task(project_id, current, current.get('task_name', '定时报告任务'))
+                changed = True
+                break
+            if changed:
+                self._schedules[project_id] = current_tasks
+                self._save_schedules()
 
     def _scheduler_loop(self):
         while not self._stop_event.is_set():
@@ -312,18 +363,12 @@ class ScheduledReportService:
                 if run_key and task.get('last_run_key') == run_key:
                     continue
                 result = self._run_project_report(project_id, cfg=task, manual=False)
-                if result.get('status') == 'success':
-                    with self._lock:
-                        current_tasks = self._get_project_tasks_locked(project_id)
-                        for idx, current in enumerate(current_tasks):
-                            if str(current.get('task_id')) != str(task.get('task_id')):
-                                continue
-                            current['last_run_key'] = run_key
-                            current['updated_at'] = now_with_timezone().isoformat()
-                            current_tasks[idx] = self._normalize_task(project_id, current, current.get('task_name', '定时报告任务'))
-                            self._schedules[project_id] = current_tasks
-                            self._save_schedules()
-                            break
+                self._mark_task_run_result(
+                    project_id=project_id,
+                    task_id=str(task.get('task_id') or ''),
+                    success=result.get('status') == 'success',
+                    run_key=run_key,
+                )
 
     def _list_project_ids(self) -> List[str]:
         if not self.doc_manager:
@@ -338,6 +383,7 @@ class ScheduledReportService:
         return []
 
     def _is_due(self, cfg: Dict[str, Any], now: datetime) -> bool:
+        task_type = str(cfg.get('task_type', 'periodic')).strip().lower()
         send_time = str(cfg.get('send_time', '09:00'))
         try:
             hour = int(send_time.split(':')[0])
@@ -347,6 +393,12 @@ class ScheduledReportService:
 
         if now.hour != hour or now.minute != minute:
             return False
+
+        if task_type == 'one_time':
+            run_date = str(cfg.get('run_date') or '').strip()
+            if not run_date:
+                return False
+            return now.strftime('%Y-%m-%d') == run_date
 
         frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
         if frequency == 'daily':

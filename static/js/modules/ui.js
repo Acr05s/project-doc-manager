@@ -1076,7 +1076,7 @@ export function setupEventListeners() {
 
     // 点击模态框外部关闭（需要确认，防止误关闭）
     // 安全码验证等关键弹窗不允许点击背景关闭
-    const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'scheduledReportModal', 'packageProgressModal'];
+    const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'scheduledReportModal', 'scheduledTaskEditorModal', 'packageProgressModal'];
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {

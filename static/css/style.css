@@ -515,7 +515,7 @@ body {
     position: absolute;
     top: 6px;
     right: 10px;
-    z-index: 100;
+    z-index: 10030;
 }
 
 .cycle-search-trigger {
@@ -556,7 +556,7 @@ body {
     border: 1px solid #ccc;
     border-radius: 6px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.18);
-    z-index: 30;
+    z-index: 10031;
     overflow: hidden;
 }
 

@@ -19,11 +19,16 @@ def get_project_report_schedule(project_id):
     """获取项目定时报告配置（兼容旧接口）。"""
     try:
         detail = scheduled_report_service.get_schedule_detail(project_id)
+        project = scheduled_report_service._load_project(project_id)  # noqa: SLF001 - 路由层展示用途
         return jsonify({
             'status': 'success',
             'data': detail.get('schedule', {}),
             'tasks': detail.get('tasks', []),
-            'recipient_options': detail.get('recipient_options', [])
+            'recipient_options': detail.get('recipient_options', []),
+            'project_meta': {
+                'party_b': project.get('party_b', ''),
+                'project_name': project.get('name', project_id),
+            }
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -60,7 +65,16 @@ def list_project_report_tasks(project_id):
     """获取项目定时报告任务列表。"""
     try:
         detail = scheduled_report_service.get_schedule_detail(project_id)
-        return jsonify({'status': 'success', 'tasks': detail.get('tasks', []), 'recipient_options': detail.get('recipient_options', [])})
+        project = scheduled_report_service._load_project(project_id)  # noqa: SLF001 - 路由层展示用途
+        return jsonify({
+            'status': 'success',
+            'tasks': detail.get('tasks', []),
+            'recipient_options': detail.get('recipient_options', []),
+            'project_meta': {
+                'party_b': project.get('party_b', ''),
+                'project_name': project.get('name', project_id),
+            }
+        })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

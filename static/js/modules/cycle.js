@@ -290,7 +290,7 @@ function initCycleSearch() {
     // 打开项目后显示搜索入口
     searchBox.style.display = '';
 
-    // 构建搜索索引：周期 -> 文档类型 -> 文档名
+    // 构建搜索索引：周期 -> 文档要求 -> 文档名（可选）
     const searchIndex = [];
     const cycles = appState.projectConfig?.cycles || [];
     const documents = appState.projectConfig?.documents || {};
@@ -298,10 +298,9 @@ function initCycleSearch() {
         const docsInfo = documents[cycle];
         if (!docsInfo || !Array.isArray(docsInfo.required_docs)) return;
         docsInfo.required_docs.forEach(doc => {
-            const docType = (doc.doc_type || doc.category || '要求文档').toString();
+            const requirement = (doc.requirement || doc.doc_type || doc.category || '文档要求').toString();
             const docName = (doc.name || '').toString();
-            if (!docName) return;
-            searchIndex.push({ cycle, docType, docName });
+            searchIndex.push({ cycle, requirement, docName });
         });
     });
 
@@ -343,12 +342,13 @@ function initCycleSearch() {
             if (!grouped[cycle]) return;
             html += `<div class="cycle-search-group-header">📁 ${cycle}（${grouped[cycle].length}）</div>`;
             grouped[cycle].forEach(item => {
-                const pathText = `${highlight(item.docType, keyword)} › ${highlight(item.docName, keyword)}`;
+                const requirementText = highlight(item.requirement, keyword);
+                const docNameText = item.docName ? ` <span class="search-path-sep">›</span> ${highlight(item.docName, keyword)}` : '';
                 html += `<div class="cycle-search-item${globalIdx === activeIndex ? ' active' : ''}" data-index="${globalIdx}" data-cycle="${item.cycle}" data-doc="${item.docName}">
                     <div class="search-path">
                         <span class="search-cycle-tag">${item.cycle}</span>
                         <span class="search-path-sep">›</span>
-                        <span class="search-doc-name">${pathText}</span>
+                        <span class="search-doc-name">${requirementText}${docNameText}</span>
                     </div>
                 </div>`;
                 globalIdx++;
@@ -374,7 +374,7 @@ function initCycleSearch() {
 
         filteredResults = searchIndex.filter(item =>
             item.cycle.toLowerCase().includes(keyword) ||
-            item.docType.toLowerCase().includes(keyword) ||
+            item.requirement.toLowerCase().includes(keyword) ||
             item.docName.toLowerCase().includes(keyword)
         );
         activeIndex = -1;
