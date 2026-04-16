@@ -250,6 +250,7 @@ class ScheduledReportService:
         period_start, period_end = self._calc_period(now_with_timezone(), frequency)
 
         metrics = self._build_metrics(project_id, project, period_start, period_end)
+        party_b = project.get('party_b', '')
         targets = self._collect_recipient_targets(project, cfg)
         recipients = targets.get('emails', [])
         site_receiver_ids = targets.get('user_ids', [])
@@ -261,6 +262,7 @@ class ScheduledReportService:
 
         subject = f"【项目定时报告】{project_name} - {'周报' if frequency == 'weekly' else '月报'}"
         text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics)
+    text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics, party_b=party_b)
 
         attachments = []
         if cfg.get('include_pdf', True):
@@ -290,7 +292,8 @@ class ScheduledReportService:
                 period_end=period_end,
                 metrics=metrics,
                 run_key=run_key,
-                popup_enabled=bool(cfg.get('login_popup_enabled', True))
+                popup_enabled=bool(cfg.get('login_popup_enabled', True)),
+                party_b=party_b,
             )
 
         status = 'success' if (success_count > 0 or site_sent_count > 0) else 'error'
@@ -352,18 +355,40 @@ class ScheduledReportService:
 
     def _build_metrics(self, project_id: str, project: Dict[str, Any], start: datetime, end: datetime) -> Dict[str, Any]:
         uploads = 0
-        by_cycle: Dict[str, Dict[str, int]] = {}
+        updated_docs = 0   # 本周期内重新上传（版本更新）次数
+        by_cycle: Dict[str, Dict[str, Any]] = {}
+        doc_details: List[Dict[str, Any]] = []   # 文档明细列表
+
         docs = project.get('documents', {}) if isinstance(project.get('documents', {}), dict) else {}
         for cycle, cycle_info in docs.items():
             uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
             cycle_upload_count = 0
+            cycle_update_count = 0
+            # 记录每个文档名已经遍历到第几次，判断是否是更新
+            doc_name_seen: Dict[str, int] = {}
             for doc in uploaded_docs:
+                dn = doc.get('doc_name', '')
+                doc_name_seen[dn] = doc_name_seen.get(dn, 0) + 1
                 t = self._parse_time(doc.get('upload_time'))
                 if t and start <= t <= end:
                     uploads += 1
                     cycle_upload_count += 1
-            by_cycle.setdefault(cycle, {'uploads': 0, 'archived': 0})
+                    is_update = doc_name_seen[dn] > 1   # 同文档名第2次及以上视为更新
+                    if is_update:
+                        updated_docs += 1
+                        cycle_update_count += 1
+                    # 添加文档明细
+                    doc_details.append({
+                        'cycle': cycle,
+                        'doc_name': dn,
+                        'uploader': doc.get('uploader', doc.get('uploaded_by', '')),
+                        'upload_time': doc.get('upload_time', ''),
+                        'filename': doc.get('original_filename', doc.get('filename', '')),
+                        'is_update': is_update,
+                    })
+            by_cycle.setdefault(cycle, {'uploads': 0, 'updated': 0, 'archived': 0})
             by_cycle[cycle]['uploads'] = cycle_upload_count
+            by_cycle[cycle]['updated'] = cycle_update_count
 
         archived = 0
         try:
@@ -390,16 +415,22 @@ class ScheduledReportService:
                     archived += count
                     cycle = row['cycle'] or '未分组'
                     by_cycle.setdefault(cycle, {'uploads': 0, 'archived': 0})
+                    by_cycle.setdefault(cycle, {'uploads': 0, 'updated': 0, 'archived': 0})
                     by_cycle[cycle]['archived'] += count
         except Exception as e:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
 
         archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
+        archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
+        # 按上传时间倒序排列文档明细
+        doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
         return {
             'uploads': uploads,
+            'updated_docs': updated_docs,
             'archived': archived,
             'archive_rate': archive_rate,
-            'by_cycle': by_cycle
+            'by_cycle': by_cycle,
+            'doc_details': doc_details,
         }
 
     def _load_project(self, project_id: str) -> Dict[str, Any]:
@@ -460,13 +491,17 @@ class ScheduledReportService:
                     'id': getattr(manager_user, 'id', None),
                     'username': getattr(manager_user, 'username', ''),
                     'display_name': getattr(manager_user, 'display_name', '') or getattr(manager_user, 'username', ''),
-                    'organization': getattr(manager_user, 'organization', ''),
-                    'role': getattr(manager_user, 'role', ''),
-                    'email': getattr(manager_user, 'email', ''),
-                    'status': getattr(manager_user, 'status', 'active')
-                }, '项目负责人', True)
-
-        options.sort(key=lambda x: (
+                archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
+                # 按上传时间倒序排列文档明细
+                doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
+                return {
+                    'uploads': uploads,
+                    'updated_docs': updated_docs,
+                    'archived': archived,
+                    'archive_rate': archive_rate,
+                    'by_cycle': by_cycle,
+                    'doc_details': doc_details,
+                }
             0 if x.get('recommended') else 1,
             str(x.get('role') or ''),
             str(x.get('display_name') or x.get('username') or '')
@@ -520,16 +555,20 @@ class ScheduledReportService:
         period_end: datetime,
         metrics: Dict[str, Any],
         run_key: str,
-        popup_enabled: bool
+        popup_enabled: bool,
+        party_b: str = '',
     ) -> int:
         if not receiver_ids:
             return 0
         title = f"【{project_name}】{'周报' if frequency == 'weekly' else '月报'}已生成"
+        party_b_line = f"承建单位：{party_b}\n" if party_b else ''
         content = (
             f"项目：{project_name}\n"
+            + party_b_line +
             f"类型：{'周报' if frequency == 'weekly' else '月报'}\n"
             f"统计区间：{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}\n"
             f"上传审核通过：{metrics.get('uploads', 0)}\n"
+            f"文档更新次数：{metrics.get('updated_docs', 0)}\n"
             f"归档通过：{metrics.get('archived', 0)}\n"
             f"归档率：{metrics.get('archive_rate', 0.0)}%\n"
             f"可在消息中心查看详情。"
@@ -552,18 +591,26 @@ class ScheduledReportService:
                 logger.warning(f'[ScheduledReportService] send site message failed for user {receiver_id}: {e}')
         return sent_count
 
-    def _build_email_content(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any]) -> Tuple[str, str]:
+    def _build_email_content(
+        self, project_name: str, frequency: str, start: datetime, end: datetime,
+        metrics: Dict[str, Any], party_b: str = ''
+    ) -> Tuple[str, str]:
         title = '周报' if frequency == 'weekly' else '月报'
         uploads = metrics.get('uploads', 0)
+        updated_docs = metrics.get('updated_docs', 0)
         archived = metrics.get('archived', 0)
         rate = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
+        doc_details = metrics.get('doc_details', [])
 
+        party_b_line = f"承建单位：{party_b}\n" if party_b else ''
         text = (
             f"项目：{project_name}\n"
-            f"报告类型：{title}\n"
+            + party_b_line
+            + f"报告类型：{title}\n"
             f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}\n"
             f"上传审核通过次数：{uploads}\n"
+            f"文档更新次数：{updated_docs}\n"
             f"归档通过次数：{archived}\n"
             f"归档率：{rate}%\n"
         )
@@ -571,44 +618,87 @@ class ScheduledReportService:
         rows = ''
         for cycle, val in sorted(by_cycle.items(), key=lambda x: str(x[0])):
             c_uploads = val.get('uploads', 0)
+            c_updated = val.get('updated', 0)
             c_archived = val.get('archived', 0)
             c_rate = round((c_archived / c_uploads) * 100, 2) if c_uploads > 0 else 0.0
             bar_width = max(1, min(100, int(c_rate)))
             rows += (
-            f"<tr><td style='padding:6px 8px;border:1px solid #ddd'>{str(cycle)}</td>"
-                f"<td style='padding:6px 8px;border:1px solid #ddd'>{c_uploads}</td>"
-                f"<td style='padding:6px 8px;border:1px solid #ddd'>{c_archived}</td>"
+                f"<tr><td style='padding:6px 8px;border:1px solid #ddd'>{str(cycle)}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center'>{c_uploads}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center'>{c_updated}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center'>{c_archived}</td>"
                 f"<td style='padding:6px 8px;border:1px solid #ddd'>"
-                f"<div style='background:#f1f5f9;height:12px;border-radius:8px;overflow:hidden;'>"
-                f"<div style='width:{bar_width}%;background:#22c55e;height:12px;'></div></div>"
-                f"<div style='font-size:12px;color:#555;margin-top:4px'>{c_rate}%</div>"
+                f"<div style='background:#f1f5f9;height:10px;border-radius:8px;overflow:hidden;'>"
+                f"<div style='width:{bar_width}%;background:#22c55e;height:10px;'></div></div>"
+                f"<div style='font-size:11px;color:#555;margin-top:3px'>{c_rate}%</div>"
                 f"</td></tr>"
             )
 
-        html = f"""
-        <div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222'>
-          <h2 style='margin:0 0 10px'>项目{title} - {project_name}</h2>
-          <p>统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}</p>
-          <div style='display:flex;gap:12px;margin:12px 0 16px;'>
-            <div style='padding:10px 12px;background:#eef6ff;border-radius:8px;'>上传审核通过：<b>{uploads}</b></div>
-            <div style='padding:10px 12px;background:#f0fff4;border-radius:8px;'>归档通过：<b>{archived}</b></div>
-            <div style='padding:10px 12px;background:#fff7ed;border-radius:8px;'>归档率：<b>{rate}%</b></div>
-          </div>
-          <table style='border-collapse:collapse;width:100%;font-size:13px;'>
-            <thead>
-              <tr>
-                <th style='padding:8px;border:1px solid #ddd;background:#f8fafc;'>周期</th>
-                <th style='padding:8px;border:1px solid #ddd;background:#f8fafc;'>上传通过</th>
-                <th style='padding:8px;border:1px solid #ddd;background:#f8fafc;'>归档通过</th>
-                <th style='padding:8px;border:1px solid #ddd;background:#f8fafc;'>归档率图示</th>
-              </tr>
-            </thead>
-            <tbody>{rows or "<tr><td colspan='4' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"}</tbody>
-          </table>
-        </div>
-        """
-        return text, html
+        detail_rows = ''
+        for d in doc_details[:50]:
+            uploader = d.get('uploader') or '-'
+            upload_time = str(d.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
+            tag = ('<span style="background:#fbbf24;color:#fff;font-size:11px;'
+                   'padding:1px 5px;border-radius:3px;margin-left:4px;">更新</span>'
+                   if d.get('is_update') else '')
+            filename = d.get('filename', '') or ''
+            filename_short = (filename[:40] + '…') if len(filename) > 40 else filename
+            detail_rows += (
+                f"<tr>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555'>{d.get('cycle', '')}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee'>{d.get('doc_name', '')}{tag}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#666;font-size:12px'>{filename_short}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555'>{uploader}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#888;font-size:12px'>{upload_time}</td>"
+                f"</tr>"
+            )
 
+        party_b_html = (f"<p style='margin:4px 0;color:#666;font-size:13px'>承建单位：<b>{party_b}</b></p>"
+                        if party_b else '')
+        no_data_row = "<tr><td colspan='5' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
+        detail_section = (
+            "<h3 style='font-size:14px;margin:22px 0 8px;color:#374151'>本期文档上传明细</h3>"
+            "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+            "<thead><tr style='background:#f8fafc;'>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>周期</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>文档名称</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>文件名</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>上传人</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>上传时间</th>"
+            f"</tr></thead><tbody>{detail_rows}</tbody></table>"
+        ) if detail_rows else "<p style='color:#999;font-size:13px'>本期无文档上传记录。</p>"
+        html = (
+            f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
+            f"<h2 style='margin:0 0 4px;font-size:18px'>项目{title} — {project_name}</h2>"
+            f"{party_b_html}"
+            f"<p style='margin:4px 0;color:#888;font-size:13px'>统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}</p>"
+            f"<div style='display:flex;flex-wrap:wrap;gap:10px;margin:14px 0;'>"
+            f"<div style='padding:10px 14px;background:#eef6ff;border-radius:8px;min-width:110px;text-align:center;'>"
+            f"<div style='font-size:22px;font-weight:bold;color:#2563eb'>{uploads}</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>上传审核通过</div></div>"
+            f"<div style='padding:10px 14px;background:#fff7ed;border-radius:8px;min-width:110px;text-align:center;'>"
+            f"<div style='font-size:22px;font-weight:bold;color:#d97706'>{updated_docs}</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>文档更新次数</div></div>"
+            f"<div style='padding:10px 14px;background:#f0fff4;border-radius:8px;min-width:110px;text-align:center;'>"
+            f"<div style='font-size:22px;font-weight:bold;color:#16a34a'>{archived}</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>归档通过</div></div>"
+            f"<div style='padding:10px 14px;background:#fdf4ff;border-radius:8px;min-width:110px;text-align:center;'>"
+            f"<div style='font-size:22px;font-weight:bold;color:#7c3aed'>{rate}%</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>归档率</div></div></div>"
+            f"<h3 style='font-size:14px;margin:18px 0 8px;color:#374151'>按周期统计</h3>"
+            f"<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+            f"<thead><tr style='background:#f8fafc;'>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>周期</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>上传通过</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>更新次数</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>归档通过</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>归档率图示</th>"
+            f"</tr></thead>"
+            f"<tbody>{rows or no_data_row}</tbody></table>"
+            f"{detail_section}"
+            f"</div>"
+        )
+        return text, html
     def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any]) -> Optional[Path]:
         try:
             from reportlab.lib import colors
@@ -631,11 +721,13 @@ class ScheduledReportService:
             c.drawString(40, 782, f"统计区间: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
 
             uploads = metrics.get('uploads', 0)
+            updated_docs = metrics.get('updated_docs', 0)
             archived = metrics.get('archived', 0)
             rate = metrics.get('archive_rate', 0.0)
-            c.drawString(40, 760, f'上传审核通过次数: {uploads}')
-            c.drawString(220, 760, f'归档通过次数: {archived}')
-            c.drawString(400, 760, f'归档率: {rate}%')
+            c.drawString(40, 760, f'上传审核通过: {uploads}')
+            c.drawString(180, 760, f'文档更新: {updated_docs}')
+            c.drawString(300, 760, f'归档通过: {archived}')
+            c.drawString(420, 760, f'归档率: {rate}%')
 
             c.setFont('STSong-Light', 11)
             c.drawString(40, 736, '按周期统计')
@@ -644,9 +736,10 @@ class ScheduledReportService:
             c.setFont('STSong-Light', 9)
             c.setFillColor(colors.black)
             c.drawString(40, y, '周期')
-            c.drawString(200, y, '上传')
-            c.drawString(260, y, '归档')
-            c.drawString(320, y, '归档率')
+            c.drawString(180, y, '上传')
+            c.drawString(225, y, '更新')
+            c.drawString(265, y, '归档')
+            c.drawString(310, y, '归档率')
             y -= 14
 
             by_cycle = metrics.get('by_cycle', {})
@@ -656,16 +749,18 @@ class ScheduledReportService:
                     c.setFont('STSong-Light', 9)
                     y = 800
                 u = val.get('uploads', 0)
+                upd = val.get('updated', 0)
                 a = val.get('archived', 0)
                 r = round((a / u) * 100, 2) if u > 0 else 0.0
                 c.setFillColor(colors.black)
                 c.drawString(40, y, str(cycle)[:24])
-                c.drawString(200, y, str(u))
-                c.drawString(260, y, str(a))
-                c.drawString(320, y, f'{r}%')
+                c.drawString(180, y, str(u))
+                c.drawString(225, y, str(upd))
+                c.drawString(265, y, str(a))
+                c.drawString(310, y, f'{r}%')
                 c.setStrokeColor(colors.lightgrey)
                 c.setFillColor(colors.HexColor('#16a34a'))
-                c.rect(370, y - 2, max(1, min(150, int(r * 1.5))), 8, fill=1, stroke=0)
+                c.rect(365, y - 2, max(1, min(140, int(r * 1.4))), 7, fill=1, stroke=0)
                 y -= 14
 
             c.save()

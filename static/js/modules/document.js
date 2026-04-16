@@ -922,16 +922,29 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 }
                                                 if (currentStage && currentStage.status === 'approved') return '';
                                                 if (currentStage && currentStage.required_role === 'pmo_leader') {
-                                                    return `
-                                                    <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
-                                                        ✅ 同意流转
-                                                    </button>
-                                                    <button class="btn btn-primary btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
-                                                        ✅ 直接归档
-                                                    </button>
-                                                    <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
-                                                        ❌ 驳回
-                                                    </button>`;
+                                                    // 判断是否有下一个待审阶段（project_admin），决定是否显示"流转"选项
+                                                    const nextStage = stages[currentStageIdx + 1];
+                                                    const canForwardToPM = nextStage && nextStage.required_role === 'project_admin' && nextStage.status === 'pending';
+                                                    if (canForwardToPM) {
+                                                        return `
+                                                        <button class="btn btn-warning btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
+                                                            ➡️ 流转项目经理复核
+                                                        </button>
+                                                        <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                            ✅ 直接归档
+                                                        </button>
+                                                        <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                            ❌ 驳回
+                                                        </button>`;
+                                                    } else {
+                                                        return `
+                                                        <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                            ✅ 批准归档
+                                                        </button>
+                                                        <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                            ❌ 驳回
+                                                        </button>`;
+                                                    }
                                                 }
                                                 return `
                                                 <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">

@@ -644,17 +644,7 @@ function setupEventListeners() {
             if (e.target === modal) {
                 // 关键弹窗不允许点击背景关闭
                 if (noBackdropCloseIds.includes(modal.id)) return;
-                // 检查模态框内是否有未保存的更改
-                const hasUnsavedChanges = checkUnsavedChanges(modal);
-                if (hasUnsavedChanges) {
-                    showConfirmModal(
-                        '确认关闭',
-                        '您有未保存的更改，确定要关闭吗？',
-                        () => closeModal(modal)
-                    );
-                } else {
-                    closeModal(modal);
-                }
+                closeModal(modal);
             }
         });
     });
@@ -1527,7 +1517,9 @@ function initCycleSearch() {
             if (!grouped[cycle]) return;
             html += `<div class="cycle-search-group-header">📁 ${cycle}（${grouped[cycle].length}）</div>`;
             grouped[cycle].forEach(item => {
-                const docDisplay = keyword ? highlightMatch(item.docName, keyword) : item.docName;
+                // 去掉文档类型前缀（如"需求文档·"），只显示文档名本身
+                const docShortName = item.docName.includes('·') ? item.docName.split('·').slice(1).join('·') : item.docName;
+                const docDisplay = keyword ? highlightMatch(docShortName, keyword) : docShortName;
                 html += `<div class="cycle-search-item${globalIdx === activeIndex ? ' active' : ''}" data-index="${globalIdx}" data-cycle="${item.cycle}" data-doc="${item.docName}">
                     <div class="search-path">
                         <span class="search-cycle-tag">${cycle}</span>
@@ -3648,6 +3640,7 @@ function openModal(modal) {
  */
 function closeModal(modal) {
     modal.classList.remove('show');
+    modal.style.display = '';
     document.body.style.overflow = 'auto';
 }
 

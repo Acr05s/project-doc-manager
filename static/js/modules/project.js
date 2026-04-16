@@ -1770,28 +1770,35 @@ export async function handleDownloadPackage() {
     
     // 显示打包选项
     content.innerHTML = `
-        <div style="padding: 20px; text-align: center;">
-            <h3 style="margin-bottom: 20px;">📦 选择打包范围</h3>
-            <div style="display: flex; flex-direction: column; gap: 15px; max-width: 400px; margin: 0 auto;">
-                <label style="display: flex; align-items: center; padding: 15px; border: 2px solid #007bff; border-radius: 8px; cursor: pointer; background: #f0f7ff;">
-                    <input type="radio" name="packageScope" value="archived" checked style="margin-right: 10px;">
-                    <div style="text-align: left;">
+        <div style="padding: 20px;">
+            <h3 style="margin-bottom: 16px; text-align:center;">📦 选择打包范围</h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <label style="display: flex; align-items: flex-start; gap:12px; padding: 14px; border: 2px solid #007bff; border-radius: 8px; cursor: pointer; background: #f0f7ff;">
+                    <input type="radio" name="packageScope" value="archived" checked style="margin-top:3px; flex-shrink:0;">
+                    <div>
                         <strong>📋 只打包已归档文档</strong>
-                        <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">只打包状态为"已归档"的文档</p>
+                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">只打包状态为"已归档"的文档；"不涉及"文档以 txt 占位（编号保持连续）</p>
                     </div>
                 </label>
-                <label style="display: flex; align-items: center; padding: 15px; border: 2px solid #28a745; border-radius: 8px; cursor: pointer; background: #f0fff4;">
-                    <input type="radio" name="packageScope" value="matched" style="margin-right: 10px;">
-                    <div style="text-align: left;">
+                <label style="display: flex; align-items: flex-start; gap:12px; padding: 14px; border: 2px solid #28a745; border-radius: 8px; cursor: pointer; background: #f0fff4;">
+                    <input type="radio" name="packageScope" value="matched" style="margin-top:3px; flex-shrink:0;">
+                    <div>
                         <strong>📁 打包所有已匹配文档</strong>
-                        <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">打包所有已匹配（无论归档状态）的文档</p>
+                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">打包所有已匹配（无论归档状态）的文档；"不涉及"文档以 txt 占位</p>
+                    </div>
+                </label>
+                <label style="display: flex; align-items: flex-start; gap:12px; padding: 14px; border: 2px solid #6c757d; border-radius: 8px; cursor: pointer; background: #f8f9fa;">
+                    <input type="radio" name="packageScope" value="skip_not_involved" style="margin-top:3px; flex-shrink:0;">
+                    <div>
+                        <strong>🚫 跳过"不涉及"文档（不放占位文件）</strong>
+                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">打包已归档文档；"不涉及"文档直接跳过，编号仍保持连续</p>
                     </div>
                 </label>
             </div>
         </div>
     `;
-    
-    modal.style.display = 'block';
+
+    modal.style.display = 'flex';
     
     // 绑定取消按钮
     if (cancelBtn) {

@@ -651,6 +651,9 @@ class TaskService:
                     
                     # 标记为不涉及的文档始终包含（视为已归档）
                     if is_not_involved:
+                        if scope == 'skip_not_involved':
+                            logger.info(f"[打包过滤] {cycle}/{doc_name}: 不涉及，跳过（skip_not_involved模式）")
+                            return False
                         logger.info(f"[打包过滤] {cycle}/{doc_name}: 不涉及，包含")
                         return True
                     

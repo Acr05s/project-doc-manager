@@ -356,22 +356,15 @@ def submit_archive_request(project_id):
             if missing_docs:
                 return jsonify({'status': 'error', 'message': f'文档未归档，无法撤销：{missing_docs[0]}'}), 400
 
-        # PMO普通成员发起时，增加 PMO负责人 前置审核阶段
+        # PMO普通成员发起时，使用固定的 [pmo_leader → project_admin(可选) → pmo_leader] 三阶段链
+        # pmo_leader 可选择"直接归档"跳过后两个阶段，或"同意流转"让项目经理复核后再由pmo_leader最终归档
         requester_role = getattr(current_user, 'role', '')
         requester_org = (getattr(current_user, 'organization', '') or '').strip()
         if requester_role == 'pmo' and requester_org == 'PMO':
             approval_chain = [
-                {
-                    'level': 1,
-                    'required_role': 'pmo_leader',
-                    'org_match': 'pmo'
-                }
-            ] + [
-                {
-                    **stage,
-                    'level': (stage.get('level', idx + 1) + 1)
-                }
-                for idx, stage in enumerate(approval_chain)
+                {'level': 1, 'required_role': 'pmo_leader', 'org_match': 'pmo'},
+                {'level': 2, 'required_role': 'project_admin', 'org_match': 'party_b'},
+                {'level': 3, 'required_role': 'pmo_leader', 'org_match': 'pmo'},
             ]
 
         # 初始化audit approval_stages

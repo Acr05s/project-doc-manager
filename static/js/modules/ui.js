@@ -263,6 +263,7 @@ export function setupEventListeners() {
     const editProjectForm = document.getElementById('editProjectForm');
     if (editProjectForm) {
         editProjectForm.addEventListener('submit', (e) => {
+            e.preventDefault();
             import('./project.js').then(({ handleEditProjectSave }) => {
                 handleEditProjectSave(e);
             });
@@ -273,6 +274,7 @@ export function setupEventListeners() {
     const archiveApprovalConfigForm = document.getElementById('archiveApprovalConfigForm');
     if (archiveApprovalConfigForm) {
         archiveApprovalConfigForm.addEventListener('submit', (e) => {
+            e.preventDefault();
             import('./project.js').then(({ handleArchiveApprovalConfigSave }) => {
                 handleArchiveApprovalConfigSave(e);
             });
