@@ -264,7 +264,7 @@ export async function runScheduledReportNow() {
             const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedule/run`, { method: 'POST' });
             const result = await safeParseJson(resp);
             return { projectId, result };
-        });
+        }));
 
         const successCount = results.filter(item => item.result.status === 'success').length;
         const failed = results.filter(item => item.result.status !== 'success');
