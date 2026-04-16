@@ -1,4 +1,4 @@
-# 项目文档管理中心 v3.0.1 📁
+# 项目文档管理中心 v3.0.2 📁
 
 一个功能完整的项目全生命周期文档管理系统，支持文档收集、版本管理、自动签字/盖章识别、ZIP批量导入、项目打包导出、多级权限管控、项目移交、操作日志审计等功能。
 
@@ -122,9 +122,12 @@ project_doc_manager/
 ├── Version.txt            # 版本信息
 ├── README.md              # 本文件
 ├── docs/                  # 文档目录
-│   ├── PROJECT_DOCUMENTATION.md  # 技术文档
-│   ├── DEPLOYMENT_GUIDE.md       # 部署指南
-│   └── QUICK_START.md            # 快速开始
+│   ├── PROJECT_DOCUMENTATION.md      # 技术文档
+│   ├── PROJECT_ENGINEERING_GUIDE.md  # 工程说明（模块/字段/迁移）
+│   ├── PRODUCT_MANUAL.md             # 产品手册（使用说明）
+│   ├── MIGRATION_ROLLBACK_GUIDE.md   # 迁移回滚手册（失败时一键回退）
+│   ├── DEPLOYMENT_GUIDE.md           # 部署指南
+│   └── QUICK_START.md                # 快速开始
 ├── app/                   # 后端代码
 ├── static/                # 前端资源
 ├── templates/             # HTML 模板
@@ -230,6 +233,38 @@ venv\Scripts\python main.py
 
 # 指定端口和线程数
 ./launcher.sh start -p 8080 -t 20
+```
+
+### Linux/Mac（推荐使用 Daemon.sh）
+
+```bash
+chmod +x Daemon.sh
+./Daemon.sh install
+./Daemon.sh start
+
+# 升级（会自动执行数据库与数据文件迁移）
+./Daemon.sh upgrade
+```
+
+## 🔄 升级与迁移
+
+推荐直接使用以下命令完成升级：
+
+```bash
+./Daemon.sh upgrade
+```
+
+升级过程将自动执行：
+1. 拉取最新代码。
+2. 更新依赖。
+3. 自动迁移数据库（`data/users.db`）。
+4. 自动迁移运行时数据文件（如 `uploads/tasks/report_schedules.json`）。
+5. 自动重启服务。
+
+如需只检查迁移差异：
+
+```bash
+python tools/migrate_branch.py --check
 ```
 
 ## 🐛 常见问题与异常处理

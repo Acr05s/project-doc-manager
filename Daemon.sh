@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # Project Document Manager - Linux/Mac Daemon
-# Version: 3.0.1
+# Version: 3.0.2
 # Features: start, install, restart, stop, logs, upgrade
 # ============================================================================
 
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # 基础配置
 APP_NAME="Project Document Manager"
-VERSION="3.0.1"
+VERSION="3.0.2"
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$APP_DIR/venv"
 LOG_DIR="$APP_DIR/logs"
@@ -42,8 +42,8 @@ show_help() {
     echo "  status      Check server status"
     echo "  logs        View server logs (tail -f)"
     echo "  log         View recent logs (last 50 lines)"
-    echo "  upgrade     Upgrade to latest version (git pull + restart)"
-    echo "  migrate     Migrate from current branch to target branch (auto backup + DB migrate)"
+    echo "  upgrade     Upgrade to latest version (git pull + auto migrate + restart)"
+    echo "  migrate     Migrate from current branch to target branch (auto backup + DB/data migrate)"
     echo "  enable      Install as system service (auto-start on boot)"
     echo "  disable     Remove system service"
     echo "  service     View service status"

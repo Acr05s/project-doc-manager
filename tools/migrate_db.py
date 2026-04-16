@@ -21,6 +21,9 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # 默认数据库路径
 DEFAULT_DB_PATH = PROJECT_ROOT / 'data' / 'users.db'
 
+# 最新迁移版本
+LATEST_MIGRATION_VERSION = 9
+
 
 def get_current_version(cursor):
     """获取当前迁移版本"""
@@ -50,11 +53,11 @@ def migrate(db_path):
         current_version = get_current_version(cursor)
         print(f'当前迁移版本: {current_version}')
 
-        if current_version >= 6:
+        if current_version >= LATEST_MIGRATION_VERSION:
             print('数据库已经是最新版本，无需迁移。')
             return True
 
-        print(f'需要迁移: {current_version} -> 6')
+        print(f'需要迁移: {current_version} -> {LATEST_MIGRATION_VERSION}')
         print()
 
         conn.execute('BEGIN TRANSACTION')
@@ -170,9 +173,48 @@ def migrate(db_path):
                 cursor.execute('INSERT INTO migration_versions (version) VALUES (6)')
                 print('  完成')
 
+            # ==================== 迁移版本 7 ====================
+            if current_version < 7:
+                print('执行迁移 7: 归档审批表添加 request_type 字段...')
+                cursor.execute('PRAGMA table_info(archive_approvals)')
+                existing = {row[1] for row in cursor.fetchall()}
+                if 'request_type' not in existing:
+                    cursor.execute("ALTER TABLE archive_approvals ADD COLUMN request_type TEXT DEFAULT 'archive'")
+                    print('  + request_type')
+                cursor.execute('INSERT INTO migration_versions (version) VALUES (7)')
+                print('  完成')
+
+            # ==================== 迁移版本 8 ====================
+            if current_version < 8:
+                print('执行迁移 8: 创建安全相关性能索引...')
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time '
+                    'ON login_attempts(ip_address, attempt_time)'
+                )
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_ip_blacklist_ip '
+                    'ON ip_blacklist(ip_address)'
+                )
+                cursor.execute('INSERT INTO migration_versions (version) VALUES (8)')
+                print('  完成')
+
+            # ==================== 迁移版本 9 ====================
+            if current_version < 9:
+                print('执行迁移 9: 创建常用业务查询索引...')
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_messages_receiver_read_created '
+                    'ON messages(receiver_id, is_read, created_at DESC)'
+                )
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_archive_approvals_project_status_created '
+                    'ON archive_approvals(project_id, status, created_at DESC)'
+                )
+                cursor.execute('INSERT INTO migration_versions (version) VALUES (9)')
+                print('  完成')
+
             conn.commit()
             print()
-            print('所有迁移执行成功！当前版本: 6')
+            print(f'所有迁移执行成功！当前版本: {LATEST_MIGRATION_VERSION}')
             return True
 
         except Exception as e:

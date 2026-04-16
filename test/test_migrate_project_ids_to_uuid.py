@@ -8,7 +8,7 @@ from tools.migrate_project_ids_to_uuid import ProjectIdUuidMigrator, is_uuid_lik
 
 
 LEGACY_PROJECT_ID = 'project_20240327112233'
-PROJECT_NAME = '老测试项目'
+PROJECT_NAME = '示例测试项目'
 
 
 class ProjectIdUuidMigrationTest(unittest.TestCase):

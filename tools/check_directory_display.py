@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""搜索网络能力建设项目的 directory 分布"""
+"""按关键字搜索项目并统计 directory 分布。"""
 import sqlite3
 import json
+import sys
 from collections import Counter
+
+keyword = sys.argv[1] if len(sys.argv) > 1 else '示例'
 
 db = sqlite3.connect('projects/projects_index.db', timeout=10)
 db.row_factory = sqlite3.Row
@@ -17,7 +20,7 @@ rows = db.execute("SELECT project_id, config_data FROM project_configs WHERE con
 
 for row in rows:
     pname = projects.get(row['project_id'], row['project_id'])
-    if '网络' not in pname:
+    if keyword not in pname:
         continue
     
     docs = json.loads(row['config_data']).get('documents', {})

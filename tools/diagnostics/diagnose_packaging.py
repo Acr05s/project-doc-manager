@@ -119,5 +119,5 @@ def diagnose_packaging_issue(project_name):
                 print(f"      路径: {file_path[:80]}..." if len(file_path) > 80 else f"      路径: {file_path}")
 
 if __name__ == '__main__':
-    # 诊断"人力资源市场平台项目"
-    diagnose_packaging_issue("人力资源市场平台项目")
+    target = sys.argv[1] if len(sys.argv) > 1 else "示例项目"
+    diagnose_packaging_issue(target)

@@ -1,7 +1,6 @@
-"""分支迁移数据脚本
+"""升级迁移脚本
 
-用途：从 main 分支（无用户系统）迁移到 feature/security-enhancements 分支（多用户系统）。
-     自动检测来源版本差异，执行对应的数据迁移。
+用途：统一处理数据库、配置文件、项目配置以及运行时数据文件迁移。
 
 此脚本可独立运行，无需启动 Flask 应用。
 
@@ -12,9 +11,10 @@
 
 迁移内容：
     1. 数据库：创建 users.db（若不存在）或升级 schema 到最新版本
-    2. 项目数据：为已有项目补充新版本所需字段（owner_id 等）
+    2. 项目数据：为已有项目补充新版本所需字段
     3. 配置文件：settings.json 补充新增配置项
-    4. 初始用户：创建默认管理员账号（admin/admin123）
+    4. 运行时数据文件：规范化 report_schedules.json 结构
+    5. 初始用户：创建默认管理员账号（admin/admin123）
 """
 
 import sqlite3
@@ -35,7 +35,7 @@ SETTINGS_PATH = PROJECT_ROOT / 'settings.json'
 PROJECTS_DIR = PROJECT_ROOT / 'projects'
 
 # 最新迁移版本
-LATEST_MIGRATION_VERSION = 8
+LATEST_MIGRATION_VERSION = 9
 
 # ============================================================================
 # 版本差异检测
@@ -398,6 +398,20 @@ def ensure_database(db_path):
                 cursor.execute('INSERT INTO migration_versions (version) VALUES (8)')
                 print('  完成')
 
+            # ==================== 迁移版本 9: 常用业务查询索引 ====================
+            if current_version < 9:
+                print('执行迁移 v9: 创建常用业务查询索引...')
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_messages_receiver_read_created '
+                    'ON messages(receiver_id, is_read, created_at DESC)'
+                )
+                cursor.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_archive_approvals_project_status_created '
+                    'ON archive_approvals(project_id, status, created_at DESC)'
+                )
+                cursor.execute('INSERT INTO migration_versions (version) VALUES (9)')
+                print('  完成')
+
             conn.commit()
             print()
             print(f'所有数据库迁移执行成功！当前版本: v{LATEST_MIGRATION_VERSION}')
@@ -551,6 +565,108 @@ def migrate_project_configs():
     print(f'项目迁移: {migrated}/{len(projects)} 个需要更新')
 
 
+def migrate_runtime_data_files():
+    """迁移运行时数据文件（当前主要是定时报告任务文件）。"""
+    schedules_file = PROJECT_ROOT / 'uploads' / 'tasks' / 'report_schedules.json'
+    if not schedules_file.exists():
+        print('运行时数据迁移: report_schedules.json 不存在，跳过')
+        return
+
+    try:
+        with open(schedules_file, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+    except Exception as e:
+        print(f'运行时数据迁移: 读取 report_schedules.json 失败 ({e})')
+        return
+
+    if not isinstance(raw, dict):
+        print('运行时数据迁移: report_schedules.json 非对象结构，跳过')
+        return
+
+    changed = False
+    migrated_tasks = 0
+
+    def normalize_task(task):
+        nonlocal changed
+        if not isinstance(task, dict):
+            return None
+
+        if 'task_id' not in task or not str(task.get('task_id', '')).strip():
+            task['task_id'] = uuid.uuid4().hex
+            changed = True
+        if 'task_name' not in task:
+            task['task_name'] = '定时报告任务'
+            changed = True
+
+        task_type = str(task.get('task_type', 'periodic')).strip().lower()
+        if task_type not in ('periodic', 'one_time'):
+            task_type = 'periodic'
+            changed = True
+        task['task_type'] = task_type
+
+        if task_type == 'one_time':
+            task.setdefault('run_date', '')
+        elif 'run_date' not in task:
+            task['run_date'] = ''
+
+        for key, default in (
+            ('enabled', False),
+            ('frequency', 'weekly'),
+            ('send_time', '09:00'),
+            ('weekday', 1),
+            ('day_of_month', 1),
+            ('include_pdf', True),
+            ('in_app_message_enabled', True),
+            ('login_popup_enabled', True),
+            ('last_run_key', ''),
+            ('run_count', 0),
+            ('last_run_at', ''),
+        ):
+            if key not in task:
+                task[key] = default
+                changed = True
+
+        for key in ('external_emails', 'recipient_user_ids'):
+            if not isinstance(task.get(key), list):
+                task[key] = []
+                changed = True
+
+        return task
+
+    normalized = {}
+    for project_id, value in raw.items():
+        if isinstance(value, list):
+            tasks = value
+        elif isinstance(value, dict):
+            tasks = [value]
+            changed = True
+        else:
+            tasks = []
+            changed = True
+
+        normalized_tasks = []
+        for task in tasks:
+            normalized_task = normalize_task(task)
+            if normalized_task:
+                normalized_tasks.append(normalized_task)
+                migrated_tasks += 1
+        normalized[str(project_id)] = normalized_tasks
+
+    if not changed:
+        print('运行时数据迁移: report_schedules.json 已是最新结构')
+        return
+
+    backup = schedules_file.with_suffix('.json.migrate_bak')
+    if not backup.exists():
+        shutil.copy2(schedules_file, backup)
+        print(f'运行时数据迁移: 已备份 {backup.name}')
+
+    with open(schedules_file, 'w', encoding='utf-8') as f:
+        json.dump(normalized, f, ensure_ascii=False, indent=2)
+
+    print(f'运行时数据迁移: 已规范化 report_schedules.json（任务数: {migrated_tasks}）')
+
+
 # ============================================================================
 # 目录创建
 # ============================================================================
@@ -591,12 +707,12 @@ def run_full_migration(db_path=None, check_only=False):
         db_path = DEFAULT_DB_PATH
 
     print('=' * 60)
-    print('  分支迁移工具 (main → feature/security-enhancements)')
+    print('  升级迁移工具')
     print('=' * 60)
     print()
 
     # Step 1: 检测来源版本
-    print('【Step 1/6】检测当前数据版本...')
+    print('【Step 1/7】检测当前数据版本...')
     info = detect_source_version()
     print(f'  来源: {info["source"]}')
     print(f'  数据库: {"存在" if info["has_users_db"] else "不存在"}')
@@ -617,6 +733,7 @@ def run_full_migration(db_path=None, check_only=False):
             print('  - 创建默认管理员用户')
             print('  - 更新 settings.json 配置')
             print('  - 为项目配置补充新字段')
+            print('  - 规范化运行时 report_schedules.json 数据结构')
         elif info['source'] == 'feature':
             if info['db_migration_version'] < LATEST_MIGRATION_VERSION:
                 print(f'结论: 已在 feature 分支，需要增量迁移 DB:'
@@ -626,30 +743,34 @@ def run_full_migration(db_path=None, check_only=False):
         return True
 
     # Step 2: 确保目录
-    print('【Step 2/6】确保目录结构...')
+    print('【Step 2/7】确保目录结构...')
     ensure_directories()
     print()
 
     # Step 3: 数据库迁移
-    print('【Step 3/6】数据库迁移...')
+    print('【Step 3/7】数据库迁移...')
     if not ensure_database(db_path):
         print('[ERROR] 数据库迁移失败，终止！')
         return False
     print()
 
     # Step 4: 管理员用户
-    print('【Step 4/6】检查管理员用户...')
+    print('【Step 4/7】检查管理员用户...')
     ensure_admin_user(db_path)
     print()
 
     # Step 5: settings.json
-    print('【Step 5/6】迁移配置文件...')
+    print('【Step 5/7】迁移配置文件...')
     migrate_settings()
     print()
 
     # Step 6: 项目数据
-    print('【Step 6/6】迁移项目数据...')
+    print('【Step 6/7】迁移项目数据...')
     migrate_project_configs()
+    print()
+
+    print('【Step 7/7】迁移运行时数据文件...')
+    migrate_runtime_data_files()
     print()
 
     print('=' * 60)

@@ -11,7 +11,7 @@ try:
     
     config = DocumentConfig()
     dm = ProjectDataManager(config)
-    project_name = "人力资源市场平台项目"
+    project_name = sys.argv[1] if len(sys.argv) > 1 else "示例项目"
     
     print(f"加载项目: {project_name}...")
     full_config = dm.load_full_config(project_name)
