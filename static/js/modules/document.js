@@ -885,7 +885,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                 <div class="action-buttons">
                                     ${!isArchived ? `
                                         ${pendingRequest ? `
-                                            <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ ${pendingRequest.request_type === 'not_involved' ? '不涉及审批中' : '待审核'} (申请人: ${pendingRequest.requester_username || ''})</div>
+                                            <div style="margin-bottom:4px;font-size:12px;color:#856404;">⏳ ${pendingRequest.request_type === 'not_involved' ? '不涉及审批中' : (pendingRequest.request_type === 'unarchive' ? '撤销归档审批中' : '待审核')} (申请人: ${pendingRequest.requester_username || ''})</div>
                                             ${(() => {
                                                 const stages = pendingRequest.approval_stages || [];
                                                 if (stages.length > 0) {
@@ -907,12 +907,16 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                             </button>
                                             ${(() => {
                                                 const userRole = authState.user?.role;
+                                                const adminApprovalEnabled = appState.systemSettings?.admin_archive_approval_enabled !== false;
                                                 if (!['admin','pmo','pmo_leader','project_admin'].includes(userRole)) return '';
+                                                if (userRole === 'admin' && !adminApprovalEnabled) return '';
                                                 const stages = pendingRequest.approval_stages || [];
                                                 const currentStageIdx = (pendingRequest.current_stage || 1) - 1;
                                                 const currentStage = stages[currentStageIdx];
-                                                // admin 可以审批任何阶段，其他角色只能审批自己角色的阶段
-                                                if (currentStage && userRole !== 'admin' && currentStage.required_role !== userRole) return '';
+                                                // admin 可跨阶段审批（仅在启用管理员审批时）；其他角色按阶段审批
+                                                if (currentStage && userRole !== 'admin' && currentStage.required_role !== userRole) {
+                                                    if (!(currentStage.required_role === 'pmo' && userRole === 'pmo_leader')) return '';
+                                                }
                                                 if (currentStage && currentStage.status === 'approved') return '';
                                                 if (currentStage && currentStage.required_role === 'pmo_leader') {
                                                     return `
@@ -3781,33 +3785,48 @@ export async function batchArchiveCycle(cycle) {
  */
 export async function unarchiveDocument(cycle, docName) {
     try {
-        // 移除归档标记
+        const requiresApproval = !!appState.projectConfig?.unarchive_requires_approval;
+
+        // 开启“撤销归档审批”时，走审批流程
+        if (requiresApproval) {
+            const result = await submitArchiveRequest(
+                appState.currentProjectId,
+                cycle,
+                [docName],
+                [],
+                'unarchive'
+            );
+            if (result.status === 'success') {
+                showNotification(result.message || '已提交撤销归档审批请求，等待审批', 'success');
+                await renderCycleDocuments(cycle);
+            } else {
+                showNotification(result.message || '提交撤销归档审批失败', 'error');
+            }
+            return;
+        }
+
+        // 未开启审批时：保持原有直接撤销归档行为
         if (appState.projectConfig.documents_archived && appState.projectConfig.documents_archived[cycle]) {
             delete appState.projectConfig.documents_archived[cycle][docName];
-            
-            // 如果该周期没有归档文档，删除周期键
+
             if (Object.keys(appState.projectConfig.documents_archived[cycle]).length === 0) {
                 delete appState.projectConfig.documents_archived[cycle];
             }
-            
-            // 如果没有任何归档文档，删除整个归档对象
+
             if (Object.keys(appState.projectConfig.documents_archived).length === 0) {
                 delete appState.projectConfig.documents_archived;
             }
         }
-        
-        // 保存到服务器
+
         const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(appState.projectConfig)
         });
-        
+
         if (response.ok) {
             showNotification('取消归档成功', 'success');
-            // 只刷新当前操作的周期，避免跳转到其他周期
             await renderCycleDocuments(cycle);
-            // 刷新周期导航栏状态
             import('./cycle.js').then(module => {
                 module.refreshCycleProgress();
             });

@@ -3,6 +3,8 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from pathlib import Path
 import json
 
@@ -19,7 +21,7 @@ def _load_settings():
     return {}
 
 
-def send_email(to_email, subject, content, html_content=None):
+def send_email(to_email, subject, content, html_content=None, attachments=None):
     """发送邮件通知
 
     Args:
@@ -27,6 +29,7 @@ def send_email(to_email, subject, content, html_content=None):
         subject: 邮件主题
         content: 纯文本内容
         html_content: HTML格式内容（可选）
+        attachments: 附件列表（可选），格式为 [{'path': '/a/b.pdf', 'name': 'report.pdf'}]
 
     Returns:
         dict: {'status': 'success'/'error', 'message': str}
@@ -50,12 +53,36 @@ def send_email(to_email, subject, content, html_content=None):
         return {'status': 'error', 'message': '收件人邮箱为空'}
 
     try:
-        if html_content:
+        has_attachments = bool(attachments)
+        if has_attachments:
+            msg = MIMEMultipart('mixed')
+            alt = MIMEMultipart('alternative')
+            alt.attach(MIMEText(content, 'plain', 'utf-8'))
+            if html_content:
+                alt.attach(MIMEText(html_content, 'html', 'utf-8'))
+            msg.attach(alt)
+        elif html_content:
             msg = MIMEMultipart('alternative')
             msg.attach(MIMEText(content, 'plain', 'utf-8'))
             msg.attach(MIMEText(html_content, 'html', 'utf-8'))
         else:
             msg = MIMEText(content, 'plain', 'utf-8')
+
+        if has_attachments:
+            for item in attachments:
+                try:
+                    file_path = Path(item.get('path', ''))
+                    if not file_path.exists() or not file_path.is_file():
+                        continue
+                    filename = item.get('name') or file_path.name
+                    part = MIMEBase('application', 'octet-stream')
+                    with open(file_path, 'rb') as f:
+                        part.set_payload(f.read())
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    msg.attach(part)
+                except Exception as attach_error:
+                    print(f'[notification] 附件加载失败: {attach_error}')
 
         msg['Subject'] = subject
         msg['From'] = f'{smtp_sender} <{smtp_username}>'

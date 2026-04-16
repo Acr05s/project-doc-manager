@@ -9,10 +9,29 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.models.user import user_manager
 from app.models.message import message_manager
-from app.routes.settings import now_with_timezone
+from app.routes.settings import now_with_timezone, load_settings
 from .utils import get_doc_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _is_admin_archive_approval_enabled():
+    try:
+        settings = load_settings()
+        return bool(settings.get('admin_archive_approval_enabled', True))
+    except Exception:
+        return True
+
+
+def _can_user_handle_archive_approval(user):
+    if not user:
+        return False
+    role = getattr(user, 'role', '')
+    if role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
+        return False
+    if role == 'admin' and not _is_admin_archive_approval_enabled():
+        return False
+    return True
 
 
 # ===== 多级审批 Helper 函数 =====
@@ -64,11 +83,15 @@ def get_next_stage_approvers(project_id, current_stage, approval_chain, project_
     roles_to_query = [required_role]
     if required_role == 'pmo':
         roles_to_query = ['pmo', 'pmo_leader']
+    if required_role == 'admin' and not _is_admin_archive_approval_enabled():
+        return []
     approvers = user_manager.get_users_by_roles(roles_to_query)
     result = []
 
     for approver in approvers:
         if approver.get('status') != 'active':
+            continue
+        if approver.get('role') == 'admin' and not _is_admin_archive_approval_enabled():
             continue
 
         # 如果配置了组织匹配，检查组织
@@ -184,15 +207,27 @@ def complete_archive_if_all_stages_done(approval_id, project_id, approval_record
             if isinstance(doc_name, str) and doc_name:
                 project_config['documents_not_involved'][cycle][doc_name] = True
 
-    # 无论是归档还是不涉及，都标记为已归档
-    if 'documents_archived' not in project_config:
-        project_config['documents_archived'] = {}
-    if cycle not in project_config['documents_archived']:
-        project_config['documents_archived'][cycle] = {}
+    if request_type == 'unarchive':
+        # 撤销归档：移除已归档标记
+        archived = project_config.get('documents_archived', {})
+        if cycle in archived and isinstance(archived.get(cycle), dict):
+            for doc_name in doc_names:
+                if isinstance(doc_name, str) and doc_name:
+                    archived[cycle].pop(doc_name, None)
+            if not archived[cycle]:
+                archived.pop(cycle, None)
+        if not archived:
+            project_config.pop('documents_archived', None)
+    else:
+        # 归档/不涉及：标记为已归档
+        if 'documents_archived' not in project_config:
+            project_config['documents_archived'] = {}
+        if cycle not in project_config['documents_archived']:
+            project_config['documents_archived'][cycle] = {}
 
-    for doc_name in doc_names:
-        if isinstance(doc_name, str) and doc_name:
-            project_config['documents_archived'][cycle][doc_name] = True
+        for doc_name in doc_names:
+            if isinstance(doc_name, str) and doc_name:
+                project_config['documents_archived'][cycle][doc_name] = True
 
     save_result = doc_manager.save_project(project_config)
     return save_result.get('status') == 'success'
@@ -239,7 +274,10 @@ def get_archive_approvers(project_id):
                 return jsonify({'status': 'success', 'approvers': stage_approvers, 'current_stage': current_stage})
 
         # 无 approval_id 或无审批链：返回所有符合条件的审批人（兼容旧逻辑）
-        approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'pmo_leader', 'project_admin'])
+        role_pool = ['admin', 'pmo', 'pmo_leader', 'project_admin']
+        if not _is_admin_archive_approval_enabled():
+            role_pool = [r for r in role_pool if r != 'admin']
+        approvers = user_manager.get_users_by_roles(role_pool)
         print(f'[DEBUG] Found {len(approvers) if approvers else 0} approvers with roles (fallback)', file=sys.stderr, flush=True)
 
         party_b = (project_config.get('party_b', '') or '').strip()
@@ -277,7 +315,7 @@ def submit_archive_request(project_id):
         cycle = (data.get('cycle') or '').strip()
         doc_names = data.get('doc_names', [])
         doc_name = data.get('doc_name')
-        request_type = data.get('request_type', 'archive')  # 'archive' 或 'not_involved'
+        request_type = data.get('request_type', 'archive')  # 'archive' / 'not_involved' / 'unarchive'
 
         print(f'[DEBUG] submit_archive_request - project_id: {project_id}, cycle: {cycle}, doc_names: {doc_names}, type: {request_type}', file=sys.stderr, flush=True)
 
@@ -305,6 +343,18 @@ def submit_archive_request(project_id):
         project_config = project_result.get('project', {})
         project_name = project_config.get('name', project_id)
         approval_chain = project_config.get('archive_approval_chain', [])
+
+        if request_type not in ('archive', 'not_involved', 'unarchive'):
+            return jsonify({'status': 'error', 'message': '不支持的审批类型'}), 400
+
+        if request_type == 'unarchive':
+            if not bool(project_config.get('unarchive_requires_approval', False)):
+                return jsonify({'status': 'error', 'message': '当前项目未开启撤销归档审批开关'}), 400
+            archived_map = project_config.get('documents_archived', {})
+            cycle_archived = archived_map.get(cycle, {}) if isinstance(archived_map, dict) else {}
+            missing_docs = [d for d in doc_names if not cycle_archived.get(d)]
+            if missing_docs:
+                return jsonify({'status': 'error', 'message': f'文档未归档，无法撤销：{missing_docs[0]}'}), 400
 
         # PMO普通成员发起时，增加 PMO负责人 前置审核阶段
         requester_role = getattr(current_user, 'role', '')
@@ -378,7 +428,7 @@ def submit_archive_request(project_id):
         doc_list_str = '、'.join(doc_names[:5])
         if len(doc_names) > 5:
             doc_list_str += f'等{len(doc_names)}个文档'
-        type_label = '不涉及' if request_type == 'not_involved' else '归档'
+        type_label = {'archive': '归档', 'not_involved': '不涉及', 'unarchive': '撤销归档'}.get(request_type, '归档')
         append_stage_history(approval_id, 'submit', requester_id, requester_username, detail=f'提交{type_label}申请：{doc_list_str}')
 
         # 向第一阶段的所有审批人发送通知
@@ -401,9 +451,14 @@ def submit_archive_request(project_id):
                     related_type='archive_approval'
                 )
 
+        op_type_map = {
+            'archive': 'archive_request',
+            'not_involved': 'not_involved_request',
+            'unarchive': 'unarchive_request'
+        }
         user_manager.add_operation_log(
             requester_id, requester_username,
-            'archive_request' if request_type == 'archive' else 'not_involved_request',
+            op_type_map.get(request_type, 'archive_request'),
             project_id, cycle,
             json.dumps(doc_names, ensure_ascii=False),
             request.remote_addr
@@ -491,6 +546,9 @@ def get_pending_archive_approvals():
         user_id = int(current_user.id)
         user_role = current_user.role
 
+        if user_role == 'admin' and not _is_admin_archive_approval_enabled():
+            return jsonify({'status': 'success', 'approvals': []})
+
         # 获取当前用户待审批的记录（status='pending' 且 current_stage 对应用户角色）
         pending_approvals = user_manager.get_pending_archive_approvals_for_user(user_id, user_role)
 
@@ -571,7 +629,7 @@ def approve_archive_request(project_id):
         # 验证审批人权限
         if not approver:
             return jsonify({'status': 'error', 'message': '审批人不存在'}), 404
-        if approver.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
+        if not _can_user_handle_archive_approval(approver):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
 
         # 验证审批安全码（仅在系统要求时）
@@ -676,7 +734,7 @@ def approve_archive_request(project_id):
         # 检查是否所有阶段都已完成
         all_completed = all(stage['status'] == 'approved' for stage in approval_stages)
         req_type = approval.get('request_type', 'archive')
-        type_label = '不涉及' if req_type == 'not_involved' else '归档'
+        type_label = {'archive': '归档', 'not_involved': '不涉及', 'unarchive': '撤销归档'}.get(req_type, '归档')
 
         if all_completed:
             # 执行最终归档/不涉及
@@ -724,9 +782,14 @@ def approve_archive_request(project_id):
                     )
                     conn.commit()
 
+                approve_op_type = {
+                    'archive': 'archive_approve',
+                    'not_involved': 'not_involved_approve',
+                    'unarchive': 'unarchive_approve'
+                }.get(req_type, 'archive_approve')
                 user_manager.add_operation_log(
                     actual_approver_id, approver.username,
-                    'archive_approve' if req_type == 'archive' else 'not_involved_approve', project_id, cycle,
+                    approve_op_type, project_id, cycle,
                     json.dumps(doc_names, ensure_ascii=False),
                     request.remote_addr
                 )
@@ -858,7 +921,7 @@ def reject_archive_request(project_id):
 
         if not approver:
             return jsonify({'status': 'error', 'message': '审批人不存在'}), 404
-        if approver.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
+        if not _can_user_handle_archive_approval(approver):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
 
         # 验证审批安全码（仅在系统要求时）
@@ -918,7 +981,7 @@ def reject_archive_request(project_id):
         user_manager.resolve_archive_approval(approval['id'], 'rejected', actual_approver_id, approver.username, reject_reason)
 
         req_type = approval.get('request_type', 'archive')
-        type_label = '不涉及' if req_type == 'not_involved' else '归档'
+        type_label = {'archive': '归档', 'not_involved': '不涉及', 'unarchive': '撤销归档'}.get(req_type, '归档')
 
         # 记录流程历史：驳回
         reason_text_log = f'：{reject_reason}' if reject_reason else ''
@@ -982,7 +1045,7 @@ def archive_project_document(project_id):
             return jsonify({'status': 'error', 'message': '归档参数不完整'}), 400
         if not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
-        if current_user.role not in ('admin', 'pmo', 'pmo_leader', 'project_admin'):
+        if not _can_user_handle_archive_approval(current_user):
             return jsonify({'status': 'error', 'message': '权限不足'}), 403
 
         user = user_manager.get_user_by_id(int(current_user.id))

@@ -71,6 +71,10 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     # 初始化任务服务
     from app.services.task_service import task_service
     task_service.set_doc_manager(doc_manager)
+
+    # 初始化定时报告服务
+    from app.services.scheduled_report_service import scheduled_report_service
+    scheduled_report_service.set_doc_manager(doc_manager)
     
     # 初始化认证模块
     from app.auth import init_auth

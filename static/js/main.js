@@ -26,6 +26,9 @@ import {
 import {
     openTransferProjectModal, closeTransferProjectModal, submitProjectTransfer
 } from './modules/project.js';
+import {
+    closeScheduledReportModal, runScheduledReportNow
+} from './modules/scheduled-reports.js';
 
 // 将返回看板函数挂载到全局
 if (typeof window !== 'undefined') {
@@ -81,6 +84,9 @@ if (typeof window !== 'undefined') {
     window.openTransferProjectModal = openTransferProjectModal;
     window.closeTransferProjectModal = closeTransferProjectModal;
     window.submitProjectTransfer = submitProjectTransfer;
+    // scheduled reports
+    window.closeScheduledReportModal = closeScheduledReportModal;
+    window.runScheduledReportNow = runScheduledReportNow;
     // pending approval
     window.sendApproverMessage = sendApproverMessage;
 }

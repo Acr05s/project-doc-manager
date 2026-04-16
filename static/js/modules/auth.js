@@ -300,6 +300,9 @@ export async function updateRoleBasedUI() {
                     case 'approvalHistoryBtn':
                         import('./document.js').then(m => m.showGlobalApprovalHistory());
                         break;
+                    case 'scheduledReportTaskMenuItem':
+                        import('./scheduled-reports.js').then(m => m.openScheduledReportModal());
+                        break;
                     case 'userApprovalHistoryMenuItem':
                         import('./admin.js').then(m => m.openUserApprovalHistoryModal());
                         break;
@@ -385,6 +388,7 @@ async function openPermissionConfigModal() {
             'userApprovalHistoryMenuItem',
             'archiveApprovalBtn',
             'approvalHistoryBtn',
+            'scheduledReportTaskMenuItem',
             'logManagementMenuItem',
             'systemSettingsMenuItem'
         ]

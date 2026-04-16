@@ -735,6 +735,7 @@
                 <a href="#" class="sidebar-menu-item" id="userApprovalHistoryMenuItem"><span>👥 用户审批历史</span></a>
                 <a href="#" class="sidebar-menu-item" id="archiveApprovalBtn"><span>📋 文档归档审批</span><span class="menu-badge" id="archiveApprovalBadge" style="display:none;"></span></a>
                 <a href="#" class="sidebar-menu-item" id="approvalHistoryBtn"><span>📊 审批历史</span></a>
+                <a href="#" class="sidebar-menu-item" id="scheduledReportTaskMenuItem"><span>🗓️ 定时报告任务</span></a>
                 <a href="#" class="sidebar-menu-item" id="logManagementMenuItem"><span>📝 操作日志</span></a>
 
                 <div class="sidebar-menu-section">系统配置</div>
@@ -1365,15 +1366,93 @@
                     </div>
                 </div>
 
+                <div class="form-group" style="margin-top: 12px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="unarchiveRequiresApproval">
+                        <label for="unarchiveRequiresApproval" style="display:inline; margin:0;">撤销归档需走审批流程</label>
+                    </div>
+                    <div style="font-size:13px; color:#666; margin-top:6px;">开启后，撤销归档将提交审批，由项目审批链处理。</div>
+                </div>
+
                 <div style="margin-top: 20px; padding: 12px; background:#f0f8ff; border-radius:4px; font-size:13px; color:#333;">
                     <strong>说明：</strong><br>
                     • <strong>两级审批（推荐）：</strong>通过项目经理初审后送项目管理组织最终审批，确保文档质量<br>
-                    • <strong>项目管理组织直接审批：</strong>适用于特殊项目，文档直接由项目管理组织审批
+                    • <strong>项目管理组织直接审批：</strong>适用于特殊项目，文档直接由项目管理组织审批<br>
+                    • <strong>撤销归档审批：</strong>开启后，文档撤销归档也必须经审批后生效
                 </div>
 
                 <div style="margin-top: 20px; text-align:right;">
                     <button type="button" class="btn btn-secondary" onclick="closeArchiveApprovalConfigModal()">取消</button>
                     <button type="submit" class="btn btn-success" style="margin-left:10px;">保存配置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 定时报告任务弹窗 -->
+    <div id="scheduledReportModal" class="modal">
+        <div class="modal-content" style="max-width:560px;">
+            <span class="close" onclick="closeScheduledReportModal()">&times;</span>
+            <h2>定时报告任务</h2>
+            <input type="hidden" id="scheduledReportProjectId">
+            <form id="scheduledReportForm">
+                <div class="form-group">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="scheduledReportEnabled">
+                        <label for="scheduledReportEnabled" style="display:inline;margin:0;">启用定时发送</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>报告频率</label>
+                    <div style="display:flex; gap:16px; margin-top:8px;">
+                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="weekly" checked> 每周</label>
+                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="monthly"> 每月</label>
+                    </div>
+                </div>
+
+                <div class="form-group" style="display:flex; gap:10px;">
+                    <div style="flex:1;">
+                        <label>发送时间</label>
+                        <input type="time" id="scheduledSendTime" value="09:00">
+                    </div>
+                    <div style="flex:1;" id="scheduledWeekdayWrap">
+                        <label>周几发送</label>
+                        <select id="scheduledWeekday">
+                            <option value="1">周一</option>
+                            <option value="2">周二</option>
+                            <option value="3">周三</option>
+                            <option value="4">周四</option>
+                            <option value="5">周五</option>
+                            <option value="6">周六</option>
+                            <option value="7">周日</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; display:none;" id="scheduledMonthdayWrap">
+                        <label>每月日期</label>
+                        <input type="number" min="1" max="28" id="scheduledDayOfMonth" value="1">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="scheduledIncludePdf" checked>
+                        <label for="scheduledIncludePdf" style="display:inline;margin:0;">附带PDF报告</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>外部抄送邮箱（逗号分隔，可选）</label>
+                    <textarea id="scheduledExternalEmails" rows="2" placeholder="example1@domain.com, example2@domain.com"></textarea>
+                    <div style="font-size:12px;color:#666;margin-top:6px;">系统默认发送给 PMO成员 与 项目经理，本处可追加外部邮箱。</div>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;gap:10px;">
+                    <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即发送一次</button>
+                    <div>
+                        <button type="button" class="btn btn-secondary" onclick="closeScheduledReportModal()">取消</button>
+                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存配置</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -1509,6 +1588,13 @@
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <small style="color: #666; font-size: 12px; display: block;">审批安全码默认关闭（按需开启），日常流程无需修改该项。</small>
+                    </div>
+                    <div class="form-group" style="margin-top: 12px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="adminArchiveApprovalEnabled" style="width: 18px; height: 18px;">
+                            <span>允许管理员参与归档审批</span>
+                        </label>
+                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">关闭后，管理员不显示归档审批菜单，也不可执行归档审批动作。</small>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">

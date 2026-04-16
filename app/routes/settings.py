@@ -44,7 +44,8 @@ def load_settings():
         'smtp_sender': '',
         'smtp_encryption': 'ssl',
         'log_retention_days': 30,
-        'timezone': 'Asia/Shanghai'
+        'timezone': 'Asia/Shanghai',
+        'admin_archive_approval_enabled': True
     }
     
     # 优先从plugin.json读取
@@ -214,7 +215,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)
@@ -342,6 +343,7 @@ DEFAULT_MENU_PERMISSIONS = {
     'userApprovalHistoryMenuItem': {'label': '👥 用户审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'archiveApprovalBtn': {'label': '📋 文档归档审批', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'scheduledReportTaskMenuItem': {'label': '🗓️ 定时报告任务', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'sidebar'},
     'logManagementMenuItem': {'label': '📝 操作日志', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], 'group': 'sidebar'},
     'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'orgManagementMenuItem': {'label': '🏢 承建单位管理', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'sidebar'},
@@ -368,6 +370,27 @@ def load_permissions():
         roles = cfg.get('roles', [])
         if 'pmo' in roles and 'pmo_leader' not in roles:
             cfg['roles'] = roles + ['pmo_leader']
+
+    # 若关闭管理员归档审批权限，则从审批相关菜单中移除 admin
+    try:
+        settings = load_settings()
+        admin_archive_approval_enabled = bool(settings.get('admin_archive_approval_enabled', True))
+        if not admin_archive_approval_enabled:
+            approval_menu_keys = {
+                'archiveAndApprovalMenu',
+                'openArchiveConfigBtn',
+                'viewArchiveRequestsBtn',
+                'viewApprovalHistoryBtn',
+                'archiveApprovalBtn',
+                'approvalHistoryBtn'
+            }
+            for key in approval_menu_keys:
+                if key in permissions:
+                    roles = permissions[key].get('roles', [])
+                    permissions[key]['roles'] = [r for r in roles if r != 'admin']
+    except Exception:
+        pass
+
     return permissions
 
 

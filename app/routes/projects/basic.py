@@ -201,7 +201,14 @@ def update_project_config(project_id):
 
         # 更新配置字段
         if 'archive_approval_mode' in data:
+            if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
+                return jsonify({'status': 'error', 'message': '仅PMO及以上可配置审批模式'}), 403
             project_config['archive_approval_mode'] = data['archive_approval_mode']
+
+        if 'unarchive_requires_approval' in data:
+            if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
+                return jsonify({'status': 'error', 'message': '仅PMO及以上可配置撤销归档审批开关'}), 403
+            project_config['unarchive_requires_approval'] = bool(data['unarchive_requires_approval'])
 
         # 保存项目配置
         save_result = doc_manager.save_project(project_config)
@@ -213,14 +220,15 @@ def update_project_config(project_id):
         user_manager.add_operation_log(
             int(current_user.id), current_user.username,
             'update_project_config', project_id, '',
-            f'archive_approval_mode={data.get("archive_approval_mode")}',
+            f'archive_approval_mode={data.get("archive_approval_mode")}, unarchive_requires_approval={data.get("unarchive_requires_approval")}',
             request.remote_addr
         )
 
         return jsonify({
             'status': 'success',
             'config': {
-                'archive_approval_mode': project_config.get('archive_approval_mode', 'two_level')
+                'archive_approval_mode': project_config.get('archive_approval_mode', 'two_level'),
+                'unarchive_requires_approval': bool(project_config.get('unarchive_requires_approval', False))
             }
         })
     except Exception as e:

@@ -279,6 +279,16 @@ export function setupEventListeners() {
         });
     }
 
+    // 定时报告表单提交
+    const scheduledReportForm = document.getElementById('scheduledReportForm');
+    if (scheduledReportForm) {
+        scheduledReportForm.addEventListener('submit', (e) => {
+            import('./scheduled-reports.js').then(({ saveScheduledReportConfig }) => {
+                saveScheduledReportConfig(e);
+            });
+        });
+    }
+
     // 归档审批确认按钮
     const archiveApprovalConfirmBtn = document.getElementById('archiveApprovalConfirmBtn');
     if (archiveApprovalConfirmBtn) {
@@ -1064,7 +1074,7 @@ export function setupEventListeners() {
 
     // 点击模态框外部关闭（需要确认，防止误关闭）
     // 安全码验证等关键弹窗不允许点击背景关闭
-    const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'packageProgressModal'];
+    const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'scheduledReportModal', 'packageProgressModal'];
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
@@ -1353,6 +1363,11 @@ async function loadSystemSettings() {
                 forceAgreementOnLogin.checked = !!settings.force_agreement_on_login;
             }
 
+            const adminArchiveApprovalEnabled = document.getElementById('adminArchiveApprovalEnabled');
+            if (adminArchiveApprovalEnabled) {
+                adminArchiveApprovalEnabled.checked = settings.admin_archive_approval_enabled !== false;
+            }
+
             const watermarkEnabled = document.getElementById('watermarkEnabled');
             if (watermarkEnabled) {
                 watermarkEnabled.checked = !!settings.watermark_enabled;
@@ -1451,6 +1466,11 @@ async function saveSystemSettings() {
         const forceAgreementOnLogin = document.getElementById('forceAgreementOnLogin');
         if (forceAgreementOnLogin) {
             settings.force_agreement_on_login = forceAgreementOnLogin.checked;
+        }
+
+        const adminArchiveApprovalEnabled = document.getElementById('adminArchiveApprovalEnabled');
+        if (adminArchiveApprovalEnabled) {
+            settings.admin_archive_approval_enabled = adminArchiveApprovalEnabled.checked;
         }
 
         const watermarkEnabled = document.getElementById('watermarkEnabled');

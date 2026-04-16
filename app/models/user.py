@@ -1517,7 +1517,11 @@ class UserManager:
                     required_role = stage.get('required_role')
 
                     # 只返回当前用户应该批准的请求（基于角色匹配）
-                    if required_role == user_role:
+                    role_matched = (required_role == user_role)
+                    if required_role == 'pmo' and user_role in ('pmo', 'pmo_leader'):
+                        role_matched = True
+
+                    if role_matched:
                         item['doc_names'] = json.loads(item['doc_names']) if item.get('doc_names') else []
                         item['target_approver_ids'] = json.loads(item['target_approver_ids']) if item.get('target_approver_ids') else []
                         item['approval_stages'] = approval_stages

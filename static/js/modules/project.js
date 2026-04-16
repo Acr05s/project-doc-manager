@@ -410,6 +410,11 @@ export async function openArchiveApprovalConfigModal(projectId) {
             radio.checked = (radio.value === approvalMode);
         });
 
+        const unarchiveCheckbox = document.getElementById('unarchiveRequiresApproval');
+        if (unarchiveCheckbox) {
+            unarchiveCheckbox.checked = !!project.unarchive_requires_approval;
+        }
+
         const modal = document.getElementById('archiveApprovalConfigModal');
         if (modal) {
             modal.classList.add('show');
@@ -440,6 +445,7 @@ export async function handleArchiveApprovalConfigSave(e) {
 
     const projectId = document.getElementById('archiveConfigProjectId').value;
     const approvalMode = document.querySelector('input[name="archiveApprovalMode"]:checked').value;
+    const unarchiveRequiresApproval = !!document.getElementById('unarchiveRequiresApproval')?.checked;
 
     if (!projectId || !approvalMode) {
         showNotification('参数错误', 'error');
@@ -452,7 +458,8 @@ export async function handleArchiveApprovalConfigSave(e) {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                archive_approval_mode: approvalMode
+                archive_approval_mode: approvalMode,
+                unarchive_requires_approval: unarchiveRequiresApproval
             })
         });
 
@@ -464,6 +471,7 @@ export async function handleArchiveApprovalConfigSave(e) {
             // 如果当前打开的就是该项目，更新apState
             if (appState.currentProjectId === projectId && appState.projectConfig) {
                 appState.projectConfig.archive_approval_mode = approvalMode;
+                appState.projectConfig.unarchive_requires_approval = unarchiveRequiresApproval;
             }
         } else {
             showNotification('保存失败: ' + result.message, 'error');
