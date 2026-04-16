@@ -261,8 +261,7 @@ class ScheduledReportService:
             return {'status': 'error', 'message': '未配置可用收件人（邮箱或站内信）'}
 
         subject = f"【项目定时报告】{project_name} - {'周报' if frequency == 'weekly' else '月报'}"
-        text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics)
-    text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics, party_b=party_b)
+        text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics, party_b=party_b)
 
         attachments = []
         if cfg.get('include_pdf', True):
@@ -414,13 +413,11 @@ class ScheduledReportService:
                     count = len([x for x in doc_names if str(x).strip()])
                     archived += count
                     cycle = row['cycle'] or '未分组'
-                    by_cycle.setdefault(cycle, {'uploads': 0, 'archived': 0})
                     by_cycle.setdefault(cycle, {'uploads': 0, 'updated': 0, 'archived': 0})
                     by_cycle[cycle]['archived'] += count
         except Exception as e:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
 
-        archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
         archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
         # 按上传时间倒序排列文档明细
         doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
@@ -491,17 +488,13 @@ class ScheduledReportService:
                     'id': getattr(manager_user, 'id', None),
                     'username': getattr(manager_user, 'username', ''),
                     'display_name': getattr(manager_user, 'display_name', '') or getattr(manager_user, 'username', ''),
-                archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
-                # 按上传时间倒序排列文档明细
-                doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
-                return {
-                    'uploads': uploads,
-                    'updated_docs': updated_docs,
-                    'archived': archived,
-                    'archive_rate': archive_rate,
-                    'by_cycle': by_cycle,
-                    'doc_details': doc_details,
-                }
+                    'organization': getattr(manager_user, 'organization', '') or '',
+                    'role': getattr(manager_user, 'role', '') or '',
+                    'email': getattr(manager_user, 'email', '') or '',
+                    'status': 'active',
+                }, '项目经理', True)
+
+        options.sort(key=lambda x: (
             0 if x.get('recommended') else 1,
             str(x.get('role') or ''),
             str(x.get('display_name') or x.get('username') or '')

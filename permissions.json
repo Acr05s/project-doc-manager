@@ -95,23 +95,13 @@
     "group": "top"
   },
   "acceptanceMenu": {
-    "label": "✅ 验收项目文件",
+    "label": "✅ 验收项目文件 📊 生成报告 ✅ 确认验收 📦 打包下载",
     "roles": [
       "admin",
       "pmo",
       "project_admin"
     ],
     "group": "top"
-  },
-  "generateReportMenuItem": {
-    "label": "📊 生成报告",
-    "roles": [
-      "admin",
-      "pmo",
-      "project_admin"
-    ],
-    "group": "top",
-    "parent": "acceptanceMenu"
   },
   "confirmAcceptanceBtn": {
     "label": "✅ 确认验收",
