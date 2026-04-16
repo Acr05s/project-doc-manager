@@ -2,7 +2,19 @@ import { appState } from './app-state.js';
 import { showLoading, showNotification } from './ui.js';
 
 let _modalProjects = [];
-let _projectScheduleCache = {};
+let _recipientOptions = [];
+let _taskList = [];
+let _currentProjectId = '';
+let _editingTaskId = '';
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function getFrequencyValue() {
     const selected = document.querySelector('input[name="scheduledFrequency"]:checked');
@@ -21,51 +33,43 @@ function toggleFrequencyFields() {
     }
 }
 
+function updateSelectedProjectCount() {
+    const countEl = document.getElementById('scheduledSelectedProjectCount');
+    if (!countEl) return;
+    const checked = document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]:checked');
+    countEl.textContent = String(checked.length);
+}
+
 function getSelectedProjectIds() {
-    const list = document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]:checked');
-    return Array.from(list).map(item => item.dataset.projectId).filter(Boolean);
+    const checked = document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]:checked');
+    return Array.from(checked).map(x => x.dataset.projectId).filter(Boolean);
 }
 
 function getConfigProjectId() {
-    const configSelect = document.getElementById('scheduledConfigProjectId');
-    const selectedProjectIds = getSelectedProjectIds();
-    if (configSelect && selectedProjectIds.includes(configSelect.value)) {
-        return configSelect.value;
+    const select = document.getElementById('scheduledConfigProjectId');
+    const selectedIds = getSelectedProjectIds();
+    if (select && selectedIds.includes(select.value)) {
+        return select.value;
     }
-    return selectedProjectIds[0] || '';
-}
-
-function escapeHtml(value) {
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function updateSelectedProjectCount() {
-    const el = document.getElementById('scheduledSelectedProjectCount');
-    if (el) {
-        el.textContent = String(getSelectedProjectIds().length);
-    }
+    return selectedIds[0] || '';
 }
 
 function syncConfigProjectSelect() {
     const select = document.getElementById('scheduledConfigProjectId');
     if (!select) return;
-    const selectedProjectIds = getSelectedProjectIds();
+
+    const selectedIds = getSelectedProjectIds();
     const previous = select.value;
-    const selectedSet = new Set(selectedProjectIds);
+    const selectedSet = new Set(selectedIds);
     select.innerHTML = '';
 
-    if (selectedProjectIds.length === 0) {
+    if (selectedIds.length === 0) {
         select.innerHTML = '<option value="">-- 请先从上方选择项目 --</option>';
-        renderRecipientUserList([], []);
+        _currentProjectId = '';
         return;
     }
 
-    selectedProjectIds.forEach((projectId) => {
+    selectedIds.forEach((projectId) => {
         const project = _modalProjects.find(item => String(item.id) === String(projectId));
         const opt = document.createElement('option');
         opt.value = projectId;
@@ -73,8 +77,62 @@ function syncConfigProjectSelect() {
         select.appendChild(opt);
     });
 
-    const nextValue = selectedSet.has(previous) ? previous : selectedProjectIds[0];
+    const nextValue = selectedSet.has(previous) ? previous : selectedIds[0];
     select.value = nextValue;
+    _currentProjectId = nextValue;
+}
+
+function renderProjectList(projects, preferredProjectId) {
+    const container = document.getElementById('scheduledProjectList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!Array.isArray(projects) || projects.length === 0) {
+        container.innerHTML = '<div style="grid-column:1 / -1; color:#777; font-size:13px;">暂无可配置项目</div>';
+        updateSelectedProjectCount();
+        return;
+    }
+
+    const fallbackProjectId = preferredProjectId || appState.currentProjectId;
+
+    projects.forEach((project, index) => {
+        const projectId = String(project.id || '').trim();
+        if (!projectId) return;
+        const projectName = String(project.name || projectId);
+        const escapedProjectId = escapeHtml(projectId);
+        const escapedProjectName = escapeHtml(projectName);
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex; align-items:flex-start; gap:8px; border:1px solid #e4ebf5; border-radius:8px; background:#fff; padding:8px; cursor:pointer;';
+        row.innerHTML = `
+            <input type="checkbox" data-project-id="${escapedProjectId}" style="margin-top:2px;">
+            <span style="display:flex; flex-direction:column; gap:2px; min-width:0;">
+                <strong style="font-size:13px; color:#224; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapedProjectName}</strong>
+                <span style="font-size:11px; color:#789;">ID: ${escapedProjectId}</span>
+            </span>
+        `;
+
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+            checkbox.checked = projectId === fallbackProjectId || (!fallbackProjectId && index === 0);
+            checkbox.addEventListener('change', async () => {
+                updateSelectedProjectCount();
+                syncConfigProjectSelect();
+                const configProjectId = getConfigProjectId();
+                if (configProjectId) {
+                    await loadTasksForProject(configProjectId, '');
+                } else {
+                    clearEditorToNewTask();
+                    renderTaskList([]);
+                    renderRecipientUserList([], []);
+                }
+            });
+        }
+
+        container.appendChild(row);
+    });
+
+    updateSelectedProjectCount();
+    syncConfigProjectSelect();
 }
 
 function renderRecipientUserList(recipientOptions, selectedIds) {
@@ -91,6 +149,7 @@ function renderRecipientUserList(recipientOptions, selectedIds) {
     recipientOptions.forEach((user) => {
         const uid = Number(user.id || 0);
         if (!uid) return;
+
         const row = document.createElement('label');
         row.style.cssText = 'display:flex; align-items:flex-start; gap:8px; border:1px solid #e3edf9; border-radius:6px; padding:7px; background:#fff;';
         const role = escapeHtml(user.role || '-');
@@ -119,66 +178,153 @@ function collectSelectedRecipientUserIds() {
         .filter(item => item > 0);
 }
 
-function renderProjectList(projects, preferredProjectId) {
-    const container = document.getElementById('scheduledProjectList');
-    if (!container) {
-        return;
-    }
-    container.innerHTML = '';
-
-    if (!Array.isArray(projects) || projects.length === 0) {
-        container.innerHTML = '<div style="grid-column:1 / -1; color:#777; font-size:13px;">暂无可配置项目</div>';
-        updateSelectedProjectCount();
-        return;
-    }
-
-    const fallbackProjectId = preferredProjectId || appState.currentProjectId;
-    projects.forEach((project, index) => {
-        const projectId = String(project.id || '').trim();
-        if (!projectId) return;
-        const projectName = String(project.name || projectId);
-        const escapedProjectId = escapeHtml(projectId);
-        const escapedProjectName = escapeHtml(projectName);
-        const row = document.createElement('label');
-        row.style.cssText = 'display:flex; align-items:flex-start; gap:8px; border:1px solid #e4ebf5; border-radius:8px; background:#fff; padding:8px; cursor:pointer;';
-        row.innerHTML = `
-            <input type="checkbox" data-project-id="${escapedProjectId}" style="margin-top:2px;">
-            <span style="display:flex; flex-direction:column; gap:2px; min-width:0;">
-                <strong style="font-size:13px; color:#224; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapedProjectName}</strong>
-                <span style="font-size:11px; color:#789;">ID: ${escapedProjectId}</span>
-            </span>
-        `;
-        const checkbox = row.querySelector('input[type="checkbox"]');
-        if (checkbox) {
-            const shouldCheck = projectId === fallbackProjectId || (!fallbackProjectId && index === 0);
-            checkbox.checked = !!shouldCheck;
-            checkbox.addEventListener('change', async () => {
-                updateSelectedProjectCount();
-                syncConfigProjectSelect();
-                const configProjectId = getConfigProjectId();
-                if (configProjectId) {
-                    await loadScheduleForProject(configProjectId);
-                }
-            });
-        }
-        container.appendChild(row);
-    });
-    updateSelectedProjectCount();
-    syncConfigProjectSelect();
+function getTaskLabel(task) {
+    const f = String(task.frequency || 'weekly');
+    const fLabel = f === 'daily' ? '日报' : (f === 'monthly' ? '月报' : '周报');
+    const status = task.enabled ? '启用' : '停用';
+    return `${fLabel} | ${task.send_time || '09:00'} | ${status}`;
 }
 
-async function loadAccessibleProjects(preferredProjectId) {
-    const resp = await fetch('/api/projects/accessible');
-    if (!resp.ok) {
-        throw new Error('加载项目列表失败');
+function renderTaskList(tasks) {
+    const container = document.getElementById('scheduledTaskList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+        container.innerHTML = '<div style="font-size:12px; color:#777;">当前项目暂无任务，点击“新建任务”开始配置。</div>';
+        return;
     }
-    const result = await resp.json();
-    if (!Array.isArray(result)) {
-        throw new Error(result.message || '项目列表数据格式错误');
-    }
-    _modalProjects = result;
-    renderProjectList(_modalProjects, preferredProjectId);
-    return _modalProjects;
+
+    tasks.forEach((task) => {
+        const taskId = String(task.task_id || '');
+        const activeStyle = taskId === _editingTaskId ? 'border:1px solid #7aa7ea; background:#eef6ff;' : 'border:1px solid #e3edf9; background:#fff;';
+        const row = document.createElement('div');
+        row.style.cssText = `${activeStyle} border-radius:8px; padding:8px; display:flex; justify-content:space-between; gap:8px; align-items:flex-start;`;
+
+        const taskName = escapeHtml(task.task_name || '未命名任务');
+        const label = escapeHtml(getTaskLabel(task));
+        const toggleText = task.enabled ? '停用' : '启用';
+
+        row.innerHTML = `
+            <div style="min-width:0; display:flex; flex-direction:column; gap:3px;">
+                <strong style="font-size:13px; color:#223; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${taskName}</strong>
+                <span style="font-size:11px; color:#607389;">${label}</span>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" data-task-action="edit" data-task-id="${taskId}">编辑</button>
+                <button type="button" class="btn btn-info btn-sm" data-task-action="toggle" data-task-id="${taskId}">${toggleText}</button>
+                <button type="button" class="btn btn-warning btn-sm" data-task-action="run" data-task-id="${taskId}">执行</button>
+                <button type="button" class="btn btn-danger btn-sm" data-task-action="delete" data-task-id="${taskId}">删除</button>
+            </div>
+        `;
+        container.appendChild(row);
+    });
+
+    container.querySelectorAll('button[data-task-action]').forEach((btn) => {
+        btn.onclick = async () => {
+            const action = btn.dataset.taskAction;
+            const taskId = btn.dataset.taskId;
+            if (!taskId) return;
+            if (action === 'edit') {
+                const task = _taskList.find(x => String(x.task_id) === String(taskId));
+                if (task) {
+                    fillEditorByTask(task);
+                    renderTaskList(_taskList);
+                }
+                return;
+            }
+            if (action === 'toggle') {
+                await toggleTask(taskId);
+                return;
+            }
+            if (action === 'run') {
+                await runTaskNow(taskId);
+                return;
+            }
+            if (action === 'delete') {
+                await deleteTask(taskId);
+            }
+        };
+    });
+}
+
+function fillEditorByTask(task) {
+    _editingTaskId = String(task.task_id || '');
+    const editingId = document.getElementById('scheduledEditingTaskId');
+    if (editingId) editingId.value = _editingTaskId;
+
+    const projectIdInput = document.getElementById('scheduledReportProjectId');
+    if (projectIdInput) projectIdInput.value = _currentProjectId;
+
+    const taskName = document.getElementById('scheduledTaskName');
+    if (taskName) taskName.value = task.task_name || '';
+
+    const enabled = document.getElementById('scheduledReportEnabled');
+    if (enabled) enabled.checked = !!task.enabled;
+
+    const sendTime = document.getElementById('scheduledSendTime');
+    if (sendTime) sendTime.value = task.send_time || '09:00';
+
+    const weekday = document.getElementById('scheduledWeekday');
+    if (weekday) weekday.value = String(task.weekday || 1);
+
+    const dayOfMonth = document.getElementById('scheduledDayOfMonth');
+    if (dayOfMonth) dayOfMonth.value = String(task.day_of_month || 1);
+
+    const includePdf = document.getElementById('scheduledIncludePdf');
+    if (includePdf) includePdf.checked = task.include_pdf !== false;
+
+    const popupEnabled = document.getElementById('scheduledLoginPopupEnabled');
+    if (popupEnabled) popupEnabled.checked = task.login_popup_enabled !== false;
+
+    const ext = document.getElementById('scheduledExternalEmails');
+    if (ext) ext.value = Array.isArray(task.external_emails) ? task.external_emails.join(', ') : '';
+
+    const freq = String(task.frequency || 'weekly');
+    const radio = document.querySelector(`input[name="scheduledFrequency"][value="${freq}"]`);
+    if (radio) radio.checked = true;
+    toggleFrequencyFields();
+
+    renderRecipientUserList(_recipientOptions, task.recipient_user_ids || []);
+}
+
+function clearEditorToNewTask() {
+    _editingTaskId = '';
+    const editingId = document.getElementById('scheduledEditingTaskId');
+    if (editingId) editingId.value = '';
+
+    const projectIdInput = document.getElementById('scheduledReportProjectId');
+    if (projectIdInput) projectIdInput.value = _currentProjectId || '';
+
+    const taskName = document.getElementById('scheduledTaskName');
+    if (taskName) taskName.value = '';
+
+    const enabled = document.getElementById('scheduledReportEnabled');
+    if (enabled) enabled.checked = true;
+
+    const sendTime = document.getElementById('scheduledSendTime');
+    if (sendTime) sendTime.value = '09:00';
+
+    const weekday = document.getElementById('scheduledWeekday');
+    if (weekday) weekday.value = '1';
+
+    const dayOfMonth = document.getElementById('scheduledDayOfMonth');
+    if (dayOfMonth) dayOfMonth.value = '1';
+
+    const includePdf = document.getElementById('scheduledIncludePdf');
+    if (includePdf) includePdf.checked = true;
+
+    const popupEnabled = document.getElementById('scheduledLoginPopupEnabled');
+    if (popupEnabled) popupEnabled.checked = true;
+
+    const ext = document.getElementById('scheduledExternalEmails');
+    if (ext) ext.value = '';
+
+    const weekly = document.querySelector('input[name="scheduledFrequency"][value="weekly"]');
+    if (weekly) weekly.checked = true;
+    toggleFrequencyFields();
+
+    renderRecipientUserList(_recipientOptions, []);
 }
 
 async function safeParseJson(resp) {
@@ -190,39 +336,131 @@ async function safeParseJson(resp) {
     }
 }
 
-async function loadScheduleForProject(projectId) {
-    if (!projectId) {
-        return;
+async function loadAccessibleProjects(preferredProjectId) {
+    const resp = await fetch('/api/projects/accessible');
+    if (!resp.ok) {
+        throw new Error('加载项目列表失败');
     }
-    const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedule`);
+    const result = await resp.json();
+    if (!Array.isArray(result)) {
+        throw new Error(result.message || '项目列表数据格式错误');
+    }
+
+    _modalProjects = result;
+    renderProjectList(_modalProjects, preferredProjectId);
+}
+
+async function loadTasksForProject(projectId, preferredTaskId = '') {
+    _currentProjectId = projectId;
+    const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`);
     const result = await safeParseJson(resp);
     if (result.status !== 'success') {
-        throw new Error(result.message || '加载定时报告配置失败');
+        throw new Error(result.message || '加载任务失败');
     }
 
-    const data = result.data || {};
-    const recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
-    _projectScheduleCache[projectId] = {
-        data,
-        recipient_options: recipientOptions
+    _taskList = Array.isArray(result.tasks) ? result.tasks : [];
+    _recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
+
+    renderTaskList(_taskList);
+
+    if (_taskList.length === 0) {
+        clearEditorToNewTask();
+        return;
+    }
+
+    const task = _taskList.find(x => String(x.task_id) === String(preferredTaskId)) || _taskList[0];
+    fillEditorByTask(task);
+    renderTaskList(_taskList);
+}
+
+function buildPayloadFromForm() {
+    return {
+        task_name: (document.getElementById('scheduledTaskName')?.value || '').trim() || '定时报告任务',
+        enabled: !!document.getElementById('scheduledReportEnabled')?.checked,
+        frequency: getFrequencyValue(),
+        send_time: document.getElementById('scheduledSendTime')?.value || '09:00',
+        weekday: Number(document.getElementById('scheduledWeekday')?.value || 1),
+        day_of_month: Number(document.getElementById('scheduledDayOfMonth')?.value || 1),
+        include_pdf: !!document.getElementById('scheduledIncludePdf')?.checked,
+        in_app_message_enabled: true,
+        login_popup_enabled: !!document.getElementById('scheduledLoginPopupEnabled')?.checked,
+        recipient_user_ids: collectSelectedRecipientUserIds(),
+        external_emails: (document.getElementById('scheduledExternalEmails')?.value || '')
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean)
     };
+}
 
-    document.getElementById('scheduledReportProjectId').value = projectId;
-    document.getElementById('scheduledReportEnabled').checked = !!data.enabled;
-    document.getElementById('scheduledSendTime').value = data.send_time || '09:00';
-    document.getElementById('scheduledWeekday').value = String(data.weekday || 1);
-    document.getElementById('scheduledDayOfMonth').value = String(data.day_of_month || 1);
-    document.getElementById('scheduledIncludePdf').checked = data.include_pdf !== false;
-    document.getElementById('scheduledLoginPopupEnabled').checked = data.login_popup_enabled !== false;
-    document.getElementById('scheduledExternalEmails').value = (data.external_emails || []).join(', ');
-    renderRecipientUserList(recipientOptions, data.recipient_user_ids || []);
-
-    const frequency = data.frequency || 'weekly';
-    const radio = document.querySelector(`input[name="scheduledFrequency"][value="${frequency}"]`);
-    if (radio) {
-        radio.checked = true;
+async function runTaskNow(taskId) {
+    if (!_currentProjectId || !taskId) {
+        showNotification('请先选择项目和任务', 'error');
+        return;
     }
-    toggleFrequencyFields();
+    try {
+        showLoading(true);
+        const resp = await fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}/run`, { method: 'POST' });
+        const result = await safeParseJson(resp);
+        if (result.status === 'success') {
+            showNotification(result.message || '执行成功', 'success');
+        } else {
+            showNotification(result.message || '执行失败', 'error');
+        }
+    } catch (e) {
+        showNotification(e.message || '执行失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function toggleTask(taskId) {
+    const task = _taskList.find(x => String(x.task_id) === String(taskId));
+    if (!task) {
+        showNotification('任务不存在', 'error');
+        return;
+    }
+    try {
+        showLoading(true);
+        const resp = await fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !task.enabled })
+        });
+        const result = await safeParseJson(resp);
+        if (result.status !== 'success') {
+            showNotification(result.message || '更新状态失败', 'error');
+            return;
+        }
+        await loadTasksForProject(_currentProjectId, taskId);
+        showNotification(task.enabled ? '任务已停用' : '任务已启用', 'success');
+    } catch (e) {
+        showNotification(e.message || '更新状态失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function deleteTask(taskId) {
+    if (!_currentProjectId || !taskId) return;
+    if (!window.confirm('确认删除该定时任务吗？')) return;
+
+    try {
+        showLoading(true);
+        const resp = await fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}`, {
+            method: 'DELETE'
+        });
+        const result = await safeParseJson(resp);
+        if (result.status !== 'success') {
+            showNotification(result.message || '删除失败', 'error');
+            return;
+        }
+        await loadTasksForProject(_currentProjectId, '');
+        showNotification('任务已删除', 'success');
+    } catch (e) {
+        showNotification(e.message || '删除失败', 'error');
+    } finally {
+        showLoading(false);
+    }
 }
 
 export async function openScheduledReportModal() {
@@ -230,7 +468,10 @@ export async function openScheduledReportModal() {
 
     try {
         showLoading(true);
-        _projectScheduleCache = {};
+        _taskList = [];
+        _recipientOptions = [];
+        _editingTaskId = '';
+
         await loadAccessibleProjects(projectId);
 
         const configProjectSelect = document.getElementById('scheduledConfigProjectId');
@@ -238,29 +479,18 @@ export async function openScheduledReportModal() {
             configProjectSelect.onchange = async () => {
                 const configProjectId = getConfigProjectId();
                 if (configProjectId) {
-                    await loadScheduleForProject(configProjectId);
+                    await loadTasksForProject(configProjectId, '');
                 }
             };
         }
 
-        const configProjectId = getConfigProjectId();
-        if (configProjectId) {
-            await loadScheduleForProject(configProjectId);
+        const selectedProjectId = getConfigProjectId();
+        if (selectedProjectId) {
+            await loadTasksForProject(selectedProjectId, '');
         } else {
-            document.getElementById('scheduledReportProjectId').value = '';
-            document.getElementById('scheduledReportEnabled').checked = false;
-            document.getElementById('scheduledSendTime').value = '09:00';
-            document.getElementById('scheduledWeekday').value = '1';
-            document.getElementById('scheduledDayOfMonth').value = '1';
-            document.getElementById('scheduledIncludePdf').checked = true;
-            document.getElementById('scheduledLoginPopupEnabled').checked = true;
-            document.getElementById('scheduledExternalEmails').value = '';
+            clearEditorToNewTask();
+            renderTaskList([]);
             renderRecipientUserList([], []);
-            const weekly = document.querySelector('input[name="scheduledFrequency"][value="weekly"]');
-            if (weekly) {
-                weekly.checked = true;
-            }
-            toggleFrequencyFields();
         }
 
         const selectAllBtn = document.getElementById('scheduledProjectSelectAllBtn');
@@ -271,9 +501,9 @@ export async function openScheduledReportModal() {
                 });
                 updateSelectedProjectCount();
                 syncConfigProjectSelect();
-                const selectedConfigProjectId = getConfigProjectId();
-                if (selectedConfigProjectId) {
-                    await loadScheduleForProject(selectedConfigProjectId);
+                const projectIdToLoad = getConfigProjectId();
+                if (projectIdToLoad) {
+                    await loadTasksForProject(projectIdToLoad, '');
                 }
             };
         }
@@ -286,8 +516,19 @@ export async function openScheduledReportModal() {
                 });
                 updateSelectedProjectCount();
                 syncConfigProjectSelect();
-                document.getElementById('scheduledReportProjectId').value = '';
+                _taskList = [];
+                _recipientOptions = [];
+                clearEditorToNewTask();
+                renderTaskList([]);
                 renderRecipientUserList([], []);
+            };
+        }
+
+        const newTaskBtn = document.getElementById('scheduledTaskNewBtn');
+        if (newTaskBtn) {
+            newTaskBtn.onclick = () => {
+                clearEditorToNewTask();
+                renderTaskList(_taskList);
             };
         }
 
@@ -297,8 +538,8 @@ export async function openScheduledReportModal() {
             modal.style.display = 'flex';
         }
     } catch (e) {
-        console.error('加载定时报告配置失败:', e);
-        showNotification('加载定时报告配置失败', 'error');
+        console.error('加载定时报告任务失败:', e);
+        showNotification('加载定时报告任务失败', 'error');
     } finally {
         showLoading(false);
     }
@@ -320,125 +561,53 @@ export async function saveScheduledReportConfig(e) {
         return;
     }
 
-    const recipientUserIds = collectSelectedRecipientUserIds();
-    const frequency = getFrequencyValue();
-    const payload = {
-        enabled: document.getElementById('scheduledReportEnabled').checked,
-        frequency,
-        send_time: document.getElementById('scheduledSendTime').value || '09:00',
-        weekday: Number(document.getElementById('scheduledWeekday').value || 1),
-        day_of_month: Number(document.getElementById('scheduledDayOfMonth').value || 1),
-        include_pdf: document.getElementById('scheduledIncludePdf').checked,
-        in_app_message_enabled: true,
-        login_popup_enabled: document.getElementById('scheduledLoginPopupEnabled').checked,
-        recipient_user_ids: recipientUserIds,
-        external_emails: (document.getElementById('scheduledExternalEmails').value || '')
-            .split(',')
-            .map(item => item.trim())
-            .filter(Boolean)
-    };
+    const payload = buildPayloadFromForm();
+    const editingTaskId = document.getElementById('scheduledEditingTaskId')?.value || _editingTaskId;
 
     try {
         showLoading(true);
-        const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedule`, {
-            method: 'PATCH',
+        const isEdit = !!editingTaskId;
+        const url = isEdit
+            ? `/api/projects/${encodeURIComponent(projectId)}/report-schedules/${encodeURIComponent(editingTaskId)}`
+            : `/api/projects/${encodeURIComponent(projectId)}/report-schedules`;
+        const method = isEdit ? 'PATCH' : 'POST';
+
+        const resp = await fetch(url, {
+            method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         const result = await safeParseJson(resp);
-        if (result.status === 'success') {
-            showNotification('当前项目定时报告配置已保存', 'success');
-            closeScheduledReportModal();
-        } else {
+
+        if (result.status !== 'success') {
             showNotification(result.message || '保存失败', 'error');
+            return;
         }
+
+        const savedTaskId = result.data?.task_id || editingTaskId || '';
+        await loadTasksForProject(projectId, savedTaskId);
+        showNotification(isEdit ? '任务已更新' : '任务已创建', 'success');
     } catch (e) {
-        console.error('保存定时报告失败:', e);
+        console.error('保存定时任务失败:', e);
         showNotification(e.message || '保存失败', 'error');
     } finally {
         showLoading(false);
     }
 }
 
-export async function applyScheduledReportConfigToSelected() {
-    const selectedProjectIds = getSelectedProjectIds();
-    if (selectedProjectIds.length === 0) {
-        showNotification('请至少选择一个项目', 'error');
+export async function runScheduledReportNow() {
+    const projectId = getConfigProjectId();
+    const taskId = document.getElementById('scheduledEditingTaskId')?.value || _editingTaskId;
+    if (!projectId || !taskId) {
+        showNotification('请先在任务列表中选择一个任务', 'warning');
         return;
     }
-
-    const payload = {
-        enabled: document.getElementById('scheduledReportEnabled').checked,
-        frequency: getFrequencyValue(),
-        send_time: document.getElementById('scheduledSendTime').value || '09:00',
-        weekday: Number(document.getElementById('scheduledWeekday').value || 1),
-        day_of_month: Number(document.getElementById('scheduledDayOfMonth').value || 1),
-        include_pdf: document.getElementById('scheduledIncludePdf').checked,
-        in_app_message_enabled: true,
-        login_popup_enabled: document.getElementById('scheduledLoginPopupEnabled').checked,
-        recipient_user_ids: collectSelectedRecipientUserIds(),
-        external_emails: (document.getElementById('scheduledExternalEmails').value || '')
-            .split(',')
-            .map(item => item.trim())
-            .filter(Boolean)
-    };
-
-    try {
-        showLoading(true);
-        const results = await Promise.all(selectedProjectIds.map(async (projectId) => {
-            const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedule`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const result = await safeParseJson(resp);
-            return { projectId, result };
-        }));
-
-        const failed = results.filter(item => item.result.status !== 'success');
-        if (failed.length === 0) {
-            showNotification(`已批量应用到 ${results.length} 个项目`, 'success');
-        } else {
-            const first = failed[0];
-            showNotification(`部分项目保存失败（${failed.length}/${results.length}）：${first.projectId} - ${first.result.message || '未知错误'}`, 'error');
-        }
-    } catch (e) {
-        console.error('批量保存定时报告失败:', e);
-        showNotification(e.message || '批量保存失败', 'error');
-    } finally {
-        showLoading(false);
-    }
+    await runTaskNow(taskId);
 }
 
-export async function runScheduledReportNow() {
-    const selectedProjectIds = getSelectedProjectIds();
-    if (selectedProjectIds.length === 0) {
-        showNotification('请至少选择一个项目', 'error');
-        return;
-    }
-
-    try {
-        showLoading(true);
-        const results = await Promise.all(selectedProjectIds.map(async (projectId) => {
-            const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedule/run`, { method: 'POST' });
-            const result = await safeParseJson(resp);
-            return { projectId, result };
-        }));
-
-        const successCount = results.filter(item => item.result.status === 'success').length;
-        const failed = results.filter(item => item.result.status !== 'success');
-        if (failed.length === 0) {
-            showNotification(`发送成功：${successCount}/${results.length}`, 'success');
-        } else {
-            const first = failed[0];
-            showNotification(`发送完成：${successCount}/${results.length}，失败示例 ${first.projectId}: ${first.result.message || '未知错误'}`, 'error');
-        }
-    } catch (e) {
-        console.error('立即发送报告失败:', e);
-        showNotification(e.message || '发送失败', 'error');
-    } finally {
-        showLoading(false);
-    }
+// 兼容旧入口：当前改为按任务管理，不再做跨项目批量覆盖。
+export async function applyScheduledReportConfigToSelected() {
+    showNotification('已升级为“任务管理模式”，请直接保存当前任务。', 'info');
 }
 
 if (typeof document !== 'undefined') {

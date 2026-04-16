@@ -1402,8 +1402,9 @@
     <div id="scheduledReportModal" class="modal">
         <div class="modal-content" style="max-width:860px; max-height:86vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
             <span class="close" onclick="closeScheduledReportModal()">&times;</span>
-            <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务</h2>
+            <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务管理</h2>
             <input type="hidden" id="scheduledReportProjectId">
+            <input type="hidden" id="scheduledEditingTaskId">
             <form id="scheduledReportForm" style="padding:16px 18px 18px; overflow-y:auto;">
                 <div class="form-group">
                     <label style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -1424,21 +1425,38 @@
                     <select id="scheduledConfigProjectId" style="margin-top:8px;">
                         <option value="">-- 请先从上方选择项目 --</option>
                     </select>
-                    <div style="font-size:12px; color:#567; margin-top:6px;">保存默认只针对当前配置项目；如需统一覆盖多个项目，请使用“批量应用到所选项目”。</div>
+                    <div style="font-size:12px; color:#567; margin-top:6px;">每个项目可维护多个定时任务（日报/周报/月报），支持启停、编辑和删除。</div>
+                </div>
+
+                <div class="form-group" style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                        <label style="font-weight:600; margin:0;">任务列表</label>
+                        <button type="button" class="btn btn-info btn-sm" id="scheduledTaskNewBtn">+ 新建任务</button>
+                    </div>
+                    <div id="scheduledTaskList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:190px; overflow:auto;">
+                        <div style="font-size:12px; color:#777;">请选择“当前配置项目”后加载任务</div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="background:#fffdf8; border:1px solid #efe2c8; border-radius:8px; padding:10px;">
+                    <label for="scheduledTaskName" style="font-weight:600;">任务名称</label>
+                    <input type="text" id="scheduledTaskName" maxlength="40" placeholder="例如：周报任务、月报任务、日报任务" style="margin-top:8px;">
+                    <div style="font-size:12px; color:#8a6d3b; margin-top:6px;">保存时：有任务ID则编辑，没任务ID则创建新任务。</div>
                 </div>
 
                 <div class="form-group">
                     <div style="display:flex;align-items:center;gap:8px;">
                         <input type="checkbox" id="scheduledReportEnabled">
-                        <label for="scheduledReportEnabled" style="display:inline;margin:0;">启用定时发送</label>
+                        <label for="scheduledReportEnabled" style="display:inline;margin:0;">启用该任务</label>
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label>报告频率</label>
-                    <div style="display:flex; gap:16px; margin-top:8px;">
-                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="weekly" checked> 每周</label>
-                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="monthly"> 每月</label>
+                    <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
+                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="daily"> 每日（日报）</label>
+                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="weekly" checked> 每周（周报）</label>
+                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="monthly"> 每月（月报）</label>
                     </div>
                 </div>
 
@@ -1495,11 +1513,10 @@
                 </div>
 
                 <div style="display:flex;justify-content:space-between;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3;">
-                    <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即发送所选项目</button>
+                    <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即执行当前任务</button>
                     <div>
                         <button type="button" class="btn btn-secondary" onclick="closeScheduledReportModal()">取消</button>
-                        <button type="button" class="btn btn-info" onclick="applyScheduledReportConfigToSelected()" style="margin-left:10px;">批量应用到所选项目</button>
-                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存当前配置项目</button>
+                        <button type="submit" class="btn btn-success" style="margin-left:10px;">保存任务</button>
                     </div>
                 </div>
             </form>

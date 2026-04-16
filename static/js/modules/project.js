@@ -437,6 +437,10 @@ export function closeArchiveApprovalConfigModal() {
     }
 }
 
+// HTML 内联 onclick 依赖全局函数（取消按钮、右上角关闭）
+window.closeArchiveApprovalConfigModal = closeArchiveApprovalConfigModal;
+window.openArchiveApprovalConfigModal = openArchiveApprovalConfigModal;
+
 /**
  * 处理保存归档审批配置
  */

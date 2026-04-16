@@ -677,6 +677,36 @@ function _applyMenuPermissions(permissions) {
     // 权限配置菜单项（仅admin）
     const permissionConfigMenuItem = document.getElementById('permissionConfigMenuItem');
     if (permissionConfigMenuItem) permissionConfigMenuItem.style.display = isAdmin ? '' : 'none';
+
+    // 侧边栏分组标题：如果该分组下无可见菜单项，则隐藏标题
+    const sidebar = document.getElementById('systemManagementDropdown');
+    if (sidebar) {
+        const children = Array.from(sidebar.children);
+        let currentSection = null;
+        let hasVisibleItem = false;
+
+        children.forEach((node) => {
+            if (node.classList && node.classList.contains('sidebar-menu-section')) {
+                if (currentSection) {
+                    currentSection.style.display = hasVisibleItem ? '' : 'none';
+                }
+                currentSection = node;
+                hasVisibleItem = false;
+                return;
+            }
+
+            if (node.classList && node.classList.contains('sidebar-menu-item')) {
+                const visible = window.getComputedStyle(node).display !== 'none';
+                if (visible) {
+                    hasVisibleItem = true;
+                }
+            }
+        });
+
+        if (currentSection) {
+            currentSection.style.display = hasVisibleItem ? '' : 'none';
+        }
+    }
 }
 
 /**

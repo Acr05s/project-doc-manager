@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 from app.models.user import user_manager
 from app.models.message import message_manager
@@ -67,111 +68,227 @@ class ScheduledReportService:
         except Exception as e:
             logger.error(f'[ScheduledReportService] save schedules failed: {e}')
 
-    def get_schedule(self, project_id: str) -> Dict[str, Any]:
+    def _default_task(self, project_id: str = '', task_name: str = '') -> Dict[str, Any]:
+        now_iso = now_with_timezone().isoformat()
+        return {
+            'task_id': uuid4().hex,
+            'project_id': project_id,
+            'task_name': task_name or '定时报告任务',
+            'enabled': False,
+            'frequency': 'weekly',
+            'send_time': '09:00',
+            'weekday': 1,
+            'day_of_month': 1,
+            'include_pdf': True,
+            'in_app_message_enabled': True,
+            'login_popup_enabled': True,
+            'external_emails': [],
+            'recipient_user_ids': [],
+            'last_run_key': '',
+            'created_at': now_iso,
+            'updated_at': now_iso,
+        }
+
+    def _normalize_task(self, project_id: str, data: Dict[str, Any], fallback_name: str = '') -> Dict[str, Any]:
+        base = self._default_task(project_id=project_id, task_name=fallback_name)
+        merged = dict(base)
+        if isinstance(data, dict):
+            merged.update(data)
+
+        merged['task_id'] = str(merged.get('task_id') or uuid4().hex)
+        merged['project_id'] = project_id
+        merged['task_name'] = str(merged.get('task_name') or fallback_name or '定时报告任务').strip()
+        if not merged['task_name']:
+            merged['task_name'] = '定时报告任务'
+
+        merged['enabled'] = bool(merged.get('enabled', False))
+        frequency = str(merged.get('frequency', 'weekly')).strip().lower()
+        if frequency not in ('daily', 'weekly', 'monthly'):
+            frequency = 'weekly'
+        merged['frequency'] = frequency
+
+        send_time = str(merged.get('send_time', '09:00')).strip()
+        if len(send_time) != 5 or ':' not in send_time:
+            send_time = '09:00'
+        merged['send_time'] = send_time
+
+        try:
+            merged['weekday'] = min(7, max(1, int(merged.get('weekday', 1))))
+        except Exception:
+            merged['weekday'] = 1
+        try:
+            merged['day_of_month'] = min(28, max(1, int(merged.get('day_of_month', 1))))
+        except Exception:
+            merged['day_of_month'] = 1
+
+        merged['include_pdf'] = bool(merged.get('include_pdf', True))
+        merged['in_app_message_enabled'] = bool(merged.get('in_app_message_enabled', True))
+        merged['login_popup_enabled'] = bool(merged.get('login_popup_enabled', True))
+
+        ids = merged.get('recipient_user_ids', [])
+        recipient_user_ids: List[int] = []
+        if isinstance(ids, str):
+            ids = [x.strip() for x in ids.replace('，', ',').split(',') if x.strip()]
+        if isinstance(ids, list):
+            for x in ids:
+                try:
+                    recipient_user_ids.append(int(x))
+                except Exception:
+                    continue
+        merged['recipient_user_ids'] = sorted(set(recipient_user_ids))
+
+        ext = merged.get('external_emails', [])
+        if isinstance(ext, str):
+            ext = [x.strip() for x in ext.replace('，', ',').split(',') if x.strip()]
+        elif isinstance(ext, list):
+            ext = [str(x).strip() for x in ext if str(x).strip()]
+        else:
+            ext = []
+        merged['external_emails'] = ext
+
+        merged['last_run_key'] = str(merged.get('last_run_key') or '')
+        merged['created_at'] = str(merged.get('created_at') or base['created_at'])
+        merged['updated_at'] = now_with_timezone().isoformat()
+        return merged
+
+    def _get_project_tasks_locked(self, project_id: str) -> List[Dict[str, Any]]:
+        raw = self._schedules.get(project_id)
+        tasks: List[Dict[str, Any]] = []
+
+        if isinstance(raw, list):
+            tasks = [self._normalize_task(project_id, x, f'定时任务{i + 1}') for i, x in enumerate(raw) if isinstance(x, dict)]
+        elif isinstance(raw, dict):
+            if 'tasks' in raw and isinstance(raw.get('tasks'), list):
+                tasks = [self._normalize_task(project_id, x, f'定时任务{i + 1}') for i, x in enumerate(raw.get('tasks', [])) if isinstance(x, dict)]
+            else:
+                # 兼容旧版：每项目单配置
+                tasks = [self._normalize_task(project_id, raw, '默认定时任务')]
+        else:
+            tasks = []
+
+        self._schedules[project_id] = tasks
+        return tasks
+
+    def list_tasks(self, project_id: str) -> List[Dict[str, Any]]:
         with self._lock:
-            cfg = self._schedules.get(project_id, {}).copy()
-        if not cfg:
-            return {
-                'enabled': False,
-                'frequency': 'weekly',
-                'send_time': '09:00',
-                'weekday': 1,
-                'day_of_month': 1,
-                'include_pdf': True,
-                'in_app_message_enabled': True,
-                'login_popup_enabled': True,
-                'external_emails': [],
-                'recipient_user_ids': [],
-                'last_run_key': ''
-            }
-        cfg.setdefault('enabled', False)
-        cfg.setdefault('frequency', 'weekly')
-        cfg.setdefault('send_time', '09:00')
-        cfg.setdefault('weekday', 1)
-        cfg.setdefault('day_of_month', 1)
-        cfg.setdefault('include_pdf', True)
-        cfg.setdefault('in_app_message_enabled', True)
-        cfg.setdefault('login_popup_enabled', True)
-        cfg.setdefault('external_emails', [])
-        cfg.setdefault('recipient_user_ids', [])
-        cfg.setdefault('last_run_key', '')
-        return cfg
+            tasks = self._get_project_tasks_locked(project_id)
+            return [dict(x) for x in tasks]
+
+    def get_task(self, project_id: str, task_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            tasks = self._get_project_tasks_locked(project_id)
+            for task in tasks:
+                if str(task.get('task_id')) == str(task_id):
+                    return dict(task)
+        return None
+
+    def create_task(self, project_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            tasks = self._get_project_tasks_locked(project_id)
+            fallback_name = f'定时任务{len(tasks) + 1}'
+            task = self._normalize_task(project_id, data or {}, fallback_name)
+            tasks.append(task)
+            self._schedules[project_id] = tasks
+            self._save_schedules()
+            return dict(task)
+
+    def update_task(self, project_id: str, task_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            tasks = self._get_project_tasks_locked(project_id)
+            for i, task in enumerate(tasks):
+                if str(task.get('task_id')) != str(task_id):
+                    continue
+                updated = dict(task)
+                if isinstance(data, dict):
+                    updated.update(data)
+                updated['task_id'] = str(task_id)
+                updated = self._normalize_task(project_id, updated, task.get('task_name', '定时报告任务'))
+                tasks[i] = updated
+                self._schedules[project_id] = tasks
+                self._save_schedules()
+                return dict(updated)
+        raise ValueError('任务不存在')
+
+    def delete_task(self, project_id: str, task_id: str) -> bool:
+        with self._lock:
+            tasks = self._get_project_tasks_locked(project_id)
+            new_tasks = [x for x in tasks if str(x.get('task_id')) != str(task_id)]
+            if len(new_tasks) == len(tasks):
+                return False
+            self._schedules[project_id] = new_tasks
+            self._save_schedules()
+            return True
+
+    def set_task_enabled(self, project_id: str, task_id: str, enabled: bool) -> Dict[str, Any]:
+        return self.update_task(project_id, task_id, {'enabled': bool(enabled)})
+
+    def get_schedule(self, project_id: str) -> Dict[str, Any]:
+        tasks = self.list_tasks(project_id)
+        if tasks:
+            return tasks[0]
+        return self._default_task(project_id=project_id, task_name='默认定时任务')
 
     def get_schedule_detail(self, project_id: str) -> Dict[str, Any]:
-        schedule = self.get_schedule(project_id)
         project = self._load_project(project_id)
         recipient_options = self._build_project_recipient_options(project)
+
+        tasks = self.list_tasks(project_id)
         active_ids = {int(opt.get('id')) for opt in recipient_options if opt.get('id')}
-        selected_ids = []
-        for x in schedule.get('recipient_user_ids', []) or []:
-            try:
-                uid = int(x)
-            except Exception:
-                continue
-            if uid in active_ids:
-                selected_ids.append(uid)
-        if not selected_ids:
-            selected_ids = [int(opt['id']) for opt in recipient_options if opt.get('recommended') and opt.get('id')]
-        schedule['recipient_user_ids'] = sorted(set(selected_ids))
+        normalized_tasks: List[Dict[str, Any]] = []
+        for task in tasks:
+            selected_ids = []
+            for x in task.get('recipient_user_ids', []) or []:
+                try:
+                    uid = int(x)
+                except Exception:
+                    continue
+                if uid in active_ids:
+                    selected_ids.append(uid)
+            if not selected_ids:
+                selected_ids = [int(opt['id']) for opt in recipient_options if opt.get('recommended') and opt.get('id')]
+            item = dict(task)
+            item['recipient_user_ids'] = sorted(set(selected_ids))
+            normalized_tasks.append(item)
+
         return {
-            'schedule': schedule,
+            'schedule': normalized_tasks[0] if normalized_tasks else self._default_task(project_id=project_id, task_name='默认定时任务'),
+            'tasks': normalized_tasks,
             'recipient_options': recipient_options
         }
 
     def update_schedule(self, project_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        # 兼容旧接口：更新第一个任务，不存在则创建
         with self._lock:
-            cfg = self.get_schedule(project_id)
-            cfg['enabled'] = bool(data.get('enabled', cfg['enabled']))
-            frequency = str(data.get('frequency', cfg['frequency'])).strip()
-            if frequency not in ('weekly', 'monthly'):
-                frequency = 'weekly'
-            cfg['frequency'] = frequency
+            tasks = self._get_project_tasks_locked(project_id)
+            if not tasks:
+                task = self._normalize_task(project_id, data or {}, '默认定时任务')
+                tasks.append(task)
+                self._schedules[project_id] = tasks
+                self._save_schedules()
+                return dict(task)
 
-            send_time = str(data.get('send_time', cfg['send_time'])).strip()
-            if len(send_time) != 5 or ':' not in send_time:
-                send_time = '09:00'
-            cfg['send_time'] = send_time
-
-            try:
-                cfg['weekday'] = min(7, max(1, int(data.get('weekday', cfg['weekday']))))
-            except Exception:
-                cfg['weekday'] = 1
-            try:
-                cfg['day_of_month'] = min(28, max(1, int(data.get('day_of_month', cfg['day_of_month']))))
-            except Exception:
-                cfg['day_of_month'] = 1
-
-            cfg['include_pdf'] = bool(data.get('include_pdf', cfg['include_pdf']))
-            cfg['in_app_message_enabled'] = bool(data.get('in_app_message_enabled', cfg.get('in_app_message_enabled', True)))
-            cfg['login_popup_enabled'] = bool(data.get('login_popup_enabled', cfg.get('login_popup_enabled', True)))
-
-            ids = data.get('recipient_user_ids', cfg.get('recipient_user_ids', []))
-            recipient_user_ids: List[int] = []
-            if isinstance(ids, str):
-                ids = [x.strip() for x in ids.replace('，', ',').split(',') if x.strip()]
-            if isinstance(ids, list):
-                for x in ids:
-                    try:
-                        recipient_user_ids.append(int(x))
-                    except Exception:
-                        continue
-            cfg['recipient_user_ids'] = sorted(set(recipient_user_ids))
-
-            ext = data.get('external_emails', cfg.get('external_emails', []))
-            if isinstance(ext, str):
-                ext = [x.strip() for x in ext.replace('，', ',').split(',') if x.strip()]
-            elif isinstance(ext, list):
-                ext = [str(x).strip() for x in ext if str(x).strip()]
-            else:
-                ext = []
-            cfg['external_emails'] = ext
-
-            self._schedules[project_id] = cfg
+            merged = dict(tasks[0])
+            if isinstance(data, dict):
+                merged.update(data)
+            merged = self._normalize_task(project_id, merged, tasks[0].get('task_name', '默认定时任务'))
+            tasks[0] = merged
+            self._schedules[project_id] = tasks
             self._save_schedules()
-            return cfg
+            return dict(merged)
 
-    def run_now(self, project_id: str, requester_user_id: Optional[int] = None) -> Dict[str, Any]:
-        return self._run_project_report(project_id, manual=True, requester_user_id=requester_user_id)
+    def run_now(self, project_id: str, requester_user_id: Optional[int] = None, task_id: Optional[str] = None) -> Dict[str, Any]:
+        cfg = None
+        if task_id:
+            cfg = self.get_task(project_id, task_id)
+            if not cfg:
+                return {'status': 'error', 'message': '任务不存在'}
+        else:
+            tasks = self.list_tasks(project_id)
+            if tasks:
+                cfg = tasks[0]
+        if cfg is None:
+            cfg = self.get_schedule(project_id)
+        return self._run_project_report(project_id, cfg=cfg, manual=True, requester_user_id=requester_user_id)
 
     def _scheduler_loop(self):
         while not self._stop_event.is_set():
@@ -185,20 +302,28 @@ class ScheduledReportService:
         now = now_with_timezone()
         project_ids = self._list_project_ids()
         for project_id in project_ids:
-            cfg = self.get_schedule(project_id)
-            if not cfg.get('enabled'):
-                continue
-            if self._is_due(cfg, now):
-                run_key = self._build_run_key(cfg, now)
-                if run_key and cfg.get('last_run_key') == run_key:
+            tasks = self.list_tasks(project_id)
+            for task in tasks:
+                if not task.get('enabled'):
                     continue
-                result = self._run_project_report(project_id, manual=False)
+                if not self._is_due(task, now):
+                    continue
+                run_key = self._build_run_key(task, now)
+                if run_key and task.get('last_run_key') == run_key:
+                    continue
+                result = self._run_project_report(project_id, cfg=task, manual=False)
                 if result.get('status') == 'success':
                     with self._lock:
-                        fresh = self.get_schedule(project_id)
-                        fresh['last_run_key'] = run_key
-                        self._schedules[project_id] = fresh
-                        self._save_schedules()
+                        current_tasks = self._get_project_tasks_locked(project_id)
+                        for idx, current in enumerate(current_tasks):
+                            if str(current.get('task_id')) != str(task.get('task_id')):
+                                continue
+                            current['last_run_key'] = run_key
+                            current['updated_at'] = now_with_timezone().isoformat()
+                            current_tasks[idx] = self._normalize_task(project_id, current, current.get('task_name', '定时报告任务'))
+                            self._schedules[project_id] = current_tasks
+                            self._save_schedules()
+                            break
 
     def _list_project_ids(self) -> List[str]:
         if not self.doc_manager:
@@ -223,7 +348,9 @@ class ScheduledReportService:
         if now.hour != hour or now.minute != minute:
             return False
 
-        frequency = cfg.get('frequency', 'weekly')
+        frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
+        if frequency == 'daily':
+            return True
         if frequency == 'weekly':
             weekday = int(cfg.get('weekday', 1))
             # Python weekday: Monday=0 ... Sunday=6
@@ -232,12 +359,20 @@ class ScheduledReportService:
         return now.day == day_of_month
 
     def _build_run_key(self, cfg: Dict[str, Any], now: datetime) -> str:
-        frequency = cfg.get('frequency', 'weekly')
+        frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
+        if frequency == 'daily':
+            return now.strftime('D%Y-%m-%d')
         if frequency == 'weekly':
             return now.strftime('W%Y-%W')
         return now.strftime('M%Y-%m')
 
-    def _run_project_report(self, project_id: str, manual: bool = False, requester_user_id: Optional[int] = None) -> Dict[str, Any]:
+    def _run_project_report(
+        self,
+        project_id: str,
+        cfg: Optional[Dict[str, Any]] = None,
+        manual: bool = False,
+        requester_user_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         if not self.doc_manager:
             return {'status': 'error', 'message': '文档管理器未初始化'}
 
@@ -245,8 +380,8 @@ class ScheduledReportService:
         if not project:
             return {'status': 'error', 'message': '项目加载失败'}
         project_name = project.get('name', project_id)
-        cfg = self.get_schedule(project_id)
-        frequency = cfg.get('frequency', 'weekly')
+        cfg = cfg or self.get_schedule(project_id)
+        frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
         period_start, period_end = self._calc_period(now_with_timezone(), frequency)
 
         metrics = self._build_metrics(project_id, project, period_start, period_end)
@@ -260,7 +395,7 @@ class ScheduledReportService:
         if not recipients and not (cfg.get('in_app_message_enabled', True) and site_receiver_ids):
             return {'status': 'error', 'message': '未配置可用收件人（邮箱或站内信）'}
 
-        subject = f"【项目定时报告】{project_name} - {'周报' if frequency == 'weekly' else '月报'}"
+        subject = f"【项目定时报告】{project_name} - {self._frequency_label(frequency)}"
         text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics, party_b=party_b)
 
         attachments = []
@@ -323,9 +458,19 @@ class ScheduledReportService:
         # 统一为本地无时区时间，避免与解析出的历史时间（通常为无时区）比较时报错。
         if getattr(now, 'tzinfo', None) is not None:
             now = now.replace(tzinfo=None)
+        if frequency == 'daily':
+            return now - timedelta(days=1), now
         if frequency == 'monthly':
             return now - timedelta(days=30), now
         return now - timedelta(days=7), now
+
+    def _frequency_label(self, frequency: str) -> str:
+        f = str(frequency or '').strip().lower()
+        if f == 'daily':
+            return '日报'
+        if f == 'monthly':
+            return '月报'
+        return '周报'
 
     def _parse_time(self, value: Any) -> Optional[datetime]:
         if not value:
@@ -553,12 +698,12 @@ class ScheduledReportService:
     ) -> int:
         if not receiver_ids:
             return 0
-        title = f"【{project_name}】{'周报' if frequency == 'weekly' else '月报'}已生成"
+        title = f"【{project_name}】{self._frequency_label(frequency)}已生成"
         party_b_line = f"承建单位：{party_b}\n" if party_b else ''
         content = (
             f"项目：{project_name}\n"
             + party_b_line +
-            f"类型：{'周报' if frequency == 'weekly' else '月报'}\n"
+            f"类型：{self._frequency_label(frequency)}\n"
             f"统计区间：{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}\n"
             f"上传审核通过：{metrics.get('uploads', 0)}\n"
             f"文档更新次数：{metrics.get('updated_docs', 0)}\n"
@@ -588,7 +733,7 @@ class ScheduledReportService:
         self, project_name: str, frequency: str, start: datetime, end: datetime,
         metrics: Dict[str, Any], party_b: str = ''
     ) -> Tuple[str, str]:
-        title = '周报' if frequency == 'weekly' else '月报'
+        title = self._frequency_label(frequency)
         uploads = metrics.get('uploads', 0)
         updated_docs = metrics.get('updated_docs', 0)
         archived = metrics.get('archived', 0)
@@ -708,7 +853,7 @@ class ScheduledReportService:
             pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
             c = canvas.Canvas(str(pdf_path), pagesize=A4)
             c.setFont('STSong-Light', 14)
-            title = '周报' if frequency == 'weekly' else '月报'
+            title = self._frequency_label(frequency)
             c.drawString(40, 800, f'项目定时{title}: {project_name}')
             c.setFont('STSong-Light', 10)
             c.drawString(40, 782, f"统计区间: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")

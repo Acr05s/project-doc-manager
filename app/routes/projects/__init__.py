@@ -15,7 +15,17 @@ from .templates import list_templates, save_template, load_template, delete_temp
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
 from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request, get_approval_history, get_all_approval_history
-from .scheduled_reports import get_project_report_schedule, update_project_report_schedule, run_project_report_now
+from .scheduled_reports import (
+    get_project_report_schedule,
+    update_project_report_schedule,
+    run_project_report_now,
+    list_project_report_tasks,
+    create_project_report_task,
+    update_project_report_task,
+    delete_project_report_task,
+    toggle_project_report_task,
+    run_project_report_task_now,
+)
 from .modules import modules_bp
 
 # 创建蓝图
@@ -103,6 +113,14 @@ project_bp.route('/archive/history', methods=['GET'])(login_required(get_all_app
 project_bp.route('/<project_id>/report-schedule', methods=['GET'])(project_access_required(get_project_report_schedule))
 project_bp.route('/<project_id>/report-schedule', methods=['PATCH'])(project_access_required(update_project_report_schedule))
 project_bp.route('/<project_id>/report-schedule/run', methods=['POST'])(project_access_required(run_project_report_now))
+
+# 项目定时报告任务管理（新）
+project_bp.route('/<project_id>/report-schedules', methods=['GET'])(project_access_required(list_project_report_tasks))
+project_bp.route('/<project_id>/report-schedules', methods=['POST'])(project_access_required(create_project_report_task))
+project_bp.route('/<project_id>/report-schedules/<task_id>', methods=['PATCH'])(project_access_required(update_project_report_task))
+project_bp.route('/<project_id>/report-schedules/<task_id>', methods=['DELETE'])(project_access_required(delete_project_report_task))
+project_bp.route('/<project_id>/report-schedules/<task_id>/toggle', methods=['POST'])(project_access_required(toggle_project_report_task))
+project_bp.route('/<project_id>/report-schedules/<task_id>/run', methods=['POST'])(project_access_required(run_project_report_task_now))
 
 # 文档目录映射相关路由
 project_bp.route('/<project_id>/document-directories', methods=['GET'])(project_access_required(get_document_directories))
