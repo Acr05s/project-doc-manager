@@ -90,3 +90,5 @@ projects_json_backup/
 # Temporary tool scripts (do not track)
 tmp_tools/
 emp_tools/
+# BitFun snapshot data - auto managed
+.bitfun/
