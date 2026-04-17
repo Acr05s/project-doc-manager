@@ -373,11 +373,16 @@ class ScheduledReportService:
                 run_key = self._build_run_key(task, now)
                 if run_key and task.get('last_run_key') == run_key:
                     continue
-                result = self._run_project_report(project_id, cfg=task, manual=False)
+                try:
+                    result = self._run_project_report(project_id, cfg=task, manual=False)
+                    success = result.get('status') == 'success'
+                except Exception as e:
+                    logger.error(f'[ScheduledReportService] run report failed for {project_id}/{task.get("task_id")}: {e}')
+                    success = False
                 self._mark_task_run_result(
                     project_id=project_id,
                     task_id=str(task.get('task_id') or ''),
-                    success=result.get('status') == 'success',
+                    success=success,
                     run_key=run_key,
                 )
 
@@ -910,6 +915,7 @@ class ScheduledReportService:
         rate = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
         cycle_order = metrics.get('cycle_order', [])
+        checklist = metrics.get('checklist', [])
 
         party_b_line = f"承建单位：{party_b}\n" if party_b else ''
         text = (

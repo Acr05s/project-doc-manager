@@ -1682,8 +1682,7 @@ async function saveSystemSettings() {
         if (emailNotificationEnabled) {
             settings.email_notification_enabled = emailNotificationEnabled.checked;
         }
-        // 审批安全码默认关闭，不在日常设置流程中暴露
-        settings.require_approval_code = false;
+        // require_approval_code 不在此处设置，保留服务端现有值
 
         const forceAgreementOnLogin = document.getElementById('forceAgreementOnLogin');
         if (forceAgreementOnLogin) {
