@@ -205,37 +205,22 @@ def get_settings():
 def update_settings():
     """更新系统设置"""
     try:
-        import sys
         data = request.get_json()
-        print(f"[update_settings] Received data: {data}", flush=True)
-        sys.stdout.flush()
         if not data:
             return jsonify({'status': 'error', 'message': '无效的数据'}), 400
         
         # 加载当前设置
         current_settings = load_settings()
-        print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code']
-        print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
-        print(f"[update_settings] Data: {data}", flush=True)
-        print(f"[update_settings] Data type: {type(data)}", flush=True)
-        
-        # 手动检查 fast_preview_threshold
-        print(f"[update_settings] 'fast_preview_threshold' in data: {'fast_preview_threshold' in data}", flush=True)
-        if 'fast_preview_threshold' in data:
-            print(f"[update_settings] data['fast_preview_threshold'] = {data['fast_preview_threshold']}", flush=True)
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code', 'approval_code_cache_minutes']
         
         # 规范化布尔字段，确保 false 被正确保存
         bool_fields = {'email_notification_enabled', 'require_approval_code', 'force_agreement_on_login', 'watermark_enabled', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code'}
         for field in allowed_fields:
-            print(f"[update_settings] Checking field: {field}", flush=True)
             if field in data:
-                print(f"[update_settings] >>> Updating {field}: {data[field]}", flush=True)
                 val = data[field]
                 if field in bool_fields:
-                    # 将字符串'false'、0、'' 等转换为正确的布尔值
                     if isinstance(val, bool):
                         current_settings[field] = val
                     elif isinstance(val, str):
@@ -244,9 +229,6 @@ def update_settings():
                         current_settings[field] = bool(val)
                 else:
                     current_settings[field] = val
-                print(f"[update_settings] >>> Updated current_settings[{field}] = {current_settings[field]}", flush=True)
-            else:
-                print(f"[update_settings] Field not in data: {field}", flush=True)
 
         # 水印字段白名单化，避免写入非法值
         wm_fields = current_settings.get('watermark_content_fields', ['username', 'display_name', 'organization', 'datetime'])
@@ -259,12 +241,6 @@ def update_settings():
         if not wm_fields:
             wm_fields = ['username', 'display_name', 'organization', 'datetime']
         current_settings['watermark_content_fields'] = wm_fields
-        
-        print(f"[update_settings] After update: {current_settings}", flush=True)
-        
-        # DEBUG: 强制检查 fast_preview_threshold
-        if 'fast_preview_threshold' not in current_settings:
-            raise Exception("fast_preview_threshold missing!")
         
         # 保存到settings.json
         if save_settings(current_settings):

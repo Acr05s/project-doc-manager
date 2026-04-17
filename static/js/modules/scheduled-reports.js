@@ -1,5 +1,5 @@
 import { appState } from './app-state.js';
-import { showLoading, showNotification } from './ui.js';
+import { showLoading, showNotification, showConfirmModal } from './ui.js';
 
 let _modalProjects = [];
 let _recipientOptions = [];
@@ -590,11 +590,18 @@ async function reloadTasksBySelection(preferredTaskId = '') {
 
 function buildPayloadFromEditorForm() {
     const taskType = getTaskTypeValue();
+    const frequency = getFrequencyValue();
+    // 自动生成任务名称
+    const freqLabels = { daily: '日报', weekly: '周报', monthly: '月报' };
+    const projectSelect = document.getElementById('scheduledEditorProjectSelect');
+    const projectName = projectSelect?.selectedOptions?.[0]?.textContent?.replace(/\s*\(.*\)$/, '') || '';
+    const autoName = projectName ? `${projectName}-${freqLabels[frequency] || '报告'}` : (freqLabels[frequency] || '定时报告任务');
+    const taskName = (document.getElementById('scheduledTaskName')?.value || '').trim() || autoName;
     return {
-        task_name: (document.getElementById('scheduledTaskName')?.value || '').trim() || '定时报告任务',
+        task_name: taskName,
         task_type: taskType,
         enabled: !!document.getElementById('scheduledReportEnabled')?.checked,
-        frequency: getFrequencyValue(),
+        frequency: frequency,
         send_time: document.getElementById('scheduledSendTime')?.value || '09:00',
         weekday: Number(document.getElementById('scheduledWeekday')?.value || 1),
         day_of_month: Number(document.getElementById('scheduledDayOfMonth')?.value || 1),
@@ -607,7 +614,10 @@ function buildPayloadFromEditorForm() {
     };
 }
 
+let _preSaveTaskScope = 'single';
+
 export async function openScheduledTaskEditorModal(taskId = '', projectId = '') {
+    _preSaveTaskScope = _taskScope;
     if (taskId) {
         const task = _allLoadedTasks.find((x) => String(x.task_id) === String(taskId) && String(x._project_id || projectId || _currentProjectId) === String(projectId || x._project_id || _currentProjectId));
         const targetProjectId = String(projectId || task?._project_id || _currentProjectId || '').trim();
@@ -716,7 +726,8 @@ async function toggleTask(taskId, projectId = '') {
 async function deleteTask(taskId, projectId = '') {
     const targetProjectId = String(projectId || _currentProjectId || '').trim();
     if (!targetProjectId || !taskId) return;
-    if (!window.confirm('确认删除该定时任务吗？')) return;
+    const confirmed = await new Promise(resolve => showConfirmModal('删除任务', '确认删除该定时任务吗？', () => resolve(true), () => resolve(false)));
+    if (!confirmed) return;
 
     try {
         showLoading(true);
@@ -775,7 +786,8 @@ async function batchDeleteTasks() {
         showNotification('请先勾选任务', 'warning');
         return;
     }
-    if (!window.confirm(`确认删除选中的 ${ids.length} 个任务吗？`)) return;
+    const confirmed = await new Promise(resolve => showConfirmModal('批量删除', `确认删除选中的 ${ids.length} 个任务吗？`, () => resolve(true), () => resolve(false)));
+    if (!confirmed) return;
 
     try {
         showLoading(true);
@@ -955,7 +967,7 @@ export async function saveScheduledReportConfig(e) {
         }
 
         const savedTaskId = result.data?.task_id || editingTaskId || '';
-        if (_taskScope === 'all') {
+        if (_preSaveTaskScope === 'all') {
             await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
         } else {
             await loadTasksForProject(projectId, savedTaskId);

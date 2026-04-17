@@ -1406,8 +1406,7 @@
             <input type="hidden" id="scheduledReportProjectId">
             <form id="scheduledReportForm" style="padding:16px 18px 18px; overflow-y:auto;">
                 <div class="form-group" style="background:#f8fbff; border:1px solid #d9e8fb; border-radius:10px; padding:12px;">
-                    <label for="scheduledConfigProjectId" style="font-weight:600;">当前查看项目</label>
-                    <select id="scheduledConfigProjectId" style="margin-top:8px;">
+                    <select id="scheduledConfigProjectId" style="display:none;">
                         <option value="">-- 加载项目中 --</option>
                     </select>
                     <div style="margin-top:10px; border:1px solid #d8e5f6; border-radius:8px; background:#fff; padding:8px;">
@@ -1434,7 +1433,7 @@
                             </select>
                         </div>
                     </div>
-                    <div style="font-size:12px; color:#567; margin-top:6px;">这里是筛选器：可选单个项目；选择“全部项目”可查看所有任务。点击“新建任务”后再选择任务所属项目并配置内容。</div>
+                    <div style="font-size:12px; color:#567; margin-top:6px;">勾选项目筛选任务列表。点击“新建任务”后选择任务所属项目并配置内容。</div>
                 </div>
 
                 <div class="form-group" style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px;">
@@ -1475,9 +1474,9 @@
                     <div style="font-size:12px; color:#567; margin-top:6px;">新建任务时可选择项目；编辑已有任务时固定为当前任务项目。</div>
                 </div>
 
-                <div class="form-group" style="background:#fffdf8; border:1px solid #efe2c8; border-radius:8px; padding:10px;">
+                <div class="form-group" style="display:none;">
                     <label for="scheduledTaskName" style="font-weight:600;">任务名称</label>
-                    <input type="text" id="scheduledTaskName" maxlength="40" placeholder="例如：周报任务、月报任务、日报任务" style="margin-top:8px;">
+                    <input type="text" id="scheduledTaskName" maxlength="40" placeholder="自动生成" style="margin-top:8px;">
                 </div>
 
                 <div class="form-group">

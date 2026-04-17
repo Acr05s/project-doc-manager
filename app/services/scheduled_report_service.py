@@ -857,6 +857,7 @@ class ScheduledReportService:
             return 0
         title = f"【{project_name}】{self._frequency_label(frequency)}已生成"
         party_b_line = f"承建单位：{party_b}\n" if party_b else ''
+        # 站内信内容与邮件概括保持一致（HTML格式）
         content = (
             f"项目：{project_name}\n"
             + party_b_line +
@@ -866,8 +867,20 @@ class ScheduledReportService:
             f"文档更新次数：{metrics.get('updated_docs', 0)}\n"
             f"归档通过：{metrics.get('archived', 0)}\n"
             f"归档率：{metrics.get('archive_rate', 0.0)}%\n"
-            f"可在消息中心查看详情。"
         )
+        # 添加按周期统计摘要
+        by_cycle = metrics.get('by_cycle', {})
+        cycle_order = metrics.get('cycle_order', [])
+        ordered_cycles = [c for c in cycle_order if c in by_cycle] + [c for c in by_cycle.keys() if c not in set(cycle_order)]
+        if ordered_cycles:
+            content += "\n按周期统计：\n"
+            for cycle in ordered_cycles:
+                val = by_cycle.get(cycle, {})
+                c_uploads = val.get('uploads', 0)
+                c_archived = val.get('archived', 0)
+                c_rate = round((c_archived / c_uploads) * 100, 2) if c_uploads > 0 else 0.0
+                content += f"  {cycle}：上传{c_uploads} / 归档{c_archived} / 归档率{c_rate}%\n"
+        content += "\n文档清单请查看PDF附件。"
         msg_type = 'scheduled_report_popup' if popup_enabled else 'scheduled_report'
         sent_count = 0
         for receiver_id in receiver_ids:
@@ -896,9 +909,7 @@ class ScheduledReportService:
         archived = metrics.get('archived', 0)
         rate = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
-        doc_details = metrics.get('doc_details', [])
         cycle_order = metrics.get('cycle_order', [])
-        checklist = metrics.get('checklist', [])
 
         party_b_line = f"承建单位：{party_b}\n" if party_b else ''
         text = (
@@ -934,65 +945,12 @@ class ScheduledReportService:
                 f"</td></tr>"
             )
 
-        detail_rows = ''
-        for d in doc_details[:50]:
-            uploader = d.get('uploader') or '-'
-            upload_time = str(d.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
-            tag = ('<span style="background:#fbbf24;color:#fff;font-size:11px;'
-                   'padding:1px 5px;border-radius:3px;margin-left:4px;">更新</span>'
-                   if d.get('is_update') else '')
-            filename = d.get('filename', '') or ''
-            filename_short = (filename[:40] + '…') if len(filename) > 40 else filename
-            detail_rows += (
-                f"<tr>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555'>{d.get('cycle', '')}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee'>{d.get('doc_name', '')}{tag}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#666;font-size:12px'>{filename_short}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555'>{uploader}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#888;font-size:12px'>{upload_time}</td>"
-                f"</tr>"
-            )
-
-        checklist_rows = ''
-        for item in checklist[:120]:
-            checklist_rows += (
-                f"<tr>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555'>{item.get('cycle', '')}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555;text-align:center'>{item.get('index', '')}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee'>{item.get('doc_name', '')}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#666;font-size:12px'>{item.get('requirement', '-') or '-'}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555;text-align:center'>{item.get('uploaded_count', 0)}</td>"
-                f"<td style='padding:5px 8px;border:1px solid #eee;color:#0f766e'>{item.get('status', '')}</td>"
-                f"</tr>"
-            )
 
         party_b_html = (f"<p style='margin:4px 0;color:#666;font-size:13px'>承建单位：<b>{party_b}</b></p>"
                         if party_b else '')
         no_data_row = "<tr><td colspan='5' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
-        detail_section = (
-            "<h3 style='font-size:14px;margin:22px 0 8px;color:#374151'>本期文档上传明细</h3>"
-            "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
-            "<thead><tr style='background:#f8fafc;'>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>周期</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>文档名称</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>文件名</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>上传人</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>上传时间</th>"
-            f"</tr></thead><tbody>{detail_rows}</tbody></table>"
-        ) if detail_rows else "<p style='color:#999;font-size:13px'>本期无文档上传记录。</p>"
 
-        checklist_section = (
-            "<h3 style='font-size:14px;margin:22px 0 8px;color:#374151'>项目文档清单（按系统周期顺序）</h3>"
-            "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
-            "<thead><tr style='background:#f8fafc;'>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>周期</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:center'>序号</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>文档名称</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>要求</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:center'>上传数</th>"
-            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>状态</th>"
-            f"</tr></thead><tbody>{checklist_rows}</tbody></table>"
-        ) if checklist_rows else "<p style='color:#999;font-size:13px'>暂无项目文档清单数据。</p>"
+        # 邮件只包含概括摘要 + 按周期统计表，文档清单和上传明细通过PDF附件发送
         html = (
             f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
             f"<h2 style='margin:0 0 4px;font-size:18px'>项目{title} — {project_name}</h2>"
@@ -1021,8 +979,7 @@ class ScheduledReportService:
             f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>归档率图示</th>"
             f"</tr></thead>"
             f"<tbody>{rows or no_data_row}</tbody></table>"
-            f"{checklist_section}"
-            f"{detail_section}"
+            f"<p style='margin:18px 0 4px;color:#888;font-size:12px'>文档清单及上传明细请查看PDF附件。</p>"
             f"</div>"
         )
         return text, html
@@ -1102,30 +1059,81 @@ class ScheduledReportService:
                 c.drawString(40, 810, '项目文档清单（按系统周期顺序）')
                 c.setFont('STSong-Light', 9)
                 y = 790
-                c.drawString(40, y, '周期')
-                c.drawString(130, y, '序号')
+                c.drawString(40, y, '序号')
+                c.drawString(75, y, '周期')
                 c.drawString(165, y, '文档名称')
                 c.drawString(350, y, '上传')
                 c.drawString(390, y, '状态')
                 y -= 14
 
+                prev_cycle = None
+                seq = 0
                 for item in checklist:
                     if y < 60:
                         c.showPage()
                         c.setFont('STSong-Light', 9)
                         y = 810
-                        c.drawString(40, y, '周期')
-                        c.drawString(130, y, '序号')
+                        c.drawString(40, y, '序号')
+                        c.drawString(75, y, '周期')
                         c.drawString(165, y, '文档名称')
                         c.drawString(350, y, '上传')
                         c.drawString(390, y, '状态')
                         y -= 14
+                        prev_cycle = None
                     c.setFillColor(colors.black)
-                    c.drawString(40, y, str(item.get('cycle', ''))[:12])
-                    c.drawString(130, y, str(item.get('index', '')))
+                    seq += 1
+                    c.drawString(40, y, str(seq))
+                    cur_cycle = str(item.get('cycle', ''))
+                    if cur_cycle != prev_cycle:
+                        c.drawString(75, y, cur_cycle[:12])
+                        prev_cycle = cur_cycle
                     c.drawString(165, y, str(item.get('doc_name', ''))[:24])
                     c.drawString(350, y, str(item.get('uploaded_count', 0)))
                     c.drawString(390, y, str(item.get('status', '')))
+                    y -= 13
+
+            # 本期文档上传明细
+            doc_details = metrics.get('doc_details', [])
+            if doc_details:
+                c.showPage()
+                c.setFont('STSong-Light', 12)
+                c.setFillColor(colors.black)
+                c.drawString(40, 810, '本期文档上传明细')
+                c.setFont('STSong-Light', 9)
+                y = 790
+                c.drawString(40, y, '序号')
+                c.drawString(75, y, '周期')
+                c.drawString(165, y, '文档名称')
+                c.drawString(350, y, '上传人')
+                c.drawString(420, y, '上传时间')
+                y -= 14
+
+                prev_cycle = None
+                for idx, d in enumerate(doc_details, 1):
+                    if y < 60:
+                        c.showPage()
+                        c.setFont('STSong-Light', 9)
+                        y = 810
+                        c.drawString(40, y, '序号')
+                        c.drawString(75, y, '周期')
+                        c.drawString(165, y, '文档名称')
+                        c.drawString(350, y, '上传人')
+                        c.drawString(420, y, '上传时间')
+                        y -= 14
+                        prev_cycle = None
+                    c.setFillColor(colors.black)
+                    c.drawString(40, y, str(idx))
+                    cur_cycle = str(d.get('cycle', ''))
+                    if cur_cycle != prev_cycle:
+                        c.drawString(75, y, cur_cycle[:12])
+                        prev_cycle = cur_cycle
+                    doc_name = str(d.get('doc_name', ''))
+                    if d.get('is_update'):
+                        doc_name += '(更新)'
+                    c.drawString(165, y, doc_name[:24])
+                    c.drawString(350, y, str(d.get('uploader', '-') or '-')[:10])
+                    upload_time = str(d.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
+                    c.drawString(420, y, upload_time)
                     y -= 13
 
             c.save()

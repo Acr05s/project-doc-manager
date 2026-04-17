@@ -1305,7 +1305,18 @@ async function _unbanIp(ip) {
     }
 }
 
+// 安全码验证缓存：验证通过后一段时间内免再次输入
+let _approvalCodeVerifiedAt = 0;
+const APPROVAL_CODE_CACHE_MINUTES = 5; // 默认缓存时间(分钟)
+
 async function verifyApprovalCodeForAdminSettings() {
+    // 检查缓存是否有效
+    const cacheMinutes = Number(appState.systemSettings?.approval_code_cache_minutes) || APPROVAL_CODE_CACHE_MINUTES;
+    const elapsed = (Date.now() - _approvalCodeVerifiedAt) / 60000;
+    if (_approvalCodeVerifiedAt > 0 && elapsed < cacheMinutes) {
+        return true; // 缓存有效，免再次输入
+    }
+
     const askCode = () => new Promise((resolve) => {
         showInputModal('安全校验', [
             { label: '审批安全码', key: 'code', type: 'password', placeholder: '请输入审批安全码' }
@@ -1335,6 +1346,7 @@ async function verifyApprovalCodeForAdminSettings() {
             const result = await response.json();
 
             if (result.status === 'success') {
+                _approvalCodeVerifiedAt = Date.now();
                 return true;
             }
 

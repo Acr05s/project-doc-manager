@@ -300,7 +300,15 @@ window.moduleManagement = {
     },
 
     async deleteModule(moduleId) {
-        if (!confirm('确定要删除此模块吗？')) return;
+        const confirmed = await new Promise(resolve => {
+            if (typeof window.showConfirmModal === 'function') {
+                window.showConfirmModal('删除模块', '确定要删除此模块吗？', () => resolve(true), () => resolve(false));
+            } else {
+                // fallback: 动态导入
+                import('./ui.js').then(ui => ui.showConfirmModal('删除模块', '确定要删除此模块吗？', () => resolve(true), () => resolve(false)));
+            }
+        });
+        if (!confirmed) return;
 
         try {
             const response = await fetch(`/api/modules/delete/${moduleId}`, {

@@ -2,7 +2,7 @@
  * 文档归档审批模块
  */
 
-import { showNotification, showInputModal } from './ui.js';
+import { showNotification, showInputModal, showConfirmModal } from './ui.js';
 import { getCurrentUser, authState } from './auth.js';
 import { getArchiveApprovers } from './api.js';
 import { appState } from './app-state.js';
@@ -595,7 +595,8 @@ function escapeHtml(text) {
  * 撤回归档请求
  */
 export async function handleWithdrawArchiveRequest(projectId, approvalId) {
-    if (!confirm('确定要撤回此归档请求吗？')) {
+    const confirmed = await new Promise(resolve => showConfirmModal('撤回归档', '确定要撤回此归档请求吗？', () => resolve(true), () => resolve(false)));
+    if (!confirmed) {
         return;
     }
 
