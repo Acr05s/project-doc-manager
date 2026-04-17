@@ -1109,7 +1109,12 @@ export async function saveScheduledReportConfig(e) {
 
         const savedTaskId = result.data?.task_id || editingTaskId || '';
         if (_preSaveTaskScope === 'all') {
-            await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
+            // 确保新任务所属的项目在加载列表中
+            const selectedIds = getSelectedProjectIdsFromMulti();
+            if (!selectedIds.includes(projectId)) {
+                selectedIds.push(projectId);
+            }
+            await loadTasksForAllProjects(selectedIds);
         } else {
             await loadTasksForProject(projectId, savedTaskId);
         }
