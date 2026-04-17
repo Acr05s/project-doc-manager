@@ -153,6 +153,23 @@ def notify_user_rejected(username, email):
     send_email(email, subject, content)
 
 
+def notify_user_approval_code_reset(username, email, operator_name='管理员'):
+    """通知用户审批安全码被重置"""
+    if not email:
+        return
+    subject = '【项目资料管理平台】审批安全码已重置'
+    content = f'''您好 {username}，
+
+您的审批安全码已由 {operator_name} 重置为当前登录密码。
+
+为保障账户安全，您在下次使用审批安全码时需要先重新设置新审批码。
+
+如该操作并非您本人知情，请立即联系系统管理员。
+
+--- 项目资料管理平台'''
+    send_email(email, subject, content)
+
+
 def notify_archive_approved(username, email, project_name, doc_names):
     """通知文档归档审批通过"""
     if not email:

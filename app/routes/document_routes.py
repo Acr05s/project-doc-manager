@@ -5,6 +5,7 @@ import zipfile
 import io
 import os
 import hashlib
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Dict
@@ -87,9 +88,9 @@ def upload_document():
         
         # 上传成功后，将文档添加到documents_db中
         if result.get('status') == 'success':
-            from datetime import datetime
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            doc_id = f"{cycle}_{doc_name}_{timestamp}"
+            # 多版本场景下同一秒可能连续上传多份同名文档，使用UUID避免 doc_id 冲突
+            timestamp = now_with_timezone().strftime('%Y%m%d_%H%M%S_%f')
+            doc_id = f"{cycle}_{doc_name}_{timestamp}_{uuid.uuid4().hex[:8]}"
             
             # 构建文档元数据
             doc_metadata = {
@@ -173,17 +174,23 @@ def list_documents():
                             continue
                         # 检查是否有已上传的文档
                         if 'uploaded_docs' in cycle_info:
-                            for doc in cycle_info['uploaded_docs']:
+                            for idx, doc in enumerate(cycle_info['uploaded_docs']):
                                 # 更灵活的文档名称匹配
                                 doc_doc_name = doc.get('doc_name') or doc.get('name') or doc.get('docName')
                                 # 过滤文档名称
                                 if doc_name and doc_doc_name != doc_name:
                                     continue
                                 # 确保文档有 ID
-                                doc_id = doc.get('doc_id') or f"{doc_cycle}_{doc_doc_name}_{doc.get('upload_time', '').replace(':', '_').replace('-', '_')}"
+                                if doc.get('doc_id'):
+                                    doc_id = doc.get('doc_id')
+                                else:
+                                    seed = f"{doc_cycle}|{doc_doc_name}|{doc.get('upload_time', '')}|{doc.get('filename', '')}|{doc.get('file_path', '')}|{idx}"
+                                    digest = hashlib.md5(seed.encode('utf-8')).hexdigest()[:12]
+                                    doc_id = f"{doc_cycle}_{doc_doc_name}_{digest}"
                                 # 添加到结果列表（先展开 doc，再设置 id，避免 doc 中旧的 id 字段覆盖正确的 doc_id）
                                 doc_copy = dict(doc)
                                 doc_copy['id'] = doc_id
+                                doc_copy['doc_id'] = doc_id
                                 docs.append(doc_copy)
         
         return jsonify({
@@ -1594,7 +1601,7 @@ def select_files():
             # 构建文档元数据
             from datetime import datetime
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            doc_id = f"{cycle}_{doc_name}_{timestamp}_{len(results)}"
+            doc_id = f"{cycle}_{doc_name}_{timestamp}_{uuid.uuid4().hex[:8]}"
             
             # 获取目录信息（来自前端的 source_dir 字段），用于打包时建立子目录
             source_dir = file_info.get('source_dir', '') or ''
@@ -2697,7 +2704,7 @@ def archive_from_zip():
             'custom_attrs': {}  # 自定义属性（归档时不携带）
         }
 
-        doc_id = f"{cycle}_{doc_name}_{timestamp}"
+        doc_id = f"{cycle}_{doc_name}_{timestamp}_{uuid.uuid4().hex[:8]}"
         doc_manager.documents_db[doc_id] = metadata
 
         # ===== 保存到项目配置 =====
@@ -2856,7 +2863,7 @@ def confirm_pending_files():
                             if cycle not in project_config['cycles']:
                                 project_config['cycles'].append(cycle)
                             
-                            doc_id = f"{cycle}_{doc_name}_{timestamp}"
+                            doc_id = f"{cycle}_{doc_name}_{timestamp}_{uuid.uuid4().hex[:8]}"
                             project_config['documents'][cycle]['uploaded_docs'].append({
                                 'doc_name': doc_name,
                                 'filename': new_filename,

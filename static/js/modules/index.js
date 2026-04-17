@@ -1228,14 +1228,15 @@ function initMsgBatchToolbar() {
         batchDeleteBtn.addEventListener('click', async () => {
             const ids = getSelectedMsgIds();
             if (!ids.length) return;
-            if (!confirm(`确定要删除选中的 ${ids.length} 条消息吗？`)) return;
-            const result = await batchDeleteMessages(ids);
-            if (result.status === 'success') {
-                showNotification(result.message || `已删除 ${ids.length} 条消息`, 'success');
-                await loadMessages();
-            } else {
-                showNotification(result.message || '操作失败', 'error');
-            }
+            showConfirmModal('批量删除消息', `确定要删除选中的 ${ids.length} 条消息吗？`, async () => {
+                const result = await batchDeleteMessages(ids);
+                if (result.status === 'success') {
+                    showNotification(result.message || `已删除 ${ids.length} 条消息`, 'success');
+                    await loadMessages();
+                } else {
+                    showNotification(result.message || '操作失败', 'error');
+                }
+            });
         });
     }
 }

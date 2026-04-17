@@ -1410,6 +1410,30 @@
                     <select id="scheduledConfigProjectId" style="margin-top:8px;">
                         <option value="">-- 加载项目中 --</option>
                     </select>
+                    <div style="margin-top:10px; border:1px solid #d8e5f6; border-radius:8px; background:#fff; padding:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+                            <label style="font-size:12px; color:#456; font-weight:600; margin:0;">项目多选（支持跨项目批量查看任务）</label>
+                            <label style="font-size:12px; color:#456; display:flex; align-items:center; gap:6px; margin:0;">
+                                <input type="checkbox" id="scheduledProjectSelectAll" checked>
+                                <span>全选</span>
+                            </label>
+                        </div>
+                        <div id="scheduledProjectMultiList" style="display:flex; flex-wrap:wrap; gap:8px 14px; max-height:120px; overflow:auto; padding-right:2px;"></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-top:10px;">
+                        <div>
+                            <label for="scheduledOrgFilter" style="font-size:12px; color:#456;">按承建单位筛选</label>
+                            <select id="scheduledOrgFilter" style="margin-top:4px;">
+                                <option value="">全部承建单位</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="scheduledCreatorFilter" style="font-size:12px; color:#456;">按任务创建人筛选</label>
+                            <select id="scheduledCreatorFilter" style="margin-top:4px;">
+                                <option value="">全部创建人</option>
+                            </select>
+                        </div>
+                    </div>
                     <div style="font-size:12px; color:#567; margin-top:6px;">这里是筛选器：可选单个项目；选择“全部项目”可查看所有任务。点击“新建任务”后再选择任务所属项目并配置内容。</div>
                 </div>
 
@@ -1682,6 +1706,13 @@
                             <span>允许管理员参与归档审批</span>
                         </label>
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">关闭后，管理员不显示归档审批菜单，也不可执行归档审批动作。</small>
+                    </div>
+                    <div class="form-group" style="margin-top: 12px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="adminSystemSettingsRequireApprovalCode" style="width: 18px; height: 18px;">
+                            <span>管理员进入系统设置前需校验审批安全码</span>
+                        </label>
+                        <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，admin 每次进入系统设置都需要先通过审批安全码验证（首次使用将引导设置新审批码）。</small>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">

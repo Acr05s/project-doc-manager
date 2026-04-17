@@ -139,11 +139,24 @@ def api_update_settings():
             'fast_preview_threshold', 'email_notification_enabled',
             'require_approval_code', 'log_retention_days', 'timezone',
             'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption',
-            'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled'
+            'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled',
+            'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code'
         ]
+        # 规范化布尔字段，确保 false 被正确保存
+        bool_fields = {'email_notification_enabled', 'require_approval_code', 'force_agreement_on_login', 'watermark_enabled', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code'}
         for field in allowed_fields:
             if field in data:
-                current_settings[field] = data[field]
+                val = data[field]
+                if field in bool_fields:
+                    # 将字符串、0、'' 等转换为正确的布尔值
+                    if isinstance(val, bool):
+                        current_settings[field] = val
+                    elif isinstance(val, str):
+                        current_settings[field] = val.lower() in ('true', '1', 'yes')
+                    else:
+                        current_settings[field] = bool(val)
+                else:
+                    current_settings[field] = val
         
         # 保存到settings.json
         if save_settings(current_settings):

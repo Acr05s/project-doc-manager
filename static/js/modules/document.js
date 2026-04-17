@@ -1059,8 +1059,8 @@ export async function markDocumentNotInvolved(cycle, docName) {
     try {
         // 检查文档当前状态（从文档列表和项目配置中）
         const docsList = await getCycleDocuments(cycle);
-        const doc = docsList.find(d => d.doc_name === docName);
-        const isNotInvolvedFromDocs = doc && (doc.not_involved || doc._not_involved);
+        const sameNameDocs = docsList.filter(d => d.doc_name === docName);
+        const isNotInvolvedFromDocs = sameNameDocs.some(d => d.not_involved || d._not_involved);
         const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[docName];
         const isCurrentlyNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
         
@@ -1072,12 +1072,21 @@ export async function markDocumentNotInvolved(cycle, docName) {
                 showLoading(true);
                 try {
                     let success = true;
-                    if (doc) {
-                        const docData = { not_involved: false };
-                        const result = await editDocument(doc.id, docData);
-                        if (result.status !== 'success') {
+                    if (sameNameDocs.length > 0) {
+                        // 多版本文档场景：同一文档类型下的所有记录都应同步撤销不涉及
+                        const patchResults = await Promise.all(
+                            sameNameDocs
+                                .map(d => d.id || d.doc_id)
+                                .filter(Boolean)
+                                .map(async (id) => {
+                                    const result = await editDocument(id, { not_involved: false });
+                                    return { id, result };
+                                })
+                        );
+                        const failed = patchResults.find(item => item.result?.status !== 'success');
+                        if (failed) {
                             success = false;
-                            showNotification('操作失败: ' + result.message, 'error');
+                            showNotification('操作失败: ' + (failed.result?.message || '部分文档更新失败'), 'error');
                         }
                     }
                     if (appState.projectConfig.documents_not_involved?.[cycle]?.[docName]) {

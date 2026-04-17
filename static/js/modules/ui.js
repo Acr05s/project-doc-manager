@@ -1150,8 +1150,26 @@ export function setupEventListeners() {
     const systemSettingsMenuItem = document.getElementById('systemSettingsMenuItem');
     const systemSettingsModal = document.getElementById('systemSettingsModal');
     if (systemSettingsMenuItem && systemSettingsModal) {
-        systemSettingsMenuItem.addEventListener('click', (e) => {
+            systemSettingsMenuItem.addEventListener('click', async (e) => {
             e.preventDefault();
+                const user = getCurrentUser();
+            let needApprovalCheck = !!(appState.systemSettings && appState.systemSettings.admin_system_settings_require_approval_code);
+            if (user && user.role === 'admin') {
+                try {
+                    const latestResp = await fetch('/api/settings');
+                    const latestResult = await latestResp.json();
+                    if (latestResult.status === 'success' && latestResult.data) {
+                        appState.systemSettings = latestResult.data;
+                        needApprovalCheck = !!latestResult.data.admin_system_settings_require_approval_code;
+                    }
+                } catch (error) {
+                    console.warn('读取最新系统设置失败，使用本地缓存继续:', error);
+                }
+            }
+                if (user && user.role === 'admin' && needApprovalCheck) {
+                    const verified = await verifyApprovalCodeForAdminSettings();
+                    if (!verified) return;
+                }
             loadSystemSettings();
             openModal(systemSettingsModal);
         });
@@ -1286,6 +1304,59 @@ async function _unbanIp(ip) {
         }
     } catch (e) {
         showNotification('解封请求失败', 'error');
+    }
+}
+
+async function verifyApprovalCodeForAdminSettings() {
+    const askCode = () => new Promise((resolve) => {
+        showInputModal('安全校验', [
+            { label: '审批安全码', key: 'code', type: 'password', placeholder: '请输入审批安全码' }
+        ], (values) => resolve(values || null));
+    });
+
+    const askResetCode = () => new Promise((resolve) => {
+        showInputModal('首次使用审批安全码，请先完成设置', [
+            { label: '当前登录密码', key: 'code', type: 'password', placeholder: '请输入当前登录密码' },
+            { label: '新审批安全码', key: 'new_code', type: 'password', placeholder: '至少8位，包含字母和数字' }
+        ], (values) => resolve(values || null));
+    });
+
+    let payload = await askCode();
+    if (!payload || !payload.code) {
+        showNotification('已取消安全校验', 'info');
+        return false;
+    }
+
+    while (true) {
+        try {
+            const response = await fetch('/api/me/approval-code/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                return true;
+            }
+
+            if (result.status === 'needs_change') {
+                const resetValues = await askResetCode();
+                if (!resetValues || !resetValues.code || !resetValues.new_code) {
+                    showNotification('已取消安全校验', 'info');
+                    return false;
+                }
+                payload = { code: resetValues.code, new_code: resetValues.new_code };
+                continue;
+            }
+
+            showNotification(result.message || '审批安全码校验失败', 'error');
+            return false;
+        } catch (error) {
+            console.error('审批安全码校验失败:', error);
+            showNotification('审批安全码校验失败', 'error');
+            return false;
+        }
     }
 }
 
@@ -1481,7 +1552,13 @@ async function loadSystemSettings() {
 
             const adminArchiveApprovalEnabled = document.getElementById('adminArchiveApprovalEnabled');
             if (adminArchiveApprovalEnabled) {
-                adminArchiveApprovalEnabled.checked = settings.admin_archive_approval_enabled !== false;
+                // 确保正确识别 false：只要不是严格等于 true，就认为是 false
+                adminArchiveApprovalEnabled.checked = settings.admin_archive_approval_enabled === true;
+            }
+
+            const adminSystemSettingsRequireApprovalCode = document.getElementById('adminSystemSettingsRequireApprovalCode');
+            if (adminSystemSettingsRequireApprovalCode) {
+                adminSystemSettingsRequireApprovalCode.checked = settings.admin_system_settings_require_approval_code === true;
             }
 
             const watermarkEnabled = document.getElementById('watermarkEnabled');
@@ -1587,6 +1664,11 @@ async function saveSystemSettings() {
         const adminArchiveApprovalEnabled = document.getElementById('adminArchiveApprovalEnabled');
         if (adminArchiveApprovalEnabled) {
             settings.admin_archive_approval_enabled = adminArchiveApprovalEnabled.checked;
+        }
+
+        const adminSystemSettingsRequireApprovalCode = document.getElementById('adminSystemSettingsRequireApprovalCode');
+        if (adminSystemSettingsRequireApprovalCode) {
+            settings.admin_system_settings_require_approval_code = adminSystemSettingsRequireApprovalCode.checked;
         }
 
         const watermarkEnabled = document.getElementById('watermarkEnabled');

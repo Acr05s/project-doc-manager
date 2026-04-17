@@ -85,6 +85,10 @@ def create_project_report_task(project_id):
         if not _is_pmo_plus():
             return _forbidden_resp()
         data = request.get_json() or {}
+        data.setdefault('created_by_user_id', int(getattr(current_user, 'id', 0) or 0))
+        data.setdefault('created_by_username', str(getattr(current_user, 'username', '') or ''))
+        data.setdefault('created_by_display_name', str(getattr(current_user, 'display_name', '') or getattr(current_user, 'username', '') or ''))
+        data.setdefault('created_by_organization', str(getattr(current_user, 'organization', '') or ''))
         task = scheduled_report_service.create_task(project_id, data)
         return jsonify({'status': 'success', 'data': task, 'message': '任务已创建'})
     except Exception as e:

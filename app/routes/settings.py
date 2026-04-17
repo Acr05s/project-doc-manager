@@ -46,7 +46,8 @@ def load_settings():
         'smtp_encryption': 'ssl',
         'log_retention_days': 30,
         'timezone': 'Asia/Shanghai',
-        'admin_archive_approval_enabled': True
+        'admin_archive_approval_enabled': True,
+        'admin_system_settings_require_approval_code': False
     }
     
     # 优先从plugin.json读取
@@ -216,7 +217,7 @@ def update_settings():
         print(f"[update_settings] Current settings: {current_settings}", flush=True)
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code']
         print(f"[update_settings] Allowed fields: {allowed_fields}", flush=True)
         print(f"[update_settings] Data: {data}", flush=True)
         print(f"[update_settings] Data type: {type(data)}", flush=True)
@@ -226,11 +227,23 @@ def update_settings():
         if 'fast_preview_threshold' in data:
             print(f"[update_settings] data['fast_preview_threshold'] = {data['fast_preview_threshold']}", flush=True)
         
+        # 规范化布尔字段，确保 false 被正确保存
+        bool_fields = {'email_notification_enabled', 'require_approval_code', 'force_agreement_on_login', 'watermark_enabled', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code'}
         for field in allowed_fields:
             print(f"[update_settings] Checking field: {field}", flush=True)
             if field in data:
                 print(f"[update_settings] >>> Updating {field}: {data[field]}", flush=True)
-                current_settings[field] = data[field]
+                val = data[field]
+                if field in bool_fields:
+                    # 将字符串'false'、0、'' 等转换为正确的布尔值
+                    if isinstance(val, bool):
+                        current_settings[field] = val
+                    elif isinstance(val, str):
+                        current_settings[field] = val.lower() in ('true', '1', 'yes')
+                    else:
+                        current_settings[field] = bool(val)
+                else:
+                    current_settings[field] = val
                 print(f"[update_settings] >>> Updated current_settings[{field}] = {current_settings[field]}", flush=True)
             else:
                 print(f"[update_settings] Field not in data: {field}", flush=True)

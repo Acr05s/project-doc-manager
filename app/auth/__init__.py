@@ -823,6 +823,21 @@ def admin_reset_approval_code(user_id):
     if result['status'] == 'success':
         ip = get_real_ip()
         user_manager.add_operation_log(current_user.id, current_user.username, 'reset_approval_code', str(target.uuid), None, None, ip)
+        # 通知被重置用户
+        message_manager.send_message(
+            receiver_id=target.id,
+            title='审批安全码已重置',
+            content=f'您的审批安全码已由管理员 {current_user.username} 重置为登录密码。为保障安全，下次使用审批安全码时请先完成重新设置。',
+            msg_type='system',
+            related_id=str(target.uuid),
+            related_type='user'
+        )
+        # 发送邮件通知（系统邮件通知开启时生效）
+        try:
+            from app.utils.notification import notify_user_approval_code_reset
+            notify_user_approval_code_reset(target.username, target.email, current_user.username)
+        except Exception as e:
+            print(f"发送审批安全码重置邮件失败: {e}")
     return jsonify(result)
 
 @auth_bp.route('/api/admin/users/<user_id>/role', methods=['POST'])

@@ -89,6 +89,10 @@ class ScheduledReportService:
             'last_run_key': '',
             'run_count': 0,
             'last_run_at': '',
+            'created_by_user_id': 0,
+            'created_by_username': '',
+            'created_by_display_name': '',
+            'created_by_organization': '',
             'created_at': now_iso,
             'updated_at': now_iso,
         }
@@ -164,6 +168,13 @@ class ScheduledReportService:
         except Exception:
             merged['run_count'] = 0
         merged['last_run_at'] = str(merged.get('last_run_at') or '')
+        try:
+            merged['created_by_user_id'] = int(merged.get('created_by_user_id') or 0)
+        except Exception:
+            merged['created_by_user_id'] = 0
+        merged['created_by_username'] = str(merged.get('created_by_username') or '')
+        merged['created_by_display_name'] = str(merged.get('created_by_display_name') or '')
+        merged['created_by_organization'] = str(merged.get('created_by_organization') or '')
         merged['created_at'] = str(merged.get('created_at') or base['created_at'])
         merged['updated_at'] = now_with_timezone().isoformat()
         return merged
