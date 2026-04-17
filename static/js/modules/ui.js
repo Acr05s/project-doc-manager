@@ -1156,7 +1156,7 @@ export function setupEventListeners() {
             if (user && user.role === 'admin') {
                 // 刷新最新的系统设置
                 try {
-                    const latestResp = await fetch('/api/settings');
+                    const latestResp = await fetch('/api/settings', { cache: 'no-store' });
                     const latestResult = await latestResp.json();
                     if (latestResult.status === 'success' && latestResult.data) {
                         appState.systemSettings = latestResult.data;
@@ -1427,7 +1427,7 @@ function _applySystemNameToPage(systemName) {
  */
 export async function applySystemSettingsToPage() {
     try {
-        const response = await fetch('/api/settings');
+        const response = await fetch('/api/settings', { cache: 'no-store' });
         const result = await response.json();
         if (result.status === 'success' && result.data) {
             const settings = result.data;
@@ -1543,7 +1543,7 @@ function applyDynamicWatermark(settings) {
  */
 async function loadSystemSettings() {
     try {
-        const response = await fetch('/api/settings');
+        const response = await fetch('/api/settings', { cache: 'no-store' });
         const result = await response.json();
         
         if (result.status === 'success' && result.data) {

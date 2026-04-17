@@ -77,13 +77,12 @@ def load_settings():
 def save_settings(settings):
     """保存系统设置到settings.json"""
     try:
-        print(f"[save_settings] Saving settings: {settings}", flush=True)
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, ensure_ascii=False, indent=2)
-        print(f"[save_settings] Saved to {SETTINGS_FILE}", flush=True)
         return True
     except Exception as e:
-        print(f"保存设置失败: {e}", flush=True)
+        import logging
+        logging.getLogger(__name__).error(f'保存设置失败: {e}')
         return False
 
 
@@ -195,10 +194,12 @@ def get_settings():
     """获取系统设置"""
     settings = load_settings()
     settings['current_version'] = get_local_version()
-    return jsonify({
+    resp = jsonify({
         'status': 'success',
         'data': settings
     })
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @settings_bp.route('/api/settings', methods=['POST'])

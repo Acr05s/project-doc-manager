@@ -512,7 +512,7 @@ async function loadAccessibleProjects(preferredProjectId) {
 async function loadTasksForProject(projectId, preferredTaskId = '') {
     _taskScope = 'single';
     _currentProjectId = projectId;
-    const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`);
+    const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`, { cache: 'no-store' });
     const result = await safeParseJson(resp);
     if (result.status !== 'success') {
         throw new Error(result.message || '加载任务失败');
@@ -553,7 +553,7 @@ async function loadTasksForAllProjects(projectIds = []) {
     const requests = projects.map(async (project) => {
         const projectId = String(project.id || '').trim();
         if (!projectId) return [];
-        const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`);
+        const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`, { cache: 'no-store' });
         const result = await safeParseJson(resp);
         if (result.status !== 'success') return [];
 
@@ -759,20 +759,30 @@ async function batchEnableTasks() {
     try {
         showLoading(true);
         const selectedTasks = _taskList.filter((t) => ids.includes(String(t.task_id || '')));
-        await Promise.all(selectedTasks.map((task) => fetch(
-            `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}/toggle`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: true })
-            }
-        )));
+        const results = await Promise.all(selectedTasks.map(async (task) => {
+            const resp = await fetch(
+                `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}/toggle`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: true })
+                }
+            );
+            const r = await safeParseJson(resp);
+            return r.status === 'success';
+        }));
+        const successCount = results.filter(Boolean).length;
+        const failCount = results.length - successCount;
         if (_taskScope === 'all') {
             await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
         } else {
             await loadTasksForProject(_currentProjectId, '');
         }
-        showNotification(`已启用 ${ids.length} 个任务`, 'success');
+        if (failCount > 0) {
+            showNotification(`成功启用 ${successCount} 个，${failCount} 个失败`, 'warning');
+        } else {
+            showNotification(`已启用 ${successCount} 个任务`, 'success');
+        }
     } catch (e) {
         showNotification(e.message || '批量启用失败', 'error');
     } finally {
@@ -792,16 +802,26 @@ async function batchDeleteTasks() {
     try {
         showLoading(true);
         const selectedTasks = _taskList.filter((t) => ids.includes(String(t.task_id || '')));
-        await Promise.all(selectedTasks.map((task) => fetch(
-            `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}`,
-            { method: 'DELETE' }
-        )));
+        const results = await Promise.all(selectedTasks.map(async (task) => {
+            const resp = await fetch(
+                `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}`,
+                { method: 'DELETE' }
+            );
+            const r = await safeParseJson(resp);
+            return r.status === 'success';
+        }));
+        const successCount = results.filter(Boolean).length;
+        const failCount = results.length - successCount;
         if (_taskScope === 'all') {
             await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
         } else {
             await loadTasksForProject(_currentProjectId, '');
         }
-        showNotification(`已删除 ${ids.length} 个任务`, 'success');
+        if (failCount > 0) {
+            showNotification(`成功删除 ${successCount} 个，${failCount} 个删除失败`, failCount === results.length ? 'error' : 'warning');
+        } else {
+            showNotification(`已删除 ${successCount} 个任务`, 'success');
+        }
     } catch (e) {
         showNotification(e.message || '批量删除失败', 'error');
     } finally {

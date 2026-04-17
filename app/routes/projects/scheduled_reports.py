@@ -20,7 +20,7 @@ def get_project_report_schedule(project_id):
     try:
         detail = scheduled_report_service.get_schedule_detail(project_id)
         project = scheduled_report_service._load_project(project_id)  # noqa: SLF001 - 路由层展示用途
-        return jsonify({
+        resp = jsonify({
             'status': 'success',
             'data': detail.get('schedule', {}),
             'tasks': detail.get('tasks', []),
@@ -30,6 +30,8 @@ def get_project_report_schedule(project_id):
                 'project_name': project.get('name', project_id),
             }
         })
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
