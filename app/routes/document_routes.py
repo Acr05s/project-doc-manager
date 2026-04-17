@@ -13,6 +13,7 @@ from app.utils.zip_matcher import create_matcher
 from app.utils.json_file_manager import json_file_manager
 from app.utils.base import normalize_file_path
 from src.services.preview_service import PreviewService
+from app.routes.settings import now_with_timezone
 
 document_bp = Blueprint('document', __name__)
 doc_manager = None
@@ -1608,7 +1609,7 @@ def select_files():
                 'original_filename': file_path.name,
                 'file_path': str(file_path),
                 'project_name': project_name,
-                'upload_time': datetime.now().isoformat(),
+                'upload_time': now_with_timezone().isoformat(),
                 'source': 'select',
                 'file_size': file_path.stat().st_size,
                 'doc_id': doc_id,
@@ -1715,7 +1716,7 @@ def add_zip_record():
             zip_info['id'] = str(uuid.uuid4())
         
         if 'upload_time' not in zip_info:
-            zip_info['upload_time'] = datetime.now().isoformat()
+            zip_info['upload_time'] = now_with_timezone().isoformat()
         
         # 使用JSON文件管理器添加ZIP上传记录
         success = json_file_manager.add_zip_upload_record(str(project_file), zip_info)
@@ -1876,7 +1877,7 @@ def start_zip_match():
             'zip_path': zip_path,
             'project_id': project_id,
             'result': None,
-            'created_at': datetime.now().isoformat()
+            'created_at': now_with_timezone().isoformat()
         }
         
         # 在后台线程执行匹配（简单实现，实际可用Celery）
@@ -2032,7 +2033,7 @@ def upload_zip():
                     'name': original_filename,
                     'path': path_for_record,
                     'file_count': result.get('total_files', 0),
-                    'upload_time': datetime.now().isoformat(),
+                    'upload_time': now_with_timezone().isoformat(),
                     'status': '已完成'
                 }
                 
@@ -2684,7 +2685,7 @@ def archive_from_zip():
             'party_b_seal': party_b_seal,
             'no_seal': no_seal,
             'other_seal': other_seal,
-            'upload_time': datetime.now().isoformat(),
+            'upload_time': now_with_timezone().isoformat(),
             'source': 'zip',
             'detected_signature': detected_signature,
             'sign_confidence': 0.0,
@@ -2723,7 +2724,7 @@ def archive_from_zip():
                     'sign_date': sign_date,
                     'signer': signer,
                     'has_seal': has_seal or detected_seal,
-                    'upload_time': datetime.now().isoformat(),
+                    'upload_time': now_with_timezone().isoformat(),
                     'source': 'zip',
                     'doc_id': doc_id,
                     'directory': source_dir if source_dir else '/',  # 使用前端传递的目录信息
@@ -2865,7 +2866,7 @@ def confirm_pending_files():
                                 'sign_date': '',
                                 'signer': '',
                                 'has_seal': False,
-                                'upload_time': datetime.now().isoformat(),
+                                'upload_time': now_with_timezone().isoformat(),
                                 'source': 'zip',
                                 'doc_id': doc_id,
                                 'directory': directory if directory else '/',  # 目录：默认根目录
@@ -3028,7 +3029,7 @@ def init_upload():
             'file_size': file_size,
             'uploaded_chunks': [],
             'temp_folder': str(temp_folder),
-            'init_time': datetime.now().isoformat()
+            'init_time': now_with_timezone().isoformat()
         }
         
         return jsonify({

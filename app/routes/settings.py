@@ -357,7 +357,7 @@ DEFAULT_MENU_PERMISSIONS = {
     'approvalHistoryBtn': {'label': '📊 审批历史', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
     'scheduledReportTaskMenuItem': {'label': '🗓️ 定时报告任务', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'sidebar'},
     'logManagementMenuItem': {'label': '📝 操作日志', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], 'group': 'sidebar'},
-    'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
+    'userManagementMenuItem': {'label': '👤 用户管理', 'roles': ['admin', 'pmo_leader', 'pmo', 'project_admin'], 'group': 'sidebar'},
     'orgManagementMenuItem': {'label': '🏢 承建单位管理', 'roles': ['admin', 'pmo', 'pmo_leader'], 'group': 'sidebar'},
     'projectManagementMenuItem': {'label': '📁 项目管理', 'roles': ['admin', 'pmo', 'pmo_leader', 'project_admin'], 'group': 'sidebar'},
 }

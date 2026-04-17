@@ -156,6 +156,21 @@ export async function loadUserManagementList() {
             actionTd.style.padding = '8px';
             actionTd.style.borderBottom = '1px solid #eee';
             actionTd.style.whiteSpace = 'nowrap';
+            const currentRole = authState.user?.role;
+            const isSelfRow = String(user.id) === String(authState.user?.id);
+            const targetRole = user.role;
+            // 权限层级：admin > pmo_leader > pmo > project_admin > contractor
+            // 每级只能管理下级，不能操作自己
+            let canManageRow = false;
+            if (currentRole === 'admin') {
+                canManageRow = !isSelfRow;
+            } else if (currentRole === 'pmo_leader') {
+                canManageRow = !isSelfRow && ['pmo', 'pmo_leader'].includes(targetRole);
+            } else if (currentRole === 'pmo') {
+                canManageRow = !isSelfRow && ['project_admin', 'contractor'].includes(targetRole);
+            } else if (currentRole === 'project_admin') {
+                canManageRow = !isSelfRow && targetRole === 'contractor';
+            }
             
             // 创建角色选择器
             const roleSelect = document.createElement('select');
@@ -197,6 +212,7 @@ export async function loadUserManagementList() {
                 roleSelect.appendChild(option);
             });
             
+            roleSelect.disabled = !canManageRow;
             actionTd.appendChild(roleSelect);
             
             // 创建重置密码按钮
@@ -206,6 +222,7 @@ export async function loadUserManagementList() {
             resetBtn.style.padding = '4px 8px';
             resetBtn.style.fontSize = '12px';
             resetBtn.textContent = '重置密码';
+            resetBtn.disabled = !canManageRow;
             actionTd.appendChild(resetBtn);
             
             // 创建启用/禁用按钮
@@ -215,6 +232,7 @@ export async function loadUserManagementList() {
             toggleBtn.style.padding = '4px 8px';
             toggleBtn.style.fontSize = '12px';
             toggleBtn.textContent = user.status === 'active' ? '禁用' : '启用';
+            toggleBtn.disabled = !canManageRow;
             actionTd.appendChild(toggleBtn);
             
             // 创建删除按钮
@@ -223,6 +241,7 @@ export async function loadUserManagementList() {
             deleteBtn.style.padding = '4px 8px';
             deleteBtn.style.fontSize = '12px';
             deleteBtn.textContent = '删除';
+            deleteBtn.disabled = !canManageRow;
             actionTd.appendChild(deleteBtn);
             
             tr.appendChild(actionTd);
@@ -242,6 +261,7 @@ export async function loadUserManagementList() {
             resetApprovalBtn.style.padding = '4px 8px';
             resetApprovalBtn.style.fontSize = '12px';
             resetApprovalBtn.textContent = '重置审批码';
+            resetApprovalBtn.disabled = !canManageRow;
             actionTd.appendChild(resetApprovalBtn);
 
             resetApprovalBtn.addEventListener('click', () => resetUserApprovalCode(user.id));

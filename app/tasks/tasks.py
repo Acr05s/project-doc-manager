@@ -4,6 +4,7 @@ import os
 import json
 import logging
 from datetime import datetime
+from app.routes.settings import now_with_timezone
 from celery import Celery
 from flask import current_app
 
@@ -52,8 +53,8 @@ def package_project_task(self, project_id, project_config):
         'status': 'running',
         'progress': 0,
         'message': '开始打包项目...',
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
+        'created_at': now_with_timezone().isoformat(),
+        'updated_at': now_with_timezone().isoformat()
     }
     
     try:
@@ -71,7 +72,7 @@ def package_project_task(self, project_id, project_config):
             )
             tasks_store[task_id]['progress'] = i * 10
             tasks_store[task_id]['message'] = f'正在打包项目... {i * 10}%'
-            tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+            tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
             
             # 实际打包操作
             if i == 5:
@@ -83,7 +84,7 @@ def package_project_task(self, project_id, project_config):
         
         tasks_store[task_id]['status'] = 'completed'
         tasks_store[task_id]['message'] = '项目打包完成'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         return {
             'status': 'success',
@@ -94,7 +95,7 @@ def package_project_task(self, project_id, project_config):
     except Exception as e:
         tasks_store[task_id]['status'] = 'failed'
         tasks_store[task_id]['message'] = f'打包失败: {str(e)}'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         raise
 
 @celery.task(bind=True)
@@ -108,8 +109,8 @@ def export_requirements_task(self, project_id, project_config):
         'status': 'running',
         'progress': 0,
         'message': '开始导出需求清单...',
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
+        'created_at': now_with_timezone().isoformat(),
+        'updated_at': now_with_timezone().isoformat()
     }
     
     try:
@@ -127,7 +128,7 @@ def export_requirements_task(self, project_id, project_config):
             )
             tasks_store[task_id]['progress'] = i * 20
             tasks_store[task_id]['message'] = f'正在导出需求清单... {i * 20}%'
-            tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+            tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
             
             # 实际导出操作
             if i == 3:
@@ -138,7 +139,7 @@ def export_requirements_task(self, project_id, project_config):
         
         tasks_store[task_id]['status'] = 'completed'
         tasks_store[task_id]['message'] = '需求清单导出完成'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         return {
             'status': 'success',
@@ -149,7 +150,7 @@ def export_requirements_task(self, project_id, project_config):
     except Exception as e:
         tasks_store[task_id]['status'] = 'failed'
         tasks_store[task_id]['message'] = f'导出失败: {str(e)}'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         raise
 
 @celery.task(bind=True)
@@ -163,8 +164,8 @@ def generate_report_task(self, project_config):
         'status': 'running',
         'progress': 0,
         'message': '开始生成报告...',
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
+        'created_at': now_with_timezone().isoformat(),
+        'updated_at': now_with_timezone().isoformat()
     }
     
     try:
@@ -182,7 +183,7 @@ def generate_report_task(self, project_config):
             )
             tasks_store[task_id]['progress'] = round(i * 14.28)
             tasks_store[task_id]['message'] = f'正在生成报告... {round(i * 14.28)}%'
-            tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+            tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
             
             # 实际报告生成操作
             if i == 4:
@@ -193,7 +194,7 @@ def generate_report_task(self, project_config):
         
         tasks_store[task_id]['status'] = 'completed'
         tasks_store[task_id]['message'] = '报告生成完成'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         return {
             'status': 'success',
@@ -204,7 +205,7 @@ def generate_report_task(self, project_config):
     except Exception as e:
         tasks_store[task_id]['status'] = 'failed'
         tasks_store[task_id]['message'] = f'报告生成失败: {str(e)}'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         raise
 
 @celery.task(bind=True)
@@ -218,8 +219,8 @@ def check_compliance_task(self, project_config):
         'status': 'running',
         'progress': 0,
         'message': '开始检查异常...',
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
+        'created_at': now_with_timezone().isoformat(),
+        'updated_at': now_with_timezone().isoformat()
     }
     
     try:
@@ -237,7 +238,7 @@ def check_compliance_task(self, project_config):
             )
             tasks_store[task_id]['progress'] = round(i * 16.67)
             tasks_store[task_id]['message'] = f'正在检查异常... {round(i * 16.67)}%'
-            tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+            tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
             
             # 实际检查操作
             if i == 3:
@@ -248,7 +249,7 @@ def check_compliance_task(self, project_config):
         
         tasks_store[task_id]['status'] = 'completed'
         tasks_store[task_id]['message'] = '异常检查完成'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         return {
             'status': 'success',
@@ -259,7 +260,7 @@ def check_compliance_task(self, project_config):
     except Exception as e:
         tasks_store[task_id]['status'] = 'failed'
         tasks_store[task_id]['message'] = f'检查失败: {str(e)}'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         raise
 
 def get_task_status(task_id):
@@ -278,7 +279,7 @@ def cancel_task(task_id):
         # 更新任务状态
         tasks_store[task_id]['status'] = 'cancelled'
         tasks_store[task_id]['message'] = '任务已取消'
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         return True
     return False
 
@@ -290,6 +291,6 @@ def update_task_status(task_id, status, message=None, progress=None):
             tasks_store[task_id]['message'] = message
         if progress is not None:
             tasks_store[task_id]['progress'] = progress
-        tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+        tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         return True
     return False

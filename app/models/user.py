@@ -1112,7 +1112,7 @@ class UserManager:
     def get_failed_login_attempts(self, ip_address, minutes=15):
         """获取指定时间内的失败登录尝试次数"""
         from datetime import datetime, timedelta
-        cutoff_time = (datetime.now() - timedelta(minutes=minutes)).isoformat()
+        cutoff_time = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -1137,7 +1137,7 @@ class UserManager:
         """清理超过 hours 小时的登录尝试记录（定期维护调用）"""
         try:
             from datetime import datetime, timedelta
-            cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+            cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
             with sqlite3.connect(str(self.db_path)) as conn:
                 conn.execute('DELETE FROM login_attempts WHERE attempt_time < ?', (cutoff,))
                 conn.commit()
@@ -1199,7 +1199,7 @@ class UserManager:
                 cursor = conn.cursor()
                 cursor.execute(
                     'INSERT INTO operation_logs (user_id, username, operation_type, target_id, target_name, details, ip_address, operation_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (user_id, username, operation_type, target_id, target_name, details, ip_address, now_with_timezone().strftime('%Y-%m-%d %H:%M:%S'))
+                    (user_id, username, operation_type, target_id, target_name, details, ip_address, now_with_timezone().isoformat())
                 )
                 conn.commit()
                 return True

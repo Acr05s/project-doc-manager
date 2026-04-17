@@ -12,7 +12,7 @@ import { renderProjectsList, selectProject, handleCreateProject, handleLoadProje
 import { renderCycles, renderInitialContent } from './cycle.js';
 import { handleZipArchive, handleZipUpload, handleImportMatchedFiles, handleConfirmPendingFiles, handleRejectPendingFiles, loadZipPackagesList, searchZipFilesInPackage, fixZipSelectionIssue } from './zip.js';
 import { handleGenerateReport, handleCheckCompliance, handleExportReport } from './report.js';
-import { formatDate, formatDateToMonth, getFileExtension, isValidEmail } from './utils.js';
+import { formatDate, formatDateToMonth, formatDateTimeDisplay, getFileExtension, isValidEmail } from './utils.js';
 
 // 导出所有模块
 export * from './app-state.js';
@@ -570,6 +570,65 @@ async function handleTransferMessageClick(message) {
     }, { okText: '接受', cancelText: '拒绝' });
 }
 
+function isScheduledReportMessage(message) {
+    const msgType = String(message?.type || '').toLowerCase();
+    return msgType === 'scheduled_report' || msgType === 'scheduled_report_popup';
+}
+
+function openScheduledReportMessageModal(message) {
+    let modal = document.getElementById('scheduledReportMessageModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'scheduledReportMessageModal';
+        modal.className = 'modal';
+        modal.style.display = 'none';
+        document.body.appendChild(modal);
+    }
+
+    const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
+    const createdAt = formatDateTimeDisplay(message?.created_at, tz);
+    const title = escapeHtml(message?.title || '定时报告通知');
+    const content = escapeHtml(message?.content || '').replace(/\n/g, '<br>');
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:760px;border-radius:12px;border:1px solid #dbe7f5;box-shadow:0 20px 50px rgba(8,36,74,.25);">
+            <span class="close" id="scheduledReportMessageCloseBtn">&times;</span>
+            <h2 style="margin:0;padding:14px 16px;background:linear-gradient(135deg,#f8fbff,#edf5ff);border-bottom:1px solid #dde8f6;">📄 报告详情</h2>
+            <div style="padding:16px;max-height:60vh;overflow:auto;background:#f9fcff;">
+                <div style="font-size:16px;font-weight:600;color:#153a6b;">${title}</div>
+                <div style="font-size:12px;color:#6c7b90;margin-top:4px;">${createdAt}</div>
+                <div style="margin-top:12px;font-size:13px;line-height:1.7;color:#334;">${content || '-'}</div>
+            </div>
+            <div style="padding:12px 16px;border-top:1px solid #e6eef8;display:flex;justify-content:flex-end;gap:10px;">
+                <button type="button" class="btn btn-secondary" id="scheduledReportMessageCloseBtn2">关闭</button>
+                <button type="button" class="btn btn-primary" id="scheduledReportMessageOpenProjectBtn">打开项目</button>
+            </div>
+        </div>
+    `;
+
+    const closeModalInner = () => {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+    };
+
+    const closeBtn = document.getElementById('scheduledReportMessageCloseBtn');
+    if (closeBtn) closeBtn.onclick = closeModalInner;
+    const closeBtn2 = document.getElementById('scheduledReportMessageCloseBtn2');
+    if (closeBtn2) closeBtn2.onclick = closeModalInner;
+
+    const openProjectBtn = document.getElementById('scheduledReportMessageOpenProjectBtn');
+    if (openProjectBtn) {
+        openProjectBtn.onclick = () => {
+            closeModalInner();
+            const projectId = message?.related_id;
+            if (projectId) navigateToProject(projectId, null);
+        };
+    }
+
+    modal.classList.add('show');
+    modal.style.display = 'block';
+}
+
 async function handleProjectMessageClick(message) {
     const projectId = message.related_id;
     if (!projectId) return;
@@ -577,6 +636,12 @@ async function handleProjectMessageClick(message) {
         await markMessageAsRead(message.id);
         await loadMessages();
     }
+
+    if (isScheduledReportMessage(message)) {
+        openScheduledReportMessageModal(message);
+        return;
+    }
+
     showNotification('请在项目列表中查看该项目', 'info');
 }
 
@@ -708,7 +773,8 @@ function renderScheduledReportLoginPopup(messages) {
     const listHtml = messages.slice(0, 8).map(m => {
         const title = escapeHtml(m.title || '周报/月报提醒');
         const content = escapeHtml((m.content || '').replace(/\n/g, ' ').slice(0, 140));
-        const timeText = m.created_at ? escapeHtml(new Date(m.created_at).toLocaleString()) : '';
+        const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
+        const timeText = m.created_at ? escapeHtml(formatDateTimeDisplay(m.created_at, tz)) : '';
         return `
             <div style="padding:10px 12px; border:1px solid #e4ebf5; border-radius:8px; background:#fff; margin-bottom:8px;">
                 <div style="font-size:13px; color:#153a6b; font-weight:600;">${title}</div>
@@ -907,10 +973,13 @@ function renderMessageList(messages) {
         const isTransfer = m.related_type === 'project_transfer' && !m.is_read;
         const isUserApproval = m.type === 'approval' && m.related_type === 'user' && !m.is_read;
         const isArchiveApproval = m.related_type === 'archive_approval';
+        const isScheduledReport = isScheduledReportMessage(m);
         // 区分审批消息状态：只有标题含"待审批"才是待处理
         const isArchivePending = isArchiveApproval && (m.title || '').includes('待审批');
         const isArchiveDone = isArchiveApproval && !isArchivePending;
         const clickable = m.related_type === 'user' || m.related_type === 'project_transfer' || m.related_type === 'project' || m.related_type === 'archive_approval';
+        const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
+        const createdAtText = formatDateTimeDisplay(m.created_at, tz);
         // 确定审批消息的按钮文案和样式
         let archiveBtnHtml = '';
         if (isArchivePending && ['admin','pmo','project_admin'].includes(authState.user?.role)) {
@@ -925,7 +994,7 @@ function renderMessageList(messages) {
                 <div style="flex:1;min-width:0;">
                     <div class="message-header">
                         <span class="message-title">${m.title}</span>
-                        <span class="message-time">${new Date(m.created_at).toLocaleString()}</span>
+                        <span class="message-time">${createdAtText}</span>
                     </div>
                     <div class="message-content">${m.content}</div>
                     <div class="message-actions">
@@ -938,6 +1007,7 @@ function renderMessageList(messages) {
                             <button class="btn btn-sm btn-danger msg-user-reject-btn" data-id="${m.id}" data-related="${m.related_id || ''}">拒绝</button>
                         ` : ''}
                         ${archiveBtnHtml}
+                        ${isScheduledReport ? `<button class="btn btn-sm btn-primary msg-report-view-btn" data-id="${m.id}">查看报告</button>` : ''}
                         ${!m.is_read && !isTransfer && !isUserApproval ? `<button class="btn btn-sm btn-primary msg-read-btn" data-id="${m.id}">标为已读</button>` : ''}
                         <button class="btn btn-sm btn-secondary msg-del-btn" data-id="${m.id}">删除</button>
                     </div>
@@ -964,6 +1034,21 @@ function renderMessageList(messages) {
             await loadMessages();
         });
     });
+    // 绑定报告查看按钮
+    container.querySelectorAll('.msg-report-view-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const msg = messagesCache.find((item) => String(item.id) === String(id));
+            if (!msg) return;
+            if (!msg.is_read) {
+                await markMessageAsRead(id);
+                await loadMessages();
+            }
+            openScheduledReportMessageModal(msg);
+        });
+    });
+
     // 绑定移交同意事件
     container.querySelectorAll('.msg-transfer-accept-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {

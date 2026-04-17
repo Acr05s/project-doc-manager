@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
+from app.routes.settings import now_with_timezone
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -110,8 +111,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始打包项目...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat()
         }
         self._save_tasks()  # 立即保存任务
         
@@ -132,7 +133,7 @@ class TaskService:
                 # 更新进度：查找项目目录
                 self.tasks_store[task_id]['progress'] = 10
                 self.tasks_store[task_id]['message'] = '正在查找项目目录...'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 
                 # 查找项目目录
                 projects_base = Path(self.doc_manager.config.projects_base_folder)
@@ -159,7 +160,7 @@ class TaskService:
                 # 更新进度：开始创建ZIP
                 self.tasks_store[task_id]['progress'] = 20
                 self.tasks_store[task_id]['message'] = f'正在打包项目目录... 共 {total_files} 个文件'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 
                 # 创建ZIP文件
                 with zipfile.ZipFile(package_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -189,7 +190,7 @@ class TaskService:
                                 progress = 20 + int(70 * processed_files / total_files)
                                 self.tasks_store[task_id]['progress'] = min(progress, 90)
                                 self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files})'
-                                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                             
                             # 每10个文件保存一次进度
                             if processed_files % 10 == 0:
@@ -211,13 +212,13 @@ class TaskService:
                     'total_files': total_files,
                     'processed_files': processed_files
                 }
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()  # 保存到文件
                 
             except Exception as e:
                 self.tasks_store[task_id]['status'] = 'error'
                 self.tasks_store[task_id]['message'] = f'打包失败: {str(e)}'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()  # 保存到文件
         
         threading.Thread(target=package_task).start()
@@ -239,8 +240,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始导出需求清单...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat()
         }
         
         # 启动后台线程执行任务
@@ -250,7 +251,7 @@ class TaskService:
                     break
                 self.tasks_store[task_id]['progress'] = i * 20
                 self.tasks_store[task_id]['message'] = f'正在导出需求清单... {i * 20}%'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 time.sleep(0.3)
             
             if self.tasks_store[task_id]['status'] != 'cancelled' and self.doc_manager:
@@ -259,7 +260,7 @@ class TaskService:
                 self.tasks_store[task_id]['status'] = 'completed'
                 self.tasks_store[task_id]['message'] = '需求清单导出完成'
                 self.tasks_store[task_id]['result'] = {'content': json_content}
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         threading.Thread(target=export_task).start()
         
@@ -280,8 +281,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始生成报告...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat()
         }
         
         # 启动后台线程执行任务
@@ -291,7 +292,7 @@ class TaskService:
                     break
                 self.tasks_store[task_id]['progress'] = round(i * 14.28)
                 self.tasks_store[task_id]['message'] = f'正在生成报告... {round(i * 14.28)}%'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 time.sleep(0.4)
             
             if self.tasks_store[task_id]['status'] != 'cancelled' and self.doc_manager:
@@ -300,7 +301,7 @@ class TaskService:
                 self.tasks_store[task_id]['status'] = 'completed'
                 self.tasks_store[task_id]['message'] = '报告生成完成'
                 self.tasks_store[task_id]['result'] = {'report': report}
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         threading.Thread(target=report_task).start()
         
@@ -321,8 +322,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始检查异常...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat()
         }
         
         # 启动后台线程执行任务
@@ -332,7 +333,7 @@ class TaskService:
                     break
                 self.tasks_store[task_id]['progress'] = round(i * 16.67)
                 self.tasks_store[task_id]['message'] = f'正在检查异常... {round(i * 16.67)}%'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 time.sleep(0.3)
             
             if self.tasks_store[task_id]['status'] != 'cancelled' and self.doc_manager:
@@ -341,7 +342,7 @@ class TaskService:
                 self.tasks_store[task_id]['status'] = 'completed'
                 self.tasks_store[task_id]['message'] = '异常检查完成'
                 self.tasks_store[task_id]['result'] = {'compliance': compliance}
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
         
         threading.Thread(target=check_task).start()
         
@@ -378,8 +379,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始PDF转换...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat(),
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat(),
             'file_path': file_path,
             'doc_id': doc_id
         }
@@ -402,7 +403,7 @@ class TaskService:
                 # 更新进度
                 self.tasks_store[task_id]['progress'] = 25
                 self.tasks_store[task_id]['message'] = '正在转换PDF...'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 
                 # 执行转换（使用 conversion_key 作为缓存标识）
                 pdf_path = pdf_service.convert_to_pdf(file_path, conversion_key)
@@ -416,7 +417,7 @@ class TaskService:
                 # 更新进度
                 self.tasks_store[task_id]['progress'] = 75
                 self.tasks_store[task_id]['message'] = '转换完成，保存结果...'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 
                 # 完成任务
                 self.tasks_store[task_id]['status'] = 'completed'
@@ -427,13 +428,13 @@ class TaskService:
                     'doc_id': doc_id,
                     'conversion_key': conversion_key
                 }
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()
                 
             except Exception as e:
                 self.tasks_store[task_id]['status'] = 'error'
                 self.tasks_store[task_id]['message'] = f'PDF转换失败: {str(e)}'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()
         
         threading.Thread(target=pdf_conversion_task).start()
@@ -465,8 +466,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始批量PDF转换...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat(),
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat(),
             'project_id': project_id
         }
         self._save_tasks()
@@ -504,7 +505,7 @@ class TaskService:
                     self.tasks_store[task_id]['status'] = 'completed'
                     self.tasks_store[task_id]['progress'] = 100
                     self.tasks_store[task_id]['message'] = '没有需要转换的文档'
-                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                    self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                     self._save_tasks()
                     return
                 
@@ -545,7 +546,7 @@ class TaskService:
                     progress = int(100 * (i + 1) / total_files)
                     self.tasks_store[task_id]['progress'] = progress
                     self.tasks_store[task_id]['message'] = f'正在转换... ({i + 1}/{total_files})'
-                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                    self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                     if (i + 1) % 5 == 0:
                         self._save_tasks()
                 
@@ -558,13 +559,13 @@ class TaskService:
                         'total_files': total_files,
                         'converted_files': converted_count
                     }
-                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                    self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                     self._save_tasks()
                     
             except Exception as e:
                 self.tasks_store[task_id]['status'] = 'error'
                 self.tasks_store[task_id]['message'] = f'批量转换失败: {str(e)}'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()
         
         threading.Thread(target=batch_conversion_task).start()
@@ -594,8 +595,8 @@ class TaskService:
             'status': 'running',
             'progress': 0,
             'message': '开始打包...',
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_with_timezone().isoformat(),
+            'updated_at': now_with_timezone().isoformat()
         }
         self._save_tasks()
         
@@ -808,7 +809,7 @@ class TaskService:
                                         progress = int(100 * processed_files / (total_files + not_involved_count))
                                         self.tasks_store[task_id]['progress'] = min(progress, 95)
                                     self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files + not_involved_count})'
-                                    self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                                    self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                                 continue
                             
                             # 直接遍历该文档类型的所有文件（已经通过should_include_doc过滤）
@@ -983,7 +984,7 @@ class TaskService:
                                 progress = int(100 * processed_files / total_files)
                                 self.tasks_store[task_id]['progress'] = progress
                                 self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files})'
-                                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                                 
                                 if processed_files % 5 == 0:
                                     self._save_tasks()
@@ -1002,13 +1003,13 @@ class TaskService:
                     'package_filename': package_filename,
                     'download_url': f'/api/tasks/download/{task_id}'
                 }
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()
                 
             except Exception as e:
                 self.tasks_store[task_id]['status'] = 'error'
                 self.tasks_store[task_id]['message'] = f'打包失败: {str(e)}'
-                self.tasks_store[task_id]['updated_at'] = datetime.now().isoformat()
+                self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                 self._save_tasks()
         
         threading.Thread(target=download_package_task).start()

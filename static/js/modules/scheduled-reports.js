@@ -7,6 +7,7 @@ let _taskList = [];
 let _currentProjectId = '';
 let _currentProjectMeta = { party_b: '', project_name: '' };
 let _editingTaskId = '';
+let _taskScope = 'single'; // single | all
 
 function escapeHtml(value) {
     return String(value || '')
@@ -65,13 +66,20 @@ function getConfigProjectId() {
     return select ? String(select.value || '').trim() : '';
 }
 
-function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText) {
+function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText, includeAllOption = false) {
     if (!select) return '';
 
     select.innerHTML = '';
     if (!Array.isArray(projects) || projects.length === 0) {
         select.innerHTML = `<option value="">${emptyText || '暂无可配置项目'}</option>`;
         return '';
+    }
+
+    if (includeAllOption) {
+        const allOpt = document.createElement('option');
+        allOpt.value = '';
+        allOpt.textContent = '全部项目（显示所有任务）';
+        select.appendChild(allOpt);
     }
 
     projects.forEach((project) => {
@@ -94,8 +102,14 @@ function renderProjectList(projects, preferredProjectId) {
     const editorSelect = document.getElementById('scheduledEditorProjectSelect');
     const fallbackProjectId = preferredProjectId || appState.currentProjectId;
 
-    const selectedConfigProjectId = populateProjectSelectOptions(configSelect, projects, fallbackProjectId, '-- 暂无可配置项目 --');
-    populateProjectSelectOptions(editorSelect, projects, selectedConfigProjectId, '-- 暂无可配置项目 --');
+    const selectedConfigProjectId = populateProjectSelectOptions(
+        configSelect,
+        projects,
+        fallbackProjectId,
+        '-- 暂无可配置项目 --',
+        true
+    );
+    populateProjectSelectOptions(editorSelect, projects, fallbackProjectId, '-- 暂无可配置项目 --');
 
     _currentProjectId = selectedConfigProjectId || '';
 }
@@ -107,12 +121,13 @@ function selectedTaskIds() {
 
 function recipientGroups(task) {
     const selectedSet = new Set((task.recipient_user_ids || []).map(x => Number(x)));
-    const partyB = String(_currentProjectMeta.party_b || '').trim();
+    const partyB = String(task._party_b || _currentProjectMeta.party_b || '').trim();
 
     const contractor = [];
     const pmo = [];
+    const taskRecipientOptions = Array.isArray(task._recipient_options) ? task._recipient_options : _recipientOptions;
 
-    _recipientOptions.forEach((u) => {
+    taskRecipientOptions.forEach((u) => {
         const uid = Number(u.id || 0);
         if (!uid || !selectedSet.has(uid)) return;
         const name = String(u.display_name || u.username || uid);
@@ -178,16 +193,16 @@ function renderTaskList(tasks) {
             <td style="border:1px solid #e2e8f0; padding:6px;">${taskTypeLabel(task.task_type)}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${task.task_type === 'one_time' ? `一次性(${escapeHtml(task.run_date || '-')})` : `${frequencyLabel(task.frequency)} ${escapeHtml(task.send_time || '')}`}</td>
             <td style="border:1px solid #e2e8f0; padding:6px; text-align:center;">${Number(task.run_count || 0)}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(_currentProjectMeta.party_b || '-')}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(task._party_b || _currentProjectMeta.party_b || '-')}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(groups.contractor)}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(groups.pmo)}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(groups.external)}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${task.enabled ? '启用' : '停用'}</td>
             <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">
-                <button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-task-id="${escapeHtml(task.task_id)}">编辑</button>
-                <button type="button" class="btn btn-info btn-sm" data-action="toggle" data-task-id="${escapeHtml(task.task_id)}">${task.enabled ? '停用' : '启用'}</button>
-                <button type="button" class="btn btn-warning btn-sm" data-action="run" data-task-id="${escapeHtml(task.task_id)}">执行</button>
-                <button type="button" class="btn btn-danger btn-sm" data-action="delete" data-task-id="${escapeHtml(task.task_id)}">删除</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">编辑</button>
+                <button type="button" class="btn btn-info btn-sm" data-action="toggle" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">${task.enabled ? '停用' : '启用'}</button>
+                <button type="button" class="btn btn-warning btn-sm" data-action="run" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">执行</button>
+                <button type="button" class="btn btn-danger btn-sm" data-action="delete" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">删除</button>
             </td>
         `;
         tbody.appendChild(tr);
@@ -209,21 +224,22 @@ function renderTaskList(tasks) {
         btn.onclick = async () => {
             const action = btn.dataset.action;
             const taskId = btn.dataset.taskId;
-            if (!taskId) return;
+            const projectId = String(btn.dataset.projectId || _currentProjectId || '').trim();
+            if (!taskId || !projectId) return;
             if (action === 'edit') {
-                openScheduledTaskEditorModal(taskId);
+                await openScheduledTaskEditorModal(taskId, projectId);
                 return;
             }
             if (action === 'toggle') {
-                await toggleTask(taskId);
+                await toggleTask(taskId, projectId);
                 return;
             }
             if (action === 'run') {
-                await runTaskNow(taskId);
+                await runTaskNow(taskId, projectId);
                 return;
             }
             if (action === 'delete') {
-                await deleteTask(taskId);
+                await deleteTask(taskId, projectId);
             }
         };
     });
@@ -390,6 +406,7 @@ async function loadAccessibleProjects(preferredProjectId) {
 }
 
 async function loadTasksForProject(projectId, preferredTaskId = '') {
+    _taskScope = 'single';
     _currentProjectId = projectId;
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`);
     const result = await safeParseJson(resp);
@@ -397,7 +414,14 @@ async function loadTasksForProject(projectId, preferredTaskId = '') {
         throw new Error(result.message || '加载任务失败');
     }
 
-    _taskList = Array.isArray(result.tasks) ? result.tasks : [];
+    const project = _modalProjects.find((p) => String(p.id) === String(projectId));
+    _taskList = (Array.isArray(result.tasks) ? result.tasks : []).map((task) => ({
+        ...task,
+        _project_id: projectId,
+        _project_name: project?.name || projectId,
+        _party_b: (result.project_meta || {}).party_b || '',
+        _recipient_options: Array.isArray(result.recipient_options) ? result.recipient_options : []
+    }));
     _recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
     _currentProjectMeta = result.project_meta || { party_b: '', project_name: '' };
 
@@ -407,6 +431,35 @@ async function loadTasksForProject(projectId, preferredTaskId = '') {
         const task = _taskList.find((x) => String(x.task_id) === String(preferredTaskId));
         if (task) fillEditorByTask(task);
     }
+}
+
+async function loadTasksForAllProjects() {
+    _taskScope = 'all';
+    _currentProjectId = '';
+    _recipientOptions = [];
+    _currentProjectMeta = { party_b: '', project_name: '' };
+
+    const requests = _modalProjects.map(async (project) => {
+        const projectId = String(project.id || '').trim();
+        if (!projectId) return [];
+        const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`);
+        const result = await safeParseJson(resp);
+        if (result.status !== 'success') return [];
+
+        const partyB = (result.project_meta || {}).party_b || '';
+        const recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
+        return (Array.isArray(result.tasks) ? result.tasks : []).map((task) => ({
+            ...task,
+            _project_id: projectId,
+            _project_name: project.name || projectId,
+            _party_b: partyB,
+            _recipient_options: recipientOptions
+        }));
+    });
+
+    const all = await Promise.all(requests);
+    _taskList = all.flat();
+    renderTaskList(_taskList);
 }
 
 function buildPayloadFromEditorForm() {
@@ -428,18 +481,25 @@ function buildPayloadFromEditorForm() {
     };
 }
 
-export function openScheduledTaskEditorModal(taskId = '') {
+export async function openScheduledTaskEditorModal(taskId = '', projectId = '') {
     if (taskId) {
-        if (!_currentProjectId) {
+        const task = _taskList.find((x) => String(x.task_id) === String(taskId) && String(x._project_id || projectId || _currentProjectId) === String(projectId || x._project_id || _currentProjectId));
+        const targetProjectId = String(projectId || task?._project_id || _currentProjectId || '').trim();
+        if (!targetProjectId) {
             showNotification('请先选择一个项目后再编辑任务', 'warning');
             return;
         }
-        const task = _taskList.find((x) => String(x.task_id) === String(taskId));
-        if (!task) {
+
+        if (!_currentProjectId || _currentProjectId !== targetProjectId || _taskScope === 'all') {
+            await loadTasksForProject(targetProjectId, taskId);
+        }
+
+        const editingTask = _taskList.find((x) => String(x.task_id) === String(taskId));
+        if (!editingTask) {
             showNotification('任务不存在', 'error');
             return;
         }
-        fillEditorByTask(task);
+        fillEditorByTask(editingTask);
     } else {
         clearEditorToNewTask();
     }
@@ -464,18 +524,23 @@ export function closeScheduledTaskEditorModal() {
     }
 }
 
-async function runTaskNow(taskId) {
-    if (!_currentProjectId || !taskId) {
+async function runTaskNow(taskId, projectId = '') {
+    const targetProjectId = String(projectId || _currentProjectId || '').trim();
+    if (!targetProjectId || !taskId) {
         showNotification('请先选择项目和任务', 'error');
         return;
     }
     try {
         showLoading(true);
-        const resp = await fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}/run`, { method: 'POST' });
+        const resp = await fetch(`/api/projects/${encodeURIComponent(targetProjectId)}/report-schedules/${encodeURIComponent(taskId)}/run`, { method: 'POST' });
         const result = await safeParseJson(resp);
         if (result.status === 'success') {
             showNotification(result.message || '执行成功', 'success');
-            await loadTasksForProject(_currentProjectId, taskId);
+            if (_taskScope === 'all') {
+                await loadTasksForAllProjects();
+            } else {
+                await loadTasksForProject(targetProjectId, taskId);
+            }
         } else {
             showNotification(result.message || '执行失败', 'error');
         }
@@ -486,15 +551,20 @@ async function runTaskNow(taskId) {
     }
 }
 
-async function toggleTask(taskId) {
+async function toggleTask(taskId, projectId = '') {
     const task = _taskList.find((x) => String(x.task_id) === String(taskId));
     if (!task) {
         showNotification('任务不存在', 'error');
         return;
     }
+    const targetProjectId = String(projectId || task._project_id || _currentProjectId || '').trim();
+    if (!targetProjectId) {
+        showNotification('缺少任务所属项目', 'error');
+        return;
+    }
     try {
         showLoading(true);
-        const resp = await fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}/toggle`, {
+        const resp = await fetch(`/api/projects/${encodeURIComponent(targetProjectId)}/report-schedules/${encodeURIComponent(taskId)}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled: !task.enabled })
@@ -504,7 +574,11 @@ async function toggleTask(taskId) {
             showNotification(result.message || '更新状态失败', 'error');
             return;
         }
-        await loadTasksForProject(_currentProjectId, taskId);
+        if (_taskScope === 'all') {
+            await loadTasksForAllProjects();
+        } else {
+            await loadTasksForProject(targetProjectId, taskId);
+        }
         showNotification(task.enabled ? '任务已停用' : '任务已启用', 'success');
     } catch (e) {
         showNotification(e.message || '更新状态失败', 'error');
@@ -513,19 +587,24 @@ async function toggleTask(taskId) {
     }
 }
 
-async function deleteTask(taskId) {
-    if (!_currentProjectId || !taskId) return;
+async function deleteTask(taskId, projectId = '') {
+    const targetProjectId = String(projectId || _currentProjectId || '').trim();
+    if (!targetProjectId || !taskId) return;
     if (!window.confirm('确认删除该定时任务吗？')) return;
 
     try {
         showLoading(true);
-        const resp = await fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+        const resp = await fetch(`/api/projects/${encodeURIComponent(targetProjectId)}/report-schedules/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
         const result = await safeParseJson(resp);
         if (result.status !== 'success') {
             showNotification(result.message || '删除失败', 'error');
             return;
         }
-        await loadTasksForProject(_currentProjectId, '');
+        if (_taskScope === 'all') {
+            await loadTasksForAllProjects();
+        } else {
+            await loadTasksForProject(targetProjectId, '');
+        }
         showNotification('任务已删除', 'success');
     } catch (e) {
         showNotification(e.message || '删除失败', 'error');
@@ -542,12 +621,20 @@ async function batchEnableTasks() {
     }
     try {
         showLoading(true);
-        await Promise.all(ids.map((taskId) => fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}/toggle`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: true })
-        })));
-        await loadTasksForProject(_currentProjectId, '');
+        const selectedTasks = _taskList.filter((t) => ids.includes(String(t.task_id || '')));
+        await Promise.all(selectedTasks.map((task) => fetch(
+            `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}/toggle`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: true })
+            }
+        )));
+        if (_taskScope === 'all') {
+            await loadTasksForAllProjects();
+        } else {
+            await loadTasksForProject(_currentProjectId, '');
+        }
         showNotification(`已启用 ${ids.length} 个任务`, 'success');
     } catch (e) {
         showNotification(e.message || '批量启用失败', 'error');
@@ -566,8 +653,16 @@ async function batchDeleteTasks() {
 
     try {
         showLoading(true);
-        await Promise.all(ids.map((taskId) => fetch(`/api/projects/${encodeURIComponent(_currentProjectId)}/report-schedules/${encodeURIComponent(taskId)}`, { method: 'DELETE' })));
-        await loadTasksForProject(_currentProjectId, '');
+        const selectedTasks = _taskList.filter((t) => ids.includes(String(t.task_id || '')));
+        await Promise.all(selectedTasks.map((task) => fetch(
+            `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}`,
+            { method: 'DELETE' }
+        )));
+        if (_taskScope === 'all') {
+            await loadTasksForAllProjects();
+        } else {
+            await loadTasksForProject(_currentProjectId, '');
+        }
         showNotification(`已删除 ${ids.length} 个任务`, 'success');
     } catch (e) {
         showNotification(e.message || '批量删除失败', 'error');
@@ -591,7 +686,11 @@ export async function openScheduledReportModal() {
         if (configProjectSelect) {
             configProjectSelect.onchange = async () => {
                 const configProjectId = getConfigProjectId();
-                if (configProjectId) await loadTasksForProject(configProjectId, '');
+                if (configProjectId) {
+                    await loadTasksForProject(configProjectId, '');
+                } else {
+                    await loadTasksForAllProjects();
+                }
             };
         }
 
@@ -599,8 +698,7 @@ export async function openScheduledReportModal() {
         if (selectedProjectId) {
             await loadTasksForProject(selectedProjectId, '');
         } else {
-            _taskList = [];
-            renderTaskList(_taskList);
+            await loadTasksForAllProjects();
         }
 
         const newTaskBtn = document.getElementById('scheduledTaskNewBtn');
@@ -715,11 +813,12 @@ export async function saveScheduledReportConfig(e) {
 
 export async function runScheduledReportNow() {
     const taskId = document.getElementById('scheduledEditingTaskId')?.value || _editingTaskId;
+    const projectId = (document.getElementById('scheduledEditorProjectId')?.value || '').trim() || _currentProjectId;
     if (!taskId) {
         showNotification('请先在任务列表中选择一个任务', 'warning');
         return;
     }
-    await runTaskNow(taskId);
+    await runTaskNow(taskId, projectId);
 }
 
 // 兼容旧入口

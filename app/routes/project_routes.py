@@ -7,6 +7,7 @@ from flask_login import login_required, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from app.models.user import user_manager
 from app.utils.document_manager import DocumentManager
+from app.routes.settings import now_with_timezone
 
 # 使用 get_doc_manager 方式获取 doc_manager
 def get_doc_manager():
@@ -750,7 +751,7 @@ def import_package():
                                 if doc_type not in old_project_config['documents'][cycle]['doc_types']:
                                     old_project_config['documents'][cycle]['doc_types'].append(doc_type)
             project_config = old_project_config
-            project_config['updated_time'] = datetime.now().isoformat()
+            project_config['updated_time'] = now_with_timezone().isoformat()
         elif existing_project and conflict_action == 'manual':
             # 手动编辑名称模式 - 返回冲突信息让用户确认
             return jsonify({
@@ -766,8 +767,8 @@ def import_package():
             new_project_id = str(_uuid.uuid4())
             project_config['id'] = new_project_id
             project_config['name'] = final_name
-            project_config['created_time'] = datetime.now().isoformat()
-            project_config['updated_time'] = datetime.now().isoformat()
+            project_config['created_time'] = now_with_timezone().isoformat()
+            project_config['updated_time'] = now_with_timezone().isoformat()
 
         # 复制文档文件并更新元数据（先处理文件，再保存配置）
         imported_count = 0
@@ -975,8 +976,8 @@ def import_full_package():
         # 更新项目配置
         project_config['id'] = new_project_id
         project_config['name'] = final_name
-        project_config['created_time'] = datetime.now().isoformat()
-        project_config['updated_time'] = datetime.now().isoformat()
+        project_config['created_time'] = now_with_timezone().isoformat()
+        project_config['updated_time'] = now_with_timezone().isoformat()
 
         # 创建项目目录（使用项目名称而不是项目ID）
         projects_base = doc_manager.config.projects_base_folder
@@ -1051,7 +1052,7 @@ def confirm_cycle_acceptance(project_id):
                 project_config['documents'][cycle]['acceptance'] = {}
             project_config['documents'][cycle]['acceptance'] = {
                 'accepted': True,
-                'accepted_time': datetime.now().isoformat(),
+                'accepted_time': now_with_timezone().isoformat(),
                 'accepted_by': data.get('accepted_by', '系统')
             }
             message = f'周期"{cycle}"验收确认完成'
@@ -1061,7 +1062,7 @@ def confirm_cycle_acceptance(project_id):
                 project_config['acceptance'] = {}
             project_config['acceptance'] = {
                 'accepted': True,
-                'accepted_time': datetime.now().isoformat(),
+                'accepted_time': now_with_timezone().isoformat(),
                 'accepted_by': data.get('accepted_by', '系统')
             }
             # 同步验收每个周期
@@ -1070,7 +1071,7 @@ def confirm_cycle_acceptance(project_id):
                     doc_data['acceptance'] = {}
                 doc_data['acceptance'] = {
                     'accepted': True,
-                    'accepted_time': datetime.now().isoformat(),
+                    'accepted_time': now_with_timezone().isoformat(),
                     'accepted_by': data.get('accepted_by', '系统')
                 }
             message = '所有周期验收确认完成'
@@ -1710,7 +1711,7 @@ def get_external_logs():
             'status': 'success',
             'logs': logs,
             'count': len(logs),
-            'timestamp': datetime.now().isoformat()
+            'timestamp': now_with_timezone().isoformat()
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1856,7 +1857,7 @@ def apply_template_to_project(project_id, template_id):
         # 应用模板数据
         config['cycles'] = template.get('cycles', [])
         config['documents'] = template.get('documents', {})
-        config['updated_time'] = datetime.now().isoformat()
+        config['updated_time'] = now_with_timezone().isoformat()
         
         # 保存配置
         doc_manager.save(project_id, config)
@@ -2019,7 +2020,7 @@ def save_draft(project_id):
         
         draft_data = {
             'tree_data': data.get('tree_data'),
-            'saved_time': datetime.now().isoformat(),
+            'saved_time': now_with_timezone().isoformat(),
             'version': 1
         }
         

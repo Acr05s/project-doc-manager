@@ -596,7 +596,8 @@ def get_archive_stats():
     """
     try:
         import sqlite3
-        from datetime import datetime, timedelta
+        from datetime import timedelta
+        from app.routes.settings import now_with_timezone
 
         user_id = int(current_user.id)
         user_role = current_user.role
@@ -620,7 +621,8 @@ def get_archive_stats():
             level2_pending = cursor.fetchone()['count'] if cursor.fetchone() else 0
 
             # 获取最近7天已批准的归档
-            seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+            now_local = now_with_timezone().replace(tzinfo=None)
+            seven_days_ago = (now_local - timedelta(days=7)).isoformat()
             cursor.execute('''
                 SELECT COUNT(*) as count FROM archive_approvals
                 WHERE status = 'archived' AND created_at > ?
@@ -628,7 +630,7 @@ def get_archive_stats():
             recent_archived = cursor.fetchone()['count'] if cursor.fetchone() else 0
 
             # 计算超时请求（等待超过3天）
-            three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
+            three_days_ago = (now_local - timedelta(days=3)).isoformat()
             cursor.execute('''
                 SELECT COUNT(*) as count FROM archive_approvals
                 WHERE status = 'pending' AND created_at < ?
@@ -677,6 +679,24 @@ def bulk_approve_archive_requests():
         action = data.get('action', 'approve')  # 'approve' 或 'reject'
         reason = data.get('reason', '')
 
+        # 批量快速审批也必须校验审批安全码（与单条审批一致）
+        from app.routes.settings import load_settings
+        from werkzeug.security import check_password_hash
+        settings = load_settings()
+        require_code = bool(settings.get('require_approval_code', True))
+        approval_code = (data.get('approval_code') or '').strip()
+        if require_code:
+            current_user_obj = user_manager.get_user_by_id(int(current_user.id))
+            if not current_user_obj:
+                return jsonify({'status': 'error', 'message': '当前用户不存在'}), 403
+            if getattr(current_user_obj, 'approval_code_needs_change', 1) == 1:
+                return jsonify({'status': 'needs_change', 'message': '首次使用审批安全码需先在单条审批中完成重置'}), 400
+            if not approval_code:
+                return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
+            approval_hash = getattr(current_user_obj, 'approval_code_hash', None)
+            if not approval_hash or not check_password_hash(approval_hash, approval_code):
+                return jsonify({'status': 'error', 'message': '审批安全码错误'}), 400
+
         if not approval_ids:
             return jsonify({'status': 'error', 'message': '请选择至少一个审批请求'}), 400
 
@@ -701,10 +721,10 @@ def bulk_approve_archive_requests():
 
                 # 权限检查
                 current_stage = approval.get('current_stage', 1)
-                if current_stage == 1 and current_user.role != 'project_admin':
+                if current_stage == 1 and current_user.role not in ('project_admin', 'admin'):
                     failed.append({'id': approval_id, 'error': '权限不足'})
                     continue
-                elif current_stage == 2 and current_user.role != 'pmo':
+                elif current_stage == 2 and current_user.role not in ('pmo', 'pmo_leader', 'admin'):
                     failed.append({'id': approval_id, 'error': '权限不足'})
                     continue
 

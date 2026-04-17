@@ -225,7 +225,7 @@ const ALL_PERMISSION_ROLES = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'co
 const SAFE_FALLBACK_PERMISSIONS = {
     scheduledReportTaskMenuItem: { roles: ['admin', 'pmo', 'pmo_leader'], group: 'sidebar', label: '🗓️ 定时报告任务' },
     systemSettingsMenuItem: { roles: ['admin'], group: 'sidebar', label: '⚙️ 系统设置' },
-    userManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '👤 用户管理' },
+    userManagementMenuItem: { roles: ['admin', 'pmo_leader', 'pmo', 'project_admin'], group: 'sidebar', label: '👤 用户管理' },
     orgManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader'], group: 'sidebar', label: '🏢 承建单位管理' },
     projectManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📁 项目管理' },
     userApprovalBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '👤 用户审核' },

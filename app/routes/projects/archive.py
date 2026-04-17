@@ -449,10 +449,11 @@ def submit_archive_request(project_id):
             'not_involved': 'not_involved_request',
             'unarchive': 'unarchive_request'
         }
+        _log_doc_label = '、'.join(doc_names[:3]) + (f'等{len(doc_names)}个' if len(doc_names) > 3 else '')
         user_manager.add_operation_log(
             requester_id, requester_username,
             op_type_map.get(request_type, 'archive_request'),
-            project_id, cycle,
+            project_id, f'{project_name}-{cycle}-{_log_doc_label}',
             json.dumps(doc_names, ensure_ascii=False),
             request.remote_addr
         )
@@ -604,7 +605,8 @@ def approve_archive_request(project_id):
         # 检查系统设置是否要求审批安全码
         from app.routes.settings import load_settings
         settings = load_settings()
-        require_code = settings.get('require_approval_code', False)
+        # 默认要求审批安全码，避免配置缺失时被绕过
+        require_code = settings.get('require_approval_code', True)
         code_diff_pwd = settings.get('approval_code_must_differ_from_password', True)
         min_len = int(settings.get('password_min_length', 8) or 8)
         require_mix = bool(settings.get('password_require_letter_digit', True))
@@ -780,9 +782,11 @@ def approve_archive_request(project_id):
                     'not_involved': 'not_involved_approve',
                     'unarchive': 'unarchive_approve'
                 }.get(req_type, 'archive_approve')
+                _approve_pname = project_config.get('name', project_id)
+                _approve_doc_label = '、'.join(doc_names[:3]) + (f'等{len(doc_names)}个' if len(doc_names) > 3 else '')
                 user_manager.add_operation_log(
                     actual_approver_id, approver.username,
-                    approve_op_type, project_id, cycle,
+                    approve_op_type, project_id, f'{_approve_pname}-{cycle}-{_approve_doc_label}',
                     json.dumps(doc_names, ensure_ascii=False),
                     request.remote_addr
                 )
@@ -860,9 +864,11 @@ def approve_archive_request(project_id):
                 related_type='archive_approval'
             )
 
+            _stage_pname = project_config.get('name', project_id)
+            _stage_doc_label = '、'.join(doc_names[:3]) + (f'等{len(doc_names)}个' if len(doc_names) > 3 else '')
             user_manager.add_operation_log(
                 actual_approver_id, approver.username,
-                'archive_stage_approve', project_id, cycle,
+                'archive_stage_approve', project_id, f'{_stage_pname}-{cycle}-{_stage_doc_label}',
                 json.dumps({'stage': current_stage_idx + 1, 'doc_names': doc_names}, ensure_ascii=False),
                 request.remote_addr
             )
@@ -1012,9 +1018,15 @@ def reject_archive_request(project_id):
         except Exception as e:
             print(f'[notification] 驳回邮件通知失败: {e}', file=sys.stderr)
 
+        _reject_doc_names = approval.get('doc_names') or []
+        if isinstance(_reject_doc_names, str):
+            import json as _json
+            try: _reject_doc_names = _json.loads(_reject_doc_names)
+            except: _reject_doc_names = []
+        _reject_doc_label = '、'.join(_reject_doc_names[:3]) + (f'等{len(_reject_doc_names)}个' if len(_reject_doc_names) > 3 else '')
         user_manager.add_operation_log(
             actual_approver_id, approver.username,
-            'archive_reject', project_id, approval['cycle'],
+            'archive_reject', project_id, f'{project_name}-{approval["cycle"]}-{_reject_doc_label}',
             json.dumps({'doc_names': approval['doc_names'], 'reason': reject_reason}, ensure_ascii=False),
             request.remote_addr
         )
@@ -1079,9 +1091,11 @@ def archive_project_document(project_id):
         if save_result.get('status') != 'success':
             return jsonify({'status': 'error', 'message': save_result.get('message', '归档保存失败')}), 500
 
+        _arch_pname = project_config.get('name', project_id)
+        _arch_doc_label = '、'.join(target_names[:3]) + (f'等{len(target_names)}个' if len(target_names) > 3 else '')
         user_manager.add_operation_log(
             int(current_user.id), current_user.username,
-            'archive_document', project_id, cycle,
+            'archive_document', project_id, f'{_arch_pname}-{cycle}-{_arch_doc_label}',
             json.dumps(target_names, ensure_ascii=False),
             request.remote_addr
         )
@@ -1126,9 +1140,22 @@ def withdraw_archive_request(project_id):
         append_stage_history(approval['id'], 'withdraw', int(current_user.id), current_user.username, detail='申请人撤回归档申请')
 
         # 记录操作日志
+        _wd_cycle = approval.get('cycle', '')
+        _wd_doc_names = approval.get('doc_names') or []
+        if isinstance(_wd_doc_names, str):
+            try: _wd_doc_names = json.loads(_wd_doc_names)
+            except: _wd_doc_names = []
+        _wd_doc_label = '、'.join(_wd_doc_names[:3]) + (f'等{len(_wd_doc_names)}个' if len(_wd_doc_names) > 3 else '')
+        _wd_pname = project_id
+        try:
+            _wd_pr = get_doc_manager().load_project(project_id)
+            if _wd_pr.get('status') == 'success':
+                _wd_pname = _wd_pr.get('project', {}).get('name', project_id)
+        except Exception:
+            pass
         user_manager.add_operation_log(
             int(current_user.id), current_user.username,
-            'withdraw_archive_request', project_id, approval.get('cycle', ''),
+            'withdraw_archive_request', project_id, f'{_wd_pname}-{_wd_cycle}-{_wd_doc_label}',
             f'approval_id={approval_id}', request.remote_addr
         )
 

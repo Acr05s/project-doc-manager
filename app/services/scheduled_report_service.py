@@ -451,7 +451,9 @@ class ScheduledReportService:
         text_content, html_content = self._build_email_content(project_name, frequency, period_start, period_end, metrics, party_b=party_b)
 
         attachments = []
-        if cfg.get('include_pdf', True):
+        # 手动执行时默认附带PDF，定时执行按任务配置决定
+        should_attach_pdf = bool(cfg.get('include_pdf', True)) or manual
+        if should_attach_pdf:
             pdf_path = self._build_pdf_report(project_name, frequency, period_start, period_end, metrics)
             if pdf_path:
                 attachments.append({'path': str(pdf_path), 'name': pdf_path.name})
@@ -516,6 +518,48 @@ class ScheduledReportService:
             return now - timedelta(days=30), now
         return now - timedelta(days=7), now
 
+    def _get_ordered_cycles(self, project: Dict[str, Any], docs: Dict[str, Any]) -> List[str]:
+        ordered: List[str] = []
+        seen = set()
+
+        for cycle in project.get('cycles', []) or []:
+            c = str(cycle or '').strip()
+            if not c or c in seen:
+                continue
+            seen.add(c)
+            ordered.append(c)
+
+        for cycle in docs.keys():
+            c = str(cycle or '').strip()
+            if not c or c in seen:
+                continue
+            seen.add(c)
+            ordered.append(c)
+
+        return ordered
+
+    def _is_required_doc_completed(self, req_doc: Dict[str, Any], uploaded_docs: List[Dict[str, Any]]) -> bool:
+        doc_name = str(req_doc.get('name') or '').strip()
+        requirement = str(req_doc.get('requirement') or '')
+        if not doc_name:
+            return False
+
+        uploaded = [d for d in uploaded_docs if str(d.get('doc_name') or '').strip() == doc_name]
+        has_uploaded = len(uploaded) > 0
+        has_signature = any(d.get('signer') or d.get('no_signature') for d in uploaded)
+        has_seal = any(
+            d.get('has_seal') or d.get('has_seal_marked') or d.get('party_a_seal') or d.get('party_b_seal') or d.get('no_seal')
+            for d in uploaded
+        )
+
+        is_completed = has_uploaded
+        if requirement:
+            if '签名' in requirement and not has_signature:
+                is_completed = False
+            if '盖章' in requirement and not has_seal:
+                is_completed = False
+        return is_completed
+
     def _frequency_label(self, frequency: str) -> str:
         f = str(frequency or '').strip().lower()
         if f == 'daily':
@@ -554,9 +598,49 @@ class ScheduledReportService:
         updated_docs = 0   # 本周期内重新上传（版本更新）次数
         by_cycle: Dict[str, Dict[str, Any]] = {}
         doc_details: List[Dict[str, Any]] = []   # 文档明细列表
+        checklist: List[Dict[str, Any]] = []     # 项目文档清单
 
         docs = project.get('documents', {}) if isinstance(project.get('documents', {}), dict) else {}
-        for cycle, cycle_info in docs.items():
+        cycle_order = self._get_ordered_cycles(project, docs)
+
+        # 先按系统周期顺序初始化统计和文档清单
+        for cycle in cycle_order:
+            cycle_info = docs.get(cycle, {}) if isinstance(docs.get(cycle, {}), dict) else {}
+            required_docs = cycle_info.get('required_docs', []) if isinstance(cycle_info, dict) else []
+            uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
+
+            completed_docs_count = 0
+            for idx, req in enumerate(required_docs):
+                doc_name = str(req.get('name') or '').strip()
+                requirement = str(req.get('requirement') or '').strip()
+                if not doc_name:
+                    continue
+                same_name_uploaded = [d for d in uploaded_docs if str(d.get('doc_name') or '').strip() == doc_name]
+                is_completed = self._is_required_doc_completed(req, uploaded_docs)
+                if is_completed:
+                    completed_docs_count += 1
+                status = '已完成' if is_completed else ('待完善' if same_name_uploaded else '未上传')
+                checklist.append({
+                    'cycle': cycle,
+                    'index': idx + 1,
+                    'doc_name': doc_name,
+                    'requirement': requirement,
+                    'uploaded_count': len(same_name_uploaded),
+                    'status': status
+                })
+
+            by_cycle.setdefault(cycle, {
+                'uploads': 0,
+                'updated': 0,
+                'archived': 0,
+                'required': len(required_docs),
+                'completed': completed_docs_count,
+                'pending': max(0, len(required_docs) - completed_docs_count)
+            })
+
+        # 统计本期上传/更新
+        for cycle in cycle_order:
+            cycle_info = docs.get(cycle, {}) if isinstance(docs.get(cycle, {}), dict) else {}
             uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
             cycle_upload_count = 0
             cycle_update_count = 0
@@ -582,7 +666,6 @@ class ScheduledReportService:
                         'filename': doc.get('original_filename', doc.get('filename', '')),
                         'is_update': is_update,
                     })
-            by_cycle.setdefault(cycle, {'uploads': 0, 'updated': 0, 'archived': 0})
             by_cycle[cycle]['uploads'] = cycle_upload_count
             by_cycle[cycle]['updated'] = cycle_update_count
 
@@ -610,7 +693,16 @@ class ScheduledReportService:
                     count = len([x for x in doc_names if str(x).strip()])
                     archived += count
                     cycle = row['cycle'] or '未分组'
-                    by_cycle.setdefault(cycle, {'uploads': 0, 'updated': 0, 'archived': 0})
+                    if cycle not in by_cycle:
+                        by_cycle[cycle] = {
+                            'uploads': 0,
+                            'updated': 0,
+                            'archived': 0,
+                            'required': 0,
+                            'completed': 0,
+                            'pending': 0
+                        }
+                        cycle_order.append(cycle)
                     by_cycle[cycle]['archived'] += count
         except Exception as e:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
@@ -625,6 +717,8 @@ class ScheduledReportService:
             'archive_rate': archive_rate,
             'by_cycle': by_cycle,
             'doc_details': doc_details,
+            'cycle_order': cycle_order,
+            'checklist': checklist,
         }
 
     def _load_project(self, project_id: str) -> Dict[str, Any]:
@@ -792,6 +886,8 @@ class ScheduledReportService:
         rate = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
         doc_details = metrics.get('doc_details', [])
+        cycle_order = metrics.get('cycle_order', [])
+        checklist = metrics.get('checklist', [])
 
         party_b_line = f"承建单位：{party_b}\n" if party_b else ''
         text = (
@@ -803,10 +899,13 @@ class ScheduledReportService:
             f"文档更新次数：{updated_docs}\n"
             f"归档通过次数：{archived}\n"
             f"归档率：{rate}%\n"
+            f"项目文档清单条目数：{len(checklist)}\n"
         )
 
         rows = ''
-        for cycle, val in sorted(by_cycle.items(), key=lambda x: str(x[0])):
+        ordered_cycles = [c for c in cycle_order if c in by_cycle] + [c for c in by_cycle.keys() if c not in set(cycle_order)]
+        for cycle in ordered_cycles:
+            val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
             c_updated = val.get('updated', 0)
             c_archived = val.get('archived', 0)
@@ -843,6 +942,19 @@ class ScheduledReportService:
                 f"</tr>"
             )
 
+        checklist_rows = ''
+        for item in checklist[:120]:
+            checklist_rows += (
+                f"<tr>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555'>{item.get('cycle', '')}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555;text-align:center'>{item.get('index', '')}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee'>{item.get('doc_name', '')}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#666;font-size:12px'>{item.get('requirement', '-') or '-'}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#555;text-align:center'>{item.get('uploaded_count', 0)}</td>"
+                f"<td style='padding:5px 8px;border:1px solid #eee;color:#0f766e'>{item.get('status', '')}</td>"
+                f"</tr>"
+            )
+
         party_b_html = (f"<p style='margin:4px 0;color:#666;font-size:13px'>承建单位：<b>{party_b}</b></p>"
                         if party_b else '')
         no_data_row = "<tr><td colspan='5' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
@@ -857,6 +969,19 @@ class ScheduledReportService:
             "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>上传时间</th>"
             f"</tr></thead><tbody>{detail_rows}</tbody></table>"
         ) if detail_rows else "<p style='color:#999;font-size:13px'>本期无文档上传记录。</p>"
+
+        checklist_section = (
+            "<h3 style='font-size:14px;margin:22px 0 8px;color:#374151'>项目文档清单（按系统周期顺序）</h3>"
+            "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+            "<thead><tr style='background:#f8fafc;'>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>周期</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:center'>序号</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>文档名称</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>要求</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:center'>上传数</th>"
+            "<th style='padding:7px 8px;border:1px solid #ddd;text-align:left'>状态</th>"
+            f"</tr></thead><tbody>{checklist_rows}</tbody></table>"
+        ) if checklist_rows else "<p style='color:#999;font-size:13px'>暂无项目文档清单数据。</p>"
         html = (
             f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
             f"<h2 style='margin:0 0 4px;font-size:18px'>项目{title} — {project_name}</h2>"
@@ -885,6 +1010,7 @@ class ScheduledReportService:
             f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>归档率图示</th>"
             f"</tr></thead>"
             f"<tbody>{rows or no_data_row}</tbody></table>"
+            f"{checklist_section}"
             f"{detail_section}"
             f"</div>"
         )
@@ -933,7 +1059,10 @@ class ScheduledReportService:
             y -= 14
 
             by_cycle = metrics.get('by_cycle', {})
-            for cycle, val in sorted(by_cycle.items(), key=lambda x: str(x[0])):
+            cycle_order = metrics.get('cycle_order', [])
+            ordered_cycles = [x for x in cycle_order if x in by_cycle] + [x for x in by_cycle.keys() if x not in set(cycle_order)]
+            for cycle in ordered_cycles:
+                val = by_cycle.get(cycle, {})
                 if y < 80:
                     c.showPage()
                     c.setFont('STSong-Light', 9)
@@ -952,6 +1081,41 @@ class ScheduledReportService:
                 c.setFillColor(colors.HexColor('#16a34a'))
                 c.rect(365, y - 2, max(1, min(140, int(r * 1.4))), 7, fill=1, stroke=0)
                 y -= 14
+
+            # 项目文档清单
+            checklist = metrics.get('checklist', [])
+            if checklist:
+                c.showPage()
+                c.setFont('STSong-Light', 12)
+                c.setFillColor(colors.black)
+                c.drawString(40, 810, '项目文档清单（按系统周期顺序）')
+                c.setFont('STSong-Light', 9)
+                y = 790
+                c.drawString(40, y, '周期')
+                c.drawString(130, y, '序号')
+                c.drawString(165, y, '文档名称')
+                c.drawString(350, y, '上传')
+                c.drawString(390, y, '状态')
+                y -= 14
+
+                for item in checklist:
+                    if y < 60:
+                        c.showPage()
+                        c.setFont('STSong-Light', 9)
+                        y = 810
+                        c.drawString(40, y, '周期')
+                        c.drawString(130, y, '序号')
+                        c.drawString(165, y, '文档名称')
+                        c.drawString(350, y, '上传')
+                        c.drawString(390, y, '状态')
+                        y -= 14
+                    c.setFillColor(colors.black)
+                    c.drawString(40, y, str(item.get('cycle', ''))[:12])
+                    c.drawString(130, y, str(item.get('index', '')))
+                    c.drawString(165, y, str(item.get('doc_name', ''))[:24])
+                    c.drawString(350, y, str(item.get('uploaded_count', 0)))
+                    c.drawString(390, y, str(item.get('status', '')))
+                    y -= 13
 
             c.save()
             return pdf_path

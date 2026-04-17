@@ -4,6 +4,7 @@ import sqlite3
 import uuid as uuid_module
 from datetime import datetime
 from pathlib import Path
+from app.routes.settings import now_with_timezone
 
 
 class MessageManager:
@@ -51,13 +52,14 @@ class MessageManager:
         """发送站内信"""
         try:
             new_uuid = str(uuid_module.uuid4())
+            created_at_iso = now_with_timezone().isoformat()
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''INSERT INTO messages 
-                       (sender_id, receiver_id, title, content, type, related_id, related_type, uuid) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (sender_id, receiver_id, title, content, msg_type, related_id, related_type, new_uuid)
+                       (sender_id, receiver_id, title, content, type, related_id, related_type, uuid, created_at) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (sender_id, receiver_id, title, content, msg_type, related_id, related_type, new_uuid, created_at_iso)
                 )
                 conn.commit()
                 return new_uuid
