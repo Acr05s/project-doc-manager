@@ -125,9 +125,12 @@ project_doc_manager/
 │   ├── PROJECT_DOCUMENTATION.md      # 技术文档
 │   ├── PROJECT_ENGINEERING_GUIDE.md  # 工程说明（模块/字段/迁移）
 │   ├── PRODUCT_MANUAL.md             # 产品手册（使用说明）
-│   ├── MIGRATION_ROLLBACK_GUIDE.md   # 迁移回滚手册（失败时一键回退）
+│   ├── MIGRATION_ROLLBACK_GUIDE.md   # 迁移回滚手册
 │   ├── DEPLOYMENT_GUIDE.md           # 部署指南
-│   └── QUICK_START.md                # 快速开始
+│   ├── QUICK_START.md                # 快速开始
+│   ├── ARCHIVE_DEBUG_GUIDE.md        # 归档调试指南
+│   ├── ZIP_UPLOAD_FIX.md             # ZIP上传修复说明
+│   └── ZIP_UPLOAD_FIX_DB.md          # ZIP上传数据库修复说明
 ├── app/                   # 后端代码
 ├── static/                # 前端资源
 ├── templates/             # HTML 模板
@@ -469,11 +472,11 @@ tools/
   python tools/test/test_file_paths.py
   ```
 
-### 根目录工具
+### 诊断工具
 
 - **check_db3.py**: 检查数据库
   ```bash
-  python tools/check_db3.py <project_id>
+  python tools/diagnostics/check_db3.py <project_id>
   ```
 
 - **check_depth.py**: 检查目录深度

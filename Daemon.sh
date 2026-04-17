@@ -991,58 +991,40 @@ cmd_reset_approval_code() {
         exit 1
     fi
     
-    # 提示输入新安全码
-    read -sp "Enter new admin approval code (at least 8 characters, letters and digits): " NEW_CODE
+    echo -e "${YELLOW}This will reset the admin approval code to the login password.${NC}"
+    echo -e "${YELLOW}The admin will be prompted to set a new code on next login.${NC}"
     echo ""
-    read -sp "Confirm new admin approval code: " NEW_CODE_CONFIRM
-    echo ""
-    
-    if [ "$NEW_CODE" != "$NEW_CODE_CONFIRM" ]; then
-        echo -e "${RED}[ERROR] Codes do not match!${NC}"
-        exit 1
-    fi
-    
-    if [ -z "$NEW_CODE" ]; then
-        echo -e "${RED}[ERROR] Code cannot be empty!${NC}"
-        exit 1
-    fi
-    
-    if [ ${#NEW_CODE} -lt 8 ]; then
-        echo -e "${RED}[ERROR] Code must be at least 8 characters long!${NC}"
-        exit 1
+    read -p "Continue? (y/N): " CONFIRM
+    if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
+        echo "Cancelled."
+        exit 0
     fi
     
     setup_venv
     
-    # 使用虚拟环境 Python 生成安全码 hash 并更新数据库
-    # 使用环境变量传递安全码，避免shell注入
-    export NEW_CODE="$NEW_CODE"
-    "$PYTHON_BIN" << 'EOF'
+    # 清空安全码 hash 并标记需修改，下次登录时安全码等于登录密码
+    "$PYTHON_BIN" << EOF
 import sqlite3
 import sys
-import os
-from werkzeug.security import generate_password_hash
 
 db_path = "$DB_FILE"
-code = os.environ.get('NEW_CODE', '')
 
 try:
-    code_hash = generate_password_hash(code)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # 先尝试更新 role='admin' 的用户
-    cursor.execute("UPDATE users SET approval_code_hash = ? WHERE role = 'admin'", (code_hash,))
+    # 清空 approval_code_hash 并标记 needs_change=1
+    # 这样安全码回退为登录密码，admin 登录后会被要求修改
+    cursor.execute("UPDATE users SET approval_code_hash = NULL, approval_code_needs_change = 1 WHERE role = 'admin'")
     if cursor.rowcount == 0:
-        # 如果没有 role='admin' 的用户，尝试更新 username='admin'
-        cursor.execute("UPDATE users SET approval_code_hash = ? WHERE username = 'admin'", (code_hash,))
+        cursor.execute("UPDATE users SET approval_code_hash = NULL, approval_code_needs_change = 1 WHERE username = 'admin'")
     
     conn.commit()
     updated = cursor.rowcount
     conn.close()
     
     if updated > 0:
-        print(f"[OK] Updated {updated} admin approval code(s) successfully.")
+        print(f"[OK] Reset {updated} admin approval code(s). Code is now the login password.")
     else:
         print("[WARN] No admin user found. Please check the database.")
         sys.exit(1)
@@ -1052,8 +1034,8 @@ except Exception as e:
 EOF
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[OK] Admin approval code has been reset successfully!${NC}"
-        echo -e "${YELLOW}The new code will take effect immediately.${NC}"
+        echo -e "${GREEN}[OK] Admin approval code has been reset to login password!${NC}"
+        echo -e "${YELLOW}Admin will be prompted to set a new approval code on next login.${NC}"
     else
         echo -e "${RED}[ERROR] Failed to reset admin approval code.${NC}"
         exit 1
