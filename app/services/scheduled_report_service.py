@@ -585,20 +585,86 @@ class ScheduledReportService:
             return False
 
         uploaded = [d for d in uploaded_docs if str(d.get('doc_name') or '').strip() == doc_name]
-        has_uploaded = len(uploaded) > 0
-        has_signature = any(d.get('signer') or d.get('no_signature') for d in uploaded)
-        has_seal = any(
-            d.get('has_seal') or d.get('has_seal_marked') or d.get('party_a_seal') or d.get('party_b_seal') or d.get('no_seal')
-            for d in uploaded
-        )
+        if not uploaded:
+            return False
 
-        is_completed = has_uploaded
-        if requirement:
-            if '签名' in requirement and not has_signature:
-                is_completed = False
-            if '盖章' in requirement and not has_seal:
-                is_completed = False
-        return is_completed
+        if not requirement:
+            return True
+
+        # 与前端 checkMissingRequirements 保持一致
+        def get_val(d, *keys):
+            for k in keys:
+                v = d.get(k) or d.get(f'_{k}')
+                if v:
+                    return v
+            return None
+
+        has_party_a_sign_req = '甲方签字' in requirement
+        has_party_b_sign_req = '乙方签字' in requirement
+        has_general_sign_req = '签字' in requirement and not has_party_a_sign_req and not has_party_b_sign_req
+        has_party_a_seal_req = '甲方盖章' in requirement
+        has_party_b_seal_req = '乙方盖章' in requirement
+        has_general_seal_req = '盖章' in requirement and not has_party_a_seal_req and not has_party_b_seal_req
+
+        for d in uploaded:
+            no_sig = get_val(d, 'no_signature')
+            no_seal = get_val(d, 'no_seal')
+
+            if has_party_a_sign_req:
+                if not get_val(d, 'party_a_signer') and not no_sig:
+                    continue
+            if has_party_b_sign_req:
+                if not get_val(d, 'party_b_signer') and not no_sig:
+                    continue
+            if has_general_sign_req:
+                if not get_val(d, 'signer') and not no_sig:
+                    continue
+            if has_party_a_seal_req:
+                if not (get_val(d, 'party_a_seal') or get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or no_seal):
+                    continue
+            if has_party_b_seal_req:
+                if not (get_val(d, 'party_b_seal') or get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or no_seal):
+                    continue
+            if has_general_seal_req:
+                if not (get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or
+                        get_val(d, 'party_a_seal') or get_val(d, 'party_b_seal') or no_seal):
+                    continue
+            # 该文档满足所有要求
+            return True
+        return False
+        has_party_a_sign_req = '甲方签字' in requirement
+        has_party_b_sign_req = '乙方签字' in requirement
+        has_general_sign_req = '签字' in requirement and not has_party_a_sign_req and not has_party_b_sign_req
+        has_party_a_seal_req = '甲方盖章' in requirement
+        has_party_b_seal_req = '乙方盖章' in requirement
+        has_general_seal_req = '盖章' in requirement and not has_party_a_seal_req and not has_party_b_seal_req
+
+        for d in uploaded:
+            no_sig = get_val(d, 'no_signature')
+            no_seal = get_val(d, 'no_seal')
+
+            if has_party_a_sign_req:
+                if not get_val(d, 'party_a_signer') and not no_sig:
+                    continue
+            if has_party_b_sign_req:
+                if not get_val(d, 'party_b_signer') and not no_sig:
+                    continue
+            if has_general_sign_req:
+                if not get_val(d, 'signer') and not no_sig:
+                    continue
+            if has_party_a_seal_req:
+                if not (get_val(d, 'party_a_seal') or get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or no_seal):
+                    continue
+            if has_party_b_seal_req:
+                if not (get_val(d, 'party_b_seal') or get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or no_seal):
+                    continue
+            if has_general_seal_req:
+                if not (get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or
+                        get_val(d, 'party_a_seal') or get_val(d, 'party_b_seal') or no_seal):
+                    continue
+            # 该文档满足所有要求
+            return True
+        return False
 
     def _frequency_label(self, frequency: str) -> str:
         f = str(frequency or '').strip().lower()
@@ -930,36 +996,59 @@ class ScheduledReportService:
         if not receiver_ids:
             return 0
         title = f"【{project_name}】{self._frequency_label(frequency)}已生成"
-        party_b_line = f"承建单位：{party_b}\n" if party_b else ''
-        # 站内信内容与邮件概括保持一致（HTML格式）
-        content = (
-            f"项目：{project_name}\n"
-            + party_b_line +
-            f"类型：{self._frequency_label(frequency)}\n"
-            f"统计区间：{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}\n"
-            f"上传审核通过：{metrics.get('uploads', 0)}\n"
-            f"文档更新次数：{metrics.get('updated_docs', 0)}\n"
-            f"归档通过：{metrics.get('archived', 0)}\n"
-            f"归档率：{metrics.get('archive_rate', 0.0)}%\n"
-        )
-        # 添加按周期统计摘要
+        party_b_line = f"承建单位：{party_b}<br>" if party_b else ''
+        # 站内信内容使用HTML表格格式便于渲染
+        uploads_val = metrics.get('uploads', 0)
+        updated_val = metrics.get('updated_docs', 0)
+        archived_val = metrics.get('archived', 0)
+        rate_val = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
         cycle_order = metrics.get('cycle_order', [])
         ordered_cycles = [c for c in cycle_order if c in by_cycle] + [c for c in by_cycle.keys() if c not in set(cycle_order)]
-        if ordered_cycles:
-            content += "\n按周期统计：\n"
-            for cycle in ordered_cycles:
-                val = by_cycle.get(cycle, {})
-                c_uploads = val.get('uploads', 0)
-                c_archived = val.get('archived', 0)
-                c_required = val.get('required', 0)
-                c_uploaded_unique = val.get('uploaded_unique', 0)
-                if c_uploaded_unique > 0:
-                    c_rate = round(min(100.0, (c_archived / c_uploaded_unique) * 100), 2)
-                else:
-                    c_rate = 0.0
-                content += f"  {cycle}：上传{c_uploads} / 归档{c_archived} / 归档率{c_rate}%\n"
-        content += "\n文档清单请查看PDF附件。"
+
+        cycle_rows = ''
+        for cycle in ordered_cycles:
+            val = by_cycle.get(cycle, {})
+            c_uploads = val.get('uploads', 0)
+            c_archived = val.get('archived', 0)
+            c_uploaded_unique = val.get('uploaded_unique', 0)
+            if c_uploaded_unique > 0:
+                c_rate = round(min(100.0, (c_archived / c_uploaded_unique) * 100), 2)
+            else:
+                c_rate = 0.0
+            cycle_rows += (
+                f"<tr>"
+                f"<td style='padding:4px 8px;border:1px solid #c9d7e8;'>{cycle}</td>"
+                f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_uploads}</td>"
+                f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_archived}</td>"
+                f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_rate}%</td>"
+                f"</tr>"
+            )
+        cycle_table = (
+            "<table style='border-collapse:collapse;width:100%;font-size:12px;margin-top:8px;'>"
+            "<thead><tr style='background:#e8f0f9;'>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:left;'>\u5468\u671f</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u4e0a\u4f20</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u5f52\u6863</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u5f52\u6863\u7387</th>"
+            f"</tr></thead><tbody>{cycle_rows}</tbody></table>"
+        ) if cycle_rows else '<p style="color:#888;font-size:12px;">\u6682\u65e0\u5468\u671f\u6570\u636e</p>'
+
+        content = (
+            f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;font-size:13px;color:#222;'>"
+            f"<p style='margin:0 0 6px;'><b>\u9879\u76ee\uff1a</b>{project_name}</p>"
+            f"<p style='margin:0 0 6px;'>{party_b_line}<b>\u7c7b\u578b\uff1a</b>{self._frequency_label(frequency)}</p>"
+            f"<p style='margin:0 0 6px;color:#888;'>\u7edf\u8ba1\u533a\u95f4\uff1a{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}</p>"
+            f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'>"
+            f"<span style='background:#eef6ff;padding:4px 10px;border-radius:6px;'><b style='color:#2563eb;'>{uploads_val}</b> \u4e0a\u4f20\u901a\u8fc7</span>"
+            f"<span style='background:#f0fff4;padding:4px 10px;border-radius:6px;'><b style='color:#16a34a;'>{archived_val}</b> \u5f52\u6863\u901a\u8fc7</span>"
+            f"<span style='background:#fdf4ff;padding:4px 10px;border-radius:6px;'><b style='color:#7c3aed;'>{rate_val}%</b> \u5f52\u6863\u7387</span>"
+            f"</div>"
+            f"<p style='margin:8px 0 4px;font-weight:600;'>\u6309\u5468\u671f\u7edf\u8ba1\uff1a</p>"
+            f"{cycle_table}"
+            f"<p style='margin:10px 0 0;color:#888;font-size:11px;'>\u6587\u6863\u6e05\u5355\u8bf7\u67e5\u770bPDF\u9644\u4ef6\u3002</p>"
+            f"</div>"
+        )
         msg_type = 'scheduled_report_popup' if popup_enabled else 'scheduled_report'
         sent_count = 0
         for receiver_id in receiver_ids:
@@ -1069,11 +1158,14 @@ class ScheduledReportService:
         return text, html
     def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any]) -> Optional[Path]:
         try:
-            from reportlab.lib import colors
+            from reportlab.lib import colors as rl_colors
             from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import mm
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-            from reportlab.pdfgen import canvas
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+            from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
             out_dir = Path('uploads/tasks/reports')
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -1081,150 +1173,171 @@ class ScheduledReportService:
             pdf_path = out_dir / f"scheduled_report_{suffix}.pdf"
 
             pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
-            c = canvas.Canvas(str(pdf_path), pagesize=A4)
-            c.setFont('STSong-Light', 14)
-            title = self._frequency_label(frequency)
-            c.drawString(40, 800, f'项目定时{title}: {project_name}')
-            c.setFont('STSong-Light', 10)
-            c.drawString(40, 782, f"统计区间: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
+            font_name = 'STSong-Light'
 
+            styles = getSampleStyleSheet()
+            h1 = ParagraphStyle('h1', fontName=font_name, fontSize=14, spaceAfter=4)
+            h2 = ParagraphStyle('h2', fontName=font_name, fontSize=11, spaceAfter=4, spaceBefore=10)
+            body = ParagraphStyle('body', fontName=font_name, fontSize=9, spaceAfter=2)
+
+            title_label = self._frequency_label(frequency)
+            party_b = metrics.get('party_b', '')
+
+            elems = []
+            elems.append(Paragraph(f'项目定时{title_label}：{project_name}', h1))
+            if party_b:
+                elems.append(Paragraph(f'承建单位：{party_b}', body))
+            elems.append(Paragraph(f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}", body))
+            elems.append(Spacer(1, 6))
+
+            # 概况统计行
             uploads = metrics.get('uploads', 0)
             updated_docs = metrics.get('updated_docs', 0)
             archived = metrics.get('archived', 0)
             rate = metrics.get('archive_rate', 0.0)
-            c.drawString(40, 760, f'上传审核通过: {uploads}')
-            c.drawString(180, 760, f'文档更新: {updated_docs}')
-            c.drawString(300, 760, f'归档通过: {archived}')
-            c.drawString(420, 760, f'归档率: {rate}%')
+            summary_data = [
+                ['上传审核通过', '文档更新次数', '归档通过', '归档率'],
+                [str(uploads), str(updated_docs), str(archived), f'{rate}%'],
+            ]
+            summary_style = TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), font_name),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('FONTSIZE', (0, 1), (-1, 1), 13),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, 1), [rl_colors.white]),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ])
+            w = (A4[0] - 80) / 4
+            elems.append(Table(summary_data, colWidths=[w, w, w, w], style=summary_style))
+            elems.append(Spacer(1, 8))
 
-            c.setFont('STSong-Light', 11)
-            c.drawString(40, 736, '按周期统计')
-
-            y = 716
-            c.setFont('STSong-Light', 9)
-            c.setFillColor(colors.black)
-            c.drawString(40, y, '周期')
-            c.drawString(180, y, '上传')
-            c.drawString(225, y, '更新')
-            c.drawString(265, y, '归档')
-            c.drawString(310, y, '归档率')
-            y -= 14
-
+            # 按周期统计
+            elems.append(Paragraph('按周期统计', h2))
             by_cycle = metrics.get('by_cycle', {})
             cycle_order = metrics.get('cycle_order', [])
             ordered_cycles = [x for x in cycle_order if x in by_cycle] + [x for x in by_cycle.keys() if x not in set(cycle_order)]
+            cycle_data = [['周期', '上传通过', '更新次数', '归档通过', '归档率']]
             for cycle in ordered_cycles:
                 val = by_cycle.get(cycle, {})
-                if y < 80:
-                    c.showPage()
-                    c.setFont('STSong-Light', 9)
-                    y = 800
                 u = val.get('uploads', 0)
                 upd = val.get('updated', 0)
                 a = val.get('archived', 0)
-                uploaded_unique = val.get('uploaded_unique', 0)
-                if uploaded_unique > 0:
-                    r = round(min(100.0, (a / uploaded_unique) * 100), 2)
-                else:
-                    r = 0.0
-                c.setFillColor(colors.black)
-                c.drawString(40, y, str(cycle)[:24])
-                c.drawString(180, y, str(u))
-                c.drawString(225, y, str(upd))
-                c.drawString(265, y, str(a))
-                c.drawString(310, y, f'{r}%')
-                c.setStrokeColor(colors.lightgrey)
-                c.setFillColor(colors.HexColor('#16a34a'))
-                c.rect(365, y - 2, max(1, min(140, int(r * 1.4))), 7, fill=1, stroke=0)
-                y -= 14
+                uniq = val.get('uploaded_unique', 0)
+                r = round(min(100.0, (a / uniq) * 100), 2) if uniq > 0 else 0.0
+                cycle_data.append([str(cycle), str(u), str(upd), str(a), f'{r}%'])
+            cycle_style = TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), font_name),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ])
+            pw = A4[0] - 80
+            elems.append(Table(cycle_data, colWidths=[pw*0.35, pw*0.15, pw*0.15, pw*0.15, pw*0.2], style=cycle_style))
 
             # 项目文档清单
             checklist = metrics.get('checklist', [])
             if checklist:
-                c.showPage()
-                c.setFont('STSong-Light', 12)
-                c.setFillColor(colors.black)
-                c.drawString(40, 810, '项目文档清单（按系统周期顺序）')
-                c.setFont('STSong-Light', 9)
-                y = 790
-                c.drawString(40, y, '序号')
-                c.drawString(75, y, '周期')
-                c.drawString(165, y, '文档名称')
-                c.drawString(350, y, '上传')
-                c.drawString(390, y, '状态')
-                y -= 14
-
+                elems.append(PageBreak())
+                elems.append(Paragraph('项目文档清单（按系统周期顺序）', h1))
+                cl_data = [['序号', '周期', '文档名称', '要求', '上传数', '状态']]
                 prev_cycle = None
-                seq = 0
-                for item in checklist:
-                    if y < 60:
-                        c.showPage()
-                        c.setFont('STSong-Light', 9)
-                        y = 810
-                        c.drawString(40, y, '序号')
-                        c.drawString(75, y, '周期')
-                        c.drawString(165, y, '文档名称')
-                        c.drawString(350, y, '上传')
-                        c.drawString(390, y, '状态')
-                        y -= 14
-                        prev_cycle = None
-                    c.setFillColor(colors.black)
-                    seq += 1
-                    c.drawString(40, y, str(seq))
+                for i, item in enumerate(checklist, 1):
                     cur_cycle = str(item.get('cycle', ''))
-                    if cur_cycle != prev_cycle:
-                        c.drawString(75, y, cur_cycle[:12])
-                        prev_cycle = cur_cycle
-                    c.drawString(165, y, str(item.get('doc_name', ''))[:24])
-                    c.drawString(350, y, str(item.get('uploaded_count', 0)))
-                    c.drawString(390, y, str(item.get('status', '')))
-                    y -= 13
+                    cycle_cell = cur_cycle if cur_cycle != prev_cycle else ''
+                    prev_cycle = cur_cycle
+                    status = str(item.get('status', ''))
+                    cl_data.append([
+                        str(i),
+                        cycle_cell,
+                        str(item.get('doc_name', '')),
+                        str(item.get('requirement', '') or '-'),
+                        str(item.get('uploaded_count', 0)),
+                        status,
+                    ])
+                # 为不同状态上色
+                cl_style_cmds = [
+                    ('FONTNAME', (0, 0), (-1, -1), font_name),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('ALIGN', (0, 0), (0, -1), 'CENTER'),   # 序号居中
+                    ('ALIGN', (4, 0), (5, -1), 'CENTER'),   # 上传数、状态居中
+                    ('ALIGN', (1, 0), (3, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                    ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                    ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('WORDWRAP', (2, 1), (3, -1), True),
+                ]
+                for row_idx, item in enumerate(checklist, 1):
+                    status = str(item.get('status', ''))
+                    if status == '已完成':
+                        cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#16a34a')))
+                    elif status == '待完善':
+                        cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#d97706')))
+                    elif status == '未上传':
+                        cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#dc2626')))
+                cl_style = TableStyle(cl_style_cmds)
+                cw = pw / 6
+                elems.append(Table(cl_data, colWidths=[cw*0.5, cw*1.2, cw*1.8, cw*1.3, cw*0.5, cw*0.7], style=cl_style, repeatRows=1))
 
             # 本期文档上传明细
             doc_details = metrics.get('doc_details', [])
             if doc_details:
-                c.showPage()
-                c.setFont('STSong-Light', 12)
-                c.setFillColor(colors.black)
-                c.drawString(40, 810, '本期文档上传明细')
-                c.setFont('STSong-Light', 9)
-                y = 790
-                c.drawString(40, y, '序号')
-                c.drawString(75, y, '周期')
-                c.drawString(165, y, '文档名称')
-                c.drawString(350, y, '上传人')
-                c.drawString(420, y, '上传时间')
-                y -= 14
-
+                elems.append(PageBreak())
+                elems.append(Paragraph('本期文档上传明细', h1))
+                dd_data = [['序号', '周期', '文档名称', '文件名', '上传人', '上传时间']]
                 prev_cycle = None
                 for idx, d in enumerate(doc_details, 1):
-                    if y < 60:
-                        c.showPage()
-                        c.setFont('STSong-Light', 9)
-                        y = 810
-                        c.drawString(40, y, '序号')
-                        c.drawString(75, y, '周期')
-                        c.drawString(165, y, '文档名称')
-                        c.drawString(350, y, '上传人')
-                        c.drawString(420, y, '上传时间')
-                        y -= 14
-                        prev_cycle = None
-                    c.setFillColor(colors.black)
-                    c.drawString(40, y, str(idx))
                     cur_cycle = str(d.get('cycle', ''))
-                    if cur_cycle != prev_cycle:
-                        c.drawString(75, y, cur_cycle[:12])
-                        prev_cycle = cur_cycle
+                    cycle_cell = cur_cycle if cur_cycle != prev_cycle else ''
+                    prev_cycle = cur_cycle
                     doc_name = str(d.get('doc_name', ''))
                     if d.get('is_update'):
                         doc_name += '(更新)'
-                    c.drawString(165, y, doc_name[:24])
-                    c.drawString(350, y, str(d.get('uploader', '-') or '-')[:10])
                     upload_time = str(d.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
-                    c.drawString(420, y, upload_time)
-                    y -= 13
+                    dd_data.append([
+                        str(idx),
+                        cycle_cell,
+                        doc_name,
+                        str(d.get('filename', '') or '')[:30],
+                        str(d.get('uploader', '-') or '-'),
+                        upload_time,
+                    ])
+                dd_style = TableStyle([
+                    ('FONTNAME', (0, 0), (-1, -1), font_name),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                    ('ALIGN', (1, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                    ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                    ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ])
+                dw = pw / 6
+                elems.append(Table(dd_data, colWidths=[dw*0.4, dw*0.9, dw*1.4, dw*1.5, dw*0.9, dw*0.9], style=dd_style, repeatRows=1))
 
-            c.save()
+            doc = SimpleDocTemplate(
+                str(pdf_path), pagesize=A4,
+                leftMargin=40, rightMargin=40, topMargin=40, bottomMargin=40
+            )
+            doc.build(elems)
             return pdf_path
         except Exception as e:
             logger.warning(f'[ScheduledReportService] build pdf failed: {e}')

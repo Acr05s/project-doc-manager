@@ -588,7 +588,9 @@ function openScheduledReportMessageModal(message) {
     const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
     const createdAt = formatDateTimeDisplay(message?.created_at, tz);
     const title = escapeHtml(message?.title || '定时报告通知');
-    const content = escapeHtml(message?.content || '').replace(/\n/g, '<br>');
+    // content 为 HTML 格式，直接渲染（后端已确保内容安全，仅内部生成不含用户输入）
+    const rawContent = message?.content || '';
+    const isHtmlContent = rawContent.trimStart().startsWith('<');
 
     modal.innerHTML = `
         <div class="modal-content" style="max-width:760px;border-radius:12px;border:1px solid #dbe7f5;box-shadow:0 20px 50px rgba(8,36,74,.25);">
@@ -597,7 +599,7 @@ function openScheduledReportMessageModal(message) {
             <div style="padding:16px;max-height:60vh;overflow:auto;background:#f9fcff;">
                 <div style="font-size:16px;font-weight:600;color:#153a6b;">${title}</div>
                 <div style="font-size:12px;color:#6c7b90;margin-top:4px;">${createdAt}</div>
-                <div style="margin-top:12px;font-size:13px;line-height:1.7;color:#334;">${content || '-'}</div>
+                <div style="margin-top:12px;font-size:13px;line-height:1.7;color:#334;">${isHtmlContent ? rawContent : escapeHtml(rawContent).replace(/\n/g, '<br>') || '-'}</div>
             </div>
             <div style="padding:12px 16px;border-top:1px solid #e6eef8;display:flex;justify-content:flex-end;gap:10px;">
                 <button type="button" class="btn btn-secondary" id="scheduledReportMessageCloseBtn2">关闭</button>
