@@ -60,103 +60,44 @@ function toggleEditorFields() {
     }
 }
 
-function updateSelectedProjectCount() {
-    const countEl = document.getElementById('scheduledSelectedProjectCount');
-    if (!countEl) return;
-    const checked = document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]:checked');
-    countEl.textContent = String(checked.length);
-}
-
-function getSelectedProjectIds() {
-    const checked = document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]:checked');
-    return Array.from(checked).map(x => x.dataset.projectId).filter(Boolean);
-}
-
 function getConfigProjectId() {
     const select = document.getElementById('scheduledConfigProjectId');
-    const selectedIds = getSelectedProjectIds();
-    if (select && selectedIds.includes(select.value)) {
-        return select.value;
-    }
-    return selectedIds[0] || '';
+    return select ? String(select.value || '').trim() : '';
 }
 
-function syncConfigProjectSelect() {
-    const select = document.getElementById('scheduledConfigProjectId');
-    if (!select) return;
+function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText) {
+    if (!select) return '';
 
-    const selectedIds = getSelectedProjectIds();
-    const previous = select.value;
-    const selectedSet = new Set(selectedIds);
     select.innerHTML = '';
-
-    if (selectedIds.length === 0) {
-        select.innerHTML = '<option value="">-- 请先从上方选择项目 --</option>';
-        _currentProjectId = '';
-        return;
+    if (!Array.isArray(projects) || projects.length === 0) {
+        select.innerHTML = `<option value="">${emptyText || '暂无可配置项目'}</option>`;
+        return '';
     }
 
-    selectedIds.forEach((projectId) => {
-        const project = _modalProjects.find(item => String(item.id) === String(projectId));
-        const opt = document.createElement('option');
-        opt.value = projectId;
-        opt.textContent = project ? `${project.name || projectId} (${projectId})` : projectId;
-        select.appendChild(opt);
+    projects.forEach((project) => {
+        const projectId = String(project.id || '').trim();
+        if (!projectId) return;
+        const option = document.createElement('option');
+        option.value = projectId;
+        option.textContent = `${project.name || projectId} (${projectId})`;
+        select.appendChild(option);
     });
 
-    const nextValue = selectedSet.has(previous) ? previous : selectedIds[0];
-    select.value = nextValue;
-    _currentProjectId = nextValue;
+    const preferred = String(preferredProjectId || '').trim();
+    const matched = Array.from(select.options).some((opt) => opt.value === preferred);
+    select.value = matched ? preferred : String(select.options[0]?.value || '');
+    return String(select.value || '');
 }
 
 function renderProjectList(projects, preferredProjectId) {
-    const container = document.getElementById('scheduledProjectList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (!Array.isArray(projects) || projects.length === 0) {
-        container.innerHTML = '<div style="grid-column:1 / -1; color:#777; font-size:13px;">暂无可配置项目</div>';
-        updateSelectedProjectCount();
-        return;
-    }
-
+    const configSelect = document.getElementById('scheduledConfigProjectId');
+    const editorSelect = document.getElementById('scheduledEditorProjectSelect');
     const fallbackProjectId = preferredProjectId || appState.currentProjectId;
-    projects.forEach((project, index) => {
-        const projectId = String(project.id || '').trim();
-        if (!projectId) return;
-        const projectName = String(project.name || projectId);
 
-        const row = document.createElement('label');
-        row.style.cssText = 'display:flex; align-items:flex-start; gap:8px; border:1px solid #e4ebf5; border-radius:8px; background:#fff; padding:8px; cursor:pointer;';
-        row.innerHTML = `
-            <input type="checkbox" data-project-id="${escapeHtml(projectId)}" style="margin-top:2px;">
-            <span style="display:flex; flex-direction:column; gap:2px; min-width:0;">
-                <strong style="font-size:13px; color:#224; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(projectName)}</strong>
-                <span style="font-size:11px; color:#789;">ID: ${escapeHtml(projectId)}</span>
-            </span>
-        `;
+    const selectedConfigProjectId = populateProjectSelectOptions(configSelect, projects, fallbackProjectId, '-- 暂无可配置项目 --');
+    populateProjectSelectOptions(editorSelect, projects, selectedConfigProjectId, '-- 暂无可配置项目 --');
 
-        const checkbox = row.querySelector('input[type="checkbox"]');
-        if (checkbox) {
-            checkbox.checked = projectId === fallbackProjectId || (!fallbackProjectId && index === 0);
-            checkbox.addEventListener('change', async () => {
-                updateSelectedProjectCount();
-                syncConfigProjectSelect();
-                const configProjectId = getConfigProjectId();
-                if (configProjectId) {
-                    await loadTasksForProject(configProjectId, '');
-                } else {
-                    _taskList = [];
-                    renderTaskList(_taskList);
-                }
-            });
-        }
-
-        container.appendChild(row);
-    });
-
-    updateSelectedProjectCount();
-    syncConfigProjectSelect();
+    _currentProjectId = selectedConfigProjectId || '';
 }
 
 function selectedTaskIds() {
@@ -330,6 +271,13 @@ function fillEditorByTask(task) {
     const projectIdInput = document.getElementById('scheduledEditorProjectId');
     if (projectIdInput) projectIdInput.value = _currentProjectId;
 
+    const editorProjectSelect = document.getElementById('scheduledEditorProjectSelect');
+    if (editorProjectSelect) {
+        populateProjectSelectOptions(editorProjectSelect, _modalProjects, _currentProjectId, '-- 暂无可配置项目 --');
+        editorProjectSelect.value = _currentProjectId;
+        editorProjectSelect.disabled = true;
+    }
+
     const taskName = document.getElementById('scheduledTaskName');
     if (taskName) taskName.value = task.task_name || '';
 
@@ -374,6 +322,13 @@ function clearEditorToNewTask() {
 
     const projectIdInput = document.getElementById('scheduledEditorProjectId');
     if (projectIdInput) projectIdInput.value = _currentProjectId || '';
+
+    const editorProjectSelect = document.getElementById('scheduledEditorProjectSelect');
+    if (editorProjectSelect) {
+        const selected = populateProjectSelectOptions(editorProjectSelect, _modalProjects, _currentProjectId || appState.currentProjectId, '-- 暂无可配置项目 --');
+        editorProjectSelect.disabled = false;
+        if (projectIdInput) projectIdInput.value = selected;
+    }
 
     const taskName = document.getElementById('scheduledTaskName');
     if (taskName) taskName.value = '';
@@ -474,12 +429,11 @@ function buildPayloadFromEditorForm() {
 }
 
 export function openScheduledTaskEditorModal(taskId = '') {
-    if (!_currentProjectId) {
-        showNotification('请先在任务管理页选择一个项目', 'warning');
-        return;
-    }
-
     if (taskId) {
+        if (!_currentProjectId) {
+            showNotification('请先选择一个项目后再编辑任务', 'warning');
+            return;
+        }
         const task = _taskList.find((x) => String(x.task_id) === String(taskId));
         if (!task) {
             showNotification('任务不存在', 'error');
@@ -649,35 +603,25 @@ export async function openScheduledReportModal() {
             renderTaskList(_taskList);
         }
 
-        const selectAllBtn = document.getElementById('scheduledProjectSelectAllBtn');
-        if (selectAllBtn) {
-            selectAllBtn.onclick = async () => {
-                document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]').forEach((cb) => {
-                    cb.checked = true;
-                });
-                updateSelectedProjectCount();
-                syncConfigProjectSelect();
-                const projectIdToLoad = getConfigProjectId();
-                if (projectIdToLoad) await loadTasksForProject(projectIdToLoad, '');
-            };
-        }
-
-        const clearBtn = document.getElementById('scheduledProjectClearBtn');
-        if (clearBtn) {
-            clearBtn.onclick = () => {
-                document.querySelectorAll('#scheduledProjectList input[type="checkbox"][data-project-id]').forEach((cb) => {
-                    cb.checked = false;
-                });
-                updateSelectedProjectCount();
-                syncConfigProjectSelect();
-                _taskList = [];
-                renderTaskList(_taskList);
-            };
-        }
-
         const newTaskBtn = document.getElementById('scheduledTaskNewBtn');
         if (newTaskBtn) {
             newTaskBtn.onclick = () => openScheduledTaskEditorModal('');
+        }
+
+        const editorProjectSelect = document.getElementById('scheduledEditorProjectSelect');
+        if (editorProjectSelect) {
+            editorProjectSelect.onchange = async () => {
+                const selectedId = String(editorProjectSelect.value || '').trim();
+                const projectIdInput = document.getElementById('scheduledEditorProjectId');
+                if (projectIdInput) projectIdInput.value = selectedId;
+                if (!selectedId) {
+                    _recipientOptions = [];
+                    renderRecipientUserList([], []);
+                    return;
+                }
+                await loadTasksForProject(selectedId, '');
+                renderRecipientUserList(_recipientOptions, []);
+            };
         }
 
         const taskSelectAllBtn = document.getElementById('scheduledTaskSelectAllBtn');
@@ -728,7 +672,7 @@ export async function saveScheduledReportConfig(e) {
         e.preventDefault();
     }
 
-    const projectId = _currentProjectId || getConfigProjectId();
+    const projectId = (document.getElementById('scheduledEditorProjectId')?.value || '').trim() || _currentProjectId || getConfigProjectId();
     if (!projectId) {
         showNotification('请先选择“当前配置项目”', 'error');
         return;

@@ -280,7 +280,15 @@ function _collectRuntimeMenuDefinitions() {
         'documentManagementBtn',
         'acceptanceBtn',
         'archiveAndApprovalBtn',
-        'permissionConfigMenuItem'
+        'permissionConfigMenuItem',
+        // 认证与个人信息控件不属于业务菜单，不应受项目菜单权限控制
+        'authContainer',
+        'userProfileDropdown',
+        'userProfileBtn',
+        'userProfileMenu',
+        'profileMenuItem',
+        'logoutMenuItem',
+        'headerBellBtn'
     ]);
 
     const addDef = (el, group) => {
@@ -643,6 +651,9 @@ function _applyMenuPermissions(permissions) {
 
     // 遍历所有权限项，对每个元素应用显示/隐藏
     for (const [menuKey, menuData] of Object.entries(permissions)) {
+        if (['authContainer', 'userProfileDropdown', 'userProfileBtn', 'userProfileMenu', 'profileMenuItem', 'logoutMenuItem', 'headerBellBtn'].includes(menuKey)) {
+            continue;
+        }
         const el = document.getElementById(menuKey);
         if (el) {
             if (menuData.group === 'top') {
