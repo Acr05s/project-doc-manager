@@ -635,10 +635,7 @@
                         <span class="marquee-text" id="marqueeText">暂无新消息</span>
                     </div>
                 </div>
-                <div class="header-bell" id="headerBellBtn" title="消息中心">
-                    <span class="bell-icon">🔔</span>
-                    <span class="header-bell-badge" id="headerBellBadge" style="display:none;">0</span>
-                </div>
+
             </div>
 
             <div class="header-right" style="display: flex; gap: 10px;">
@@ -647,10 +644,10 @@
                     <!-- 内容由 auth.js 动态生成 -->
                 </div>
                 
-                <!-- 消息中心按钮（保留隐藏，供内部逻辑使用） -->
-                <div id="messageCenterBtn" class="message-trigger" style="display:none;">
-                    <span>消息</span>
-                    <span id="messageBadge" class="message-badge">0</span>
+                <!-- 消息中心按钮 -->
+                <div id="messageCenterBtn" class="header-bell message-trigger" title="消息中心">
+                    <span class="bell-icon">🔔</span>
+                    <span id="messageBadge" class="header-bell-badge message-badge">0</span>
                 </div>
                 
                 <!-- 操作菜单按钮已移至左侧四叶草浮动按钮 -->
@@ -1583,8 +1580,11 @@
                     </div>
                 </div>
 
-                <div style="display:flex;justify-content:space-between;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3;">
-                    <button type="button" class="btn btn-warning" onclick="runScheduledReportNow()">立即执行当前任务</button>
+                <div style="display:flex;justify-content:space-between;gap:10px; margin-top:14px; padding-top:12px; border-top:1px dashed #d7e3f3; align-items:center; flex-wrap:wrap;">
+                    <label id="scheduledRunAfterSaveWrap" for="scheduledRunAfterSaveOnce" style="display:inline-flex; align-items:center; gap:8px; margin:0; color:#345; font-size:13px;">
+                        <input type="checkbox" id="scheduledRunAfterSaveOnce">
+                        保存任务后立即执行一次
+                    </label>
                     <div>
                         <button type="button" class="btn btn-secondary" onclick="closeScheduledTaskEditorModal()">取消</button>
                         <button type="submit" class="btn btn-success" style="margin-left:10px;">保存任务</button>
@@ -1751,7 +1751,7 @@
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;" onchange="document.getElementById('watermarkOpacityRow').style.display=this.checked?'flex':'none';document.getElementById('watermarkFieldRow').style.display=this.checked?'flex':'none'">
+                            <input type="checkbox" id="watermarkEnabled" style="width: 18px; height: 18px;" onchange="document.getElementById('watermarkOpacityRow').style.display=this.checked?'flex':'none';document.getElementById('watermarkFieldRow').style.display=this.checked?'flex':'none';document.getElementById('watermarkColorRow').style.display=this.checked?'flex':'none'">
                             <span>开启全局动态水印</span>
                         </label>
                         <small style="color: #999; font-size: 12px; display: block; margin-top: 6px;">开启后，界面将显示动态水印，内容可按需勾选组合</small>
@@ -1779,7 +1779,17 @@
                                     <input type="checkbox" id="watermarkFieldDatetime" value="datetime" checked>
                                     <span>日期时间</span>
                                 </label>
+                                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #333;">
+                                    <input type="checkbox" id="watermarkFieldCopyright" value="copyright">
+                                    <span>版权</span>
+                                </label>
                             </div>
+                        </div>
+                        <div id="watermarkColorRow" style="margin-top: 10px; display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            <label for="watermarkColor" style="font-size: 13px; color: #555; white-space: nowrap;">水印颜色：</label>
+                            <input type="color" id="watermarkColor" value="#3c3c3c" style="width: 44px; height: 30px; padding: 0; border: 1px solid #d5dbe6; border-radius: 4px; cursor: pointer;" oninput="document.getElementById('watermarkColorValue').textContent=this.value">
+                            <span id="watermarkColorValue" style="font-size: 13px; color: #333; min-width: 70px;">#3c3c3c</span>
+                            <small style="color: #999; font-size: 12px;">可手动选取水印文字颜色</small>
                         </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">

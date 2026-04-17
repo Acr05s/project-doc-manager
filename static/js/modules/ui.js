@@ -1221,6 +1221,8 @@ function toggleWatermarkConfigRows(enabled) {
     if (opacityRow) opacityRow.style.display = enabled ? 'flex' : 'none';
     const fieldRow = document.getElementById('watermarkFieldRow');
     if (fieldRow) fieldRow.style.display = enabled ? 'flex' : 'none';
+    const colorRow = document.getElementById('watermarkColorRow');
+    if (colorRow) colorRow.style.display = enabled ? 'flex' : 'none';
 }
 
 function getWatermarkFieldSelectionFromDom() {
@@ -1228,7 +1230,8 @@ function getWatermarkFieldSelectionFromDom() {
         { id: 'watermarkFieldUsername', value: 'username' },
         { id: 'watermarkFieldDisplayName', value: 'display_name' },
         { id: 'watermarkFieldOrganization', value: 'organization' },
-        { id: 'watermarkFieldDatetime', value: 'datetime' }
+        { id: 'watermarkFieldDatetime', value: 'datetime' },
+        { id: 'watermarkFieldCopyright', value: 'copyright' }
     ];
     const selected = mapping
         .filter(item => {
@@ -1247,7 +1250,8 @@ function applyWatermarkFieldSelectionToDom(fields) {
         { id: 'watermarkFieldUsername', value: 'username' },
         { id: 'watermarkFieldDisplayName', value: 'display_name' },
         { id: 'watermarkFieldOrganization', value: 'organization' },
-        { id: 'watermarkFieldDatetime', value: 'datetime' }
+        { id: 'watermarkFieldDatetime', value: 'datetime' },
+        { id: 'watermarkFieldCopyright', value: 'copyright' }
     ];
     mapping.forEach(item => {
         const el = document.getElementById(item.id);
@@ -1472,7 +1476,7 @@ function formatNow() {
     return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
 }
 
-function buildWatermarkImage(text) {
+function buildWatermarkImage(text, color = '#3c3c3c') {
     const canvas = document.createElement('canvas');
     canvas.width = 420;
     canvas.height = 240;
@@ -1484,7 +1488,7 @@ function buildWatermarkImage(text) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '16px Microsoft YaHei';
-    ctx.fillStyle = 'rgba(60, 60, 60, 0.9)';
+    ctx.fillStyle = color || '#3c3c3c';
     ctx.fillText(text, 0, 0);
     return canvas.toDataURL('image/png');
 }
@@ -1510,6 +1514,8 @@ function applyDynamicWatermark(settings) {
     const username = user?.username || 'unknown';
     const displayName = user?.display_name || user?.username || '-';
     const org = user?.organization || '-';
+    const copyrightText = settings?.author || '-';
+    const wmColor = typeof settings?.watermark_color === 'string' ? settings.watermark_color : '#3c3c3c';
     const selectedFieldsRaw = settings?.watermark_content_fields;
     const selectedFields = Array.isArray(selectedFieldsRaw) && selectedFieldsRaw.length > 0
         ? selectedFieldsRaw
@@ -1522,8 +1528,9 @@ function applyDynamicWatermark(settings) {
         if (selectedFields.includes('display_name')) parts.push(displayName);
         if (selectedFields.includes('organization')) parts.push(org);
         if (selectedFields.includes('datetime')) parts.push(formatNow());
+        if (selectedFields.includes('copyright')) parts.push(`版权所有:${copyrightText}`);
         const text = parts.length > 0 ? parts.join(' | ') : `${username} | ${displayName} | ${org} | ${formatNow()}`;
-        layer.style.backgroundImage = `url(${buildWatermarkImage(text)})`;
+        layer.style.backgroundImage = `url(${buildWatermarkImage(text, wmColor)})`;
         layer.style.display = 'block';
     };
     const watermarkEnabled = document.getElementById('watermarkEnabled');
@@ -1601,6 +1608,13 @@ async function loadSystemSettings() {
                 const opacityVal = Number(settings.watermark_opacity ?? 15);
                 watermarkOpacity.value = opacityVal;
                 if (watermarkOpacityValue) watermarkOpacityValue.textContent = opacityVal;
+            }
+            const watermarkColor = document.getElementById('watermarkColor');
+            const watermarkColorValue = document.getElementById('watermarkColorValue');
+            if (watermarkColor) {
+                const colorVal = String(settings.watermark_color || '#3c3c3c');
+                watermarkColor.value = colorVal;
+                if (watermarkColorValue) watermarkColorValue.textContent = colorVal;
             }
             applyWatermarkFieldSelectionToDom(settings.watermark_content_fields);
 
@@ -1706,6 +1720,10 @@ async function saveSystemSettings() {
         const watermarkOpacity = document.getElementById('watermarkOpacity');
         if (watermarkOpacity) {
             settings.watermark_opacity = parseInt(watermarkOpacity.value, 10) || 15;
+        }
+        const watermarkColor = document.getElementById('watermarkColor');
+        if (watermarkColor) {
+            settings.watermark_color = watermarkColor.value || '#3c3c3c';
         }
         settings.watermark_content_fields = getWatermarkFieldSelectionFromDom();
 

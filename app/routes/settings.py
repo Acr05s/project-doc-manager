@@ -37,6 +37,7 @@ def load_settings():
         'password_expire_days': 0,
         'watermark_enabled': False,
         'watermark_opacity': 15,
+        'watermark_color': '#3c3c3c',
         'watermark_content_fields': ['username', 'display_name', 'organization', 'datetime'],
         'smtp_host': '',
         'smtp_port': 465,
@@ -214,7 +215,7 @@ def update_settings():
         current_settings = load_settings()
         
         # 更新允许修改的字段
-        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code', 'approval_code_cache_minutes']
+        allowed_fields = ['system_name', 'author', 'description', 'fast_preview_threshold', 'email_notification_enabled', 'log_retention_days', 'timezone', 'require_approval_code', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_sender', 'smtp_encryption', 'force_agreement_on_login', 'agreement_markdown', 'watermark_enabled', 'watermark_opacity', 'watermark_color', 'watermark_content_fields', 'password_min_length', 'password_require_letter_digit', 'approval_code_must_differ_from_password', 'password_expire_days', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code', 'approval_code_cache_minutes']
         
         # 规范化布尔字段，确保 false 被正确保存
         bool_fields = {'email_notification_enabled', 'require_approval_code', 'force_agreement_on_login', 'watermark_enabled', 'admin_archive_approval_enabled', 'admin_system_settings_require_approval_code'}
@@ -237,11 +238,22 @@ def update_settings():
             wm_fields = [x.strip() for x in wm_fields.split(',') if x.strip()]
         if not isinstance(wm_fields, list):
             wm_fields = ['username', 'display_name', 'organization', 'datetime']
-        allowed_wm_fields = {'username', 'display_name', 'organization', 'datetime'}
+        allowed_wm_fields = {'username', 'display_name', 'organization', 'datetime', 'copyright'}
         wm_fields = [str(x).strip() for x in wm_fields if str(x).strip() in allowed_wm_fields]
         if not wm_fields:
             wm_fields = ['username', 'display_name', 'organization', 'datetime']
         current_settings['watermark_content_fields'] = wm_fields
+
+        # 水印颜色校验（HEX: #RRGGBB）
+        wm_color = str(current_settings.get('watermark_color') or '#3c3c3c').strip()
+        if len(wm_color) == 7 and wm_color.startswith('#'):
+            hex_part = wm_color[1:]
+            if all(ch in '0123456789abcdefABCDEF' for ch in hex_part):
+                current_settings['watermark_color'] = wm_color
+            else:
+                current_settings['watermark_color'] = '#3c3c3c'
+        else:
+            current_settings['watermark_color'] = '#3c3c3c'
         
         # 保存到settings.json
         if save_settings(current_settings):

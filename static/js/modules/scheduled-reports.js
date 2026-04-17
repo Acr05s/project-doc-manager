@@ -10,6 +10,8 @@ let _currentProjectMeta = { party_b: '', project_name: '' };
 let _editingTaskId = '';
 let _taskScope = 'single'; // single | all
 let _selectedProjectIds = new Set();
+const SCHEDULED_PROJECT_SELECTION_KEY = 'scheduledReport.selectedProjectIds';
+const SCHEDULED_CONFIG_PROJECT_KEY = 'scheduledReport.configProjectId';
 
 function escapeHtml(value) {
     return String(value || '')
@@ -68,6 +70,31 @@ function getConfigProjectId() {
     return select ? String(select.value || '').trim() : '';
 }
 
+function loadSavedProjectSelection() {
+    try {
+        const rawIds = localStorage.getItem(SCHEDULED_PROJECT_SELECTION_KEY) || '[]';
+        const ids = JSON.parse(rawIds);
+        const configProjectId = String(localStorage.getItem(SCHEDULED_CONFIG_PROJECT_KEY) || '').trim();
+        if (!Array.isArray(ids)) {
+            return { selectedIds: [], configProjectId };
+        }
+        const selectedIds = ids.map((x) => String(x || '').trim()).filter(Boolean);
+        return { selectedIds, configProjectId };
+    } catch (e) {
+        return { selectedIds: [], configProjectId: '' };
+    }
+}
+
+function saveProjectSelection(selectedIds, configProjectId) {
+    try {
+        const ids = Array.from(new Set((selectedIds || []).map((x) => String(x || '').trim()).filter(Boolean)));
+        localStorage.setItem(SCHEDULED_PROJECT_SELECTION_KEY, JSON.stringify(ids));
+        localStorage.setItem(SCHEDULED_CONFIG_PROJECT_KEY, String(configProjectId || '').trim());
+    } catch (e) {
+        // ignore localStorage failures
+    }
+}
+
 function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText, includeAllOption = false) {
     if (!select) return '';
 
@@ -102,7 +129,15 @@ function populateProjectSelectOptions(select, projects, preferredProjectId, empt
 function renderProjectList(projects, preferredProjectId) {
     const configSelect = document.getElementById('scheduledConfigProjectId');
     const editorSelect = document.getElementById('scheduledEditorProjectSelect');
-    const fallbackProjectId = preferredProjectId || appState.currentProjectId;
+    const saved = loadSavedProjectSelection();
+    const validProjectIds = new Set((projects || []).map((p) => String(p.id || '').trim()).filter(Boolean));
+    const savedSelectedIds = (saved.selectedIds || []).filter((id) => validProjectIds.has(id));
+    const savedConfigProjectId = saved.configProjectId && validProjectIds.has(saved.configProjectId)
+        ? saved.configProjectId
+        : '';
+
+    // 优先恢复上次选择；无历史时默认“全部项目”
+    const fallbackProjectId = savedConfigProjectId || '';
 
     const selectedConfigProjectId = populateProjectSelectOptions(
         configSelect,
@@ -115,8 +150,17 @@ function renderProjectList(projects, preferredProjectId) {
 
     _currentProjectId = selectedConfigProjectId || '';
 
-    const selectedIds = selectedConfigProjectId ? [selectedConfigProjectId] : projects.map((p) => String(p.id || '').trim()).filter(Boolean);
+    const selectedIds = savedSelectedIds.length > 0
+        ? savedSelectedIds
+        : projects.map((p) => String(p.id || '').trim()).filter(Boolean);
+
+    if (configSelect && savedSelectedIds.length > 1) {
+        // 多选场景默认显示“全部项目”
+        configSelect.value = '';
+        _currentProjectId = '';
+    }
     renderProjectMultiList(projects, selectedIds);
+    saveProjectSelection(selectedIds, _currentProjectId || '');
 }
 
 function renderProjectMultiList(projects, selectedIds = []) {
@@ -213,6 +257,21 @@ function refreshTaskListByCurrentFilters() {
     renderTaskList(filtered);
 }
 
+function highlightTaskRow(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    const row = document.querySelector(`#scheduledTaskList tr[data-task-row-id="${id}"]`);
+    if (!row) return;
+
+    row.style.transition = 'background-color 240ms ease, box-shadow 240ms ease';
+    row.style.backgroundColor = '#fff7d6';
+    row.style.boxShadow = 'inset 0 0 0 2px #fbbf24';
+    setTimeout(() => {
+        row.style.backgroundColor = '';
+        row.style.boxShadow = '';
+    }, 3000);
+}
+
 function selectedTaskIds() {
     const checked = document.querySelectorAll('#scheduledTaskList input[type="checkbox"][data-task-select="1"]:checked');
     return Array.from(checked).map(x => String(x.dataset.taskId || '')).filter(Boolean);
@@ -289,6 +348,7 @@ function renderTaskList(tasks) {
         const groups = recipientGroups(task);
         const creatorName = task._creator_name || task.created_by_display_name || task.created_by_username || '-';
         const tr = document.createElement('tr');
+        tr.dataset.taskRowId = String(task.task_id || '');
         tr.innerHTML = `
             <td style="border:1px solid #e2e8f0; padding:6px; text-align:center;"><input type="checkbox" data-task-select="1" data-task-id="${escapeHtml(task.task_id)}"></td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(task._project_name || task._project_id || '-')}</td>
@@ -482,6 +542,17 @@ function fillEditorByTask(task) {
         editorProjectSelect.disabled = true;
     }
 
+    const runAfterSaveWrap = document.getElementById('scheduledRunAfterSaveWrap');
+    const runAfterSave = document.getElementById('scheduledRunAfterSaveOnce');
+    if (runAfterSave) {
+        runAfterSave.checked = false;
+        runAfterSave.disabled = true;
+        runAfterSave.title = '编辑任务不支持“保存后立即执行”，请使用列表中的“执行”按钮';
+    }
+    if (runAfterSaveWrap) {
+        runAfterSaveWrap.style.opacity = '0.55';
+    }
+
     const taskName = document.getElementById('scheduledTaskName');
     if (taskName) taskName.value = task.task_name || '';
 
@@ -546,6 +617,17 @@ function clearEditorToNewTask() {
         const selected = populateProjectSelectOptions(editorProjectSelect, _modalProjects, _currentProjectId || appState.currentProjectId, '-- 暂无可配置项目 --');
         editorProjectSelect.disabled = false;
         if (projectIdInput) projectIdInput.value = selected;
+    }
+
+    const runAfterSaveWrap = document.getElementById('scheduledRunAfterSaveWrap');
+    const runAfterSave = document.getElementById('scheduledRunAfterSaveOnce');
+    if (runAfterSave) {
+        runAfterSave.checked = false;
+        runAfterSave.disabled = false;
+        runAfterSave.title = '勾选后保存成功会自动执行一次';
+    }
+    if (runAfterSaveWrap) {
+        runAfterSaveWrap.style.opacity = '1';
     }
 
     const taskName = document.getElementById('scheduledTaskName');
@@ -973,6 +1055,7 @@ export async function openScheduledReportModal() {
                 } else {
                     renderProjectMultiList(_modalProjects, _modalProjects.map((p) => String(p.id || '').trim()).filter(Boolean));
                 }
+                saveProjectSelection(getSelectedProjectIdsFromMulti(), configProjectId || '');
                 await reloadTasksBySelection('');
             };
         }
@@ -983,6 +1066,7 @@ export async function openScheduledReportModal() {
                 const target = evt.target;
                 if (!target || target.tagName !== 'INPUT') return;
                 syncProjectSelectAllState();
+                saveProjectSelection(getSelectedProjectIdsFromMulti(), getConfigProjectId());
                 await reloadTasksBySelection('');
             };
         }
@@ -995,6 +1079,7 @@ export async function openScheduledReportModal() {
                     cb.checked = checked;
                 });
                 syncProjectSelectAllState();
+                saveProjectSelection(getSelectedProjectIdsFromMulti(), getConfigProjectId());
                 await reloadTasksBySelection('');
             };
         }
@@ -1088,10 +1173,11 @@ export async function saveScheduledReportConfig(e) {
 
     const payload = buildPayloadFromEditorForm();
     const editingTaskId = document.getElementById('scheduledEditingTaskId')?.value || _editingTaskId;
+    const isEdit = !!editingTaskId;
+    const runAfterSave = !isEdit && !!document.getElementById('scheduledRunAfterSaveOnce')?.checked;
 
     try {
         showLoading(true);
-        const isEdit = !!editingTaskId;
         const url = isEdit
             ? `/api/projects/${encodeURIComponent(projectId)}/report-schedules/${encodeURIComponent(editingTaskId)}`
             : `/api/projects/${encodeURIComponent(projectId)}/report-schedules`;
@@ -1109,19 +1195,58 @@ export async function saveScheduledReportConfig(e) {
             return;
         }
 
-        const savedTaskId = result.data?.task_id || editingTaskId || '';
+        const savedTaskId = String(result.data?.task_id || editingTaskId || '').trim();
+
         if (_preSaveTaskScope === 'all') {
-            // 确保新任务所属的项目在加载列表中
-            const selectedIds = getSelectedProjectIdsFromMulti();
-            if (!selectedIds.includes(projectId)) {
-                selectedIds.push(projectId);
+            // 确保新任务所属项目已勾选，避免保存成功后当前视图不显示
+            const targetCb = Array.from(document.querySelectorAll('#scheduledProjectMultiList input[type="checkbox"][data-project-multi-id]'))
+                .find((cb) => String(cb.dataset.projectMultiId || '').trim() === projectId);
+            if (targetCb) targetCb.checked = true;
+            syncProjectSelectAllState();
+        }
+
+        // 保存后统一按当前勾选范围重载
+        await reloadTasksBySelection(savedTaskId);
+
+        // 新建场景下清空筛选，确保用户能立即看到新任务
+        if (!isEdit) {
+            const orgFilter = document.getElementById('scheduledOrgFilter');
+            const creatorFilter = document.getElementById('scheduledCreatorFilter');
+            if (orgFilter) orgFilter.value = '';
+            if (creatorFilter) creatorFilter.value = '';
+            refreshTaskListByCurrentFilters();
+        }
+
+        // 新建后核验任务是否确实存在，防止出现“提示成功但列表无任务”的假象
+        if (!isEdit && savedTaskId) {
+            const exists = _allLoadedTasks.some((x) => String(x.task_id) === savedTaskId && String(x._project_id || '') === String(projectId));
+            if (!exists) {
+                await loadTasksForProject(projectId, savedTaskId);
             }
-            await loadTasksForAllProjects(selectedIds);
-        } else {
+        }
+
+        if (!isEdit && savedTaskId) {
+            // 新建完成后高亮对应任务行（3秒）
+            setTimeout(() => highlightTaskRow(savedTaskId), 0);
+        }
+
+        if (!isEdit && runAfterSave && savedTaskId) {
+            const runResp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules/${encodeURIComponent(savedTaskId)}/run`, {
+                method: 'POST'
+            });
+            const runResult = await safeParseJson(runResp);
+            if (runResult.status === 'success') {
+                showNotification('任务已创建并立即执行一次', 'success');
+            } else {
+                showNotification(`任务已创建，但立即执行失败：${runResult.message || '未知错误'}`, 'warning');
+            }
             await loadTasksForProject(projectId, savedTaskId);
         }
+
         closeScheduledTaskEditorModal();
-        showNotification(isEdit ? '任务已更新' : '任务已创建', 'success');
+        if (!(runAfterSave && !isEdit)) {
+            showNotification(isEdit ? '任务已更新' : '任务已创建', 'success');
+        }
     } catch (e) {
         console.error('保存定时任务失败:', e);
         showNotification(e.message || '保存失败', 'error');
