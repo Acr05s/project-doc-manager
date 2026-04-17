@@ -26,7 +26,16 @@ class ScheduledReportService:
         self._lock = threading.RLock()
         self._started = False
         self._stop_event = threading.Event()
-        self._schedules_file = Path('uploads/tasks/report_schedules.json')
+        # 使用基于模块文件位置的绝对路径，避免相对路径问题
+        import os as _os
+        # __file__ = app/services/scheduled_report_service.py
+        # services_dir = app/services
+        # app_dir = app
+        # project_root = app 的父目录的父目录
+        _services_dir = _os.path.dirname(_os.path.abspath(__file__))
+        _app_dir = _os.path.dirname(_services_dir)  # app
+        _project_root = _os.path.dirname(_app_dir)  # 项目根目录
+        self._schedules_file = Path(_project_root) / 'uploads' / 'tasks' / 'report_schedules.json'
         self._schedules_file.parent.mkdir(parents=True, exist_ok=True)
         self._schedules: Dict[str, Dict[str, Any]] = {}
         self._load_schedules()

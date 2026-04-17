@@ -492,13 +492,43 @@ cmd_upgrade() {
         if HTTP_PROXY="$HTTP_PROXY_OPT" HTTPS_PROXY="$HTTP_PROXY_OPT" git pull --no-rebase origin "$CURRENT_BRANCH"; then
             echo -e "${GREEN}[OK] Code updated successfully (merged)!${NC}"
         else
-            echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
-            # 如果之前正在运行，尝试重新启动
-            if [ "$WAS_RUNNING" = true ]; then
-                echo -e "${YELLOW}Attempting to restart server...${NC}"
-                cmd_start
+            # 检测是否有合并冲突
+            CONFLICT_COUNT=$(git diff --name-only --diff-filter=U 2>/dev/null | wc -l)
+            if [ "$CONFLICT_COUNT" -gt 0 ]; then
+                echo -e "${YELLOW}[INFO] Detected $CONFLICT_COUNT merge conflict(s), auto-resolving...${NC}"
+                
+                # 对于代码文件，使用远程版本（ theirs）
+                # 对于本地数据文件，保留本地版本（ ours）
+                REMOTE_CODE_FILES=$(git diff --name-only --diff-filter=U 2>/dev/null | grep -E '\.(py|js|html|css|md|txt|json|yml|yaml|toml)$' || true)
+                
+                for conflicted_file in $(git diff --name-only --diff-filter=U 2>/dev/null); do
+                    # 本地数据文件：保留本地版本
+                    if echo "$conflicted_file" | grep -qE '^(settings\.json|permissions\.json|data/|uploads/|projects/|logs/)'; then
+                        echo -e "${BLUE}  Keeping local version: $conflicted_file${NC}"
+                        git checkout --ours "$conflicted_file" 2>/dev/null || true
+                    else
+                        # 代码文件：使用远程版本
+                        echo -e "${BLUE}  Using remote version: $conflicted_file${NC}"
+                        git checkout --theirs "$conflicted_file" 2>/dev/null || true
+                    fi
+                    git add "$conflicted_file" 2>/dev/null || true
+                done
+                
+                # 完成合并
+                if git commit -m "Auto-resolve merge conflicts during upgrade"; then
+                    echo -e "${GREEN}[OK] Merge conflicts auto-resolved!${NC}"
+                else
+                    echo -e "${YELLOW}[WARN] No conflicts to commit or commit failed, continuing...${NC}"
+                fi
+            else
+                echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
+                # 如果之前正在运行，尝试重新启动
+                if [ "$WAS_RUNNING" = true ]; then
+                    echo -e "${YELLOW}Attempting to restart server...${NC}"
+                    cmd_start
+                fi
+                exit 1
             fi
-            exit 1
         fi
     fi
 

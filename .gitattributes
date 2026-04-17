@@ -1,23 +1,25 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# 本地配置文件：合并时总是使用本地版本，不参与冲突
+settings.json merge=ours
+permissions.json merge=ours
 
-# Force shell scripts to always use LF line endings
-*.sh text eol=lf
-*.bash text eol=lf
+# Python 缓存目录：不参与合并
+__pycache__/ -merge=diff
+*.pyc -merge=diff
 
-# Force batch files to always use CRLF line endings
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# 临时文件：不参与合并
+*.tmp merge=nothing
+*.log merge=nothing
+*.cache merge=nothing
 
-# Binary files
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.gif binary
-*.ico binary
-*.zip binary
-*.pdf binary
-*.doc binary
-*.docx binary
-*.xls binary
-*.xlsx binary
+# Python 字节码：不参与合并
+*.pyc merge=nothing
+*.pyo merge=nothing
+
+# 备份目录：不参与合并
+backup_*/ merge=nothing
+
+# 数据目录：不参与合并
+data/ merge=nothing
+uploads/ merge=nothing
+logs/ merge=nothing
+projects/ merge=nothing

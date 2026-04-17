@@ -722,9 +722,11 @@ function buildPayloadFromEditorForm() {
         recipient_user_ids: collectSelectedRecipientUserIds(),
         external_emails: (() => {
             const enableExtCb = document.getElementById('scheduledEnableExternalEmails');
-            if (enableExtCb && !enableExtCb.checked) return [];
+            // checkbox 未勾选时不发送外部邮件，但保留数据在输入框中
+            if (!enableExtCb?.checked) return [];
             const rawVal = document.getElementById('scheduledExternalEmails')?.value || '';
-            // 支持逗号、换行、全角逗号分隔
+            // 输入框为空则清空
+            if (!rawVal.trim()) return [];
             return rawVal.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean);
         })(),
         valid_until: (() => {
