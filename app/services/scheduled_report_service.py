@@ -85,6 +85,7 @@ class ScheduledReportService:
                     run_count INTEGER DEFAULT 0,
                     last_run_at TEXT DEFAULT '',
                     valid_until TEXT DEFAULT '',
+                    skip_holidays INTEGER DEFAULT 0,
                     created_by_user_id INTEGER DEFAULT 0,
                     created_by_username TEXT DEFAULT '',
                     created_by_display_name TEXT DEFAULT '',
@@ -142,10 +143,10 @@ class ScheduledReportService:
                  send_time, weekday, day_of_month, run_date, include_pdf,
                  in_app_message_enabled, login_popup_enabled, external_emails,
                  recipient_user_ids, last_run_key, run_count, last_run_at,
-                 valid_until, created_by_user_id, created_by_username,
+                 valid_until, skip_holidays, created_by_user_id, created_by_username,
                  created_by_display_name, created_by_organization,
                  created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''', (
                 task['task_id'], task['project_id'], task['task_name'],
                 task['task_type'], 1 if task.get('enabled') else 0,
@@ -158,6 +159,7 @@ class ScheduledReportService:
                 json.dumps(task.get('recipient_user_ids', []), ensure_ascii=False),
                 task.get('last_run_key', ''), task.get('run_count', 0),
                 task.get('last_run_at', ''), task.get('valid_until', ''),
+                1 if task.get('skip_holidays') else 0,
                 task.get('created_by_user_id', 0),
                 task.get('created_by_username', ''),
                 task.get('created_by_display_name', ''),
@@ -173,6 +175,7 @@ class ScheduledReportService:
         d['include_pdf'] = bool(d.get('include_pdf', 1))
         d['in_app_message_enabled'] = bool(d.get('in_app_message_enabled', 1))
         d['login_popup_enabled'] = bool(d.get('login_popup_enabled', 1))
+        d['skip_holidays'] = bool(d.get('skip_holidays', 0))
         try:
             d['external_emails'] = json.loads(d.get('external_emails') or '[]')
         except Exception:
@@ -205,6 +208,7 @@ class ScheduledReportService:
         'run_count': 0,
         'last_run_at': '',
         'valid_until': '',
+        'skip_holidays': False,
         'created_by_user_id': 0,
             'created_by_username': '',
             'created_by_display_name': '',
@@ -287,6 +291,7 @@ class ScheduledReportService:
         # 截止日期：格式 YYYY-MM-DD 或空
         valid_until = str(merged.get('valid_until') or '').strip()[:10]
         merged['valid_until'] = valid_until
+        merged['skip_holidays'] = bool(merged.get('skip_holidays', False))
         try:
             merged['created_by_user_id'] = int(merged.get('created_by_user_id') or 0)
         except Exception:
@@ -479,34 +484,34 @@ class ScheduledReportService:
                 continue
             if not task.get('enabled'):
                 continue
-                # 检查截止日期：到期则自动禁用
-                valid_until = str(task.get('valid_until') or '').strip()
-                if valid_until:
-                    try:
-                        deadline = datetime.strptime(valid_until, '%Y-%m-%d')
-                        if now.replace(tzinfo=None) > deadline:
-                            logger.info(f'[ScheduledReportService] task {task.get("task_id")} expired ({valid_until}), auto-disabling')
-                            self.update_task(project_id, str(task.get('task_id') or ''), {'enabled': False})
-                            continue
-                    except Exception:
-                        pass
-                if not self._is_due(task, now):
-                    continue
-                run_key = self._build_run_key(task, now)
-                if run_key and task.get('last_run_key') == run_key:
-                    continue
+            # 检查截止日期：到期则自动禁用
+            valid_until = str(task.get('valid_until') or '').strip()
+            if valid_until:
                 try:
-                    result = self._run_project_report(project_id, cfg=task, manual=False)
-                    success = result.get('status') == 'success'
-                except Exception as e:
-                    logger.error(f'[ScheduledReportService] run report failed for {project_id}/{task.get("task_id")}: {e}')
-                    success = False
-                self._mark_task_run_result(
-                    project_id=project_id,
-                    task_id=str(task.get('task_id') or ''),
-                    success=success,
-                    run_key=run_key,
-                )
+                    deadline = datetime.strptime(valid_until, '%Y-%m-%d')
+                    if now.replace(tzinfo=None) > deadline:
+                        logger.info(f'[ScheduledReportService] task {task.get("task_id")} expired ({valid_until}), auto-disabling')
+                        self.update_task(project_id, str(task.get('task_id') or ''), {'enabled': False})
+                        continue
+                except Exception:
+                    pass
+            if not self._is_due(task, now):
+                continue
+            run_key = self._build_run_key(task, now)
+            if run_key and task.get('last_run_key') == run_key:
+                continue
+            try:
+                result = self._run_project_report(project_id, cfg=task, manual=False)
+                success = result.get('status') == 'success'
+            except Exception as e:
+                logger.error(f'[ScheduledReportService] run report failed for {project_id}/{task.get("task_id")}: {e}')
+                success = False
+            self._mark_task_run_result(
+                project_id=project_id,
+                task_id=str(task.get('task_id') or ''),
+                success=success,
+                run_key=run_key,
+            )
 
     def _list_project_ids(self) -> List[str]:
         if not self.doc_manager:
@@ -540,6 +545,10 @@ class ScheduledReportService:
 
         frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
         if frequency == 'daily':
+            if cfg.get('skip_holidays'):
+                from app.services.china_holidays import is_workday
+                if not is_workday(now.date()):
+                    return False
             return True
         if frequency == 'weekly':
             weekday = int(cfg.get('weekday', 1))

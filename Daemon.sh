@@ -769,6 +769,20 @@ run_db_migrate() {
     else
         echo -e "${YELLOW}[WARN] No migration script found, skipping migration${NC}"
     fi
+
+    # 执行增量迁移脚本（tools/migrate/ 目录下的 NNNN_*.py）
+    if [ -f "$APP_DIR/tools/migrate/runner.py" ]; then
+        echo -e "${BLUE}Running incremental migrations (tools/migrate/) ...${NC}"
+        "$PYTHON_BIN" "$APP_DIR/tools/migrate/runner.py"
+        local INCR_RET=$?
+        if [ $INCR_RET -eq 0 ]; then
+            echo -e "${GREEN}[OK] Incremental migrations complete${NC}"
+        else
+            echo -e "${RED}[ERROR] Incremental migration failed (exit code $INCR_RET)${NC}"
+            echo -e "${YELLOW}You may run manually: python tools/migrate/runner.py${NC}"
+            return $INCR_RET
+        fi
+    fi
 }
 
 # 迁移失败回滚辅助
