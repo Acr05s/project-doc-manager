@@ -86,10 +86,11 @@ class ScheduledReportService:
             'login_popup_enabled': True,
             'external_emails': [],
             'recipient_user_ids': [],
-            'last_run_key': '',
-            'run_count': 0,
-            'last_run_at': '',
-            'created_by_user_id': 0,
+        'last_run_key': '',
+        'run_count': 0,
+        'last_run_at': '',
+        'valid_until': '',
+        'created_by_user_id': 0,
             'created_by_username': '',
             'created_by_display_name': '',
             'created_by_organization': '',
@@ -168,6 +169,9 @@ class ScheduledReportService:
         except Exception:
             merged['run_count'] = 0
         merged['last_run_at'] = str(merged.get('last_run_at') or '')
+        # 截止日期：格式 YYYY-MM-DD 或空
+        valid_until = str(merged.get('valid_until') or '').strip()[:10]
+        merged['valid_until'] = valid_until
         try:
             merged['created_by_user_id'] = int(merged.get('created_by_user_id') or 0)
         except Exception:
@@ -368,6 +372,17 @@ class ScheduledReportService:
             for task in tasks:
                 if not task.get('enabled'):
                     continue
+                # 检查截止日期：到期则自动禁用
+                valid_until = str(task.get('valid_until') or '').strip()
+                if valid_until:
+                    try:
+                        deadline = datetime.strptime(valid_until, '%Y-%m-%d')
+                        if now.replace(tzinfo=None) > deadline:
+                            logger.info(f'[ScheduledReportService] task {task.get("task_id")} expired ({valid_until}), auto-disabling')
+                            self.update_task(project_id, str(task.get('task_id') or ''), {'enabled': False})
+                            continue
+                    except Exception:
+                        pass
                 if not self._is_due(task, now):
                     continue
                 run_key = self._build_run_key(task, now)
@@ -651,7 +666,8 @@ class ScheduledReportService:
                 'archived': 0,
                 'required': len(required_docs),
                 'completed': completed_docs_count,
-                'pending': max(0, len(required_docs) - completed_docs_count)
+                'pending': max(0, len(required_docs) - completed_docs_count),
+                'uploaded_unique': 0,
             })
 
         # 统计本期上传/更新
@@ -685,7 +701,22 @@ class ScheduledReportService:
             by_cycle[cycle]['uploads'] = cycle_upload_count
             by_cycle[cycle]['updated'] = cycle_update_count
 
+        # ── 统计本周期内实际上传的唯一文档（按 doc_name 去重） ──
+        uploaded_unique_by_cycle: Dict[str, set] = {}
+        for cycle in cycle_order:
+            cycle_info = docs.get(cycle, {}) if isinstance(docs.get(cycle, {}), dict) else {}
+            uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
+            uploaded_unique_by_cycle[cycle] = set()
+            for doc in uploaded_docs:
+                t = self._parse_time(doc.get('upload_time'))
+                if t and start <= t <= end:
+                    dn = str(doc.get('doc_name') or '').strip()
+                    if dn:
+                        uploaded_unique_by_cycle[cycle].add(dn)
+
         archived = 0
+        # 按周期统计已归档的唯一文档名
+        archived_unique_by_cycle: Dict[str, set] = {}
         try:
             with sqlite3.connect(str(user_manager.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
@@ -706,9 +737,14 @@ class ScheduledReportService:
                         doc_names = json.loads(row['doc_names']) if row['doc_names'] else []
                     except Exception:
                         doc_names = []
-                    count = len([x for x in doc_names if str(x).strip()])
-                    archived += count
                     cycle = row['cycle'] or '未分组'
+                    if cycle not in archived_unique_by_cycle:
+                        archived_unique_by_cycle[cycle] = set()
+                    for dn in doc_names:
+                        dn_s = str(dn).strip()
+                        if dn_s:
+                            archived_unique_by_cycle[cycle].add(dn_s)
+
                     if cycle not in by_cycle:
                         by_cycle[cycle] = {
                             'uploads': 0,
@@ -716,14 +752,38 @@ class ScheduledReportService:
                             'archived': 0,
                             'required': 0,
                             'completed': 0,
-                            'pending': 0
+                            'pending': 0,
+                            'uploaded_unique': 0,
                         }
                         cycle_order.append(cycle)
-                    by_cycle[cycle]['archived'] += count
+
         except Exception as e:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
 
-        archive_rate = round((archived / uploads) * 100, 2) if uploads > 0 else 0.0
+        # 计算各周期归档合格率：
+        #   分子 = 本周期内已归档的唯一文档数
+        #   分母 = 本周期内实际上传的唯一文档数（体现本周该类型文档合格率）
+        total_uploaded_unique = 0
+        total_archived_unique = 0
+        for cycle in cycle_order:
+            if cycle not in by_cycle:
+                continue
+            # 统计实际上传的唯一文档数
+            unique_uploaded = len(uploaded_unique_by_cycle.get(cycle, set()))
+            by_cycle[cycle]['uploaded_unique'] = unique_uploaded
+            unique_archived = len(archived_unique_by_cycle.get(cycle, set()))
+            # 归档数不超过本周实际上传的唯一文档数
+            cycle_archived = min(unique_archived, unique_uploaded)
+            by_cycle[cycle]['archived'] = cycle_archived
+            archived += cycle_archived
+            total_uploaded_unique += unique_uploaded
+            total_archived_unique += unique_archived
+
+        # 归档合格率 = 已归档唯一文档数 / 实际上传唯一文档数，最大 100%
+        if total_uploaded_unique > 0:
+            archive_rate = round(min(100.0, (total_archived_unique / total_uploaded_unique) * 100), 2)
+        else:
+            archive_rate = 0.0
         # 按上传时间倒序排列文档明细
         doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
         return {
@@ -883,7 +943,12 @@ class ScheduledReportService:
                 val = by_cycle.get(cycle, {})
                 c_uploads = val.get('uploads', 0)
                 c_archived = val.get('archived', 0)
-                c_rate = round((c_archived / c_uploads) * 100, 2) if c_uploads > 0 else 0.0
+                c_required = val.get('required', 0)
+                c_uploaded_unique = val.get('uploaded_unique', 0)
+                if c_uploaded_unique > 0:
+                    c_rate = round(min(100.0, (c_archived / c_uploaded_unique) * 100), 2)
+                else:
+                    c_rate = 0.0
                 content += f"  {cycle}：上传{c_uploads} / 归档{c_archived} / 归档率{c_rate}%\n"
         content += "\n文档清单请查看PDF附件。"
         msg_type = 'scheduled_report_popup' if popup_enabled else 'scheduled_report'
@@ -937,7 +1002,11 @@ class ScheduledReportService:
             c_uploads = val.get('uploads', 0)
             c_updated = val.get('updated', 0)
             c_archived = val.get('archived', 0)
-            c_rate = round((c_archived / c_uploads) * 100, 2) if c_uploads > 0 else 0.0
+            c_uploaded_unique = val.get('uploaded_unique', 0)
+            if c_uploaded_unique > 0:
+                c_rate = round(min(100.0, (c_archived / c_uploaded_unique) * 100), 2)
+            else:
+                c_rate = 0.0
             bar_width = max(1, min(100, int(c_rate)))
             rows += (
                 f"<tr><td style='padding:6px 8px;border:1px solid #ddd'>{str(cycle)}</td>"
@@ -1044,7 +1113,11 @@ class ScheduledReportService:
                 u = val.get('uploads', 0)
                 upd = val.get('updated', 0)
                 a = val.get('archived', 0)
-                r = round((a / u) * 100, 2) if u > 0 else 0.0
+                uploaded_unique = val.get('uploaded_unique', 0)
+                if uploaded_unique > 0:
+                    r = round(min(100.0, (a / uploaded_unique) * 100), 2)
+                else:
+                    r = 0.0
                 c.setFillColor(colors.black)
                 c.drawString(40, y, str(cycle)[:24])
                 c.drawString(180, y, str(u))

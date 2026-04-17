@@ -1433,7 +1433,7 @@
                             </select>
                         </div>
                     </div>
-                    <div style="font-size:12px; color:#567; margin-top:6px;">勾选项目筛选任务列表。点击“新建任务”后选择任务所属项目并配置内容。</div>
+                    <div style="font-size:12px; color:#567; margin-top:6px;">勾选项目筛选任务列表。点击"新建任务"后选择任务所属项目并配置内容。</div>
                 </div>
 
                 <div class="form-group" style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px;">
@@ -1447,7 +1447,7 @@
                         </div>
                     </div>
                     <div id="scheduledTaskList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:420px; overflow:auto;">
-                        <div style="font-size:12px; color:#777;">请选择“当前配置项目”后加载任务</div>
+                        <div style="font-size:12px; color:#777;">请选择"当前配置项目"后加载任务</div>
                     </div>
                 </div>
 
@@ -1494,12 +1494,25 @@
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label>报告频率（周期性有效）</label>
-                    <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
-                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="daily"> 每日（日报）</label>
-                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="weekly" checked> 每周（周报）</label>
-                        <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="monthly"> 每月（月报）</label>
+                <div class="form-group" style="display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:220px;">
+                        <label>报告频率（周期性有效）</label>
+                        <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
+                            <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="daily"> 每日（日报）</label>
+                            <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="weekly" checked> 每周（周报）</label>
+                            <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="monthly"> 每月（月报）</label>
+                        </div>
+                    </div>
+                    <!-- 截止日期 -->
+                    <div style="min-width:200px;">
+                        <label style="white-space:nowrap; font-size:13px;">&nbsp;</label>
+                        <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                            <input type="checkbox" id="scheduledEnableValidUntil" onchange="toggleValidUntilInput()">
+                            <label for="scheduledEnableValidUntil" style="display:inline; margin:0; font-size:13px; cursor:pointer; white-space:nowrap;">设置截止日期</label>
+                            <input type="date" id="scheduledValidUntil"
+                                style="display:none; border:1px solid #c8d8ee; border-radius:4px; padding:3px 8px; font-size:13px;">
+                        </div>
+                        <div id="scheduledValidUntilHint" style="display:none; font-size:11px; color:#888; margin-top:3px;">到期后任务自动禁用</div>
                     </div>
                 </div>
 
@@ -1544,16 +1557,30 @@
                     </div>
                 </div>
 
+                <!-- 收件人：承建单位 + PMO 左右分布 -->
                 <div class="form-group" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px;">
                     <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px; min-height:120px;">
-                        <label style="font-weight:600;">承建单位/PMO 收件人</label>
-                        <div id="scheduledRecipientUserList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:200px; overflow:auto;">
-                            <div style="font-size:12px; color:#777;">请选择“当前配置项目”后加载收件人</div>
+                        <label style="font-weight:600; font-size:13px;">承建单位 收件人</label>
+                        <div id="scheduledContractorUserList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:200px; overflow:auto;">
+                            <div style="font-size:12px; color:#777;">请选择"当前配置项目"后加载收件人</div>
                         </div>
                     </div>
-                    <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fffdf9; padding:10px; min-height:120px;">
-                        <label>外部收件人（逗号分隔，可选）</label>
-                        <textarea id="scheduledExternalEmails" rows="4" placeholder="example1@domain.com, example2@domain.com" style="margin-top:8px;"></textarea>
+                    <div style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px; min-height:120px;">
+                        <label style="font-weight:600; font-size:13px;">PMO 收件人</label>
+                        <div id="scheduledPmoUserList" style="margin-top:8px; display:flex; flex-direction:column; gap:8px; max-height:200px; overflow:auto;">
+                            <div style="font-size:12px; color:#777;">请选择"当前配置项目"后加载收件人</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 外部收件人：勾选后显示输入框 -->
+                <div class="form-group" style="margin-top:4px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="scheduledEnableExternalEmails" onchange="toggleExternalEmailsInput()">
+                        <label for="scheduledEnableExternalEmails" style="display:inline; margin:0; font-size:13px; cursor:pointer;">外部收件人（逗号分隔，可选）</label>
+                    </div>
+                    <div id="scheduledExternalEmailsWrapper" style="display:none; margin-top:8px; border:1px solid #e5d8b6; border-radius:8px; background:#fffdf9; padding:10px;">
+                        <textarea id="scheduledExternalEmails" rows="3" placeholder="多个邮箱用逗号或换行分隔，如：a@example.com, b@example.com" style="width:100%; box-sizing:border-box; font-size:13px; border:1px solid #ddd; border-radius:4px; padding:6px; resize:vertical;"></textarea>
                     </div>
                 </div>
 
@@ -2598,7 +2625,7 @@
         <div class="modal-content" style="max-width: 760px; width: 92%; max-height: 88vh; overflow-y: auto;">
             <span class="close" onclick="closePredefinedAttrEditorModal()">&times;</span>
             <h2>编辑预置附加项</h2>
-            <p style="color: #666; margin: 10px 0 18px;">这里只修改显示文案和说明，不改变底层校验键值；后续更多字段仍可继续通过“自定义属性”扩展。</p>
+            <p style="color: #666; margin: 10px 0 18px;">这里只修改显示文案和说明，不改变底层校验键值；后续更多字段仍可继续通过"自定义属性"扩展。</p>
             <div id="predefinedAttrEditorList"></div>
             <div class="modal-actions" style="justify-content: flex-end; margin-top: 18px; gap: 10px;">
                 <button type="button" class="btn btn-secondary" onclick="closePredefinedAttrEditorModal()">取消</button>

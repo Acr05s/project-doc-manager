@@ -350,21 +350,40 @@ function renderTaskList(tasks) {
 }
 
 function renderRecipientUserList(recipientOptions, selectedIds) {
-    const container = document.getElementById('scheduledRecipientUserList');
-    if (!container) return;
-    container.innerHTML = '';
+    // 兼容旧 ID —— 两个新容器：承建单位 + PMO
+    const contractorContainer = document.getElementById('scheduledContractorUserList');
+    const pmoContainer = document.getElementById('scheduledPmoUserList');
+    // 同时兼容旧的单容器 ID（万一模板未更新）
+    const legacyContainer = document.getElementById('scheduledRecipientUserList');
+
+    const empty = '<div style="font-size:12px; color:#777;">当前项目暂无可选收件人。</div>';
 
     if (!Array.isArray(recipientOptions) || recipientOptions.length === 0) {
-        container.innerHTML = '<div style="font-size:12px; color:#777;">当前项目暂无可选收件人，请补充外部邮箱。</div>';
+        if (contractorContainer) contractorContainer.innerHTML = empty;
+        if (pmoContainer) pmoContainer.innerHTML = empty;
+        if (legacyContainer) legacyContainer.innerHTML = empty;
         return;
     }
 
     const selectedSet = new Set((selectedIds || []).map(x => Number(x)));
+
+    // 分组
+    const contractorUsers = [];
+    const pmoUsers = [];
     recipientOptions.forEach((user) => {
+        const role = String(user.role || '').toLowerCase();
+        if (role === 'pmo' || role === 'pmo_leader') {
+            pmoUsers.push(user);
+        } else {
+            contractorUsers.push(user);
+        }
+    });
+
+    function buildUserRow(user) {
         const uid = Number(user.id || 0);
-        if (!uid) return;
+        if (!uid) return null;
         const row = document.createElement('label');
-        row.style.cssText = 'display:flex; align-items:flex-start; gap:8px; border:1px solid #e3edf9; border-radius:6px; padding:7px; background:#fff;';
+        row.style.cssText = 'display:flex; align-items:flex-start; gap:8px; border:1px solid #e3edf9; border-radius:6px; padding:7px; background:#fff; cursor:pointer;';
         const checked = selectedSet.has(uid) ? 'checked' : '';
         row.innerHTML = `
             <input type="checkbox" data-recipient-user-id="${uid}" ${checked} style="margin-top:2px;">
@@ -374,14 +393,79 @@ function renderRecipientUserList(recipientOptions, selectedIds) {
                 <span style="font-size:11px; color:#607389;">${escapeHtml(user.email || '-')}</span>
             </span>
         `;
-        container.appendChild(row);
-    });
+        return row;
+    }
+
+    function fillContainer(container, users) {
+        if (!container) return;
+        container.innerHTML = '';
+        if (users.length === 0) {
+            container.innerHTML = '<div style="font-size:12px; color:#aaa;">暂无</div>';
+            return;
+        }
+        users.forEach((user) => {
+            const row = buildUserRow(user);
+            if (row) container.appendChild(row);
+        });
+    }
+
+    fillContainer(contractorContainer, contractorUsers);
+    fillContainer(pmoContainer, pmoUsers);
+
+    // 兼容旧容器（全量渲染）
+    if (legacyContainer) {
+        legacyContainer.innerHTML = '';
+        recipientOptions.forEach((user) => {
+            const row = buildUserRow(user);
+            if (row) legacyContainer.appendChild(row);
+        });
+    }
 }
 
 function collectSelectedRecipientUserIds() {
-    const list = document.querySelectorAll('#scheduledRecipientUserList input[type="checkbox"][data-recipient-user-id]:checked');
-    return Array.from(list).map((item) => Number(item.dataset.recipientUserId || 0)).filter((item) => item > 0);
+    // 从两个新容器 + 旧容器中收集选中的用户ID
+    const selectors = [
+        '#scheduledContractorUserList input[type="checkbox"][data-recipient-user-id]:checked',
+        '#scheduledPmoUserList input[type="checkbox"][data-recipient-user-id]:checked',
+        '#scheduledRecipientUserList input[type="checkbox"][data-recipient-user-id]:checked'
+    ];
+    const ids = new Set();
+    selectors.forEach((sel) => {
+        document.querySelectorAll(sel).forEach((item) => {
+            const v = Number(item.dataset.recipientUserId || 0);
+            if (v > 0) ids.add(v);
+        });
+    });
+    return Array.from(ids);
 }
+
+// 切换外部收件人输入框显示/隐藏
+window.toggleExternalEmailsInput = function () {
+    const cb = document.getElementById('scheduledEnableExternalEmails');
+    const wrapper = document.getElementById('scheduledExternalEmailsWrapper');
+    if (!wrapper) return;
+    if (cb && cb.checked) {
+        wrapper.style.display = 'block';
+    } else {
+        wrapper.style.display = 'none';
+    }
+};
+
+// 切换截止日期输入框显示/隐藏
+window.toggleValidUntilInput = function () {
+    const cb = document.getElementById('scheduledEnableValidUntil');
+    const input = document.getElementById('scheduledValidUntil');
+    const hint = document.getElementById('scheduledValidUntilHint');
+    const show = !!(cb && cb.checked);
+    if (input) input.style.display = show ? 'inline-block' : 'none';
+    if (hint) hint.style.display = show ? 'block' : 'none';
+    if (show && input && !input.value) {
+        // 默认设置为今天往后一个月
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
+        input.value = d.toISOString().slice(0, 10);
+    }
+};
 
 function fillEditorByTask(task) {
     _editingTaskId = String(task.task_id || '');
@@ -423,7 +507,21 @@ function fillEditorByTask(task) {
     if (popupEnabled) popupEnabled.checked = task.login_popup_enabled !== false;
 
     const ext = document.getElementById('scheduledExternalEmails');
-    if (ext) ext.value = Array.isArray(task.external_emails) ? task.external_emails.join(', ') : '';
+    const extVal = Array.isArray(task.external_emails) ? task.external_emails.join(', ') : '';
+    if (ext) ext.value = extVal;
+    const enableExtCb = document.getElementById('scheduledEnableExternalEmails');
+    if (enableExtCb) {
+        enableExtCb.checked = !!(extVal.trim());
+        window.toggleExternalEmailsInput && window.toggleExternalEmailsInput();
+    }
+
+    // 截止日期
+    const validUntilCb = document.getElementById('scheduledEnableValidUntil');
+    const validUntilInput = document.getElementById('scheduledValidUntil');
+    const validUntilVal = String(task.valid_until || '').trim().slice(0, 10);
+    if (validUntilCb) validUntilCb.checked = !!(validUntilVal);
+    if (validUntilInput) validUntilInput.value = validUntilVal;
+    window.toggleValidUntilInput && window.toggleValidUntilInput();
 
     const typeRadio = document.querySelector(`input[name="scheduledTaskType"][value="${task.task_type || 'periodic'}"]`);
     if (typeRadio) typeRadio.checked = true;
@@ -476,6 +574,18 @@ function clearEditorToNewTask() {
 
     const ext = document.getElementById('scheduledExternalEmails');
     if (ext) ext.value = '';
+    const enableExtCb = document.getElementById('scheduledEnableExternalEmails');
+    if (enableExtCb) {
+        enableExtCb.checked = false;
+        window.toggleExternalEmailsInput && window.toggleExternalEmailsInput();
+    }
+
+    // 重置截止日期
+    const validUntilCb = document.getElementById('scheduledEnableValidUntil');
+    const validUntilInput = document.getElementById('scheduledValidUntil');
+    if (validUntilCb) validUntilCb.checked = false;
+    if (validUntilInput) validUntilInput.value = '';
+    window.toggleValidUntilInput && window.toggleValidUntilInput();
 
     const periodic = document.querySelector('input[name="scheduledTaskType"][value="periodic"]');
     if (periodic) periodic.checked = true;
@@ -610,7 +720,18 @@ function buildPayloadFromEditorForm() {
         in_app_message_enabled: true,
         login_popup_enabled: !!document.getElementById('scheduledLoginPopupEnabled')?.checked,
         recipient_user_ids: collectSelectedRecipientUserIds(),
-        external_emails: (document.getElementById('scheduledExternalEmails')?.value || '').split(',').map((item) => item.trim()).filter(Boolean)
+        external_emails: (() => {
+            const enableExtCb = document.getElementById('scheduledEnableExternalEmails');
+            if (enableExtCb && !enableExtCb.checked) return [];
+            const rawVal = document.getElementById('scheduledExternalEmails')?.value || '';
+            // 支持逗号、换行、全角逗号分隔
+            return rawVal.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean);
+        })(),
+        valid_until: (() => {
+            const cb = document.getElementById('scheduledEnableValidUntil');
+            if (!cb || !cb.checked) return '';
+            return document.getElementById('scheduledValidUntil')?.value || '';
+        })()
     };
 }
 

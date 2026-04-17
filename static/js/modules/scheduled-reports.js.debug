@@ -1,0 +1,15 @@
+﻿| '';
+        const recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
+        return (Array.isArray(result.tasks) ? result.tasks : []).map((task) => ({
+            ...task,
+            _project_id: projectId,
+            _project_name: project.name || projectId,
+            _party_b: partyB,
+            _recipient_options: recipientOptions,
+            _creator_name: task.created_by_display_name || task.created_by_username || '-'
+        }));
+    });
+
+    const all = await Promise.all(requests);
+    _allLoadedTasks = all.flat();
+    populateTaskFilterO
