@@ -28,17 +28,16 @@ class ScheduledReportService:
         self._stop_event = threading.Event()
         # 使用基于模块文件位置的绝对路径，避免相对路径问题
         import os as _os
-        # __file__ = app/services/scheduled_report_service.py
-        # services_dir = app/services
-        # app_dir = app
-        # project_root = app 的父目录的父目录
         _services_dir = _os.path.dirname(_os.path.abspath(__file__))
         _app_dir = _os.path.dirname(_services_dir)  # app
         _project_root = _os.path.dirname(_app_dir)  # 项目根目录
+        # SQLite 数据库路径
+        self._db_path = Path(_project_root) / 'data' / 'users.db'
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+        # 旧 JSON 文件路径（用于迁移）
         self._schedules_file = Path(_project_root) / 'uploads' / 'tasks' / 'report_schedules.json'
-        self._schedules_file.parent.mkdir(parents=True, exist_ok=True)
-        self._schedules: Dict[str, Dict[str, Any]] = {}
-        self._load_schedules()
+        self._migrate_json_to_db()
 
     def set_doc_manager(self, manager):
         self.doc_manager = manager
@@ -55,27 +54,134 @@ class ScheduledReportService:
     def stop_scheduler(self):
         self._stop_event.set()
 
-    def _load_schedules(self):
+    def _get_db_conn(self):
+        """获取数据库连接。"""
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        """初始化 scheduled_tasks 表。"""
+        with self._get_db_conn() as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT UNIQUE NOT NULL,
+                    project_id TEXT NOT NULL,
+                    task_name TEXT NOT NULL DEFAULT '定时报告任务',
+                    task_type TEXT NOT NULL DEFAULT 'periodic',
+                    enabled INTEGER DEFAULT 0,
+                    frequency TEXT DEFAULT 'weekly',
+                    send_time TEXT DEFAULT '09:00',
+                    weekday INTEGER DEFAULT 1,
+                    day_of_month INTEGER DEFAULT 1,
+                    run_date TEXT DEFAULT '',
+                    include_pdf INTEGER DEFAULT 1,
+                    in_app_message_enabled INTEGER DEFAULT 1,
+                    login_popup_enabled INTEGER DEFAULT 1,
+                    external_emails TEXT DEFAULT '[]',
+                    recipient_user_ids TEXT DEFAULT '[]',
+                    last_run_key TEXT DEFAULT '',
+                    run_count INTEGER DEFAULT 0,
+                    last_run_at TEXT DEFAULT '',
+                    valid_until TEXT DEFAULT '',
+                    created_by_user_id INTEGER DEFAULT 0,
+                    created_by_username TEXT DEFAULT '',
+                    created_by_display_name TEXT DEFAULT '',
+                    created_by_organization TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_project ON scheduled_tasks(project_id)')
+            conn.commit()
+
+    def _migrate_json_to_db(self):
+        """从旧 JSON 文件迁移数据到 SQLite（仅执行一次）。"""
         if not self._schedules_file.exists():
-            self._schedules = {}
             return
         try:
             with open(self._schedules_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            if isinstance(data, dict):
-                self._schedules = data
-            else:
-                self._schedules = {}
+            if not isinstance(data, dict) or not data:
+                return
+            # 检查 DB 是否已有数据（避免重复迁移）
+            with self._get_db_conn() as conn:
+                count = conn.execute('SELECT COUNT(*) FROM scheduled_tasks').fetchone()[0]
+                if count > 0:
+                    logger.info('[ScheduledReportService] DB already has tasks, skipping JSON migration')
+                    return
+            migrated = 0
+            for project_id, raw in data.items():
+                tasks = []
+                if isinstance(raw, list):
+                    tasks = [x for x in raw if isinstance(x, dict)]
+                elif isinstance(raw, dict):
+                    if 'tasks' in raw and isinstance(raw.get('tasks'), list):
+                        tasks = [x for x in raw['tasks'] if isinstance(x, dict)]
+                    else:
+                        tasks = [raw]
+                for i, task_data in enumerate(tasks):
+                    task = self._normalize_task(project_id, task_data, f'定时任务{i + 1}')
+                    self._db_insert_task(task)
+                    migrated += 1
+            logger.info(f'[ScheduledReportService] migrated {migrated} tasks from JSON to DB')
+            # 重命名旧文件作为备份
+            backup = self._schedules_file.with_suffix('.json.bak')
+            self._schedules_file.rename(backup)
+            logger.info(f'[ScheduledReportService] old JSON renamed to {backup}')
         except Exception as e:
-            logger.warning(f'[ScheduledReportService] load schedules failed: {e}')
-            self._schedules = {}
+            logger.warning(f'[ScheduledReportService] JSON migration failed: {e}')
 
-    def _save_schedules(self):
+    def _db_insert_task(self, task: Dict[str, Any]):
+        """插入一条任务到数据库。"""
+        with self._get_db_conn() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO scheduled_tasks
+                (task_id, project_id, task_name, task_type, enabled, frequency,
+                 send_time, weekday, day_of_month, run_date, include_pdf,
+                 in_app_message_enabled, login_popup_enabled, external_emails,
+                 recipient_user_ids, last_run_key, run_count, last_run_at,
+                 valid_until, created_by_user_id, created_by_username,
+                 created_by_display_name, created_by_organization,
+                 created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                task['task_id'], task['project_id'], task['task_name'],
+                task['task_type'], 1 if task.get('enabled') else 0,
+                task['frequency'], task['send_time'], task['weekday'],
+                task['day_of_month'], task.get('run_date', ''),
+                1 if task.get('include_pdf', True) else 0,
+                1 if task.get('in_app_message_enabled', True) else 0,
+                1 if task.get('login_popup_enabled', True) else 0,
+                json.dumps(task.get('external_emails', []), ensure_ascii=False),
+                json.dumps(task.get('recipient_user_ids', []), ensure_ascii=False),
+                task.get('last_run_key', ''), task.get('run_count', 0),
+                task.get('last_run_at', ''), task.get('valid_until', ''),
+                task.get('created_by_user_id', 0),
+                task.get('created_by_username', ''),
+                task.get('created_by_display_name', ''),
+                task.get('created_by_organization', ''),
+                task['created_at'], task['updated_at']
+            ))
+            conn.commit()
+
+    def _db_row_to_task(self, row: sqlite3.Row) -> Dict[str, Any]:
+        """将数据库行转换为任务字典。"""
+        d = dict(row)
+        d['enabled'] = bool(d.get('enabled', 0))
+        d['include_pdf'] = bool(d.get('include_pdf', 1))
+        d['in_app_message_enabled'] = bool(d.get('in_app_message_enabled', 1))
+        d['login_popup_enabled'] = bool(d.get('login_popup_enabled', 1))
         try:
-            with open(self._schedules_file, 'w', encoding='utf-8') as f:
-                json.dump(self._schedules, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f'[ScheduledReportService] save schedules failed: {e}')
+            d['external_emails'] = json.loads(d.get('external_emails') or '[]')
+        except Exception:
+            d['external_emails'] = []
+        try:
+            d['recipient_user_ids'] = json.loads(d.get('recipient_user_ids') or '[]')
+        except Exception:
+            d['recipient_user_ids'] = []
+        return d
 
     def _default_task(self, project_id: str = '', task_name: str = '') -> Dict[str, Any]:
         now_iso = now_with_timezone().isoformat()
@@ -193,72 +299,70 @@ class ScheduledReportService:
         return merged
 
     def _get_project_tasks_locked(self, project_id: str) -> List[Dict[str, Any]]:
-        raw = self._schedules.get(project_id)
-        tasks: List[Dict[str, Any]] = []
-
-        if isinstance(raw, list):
-            tasks = [self._normalize_task(project_id, x, f'定时任务{i + 1}') for i, x in enumerate(raw) if isinstance(x, dict)]
-        elif isinstance(raw, dict):
-            if 'tasks' in raw and isinstance(raw.get('tasks'), list):
-                tasks = [self._normalize_task(project_id, x, f'定时任务{i + 1}') for i, x in enumerate(raw.get('tasks', [])) if isinstance(x, dict)]
-            else:
-                # 兼容旧版：每项目单配置
-                tasks = [self._normalize_task(project_id, raw, '默认定时任务')]
-        else:
-            tasks = []
-
-        self._schedules[project_id] = tasks
-        return tasks
+        with self._get_db_conn() as conn:
+            rows = conn.execute(
+                'SELECT * FROM scheduled_tasks WHERE project_id = ? ORDER BY created_at',
+                (project_id,)
+            ).fetchall()
+        return [self._db_row_to_task(r) for r in rows]
 
     def list_tasks(self, project_id: str) -> List[Dict[str, Any]]:
         with self._lock:
-            tasks = self._get_project_tasks_locked(project_id)
-            return [dict(x) for x in tasks]
+            return self._get_project_tasks_locked(project_id)
+
+    def list_all_tasks(self) -> List[Dict[str, Any]]:
+        """获取所有项目的全部任务。"""
+        with self._lock:
+            with self._get_db_conn() as conn:
+                rows = conn.execute('SELECT * FROM scheduled_tasks ORDER BY created_at').fetchall()
+            return [self._db_row_to_task(r) for r in rows]
 
     def get_task(self, project_id: str, task_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
-            tasks = self._get_project_tasks_locked(project_id)
-            for task in tasks:
-                if str(task.get('task_id')) == str(task_id):
-                    return dict(task)
+            with self._get_db_conn() as conn:
+                row = conn.execute(
+                    'SELECT * FROM scheduled_tasks WHERE project_id = ? AND task_id = ?',
+                    (project_id, task_id)
+                ).fetchone()
+            if row:
+                return self._db_row_to_task(row)
         return None
 
     def create_task(self, project_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            tasks = self._get_project_tasks_locked(project_id)
-            fallback_name = f'定时任务{len(tasks) + 1}'
+            existing = self._get_project_tasks_locked(project_id)
+            fallback_name = f'定时任务{len(existing) + 1}'
             task = self._normalize_task(project_id, data or {}, fallback_name)
-            tasks.append(task)
-            self._schedules[project_id] = tasks
-            self._save_schedules()
+            self._db_insert_task(task)
             return dict(task)
 
     def update_task(self, project_id: str, task_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            tasks = self._get_project_tasks_locked(project_id)
-            for i, task in enumerate(tasks):
-                if str(task.get('task_id')) != str(task_id):
-                    continue
-                updated = dict(task)
-                if isinstance(data, dict):
-                    updated.update(data)
-                updated['task_id'] = str(task_id)
-                updated = self._normalize_task(project_id, updated, task.get('task_name', '定时报告任务'))
-                tasks[i] = updated
-                self._schedules[project_id] = tasks
-                self._save_schedules()
-                return dict(updated)
-        raise ValueError('任务不存在')
+            with self._get_db_conn() as conn:
+                row = conn.execute(
+                    'SELECT * FROM scheduled_tasks WHERE project_id = ? AND task_id = ?',
+                    (project_id, task_id)
+                ).fetchone()
+            if not row:
+                raise ValueError('任务不存在')
+            existing = self._db_row_to_task(row)
+            updated = dict(existing)
+            if isinstance(data, dict):
+                updated.update(data)
+            updated['task_id'] = str(task_id)
+            updated = self._normalize_task(project_id, updated, existing.get('task_name', '定时报告任务'))
+            self._db_insert_task(updated)  # INSERT OR REPLACE
+            return dict(updated)
 
     def delete_task(self, project_id: str, task_id: str) -> bool:
         with self._lock:
-            tasks = self._get_project_tasks_locked(project_id)
-            new_tasks = [x for x in tasks if str(x.get('task_id')) != str(task_id)]
-            if len(new_tasks) == len(tasks):
-                return False
-            self._schedules[project_id] = new_tasks
-            self._save_schedules()
-            return True
+            with self._get_db_conn() as conn:
+                cursor = conn.execute(
+                    'DELETE FROM scheduled_tasks WHERE project_id = ? AND task_id = ?',
+                    (project_id, task_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
 
     def set_task_enabled(self, project_id: str, task_id: str, enabled: bool) -> Dict[str, Any]:
         return self.update_task(project_id, task_id, {'enabled': bool(enabled)})
@@ -303,18 +407,14 @@ class ScheduledReportService:
             tasks = self._get_project_tasks_locked(project_id)
             if not tasks:
                 task = self._normalize_task(project_id, data or {}, '默认定时任务')
-                tasks.append(task)
-                self._schedules[project_id] = tasks
-                self._save_schedules()
+                self._db_insert_task(task)
                 return dict(task)
 
             merged = dict(tasks[0])
             if isinstance(data, dict):
                 merged.update(data)
             merged = self._normalize_task(project_id, merged, tasks[0].get('task_name', '默认定时任务'))
-            tasks[0] = merged
-            self._schedules[project_id] = tasks
-            self._save_schedules()
+            self._db_insert_task(merged)
             return dict(merged)
 
     def run_now(self, project_id: str, requester_user_id: Optional[int] = None, task_id: Optional[str] = None) -> Dict[str, Any]:
@@ -342,28 +442,24 @@ class ScheduledReportService:
         if not task_id:
             return
         with self._lock:
-            current_tasks = self._get_project_tasks_locked(project_id)
-            changed = False
-            for idx, current in enumerate(current_tasks):
-                if str(current.get('task_id')) != str(task_id):
-                    continue
-                if success:
-                    if run_key:
-                        current['last_run_key'] = run_key
-                    current['last_run_at'] = now_with_timezone().isoformat()
-                    try:
-                        current['run_count'] = int(current.get('run_count', 0)) + 1
-                    except Exception:
-                        current['run_count'] = 1
-                    if str(current.get('task_type', 'periodic')) == 'one_time':
-                        current['enabled'] = False
-                current['updated_at'] = now_with_timezone().isoformat()
-                current_tasks[idx] = self._normalize_task(project_id, current, current.get('task_name', '定时报告任务'))
-                changed = True
-                break
-            if changed:
-                self._schedules[project_id] = current_tasks
-                self._save_schedules()
+            task = self.get_task(project_id, task_id)
+            if not task:
+                return
+            updates: Dict[str, Any] = {'updated_at': now_with_timezone().isoformat()}
+            if success:
+                if run_key:
+                    updates['last_run_key'] = run_key
+                updates['last_run_at'] = now_with_timezone().isoformat()
+                try:
+                    updates['run_count'] = int(task.get('run_count', 0)) + 1
+                except Exception:
+                    updates['run_count'] = 1
+                if str(task.get('task_type', 'periodic')) == 'one_time':
+                    updates['enabled'] = False
+            merged = dict(task)
+            merged.update(updates)
+            merged = self._normalize_task(project_id, merged, task.get('task_name', '定时报告任务'))
+            self._db_insert_task(merged)
 
     def _scheduler_loop(self):
         while not self._stop_event.is_set():
@@ -375,12 +471,14 @@ class ScheduledReportService:
 
     def _tick(self):
         now = now_with_timezone()
-        project_ids = self._list_project_ids()
-        for project_id in project_ids:
-            tasks = self.list_tasks(project_id)
-            for task in tasks:
-                if not task.get('enabled'):
-                    continue
+        # 直接从数据库获取所有启用的任务
+        all_tasks = self.list_all_tasks()
+        for task in all_tasks:
+            project_id = str(task.get('project_id') or '')
+            if not project_id:
+                continue
+            if not task.get('enabled'):
+                continue
                 # 检查截止日期：到期则自动禁用
                 valid_until = str(task.get('valid_until') or '').strip()
                 if valid_until:

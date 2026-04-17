@@ -737,6 +737,21 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+function summarizeMessageContent(message) {
+    const raw = String(message?.content || '');
+    // 去除 HTML 标签并压缩空白
+    const plain = raw
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!plain) return '点击查看详情';
+    const maxLen = 88;
+    return plain.length > maxLen ? `${plain.slice(0, maxLen)}...` : plain;
+}
+
 async function maybeShowScheduledReportLoginPopup() {
     if (!authState?.isAuthenticated || !authState?.user) {
         return;
@@ -998,7 +1013,7 @@ function renderMessageList(messages) {
                         <span class="message-title">${m.title}</span>
                         <span class="message-time">${createdAtText}</span>
                     </div>
-                    <div class="message-content">${m.content}</div>
+                    <div class="message-content" style="color:#5f6b7a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(summarizeMessageContent(m))}</div>
                     <div class="message-actions">
                         ${isTransfer ? `
                             <button class="btn btn-sm btn-success msg-transfer-accept-btn" data-id="${m.id}" data-related="${m.related_id || ''}">同意接受</button>

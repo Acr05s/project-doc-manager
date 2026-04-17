@@ -151,3 +151,25 @@ def run_project_report_task_now(project_id, task_id):
         return jsonify(result), code
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def list_all_report_tasks():
+    """获取全平台所有定时报告任务（平台级功能）。"""
+    try:
+        tasks = scheduled_report_service.list_all_tasks()
+        # 附加项目元信息
+        enriched = []
+        for task in tasks:
+            project_id = str(task.get('project_id') or '')
+            project = scheduled_report_service._load_project(project_id) if project_id else {}  # noqa: SLF001
+            recipient_options = scheduled_report_service._build_project_recipient_options(project) if project else []  # noqa: SLF001
+            task['_project_name'] = project.get('name', project_id)
+            task['_party_b'] = project.get('party_b', '')
+            task['_recipient_options'] = recipient_options
+            task['_creator_name'] = task.get('created_by_display_name') or task.get('created_by_username') or '-'
+            enriched.append(task)
+        resp = jsonify({'status': 'success', 'tasks': enriched})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500

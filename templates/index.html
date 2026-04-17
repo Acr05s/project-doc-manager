@@ -1396,26 +1396,13 @@
 
     <!-- 定时报告任务管理弹窗 -->
     <div id="scheduledReportModal" class="modal">
-        <div class="modal-content" style="max-width:980px; max-height:88vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
+        <div class="modal-content" style="max-width:1100px; min-width:600px; max-height:90vh; min-height:400px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both;">
             <span class="close" onclick="closeScheduledReportModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务管理</h2>
             <input type="hidden" id="scheduledReportProjectId">
             <form id="scheduledReportForm" style="padding:16px 18px 18px; overflow-y:auto;">
                 <div class="form-group" style="background:#f8fbff; border:1px solid #d9e8fb; border-radius:10px; padding:12px;">
-                    <select id="scheduledConfigProjectId" style="display:none;">
-                        <option value="">-- 加载项目中 --</option>
-                    </select>
-                    <div style="margin-top:10px; border:1px solid #d8e5f6; border-radius:8px; background:#fff; padding:8px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
-                            <label style="font-size:12px; color:#456; font-weight:600; margin:0;">项目多选（支持跨项目批量查看任务）</label>
-                            <label style="font-size:12px; color:#456; display:flex; align-items:center; gap:6px; margin:0;">
-                                <input type="checkbox" id="scheduledProjectSelectAll" checked>
-                                <span>全选</span>
-                            </label>
-                        </div>
-                        <div id="scheduledProjectMultiList" style="display:flex; flex-wrap:wrap; gap:8px 14px; max-height:120px; overflow:auto; padding-right:2px;"></div>
-                    </div>
-                    <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-top:10px;">
+                    <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px;">
                         <div>
                             <label for="scheduledOrgFilter" style="font-size:12px; color:#456;">按承建单位筛选</label>
                             <select id="scheduledOrgFilter" style="margin-top:4px;">
@@ -1429,7 +1416,6 @@
                             </select>
                         </div>
                     </div>
-                    <div style="font-size:12px; color:#567; margin-top:6px;">勾选项目筛选任务列表。点击"新建任务"后选择任务所属项目并配置内容。</div>
                 </div>
 
                 <div class="form-group" style="border:1px solid #d8e5f6; border-radius:8px; background:#fbfdff; padding:10px;">
@@ -1456,7 +1442,7 @@
 
     <!-- 新建/编辑 定时任务弹窗 -->
     <div id="scheduledTaskEditorModal" class="modal">
-        <div class="modal-content" style="max-width:920px; max-height:88vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column;">
+        <div class="modal-content" style="max-width:1000px; min-width:500px; max-height:90vh; min-height:400px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both;">
             <span class="close" onclick="closeScheduledTaskEditorModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">新建/编辑定时任务</h2>
             <input type="hidden" id="scheduledEditingTaskId">

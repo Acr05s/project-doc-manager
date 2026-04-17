@@ -8,10 +8,7 @@ let _allLoadedTasks = [];
 let _currentProjectId = '';
 let _currentProjectMeta = { party_b: '', project_name: '' };
 let _editingTaskId = '';
-let _taskScope = 'single'; // single | all
-let _selectedProjectIds = new Set();
-const SCHEDULED_PROJECT_SELECTION_KEY = 'scheduledReport.selectedProjectIds';
-const SCHEDULED_CONFIG_PROJECT_KEY = 'scheduledReport.configProjectId';
+let _pendingHighlightTaskId = '';
 
 function escapeHtml(value) {
     return String(value || '')
@@ -65,52 +62,13 @@ function toggleEditorFields() {
     }
 }
 
-function getConfigProjectId() {
-    const select = document.getElementById('scheduledConfigProjectId');
-    return select ? String(select.value || '').trim() : '';
-}
-
-function loadSavedProjectSelection() {
-    try {
-        const rawIds = localStorage.getItem(SCHEDULED_PROJECT_SELECTION_KEY) || '[]';
-        const ids = JSON.parse(rawIds);
-        const configProjectId = String(localStorage.getItem(SCHEDULED_CONFIG_PROJECT_KEY) || '').trim();
-        if (!Array.isArray(ids)) {
-            return { selectedIds: [], configProjectId };
-        }
-        const selectedIds = ids.map((x) => String(x || '').trim()).filter(Boolean);
-        return { selectedIds, configProjectId };
-    } catch (e) {
-        return { selectedIds: [], configProjectId: '' };
-    }
-}
-
-function saveProjectSelection(selectedIds, configProjectId) {
-    try {
-        const ids = Array.from(new Set((selectedIds || []).map((x) => String(x || '').trim()).filter(Boolean)));
-        localStorage.setItem(SCHEDULED_PROJECT_SELECTION_KEY, JSON.stringify(ids));
-        localStorage.setItem(SCHEDULED_CONFIG_PROJECT_KEY, String(configProjectId || '').trim());
-    } catch (e) {
-        // ignore localStorage failures
-    }
-}
-
-function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText, includeAllOption = false) {
+function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText) {
     if (!select) return '';
-
     select.innerHTML = '';
     if (!Array.isArray(projects) || projects.length === 0) {
         select.innerHTML = `<option value="">${emptyText || '暂无可配置项目'}</option>`;
         return '';
     }
-
-    if (includeAllOption) {
-        const allOpt = document.createElement('option');
-        allOpt.value = '';
-        allOpt.textContent = '全部项目（显示所有任务）';
-        select.appendChild(allOpt);
-    }
-
     projects.forEach((project) => {
         const projectId = String(project.id || '').trim();
         if (!projectId) return;
@@ -119,90 +77,10 @@ function populateProjectSelectOptions(select, projects, preferredProjectId, empt
         option.textContent = `${project.name || projectId} (${projectId})`;
         select.appendChild(option);
     });
-
     const preferred = String(preferredProjectId || '').trim();
     const matched = Array.from(select.options).some((opt) => opt.value === preferred);
     select.value = matched ? preferred : String(select.options[0]?.value || '');
     return String(select.value || '');
-}
-
-function renderProjectList(projects, preferredProjectId) {
-    const configSelect = document.getElementById('scheduledConfigProjectId');
-    const editorSelect = document.getElementById('scheduledEditorProjectSelect');
-    const saved = loadSavedProjectSelection();
-    const validProjectIds = new Set((projects || []).map((p) => String(p.id || '').trim()).filter(Boolean));
-    const savedSelectedIds = (saved.selectedIds || []).filter((id) => validProjectIds.has(id));
-    const savedConfigProjectId = saved.configProjectId && validProjectIds.has(saved.configProjectId)
-        ? saved.configProjectId
-        : '';
-
-    // 优先恢复上次选择；无历史时默认“全部项目”
-    const fallbackProjectId = savedConfigProjectId || '';
-
-    const selectedConfigProjectId = populateProjectSelectOptions(
-        configSelect,
-        projects,
-        fallbackProjectId,
-        '-- 暂无可配置项目 --',
-        true
-    );
-    populateProjectSelectOptions(editorSelect, projects, fallbackProjectId, '-- 暂无可配置项目 --');
-
-    _currentProjectId = selectedConfigProjectId || '';
-
-    const selectedIds = savedSelectedIds.length > 0
-        ? savedSelectedIds
-        : projects.map((p) => String(p.id || '').trim()).filter(Boolean);
-
-    if (configSelect && savedSelectedIds.length > 1) {
-        // 多选场景默认显示“全部项目”
-        configSelect.value = '';
-        _currentProjectId = '';
-    }
-    renderProjectMultiList(projects, selectedIds);
-    saveProjectSelection(selectedIds, _currentProjectId || '');
-}
-
-function renderProjectMultiList(projects, selectedIds = []) {
-    const container = document.getElementById('scheduledProjectMultiList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    const selectedSet = new Set((selectedIds || []).map((x) => String(x || '').trim()).filter(Boolean));
-    _selectedProjectIds = selectedSet;
-
-    (projects || []).forEach((project) => {
-        const projectId = String(project.id || '').trim();
-        if (!projectId) return;
-        const label = document.createElement('label');
-        label.style.cssText = 'display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#234; white-space:nowrap;';
-        label.innerHTML = `
-            <input type="checkbox" data-project-multi-id="${escapeHtml(projectId)}" ${selectedSet.has(projectId) ? 'checked' : ''}>
-            <span>${escapeHtml(project.name || projectId)}</span>
-        `;
-        container.appendChild(label);
-    });
-
-    syncProjectSelectAllState();
-}
-
-function getSelectedProjectIdsFromMulti() {
-    const cbs = document.querySelectorAll('#scheduledProjectMultiList input[type="checkbox"][data-project-multi-id]:checked');
-    const selected = Array.from(cbs).map((item) => String(item.dataset.projectMultiId || '').trim()).filter(Boolean);
-    if (selected.length > 0) {
-        return selected;
-    }
-    return _modalProjects.map((p) => String(p.id || '').trim()).filter(Boolean);
-}
-
-function syncProjectSelectAllState() {
-    const selectAll = document.getElementById('scheduledProjectSelectAll');
-    if (!selectAll) return;
-    const cbs = document.querySelectorAll('#scheduledProjectMultiList input[type="checkbox"][data-project-multi-id]');
-    const total = cbs.length;
-    const checked = Array.from(cbs).filter((item) => item.checked).length;
-    selectAll.checked = total > 0 && checked === total;
-    selectAll.indeterminate = checked > 0 && checked < total;
 }
 
 function populateTaskFilterOptions(tasks) {
@@ -316,28 +194,28 @@ function renderTaskList(tasks) {
     container.innerHTML = '';
 
     if (!Array.isArray(tasks) || tasks.length === 0) {
-        container.innerHTML = '<div style="font-size:12px; color:#777;">当前项目暂无任务，点击“新建任务”开始配置。</div>';
+        container.innerHTML = '<div style="font-size:12px; color:#777;">暂无任务，点击"新建任务"开始配置。</div>';
         return;
     }
 
     const table = document.createElement('table');
-    table.style.cssText = 'width:100%; border-collapse:collapse; font-size:12px;';
+    table.style.cssText = 'width:100%; border-collapse:collapse; font-size:12px; table-layout:auto;';
     table.innerHTML = `
         <thead>
             <tr style="background:#f5f8fc;">
                 <th style="border:1px solid #e2e8f0; padding:6px;"><input type="checkbox" id="scheduledTaskSelectAll"></th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">项目名称</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">任务名称</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">创建人</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">任务类型</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">频率</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">执行次数</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">承建单位</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">承建单位收件人</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">PMO组收件人</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">外部收件人</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">状态</th>
-                <th style="border:1px solid #e2e8f0; padding:6px;">操作</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">项目名称</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">任务名称</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">创建人</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">任务类型</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">频率</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">执行次数</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">承建单位</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">承建单位收件人</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">PMO组收件人</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">外部收件人</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">状态</th>
+                <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">操作</th>
             </tr>
         </thead>
         <tbody></tbody>
@@ -349,24 +227,25 @@ function renderTaskList(tasks) {
         const creatorName = task._creator_name || task.created_by_display_name || task.created_by_username || '-';
         const tr = document.createElement('tr');
         tr.dataset.taskRowId = String(task.task_id || '');
+        const pid = escapeHtml(task.project_id || task._project_id || '');
         tr.innerHTML = `
             <td style="border:1px solid #e2e8f0; padding:6px; text-align:center;"><input type="checkbox" data-task-select="1" data-task-id="${escapeHtml(task.task_id)}"></td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(task._project_name || task._project_id || '-')}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(task.task_name || '未命名任务')}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(creatorName)}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${taskTypeLabel(task.task_type)}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${task.task_type === 'one_time' ? `一次性(${escapeHtml(task.run_date || '-')})` : `${frequencyLabel(task.frequency)} ${escapeHtml(task.send_time || '')}`}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${escapeHtml(task._project_name || task.project_id || '-')}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${escapeHtml(task.task_name || '未命名任务')}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${escapeHtml(creatorName)}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${taskTypeLabel(task.task_type)}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${task.task_type === 'one_time' ? `一次性(${escapeHtml(task.run_date || '-')})` : `${frequencyLabel(task.frequency)} ${escapeHtml(task.send_time || '')}`}</td>
             <td style="border:1px solid #e2e8f0; padding:6px; text-align:center;">${Number(task.run_count || 0)}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(task._party_b || _currentProjectMeta.party_b || '-')}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${escapeHtml(task._party_b || '-')}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(groups.contractor)}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(groups.pmo)}</td>
             <td style="border:1px solid #e2e8f0; padding:6px;">${escapeHtml(groups.external)}</td>
-            <td style="border:1px solid #e2e8f0; padding:6px;">${task.enabled ? '启用' : '停用'}</td>
+            <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">${task.enabled ? '启用' : '停用'}</td>
             <td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">
-                <button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">编辑</button>
-                <button type="button" class="btn btn-info btn-sm" data-action="toggle" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">${task.enabled ? '停用' : '启用'}</button>
-                <button type="button" class="btn btn-warning btn-sm" data-action="run" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">执行</button>
-                <button type="button" class="btn btn-danger btn-sm" data-action="delete" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${escapeHtml(task._project_id || _currentProjectId)}">删除</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${pid}">编辑</button>
+                <button type="button" class="btn btn-info btn-sm" data-action="toggle" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${pid}">${task.enabled ? '停用' : '启用'}</button>
+                <button type="button" class="btn btn-warning btn-sm" data-action="run" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${pid}">执行</button>
+                <button type="button" class="btn btn-danger btn-sm" data-action="delete" data-task-id="${escapeHtml(task.task_id)}" data-project-id="${pid}">删除</button>
             </td>
         `;
         tbody.appendChild(tr);
@@ -388,7 +267,7 @@ function renderTaskList(tasks) {
         btn.onclick = async () => {
             const action = btn.dataset.action;
             const taskId = btn.dataset.taskId;
-            const projectId = String(btn.dataset.projectId || _currentProjectId || '').trim();
+            const projectId = String(btn.dataset.projectId || '').trim();
             if (!taskId || !projectId) return;
             if (action === 'edit') {
                 await openScheduledTaskEditorModal(taskId, projectId);
@@ -407,13 +286,17 @@ function renderTaskList(tasks) {
             }
         };
     });
+
+    if (_pendingHighlightTaskId) {
+        const toHighlight = _pendingHighlightTaskId;
+        _pendingHighlightTaskId = '';
+        setTimeout(() => highlightTaskRow(toHighlight), 0);
+    }
 }
 
 function renderRecipientUserList(recipientOptions, selectedIds) {
-    // 兼容旧 ID —— 两个新容器：承建单位 + PMO
     const contractorContainer = document.getElementById('scheduledContractorUserList');
     const pmoContainer = document.getElementById('scheduledPmoUserList');
-    // 同时兼容旧的单容器 ID（万一模板未更新）
     const legacyContainer = document.getElementById('scheduledRecipientUserList');
 
     const empty = '<div style="font-size:12px; color:#777;">当前项目暂无可选收件人。</div>';
@@ -427,7 +310,6 @@ function renderRecipientUserList(recipientOptions, selectedIds) {
 
     const selectedSet = new Set((selectedIds || []).map(x => Number(x)));
 
-    // 分组
     const contractorUsers = [];
     const pmoUsers = [];
     recipientOptions.forEach((user) => {
@@ -472,7 +354,6 @@ function renderRecipientUserList(recipientOptions, selectedIds) {
     fillContainer(contractorContainer, contractorUsers);
     fillContainer(pmoContainer, pmoUsers);
 
-    // 兼容旧容器（全量渲染）
     if (legacyContainer) {
         legacyContainer.innerHTML = '';
         recipientOptions.forEach((user) => {
@@ -483,7 +364,6 @@ function renderRecipientUserList(recipientOptions, selectedIds) {
 }
 
 function collectSelectedRecipientUserIds() {
-    // 从两个新容器 + 旧容器中收集选中的用户ID
     const selectors = [
         '#scheduledContractorUserList input[type="checkbox"][data-recipient-user-id]:checked',
         '#scheduledPmoUserList input[type="checkbox"][data-recipient-user-id]:checked',
@@ -499,19 +379,13 @@ function collectSelectedRecipientUserIds() {
     return Array.from(ids);
 }
 
-// 切换外部收件人输入框显示/隐藏
 window.toggleExternalEmailsInput = function () {
     const cb = document.getElementById('scheduledEnableExternalEmails');
     const wrapper = document.getElementById('scheduledExternalEmailsWrapper');
     if (!wrapper) return;
-    if (cb && cb.checked) {
-        wrapper.style.display = 'block';
-    } else {
-        wrapper.style.display = 'none';
-    }
+    wrapper.style.display = (cb && cb.checked) ? 'block' : 'none';
 };
 
-// 切换截止日期输入框显示/隐藏
 window.toggleValidUntilInput = function () {
     const cb = document.getElementById('scheduledEnableValidUntil');
     const input = document.getElementById('scheduledValidUntil');
@@ -520,7 +394,6 @@ window.toggleValidUntilInput = function () {
     if (input) input.style.display = show ? 'inline-block' : 'none';
     if (hint) hint.style.display = show ? 'block' : 'none';
     if (show && input && !input.value) {
-        // 默认设置为今天往后一个月
         const d = new Date();
         d.setMonth(d.getMonth() + 1);
         input.value = d.toISOString().slice(0, 10);
@@ -532,13 +405,16 @@ function fillEditorByTask(task) {
     const editingId = document.getElementById('scheduledEditingTaskId');
     if (editingId) editingId.value = _editingTaskId;
 
+    const targetProjectId = String(task.project_id || task._project_id || _currentProjectId || '');
+    _currentProjectId = targetProjectId;
+
     const projectIdInput = document.getElementById('scheduledEditorProjectId');
-    if (projectIdInput) projectIdInput.value = _currentProjectId;
+    if (projectIdInput) projectIdInput.value = targetProjectId;
 
     const editorProjectSelect = document.getElementById('scheduledEditorProjectSelect');
     if (editorProjectSelect) {
-        populateProjectSelectOptions(editorProjectSelect, _modalProjects, _currentProjectId, '-- 暂无可配置项目 --');
-        editorProjectSelect.value = _currentProjectId;
+        populateProjectSelectOptions(editorProjectSelect, _modalProjects, targetProjectId, '-- 暂无可配置项目 --');
+        editorProjectSelect.value = targetProjectId;
         editorProjectSelect.disabled = true;
     }
 
@@ -547,11 +423,9 @@ function fillEditorByTask(task) {
     if (runAfterSave) {
         runAfterSave.checked = false;
         runAfterSave.disabled = true;
-        runAfterSave.title = '编辑任务不支持“保存后立即执行”，请使用列表中的“执行”按钮';
+        runAfterSave.title = '编辑任务不支持"保存后立即执行"，请使用列表中的"执行"按钮';
     }
-    if (runAfterSaveWrap) {
-        runAfterSaveWrap.style.opacity = '0.55';
-    }
+    if (runAfterSaveWrap) runAfterSaveWrap.style.opacity = '0.55';
 
     const taskName = document.getElementById('scheduledTaskName');
     if (taskName) taskName.value = task.task_name || '';
@@ -586,7 +460,6 @@ function fillEditorByTask(task) {
         window.toggleExternalEmailsInput && window.toggleExternalEmailsInput();
     }
 
-    // 截止日期
     const validUntilCb = document.getElementById('scheduledEnableValidUntil');
     const validUntilInput = document.getElementById('scheduledValidUntil');
     const validUntilVal = String(task.valid_until || '').trim().slice(0, 10);
@@ -600,6 +473,7 @@ function fillEditorByTask(task) {
     const freqRadio = document.querySelector(`input[name="scheduledFrequency"][value="${task.frequency || 'weekly'}"]`);
     if (freqRadio) freqRadio.checked = true;
 
+    _recipientOptions = Array.isArray(task._recipient_options) ? task._recipient_options : _recipientOptions;
     renderRecipientUserList(_recipientOptions, task.recipient_user_ids || []);
     toggleEditorFields();
 }
@@ -610,11 +484,11 @@ function clearEditorToNewTask() {
     if (editingId) editingId.value = '';
 
     const projectIdInput = document.getElementById('scheduledEditorProjectId');
-    if (projectIdInput) projectIdInput.value = _currentProjectId || '';
+    if (projectIdInput) projectIdInput.value = '';
 
     const editorProjectSelect = document.getElementById('scheduledEditorProjectSelect');
     if (editorProjectSelect) {
-        const selected = populateProjectSelectOptions(editorProjectSelect, _modalProjects, _currentProjectId || appState.currentProjectId, '-- 暂无可配置项目 --');
+        const selected = populateProjectSelectOptions(editorProjectSelect, _modalProjects, appState.currentProjectId || '', '-- 暂无可配置项目 --');
         editorProjectSelect.disabled = false;
         if (projectIdInput) projectIdInput.value = selected;
     }
@@ -626,9 +500,7 @@ function clearEditorToNewTask() {
         runAfterSave.disabled = false;
         runAfterSave.title = '勾选后保存成功会自动执行一次';
     }
-    if (runAfterSaveWrap) {
-        runAfterSaveWrap.style.opacity = '1';
-    }
+    if (runAfterSaveWrap) runAfterSaveWrap.style.opacity = '1';
 
     const taskName = document.getElementById('scheduledTaskName');
     if (taskName) taskName.value = '';
@@ -662,7 +534,6 @@ function clearEditorToNewTask() {
         window.toggleExternalEmailsInput && window.toggleExternalEmailsInput();
     }
 
-    // 重置截止日期
     const validUntilCb = document.getElementById('scheduledEnableValidUntil');
     const validUntilInput = document.getElementById('scheduledValidUntil');
     if (validUntilCb) validUntilCb.checked = false;
@@ -675,7 +546,7 @@ function clearEditorToNewTask() {
     const weekly = document.querySelector('input[name="scheduledFrequency"][value="weekly"]');
     if (weekly) weekly.checked = true;
 
-    renderRecipientUserList(_recipientOptions, []);
+    renderRecipientUserList([], []);
     toggleEditorFields();
 }
 
@@ -688,7 +559,7 @@ async function safeParseJson(resp) {
     }
 }
 
-async function loadAccessibleProjects(preferredProjectId) {
+async function loadAccessibleProjects() {
     const resp = await fetch('/api/projects/accessible');
     if (!resp.ok) {
         throw new Error('加载项目列表失败');
@@ -698,92 +569,54 @@ async function loadAccessibleProjects(preferredProjectId) {
         throw new Error(result.message || '项目列表数据格式错误');
     }
     _modalProjects = result;
-    renderProjectList(_modalProjects, preferredProjectId);
 }
 
-async function loadTasksForProject(projectId, preferredTaskId = '') {
-    _taskScope = 'single';
-    _currentProjectId = projectId;
-    const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`, { cache: 'no-store' });
+/**
+ * 从全局 API 一次性加载所有任务（平台级功能）。
+ * 替代旧的 per-project 并发请求，彻底解决数据不一致问题。
+ */
+async function loadAllTasks() {
+    _currentProjectId = '';
+    _recipientOptions = [];
+    _currentProjectMeta = { party_b: '', project_name: '' };
+
+    const resp = await fetch('/api/projects/report-schedules/all', { cache: 'no-store' });
     const result = await safeParseJson(resp);
     if (result.status !== 'success') {
         throw new Error(result.message || '加载任务失败');
     }
 
-    const project = _modalProjects.find((p) => String(p.id) === String(projectId));
-    _allLoadedTasks = (Array.isArray(result.tasks) ? result.tasks : []).map((task) => ({
-        ...task,
-        _project_id: projectId,
-        _project_name: project?.name || projectId,
-        _party_b: (result.project_meta || {}).party_b || '',
-        _recipient_options: Array.isArray(result.recipient_options) ? result.recipient_options : [],
-        _creator_name: task.created_by_display_name || task.created_by_username || '-'
-    }));
-    _recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
-    _currentProjectMeta = result.project_meta || { party_b: '', project_name: '' };
-
-    populateTaskFilterOptions(_allLoadedTasks);
-    refreshTaskListByCurrentFilters();
-
-    if (preferredTaskId) {
-        const task = _allLoadedTasks.find((x) => String(x.task_id) === String(preferredTaskId));
-        if (task) fillEditorByTask(task);
-    }
-}
-
-async function loadTasksForAllProjects(projectIds = []) {
-    _taskScope = 'all';
-    _currentProjectId = '';
-    _recipientOptions = [];
-    _currentProjectMeta = { party_b: '', project_name: '' };
-
-    const includeSet = new Set((projectIds || []).map((x) => String(x || '').trim()).filter(Boolean));
-    const projects = includeSet.size > 0
-        ? _modalProjects.filter((p) => includeSet.has(String(p.id || '').trim()))
-        : _modalProjects;
-
-    const requests = projects.map(async (project) => {
-        const projectId = String(project.id || '').trim();
-        if (!projectId) return [];
-        const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`, { cache: 'no-store' });
-        const result = await safeParseJson(resp);
-        if (result.status !== 'success') return [];
-
-        const partyB = (result.project_meta || {}).party_b || '';
-        const recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
-        return (Array.isArray(result.tasks) ? result.tasks : []).map((task) => ({
-            ...task,
-            _project_id: projectId,
-            _project_name: project.name || projectId,
-            _party_b: partyB,
-            _recipient_options: recipientOptions,
-            _creator_name: task.created_by_display_name || task.created_by_username || '-'
-        }));
-    });
-
-    const all = await Promise.all(requests);
-    _allLoadedTasks = all.flat();
+    _allLoadedTasks = Array.isArray(result.tasks) ? result.tasks : [];
     populateTaskFilterOptions(_allLoadedTasks);
     refreshTaskListByCurrentFilters();
 }
 
-async function reloadTasksBySelection(preferredTaskId = '') {
-    const selectedIds = getSelectedProjectIdsFromMulti();
-    const configSelect = document.getElementById('scheduledConfigProjectId');
-    if (selectedIds.length === 1) {
-        const singleProjectId = selectedIds[0];
-        if (configSelect) configSelect.value = singleProjectId;
-        await loadTasksForProject(singleProjectId, preferredTaskId);
+/**
+ * 统一刷新入口：始终调用全局 API 获取最新数据。
+ */
+async function reloadAllTasks() {
+    await loadAllTasks();
+}
+
+/**
+ * 加载指定项目的收件人（编辑器切换项目时使用）。
+ */
+async function loadProjectRecipients(projectId) {
+    if (!projectId) {
+        _recipientOptions = [];
         return;
     }
-    if (configSelect) configSelect.value = '';
-    await loadTasksForAllProjects(selectedIds);
+    const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules`, { cache: 'no-store' });
+    const result = await safeParseJson(resp);
+    if (result.status === 'success') {
+        _recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
+        _currentProjectMeta = result.project_meta || { party_b: '', project_name: '' };
+    }
 }
 
 function buildPayloadFromEditorForm() {
     const taskType = getTaskTypeValue();
     const frequency = getFrequencyValue();
-    // 自动生成任务名称
     const freqLabels = { daily: '日报', weekly: '周报', monthly: '月报' };
     const projectSelect = document.getElementById('scheduledEditorProjectSelect');
     const projectName = projectSelect?.selectedOptions?.[0]?.textContent?.replace(/\s*\(.*\)$/, '') || '';
@@ -804,10 +637,8 @@ function buildPayloadFromEditorForm() {
         recipient_user_ids: collectSelectedRecipientUserIds(),
         external_emails: (() => {
             const enableExtCb = document.getElementById('scheduledEnableExternalEmails');
-            // checkbox 未勾选时不发送外部邮件，但保留数据在输入框中
             if (!enableExtCb?.checked) return [];
             const rawVal = document.getElementById('scheduledExternalEmails')?.value || '';
-            // 输入框为空则清空
             if (!rawVal.trim()) return [];
             return rawVal.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean);
         })(),
@@ -819,27 +650,16 @@ function buildPayloadFromEditorForm() {
     };
 }
 
-let _preSaveTaskScope = 'single';
-
 export async function openScheduledTaskEditorModal(taskId = '', projectId = '') {
-    _preSaveTaskScope = _taskScope;
     if (taskId) {
-        const task = _allLoadedTasks.find((x) => String(x.task_id) === String(taskId) && String(x._project_id || projectId || _currentProjectId) === String(projectId || x._project_id || _currentProjectId));
-        const targetProjectId = String(projectId || task?._project_id || _currentProjectId || '').trim();
-        if (!targetProjectId) {
-            showNotification('请先选择一个项目后再编辑任务', 'warning');
-            return;
-        }
-
-        if (!_currentProjectId || _currentProjectId !== targetProjectId || _taskScope === 'all') {
-            await loadTasksForProject(targetProjectId, taskId);
-        }
-
-        const editingTask = _allLoadedTasks.find((x) => String(x.task_id) === String(taskId));
-        if (!editingTask) {
+        let editingTask = _allLoadedTasks.find((x) => String(x.task_id) === String(taskId));
+        const targetProjectId = String(projectId || editingTask?.project_id || editingTask?._project_id || '').trim();
+        if (!editingTask || !targetProjectId) {
             showNotification('任务不存在', 'error');
             return;
         }
+        _currentProjectId = targetProjectId;
+        _recipientOptions = Array.isArray(editingTask._recipient_options) ? editingTask._recipient_options : [];
         fillEditorByTask(editingTask);
     } else {
         clearEditorToNewTask();
@@ -866,9 +686,9 @@ export function closeScheduledTaskEditorModal() {
 }
 
 async function runTaskNow(taskId, projectId = '') {
-    const targetProjectId = String(projectId || _currentProjectId || '').trim();
+    const targetProjectId = String(projectId || '').trim();
     if (!targetProjectId || !taskId) {
-        showNotification('请先选择项目和任务', 'error');
+        showNotification('缺少任务信息', 'error');
         return;
     }
     try {
@@ -877,11 +697,7 @@ async function runTaskNow(taskId, projectId = '') {
         const result = await safeParseJson(resp);
         if (result.status === 'success') {
             showNotification(result.message || '执行成功', 'success');
-            if (_taskScope === 'all') {
-                await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
-            } else {
-                await loadTasksForProject(targetProjectId, taskId);
-            }
+            await reloadAllTasks();
         } else {
             showNotification(result.message || '执行失败', 'error');
         }
@@ -893,12 +709,12 @@ async function runTaskNow(taskId, projectId = '') {
 }
 
 async function toggleTask(taskId, projectId = '') {
-    const task = _taskList.find((x) => String(x.task_id) === String(taskId));
+    const task = _allLoadedTasks.find((x) => String(x.task_id) === String(taskId));
     if (!task) {
         showNotification('任务不存在', 'error');
         return;
     }
-    const targetProjectId = String(projectId || task._project_id || _currentProjectId || '').trim();
+    const targetProjectId = String(projectId || task.project_id || task._project_id || '').trim();
     if (!targetProjectId) {
         showNotification('缺少任务所属项目', 'error');
         return;
@@ -915,11 +731,7 @@ async function toggleTask(taskId, projectId = '') {
             showNotification(result.message || '更新状态失败', 'error');
             return;
         }
-        if (_taskScope === 'all') {
-            await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
-        } else {
-            await loadTasksForProject(targetProjectId, taskId);
-        }
+        await reloadAllTasks();
         showNotification(task.enabled ? '任务已停用' : '任务已启用', 'success');
     } catch (e) {
         showNotification(e.message || '更新状态失败', 'error');
@@ -929,7 +741,7 @@ async function toggleTask(taskId, projectId = '') {
 }
 
 async function deleteTask(taskId, projectId = '') {
-    const targetProjectId = String(projectId || _currentProjectId || '').trim();
+    const targetProjectId = String(projectId || '').trim();
     if (!targetProjectId || !taskId) return;
     const confirmed = await new Promise(resolve => showConfirmModal('删除任务', '确认删除该定时任务吗？', () => resolve(true), () => resolve(false)));
     if (!confirmed) return;
@@ -942,11 +754,7 @@ async function deleteTask(taskId, projectId = '') {
             showNotification(result.message || '删除失败', 'error');
             return;
         }
-        if (_taskScope === 'all') {
-            await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
-        } else {
-            await loadTasksForProject(targetProjectId, '');
-        }
+        await reloadAllTasks();
         showNotification('任务已删除', 'success');
     } catch (e) {
         showNotification(e.message || '删除失败', 'error');
@@ -963,10 +771,11 @@ async function batchEnableTasks() {
     }
     try {
         showLoading(true);
-        const selectedTasks = _taskList.filter((t) => ids.includes(String(t.task_id || '')));
+        const selectedTasks = _allLoadedTasks.filter((t) => ids.includes(String(t.task_id || '')));
         const results = await Promise.all(selectedTasks.map(async (task) => {
+            const pid = String(task.project_id || task._project_id || '');
             const resp = await fetch(
-                `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}/toggle`,
+                `/api/projects/${encodeURIComponent(pid)}/report-schedules/${encodeURIComponent(task.task_id)}/toggle`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -978,11 +787,7 @@ async function batchEnableTasks() {
         }));
         const successCount = results.filter(Boolean).length;
         const failCount = results.length - successCount;
-        if (_taskScope === 'all') {
-            await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
-        } else {
-            await loadTasksForProject(_currentProjectId, '');
-        }
+        await reloadAllTasks();
         if (failCount > 0) {
             showNotification(`成功启用 ${successCount} 个，${failCount} 个失败`, 'warning');
         } else {
@@ -1006,10 +811,11 @@ async function batchDeleteTasks() {
 
     try {
         showLoading(true);
-        const selectedTasks = _taskList.filter((t) => ids.includes(String(t.task_id || '')));
+        const selectedTasks = _allLoadedTasks.filter((t) => ids.includes(String(t.task_id || '')));
         const results = await Promise.all(selectedTasks.map(async (task) => {
+            const pid = String(task.project_id || task._project_id || '');
             const resp = await fetch(
-                `/api/projects/${encodeURIComponent(task._project_id || _currentProjectId)}/report-schedules/${encodeURIComponent(task.task_id)}`,
+                `/api/projects/${encodeURIComponent(pid)}/report-schedules/${encodeURIComponent(task.task_id)}`,
                 { method: 'DELETE' }
             );
             const r = await safeParseJson(resp);
@@ -1017,11 +823,7 @@ async function batchDeleteTasks() {
         }));
         const successCount = results.filter(Boolean).length;
         const failCount = results.length - successCount;
-        if (_taskScope === 'all') {
-            await loadTasksForAllProjects(getSelectedProjectIdsFromMulti());
-        } else {
-            await loadTasksForProject(_currentProjectId, '');
-        }
+        await reloadAllTasks();
         if (failCount > 0) {
             showNotification(`成功删除 ${successCount} 个，${failCount} 个删除失败`, failCount === results.length ? 'error' : 'warning');
         } else {
@@ -1035,7 +837,6 @@ async function batchDeleteTasks() {
 }
 
 export async function openScheduledReportModal() {
-    const projectId = appState.currentProjectId;
     try {
         showLoading(true);
         _taskList = [];
@@ -1044,45 +845,7 @@ export async function openScheduledReportModal() {
         _editingTaskId = '';
         _currentProjectMeta = { party_b: '', project_name: '' };
 
-        await loadAccessibleProjects(projectId);
-
-        const configProjectSelect = document.getElementById('scheduledConfigProjectId');
-        if (configProjectSelect) {
-            configProjectSelect.onchange = async () => {
-                const configProjectId = getConfigProjectId();
-                if (configProjectId) {
-                    renderProjectMultiList(_modalProjects, [configProjectId]);
-                } else {
-                    renderProjectMultiList(_modalProjects, _modalProjects.map((p) => String(p.id || '').trim()).filter(Boolean));
-                }
-                saveProjectSelection(getSelectedProjectIdsFromMulti(), configProjectId || '');
-                await reloadTasksBySelection('');
-            };
-        }
-
-        const projectMultiList = document.getElementById('scheduledProjectMultiList');
-        if (projectMultiList) {
-            projectMultiList.onchange = async (evt) => {
-                const target = evt.target;
-                if (!target || target.tagName !== 'INPUT') return;
-                syncProjectSelectAllState();
-                saveProjectSelection(getSelectedProjectIdsFromMulti(), getConfigProjectId());
-                await reloadTasksBySelection('');
-            };
-        }
-
-        const projectSelectAll = document.getElementById('scheduledProjectSelectAll');
-        if (projectSelectAll) {
-            projectSelectAll.onchange = async () => {
-                const checked = !!projectSelectAll.checked;
-                document.querySelectorAll('#scheduledProjectMultiList input[type="checkbox"][data-project-multi-id]').forEach((cb) => {
-                    cb.checked = checked;
-                });
-                syncProjectSelectAllState();
-                saveProjectSelection(getSelectedProjectIdsFromMulti(), getConfigProjectId());
-                await reloadTasksBySelection('');
-            };
-        }
+        await loadAccessibleProjects();
 
         const orgFilter = document.getElementById('scheduledOrgFilter');
         if (orgFilter) {
@@ -1094,7 +857,7 @@ export async function openScheduledReportModal() {
             creatorFilter.onchange = () => refreshTaskListByCurrentFilters();
         }
 
-        await reloadTasksBySelection('');
+        await reloadAllTasks();
 
         const newTaskBtn = document.getElementById('scheduledTaskNewBtn');
         if (newTaskBtn) {
@@ -1112,7 +875,7 @@ export async function openScheduledReportModal() {
                     renderRecipientUserList([], []);
                     return;
                 }
-                await loadTasksForProject(selectedId, '');
+                await loadProjectRecipients(selectedId);
                 renderRecipientUserList(_recipientOptions, []);
             };
         }
@@ -1165,9 +928,9 @@ export async function saveScheduledReportConfig(e) {
         e.preventDefault();
     }
 
-    const projectId = (document.getElementById('scheduledEditorProjectId')?.value || '').trim() || _currentProjectId || getConfigProjectId();
+    const projectId = (document.getElementById('scheduledEditorProjectId')?.value || '').trim();
     if (!projectId) {
-        showNotification('请先选择“当前配置项目”', 'error');
+        showNotification('请先选择任务所属项目', 'error');
         return;
     }
 
@@ -1197,38 +960,18 @@ export async function saveScheduledReportConfig(e) {
 
         const savedTaskId = String(result.data?.task_id || editingTaskId || '').trim();
 
-        if (_preSaveTaskScope === 'all') {
-            // 确保新任务所属项目已勾选，避免保存成功后当前视图不显示
-            const targetCb = Array.from(document.querySelectorAll('#scheduledProjectMultiList input[type="checkbox"][data-project-multi-id]'))
-                .find((cb) => String(cb.dataset.projectMultiId || '').trim() === projectId);
-            if (targetCb) targetCb.checked = true;
-            syncProjectSelectAllState();
+        if (!isEdit && savedTaskId) {
+            _pendingHighlightTaskId = savedTaskId;
         }
 
-        // 保存后统一按当前勾选范围重载
-        await reloadTasksBySelection(savedTaskId);
-
-        // 新建场景下清空筛选，确保用户能立即看到新任务
         if (!isEdit) {
             const orgFilter = document.getElementById('scheduledOrgFilter');
             const creatorFilter = document.getElementById('scheduledCreatorFilter');
             if (orgFilter) orgFilter.value = '';
             if (creatorFilter) creatorFilter.value = '';
-            refreshTaskListByCurrentFilters();
         }
 
-        // 新建后核验任务是否确实存在，防止出现“提示成功但列表无任务”的假象
-        if (!isEdit && savedTaskId) {
-            const exists = _allLoadedTasks.some((x) => String(x.task_id) === savedTaskId && String(x._project_id || '') === String(projectId));
-            if (!exists) {
-                await loadTasksForProject(projectId, savedTaskId);
-            }
-        }
-
-        if (!isEdit && savedTaskId) {
-            // 新建完成后高亮对应任务行（3秒）
-            setTimeout(() => highlightTaskRow(savedTaskId), 0);
-        }
+        await reloadAllTasks();
 
         if (!isEdit && runAfterSave && savedTaskId) {
             const runResp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/report-schedules/${encodeURIComponent(savedTaskId)}/run`, {
@@ -1240,7 +983,7 @@ export async function saveScheduledReportConfig(e) {
             } else {
                 showNotification(`任务已创建，但立即执行失败：${runResult.message || '未知错误'}`, 'warning');
             }
-            await loadTasksForProject(projectId, savedTaskId);
+            await reloadAllTasks();
         }
 
         closeScheduledTaskEditorModal();
@@ -1265,9 +1008,8 @@ export async function runScheduledReportNow() {
     await runTaskNow(taskId, projectId);
 }
 
-// 兼容旧入口
 export async function applyScheduledReportConfigToSelected() {
-    showNotification('已升级为“任务列表管理模式”', 'info');
+    showNotification('已升级为"任务列表管理模式"', 'info');
 }
 
 if (typeof document !== 'undefined') {
