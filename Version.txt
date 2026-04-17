@@ -1,25 +1,33 @@
-3.0.2
+3.0.3
 
 更新内容：
 
-1. 升级链路增强
+1. 周期状态刷新修复
+   - 修复周期状态计算优先级，文档全部归档后可正确显示“已归档”
+   - 修复周期导航项活跃样式冲突，避免刷新后字体大小不一致
+
+2. 版本与文档同步
+   - README 更新至 v3.0.3，并补充本次更新日志
+   - 项目说明文档同步刷新版本标识与更新时间
+
+3. 升级链路增强
    - `Daemon.sh upgrade` 继续保留自动迁移能力，并完善为“数据库 + 运行时数据文件”联动迁移
    - 升级后自动规范化 `uploads/tasks/report_schedules.json` 任务结构，兼容旧版单任务/字段缺失数据
 
-2. 数据库迁移版本升级
+4. 数据库迁移版本升级
    - 迁移版本提升至 v9
    - 新增常用查询索引：
      - `idx_messages_receiver_read_created`
      - `idx_archive_approvals_project_status_created`
    - `tools/migrate_db.py` 与 `tools/migrate_branch.py` 迁移版本保持一致
 
-3. 隐私与示例清理
+5. 隐私与示例清理
    - 诊断脚本移除硬编码真实项目名，改为命令行参数输入
    - 默认示例值统一为“示例项目”
 
-4. 文档体系补齐
+6. 文档体系补齐
    - 新增工程说明：`docs/PROJECT_ENGINEERING_GUIDE.md`
    - 新增产品手册：`docs/PRODUCT_MANUAL.md`
    - README 增加升级迁移说明与文档索引
 
-版本号: 2026041601
+版本号: 2026041701
