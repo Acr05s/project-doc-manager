@@ -392,7 +392,7 @@ export async function updateRoleBasedUI() {
         // 使用事件委托绑定菜单项点击，避免动态元素绑定失效
         if (!systemManagementDropdown._hasClickDelegate) {
             systemManagementDropdown._hasClickDelegate = true;
-            systemManagementDropdown.addEventListener('click', (e) => {
+            systemManagementDropdown.addEventListener('click', async (e) => {
                 const item = e.target.closest('.sidebar-menu-item');
                 if (!item) return;
                 e.preventDefault();
@@ -401,6 +401,14 @@ export async function updateRoleBasedUI() {
                 const overlay = document.getElementById('sidebarOverlay');
                 if (sidebar) sidebar.classList.remove('open');
                 if (overlay) overlay.classList.remove('show');
+                
+                // 只有"权限配置"需要安全码验证（admin 角色）
+                if (item.id === 'permissionConfigMenuItem') {
+                    const { checkAdminApprovalCodeIfNeeded } = await import('./ui.js');
+                    const verified = await checkAdminApprovalCodeIfNeeded();
+                    if (!verified) return;
+                }
+                
                 switch (item.id) {
                     case 'userApprovalBtn':
                         import('./user-approval.js').then(m => m.openUserApprovalModal());

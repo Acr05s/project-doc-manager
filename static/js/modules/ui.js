@@ -1150,26 +1150,24 @@ export function setupEventListeners() {
     const systemSettingsMenuItem = document.getElementById('systemSettingsMenuItem');
     const systemSettingsModal = document.getElementById('systemSettingsModal');
     if (systemSettingsMenuItem && systemSettingsModal) {
-            systemSettingsMenuItem.addEventListener('click', async (e) => {
+        systemSettingsMenuItem.addEventListener('click', async (e) => {
             e.preventDefault();
-                const user = getCurrentUser();
-            let needApprovalCheck = !!(appState.systemSettings && appState.systemSettings.admin_system_settings_require_approval_code);
+            const user = getCurrentUser();
             if (user && user.role === 'admin') {
+                // 刷新最新的系统设置
                 try {
                     const latestResp = await fetch('/api/settings');
                     const latestResult = await latestResp.json();
                     if (latestResult.status === 'success' && latestResult.data) {
                         appState.systemSettings = latestResult.data;
-                        needApprovalCheck = !!latestResult.data.admin_system_settings_require_approval_code;
                     }
                 } catch (error) {
                     console.warn('读取最新系统设置失败，使用本地缓存继续:', error);
                 }
+                // 检查是否需要验证安全码
+                const verified = await checkAdminApprovalCodeIfNeeded();
+                if (!verified) return;
             }
-                if (user && user.role === 'admin' && needApprovalCheck) {
-                    const verified = await verifyApprovalCodeForAdminSettings();
-                    if (!verified) return;
-                }
             loadSystemSettings();
             openModal(systemSettingsModal);
         });
@@ -1358,6 +1356,25 @@ async function verifyApprovalCodeForAdminSettings() {
             return false;
         }
     }
+}
+
+/**
+ * 检查 admin 访问系统管理功能是否需要验证安全码
+ * 返回 true 表示通过验证或无需验证，false 表示验证失败或被取消
+ */
+export async function checkAdminApprovalCodeIfNeeded() {
+    const user = getCurrentUser();
+    if (!user || user.role !== 'admin') {
+        return true; // 非admin不需要验证
+    }
+    
+    // 检查系统设置中是否为 admin 管理功能启用了安全码验证
+    const needApprovalCheck = !!(appState.systemSettings && appState.systemSettings.admin_system_settings_require_approval_code);
+    if (!needApprovalCheck) {
+        return true; // 未启用安全码验证
+    }
+    
+    return await verifyApprovalCodeForAdminSettings();
 }
 
 function toggleEmailConfigEditable(enabled) {

@@ -124,12 +124,14 @@ export async function calculateCycleStatus(cycle) {
         }
     }
 
-    if (!allFilesComplete) {
+    // 状态优先级：已归档 > 文件不全 > 属性不全 > 完整
+    if (allArchived && requiredDocs.length > 0) {
+        // 所有文档都已归档
+        return 'archived';
+    } else if (!allFilesComplete) {
         return 'incomplete';
     } else if (!allAttributesComplete) {
         return 'partial';
-    } else if (allArchived) {
-        return 'archived';
     } else {
         return 'complete';
     }
@@ -190,7 +192,7 @@ export async function loadCycleProgresses(cycles, docsData) {
         
         // 渲染周期项
         html += `
-            <div class="cycle-nav-item status-${status} ${isActive ? 'active' : ''}" data-cycle="${cycle}" data-status="${status}" style="${isActive ? 'transform: scale(1.2); z-index: 10;' : ''}" >
+            <div class="cycle-nav-item status-${status} ${isActive ? 'active' : ''}" data-cycle="${cycle}" data-status="${status}">
                 ${status === 'archived' ? `<div class="archive-tip" style="position: absolute; top: -10px; right: -10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; z-index: 10;">已归档</div>` : ''}
                 <span class="cycle-index" style="font-size:11px;opacity:0.8;">${index + 1}</span>
                 <span class="cycle-name" style="text-align:center;">${cycle}</span>

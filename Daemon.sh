@@ -49,6 +49,7 @@ show_help() {
     echo "  service     View service status"
     echo "  install-lo  Install LibreOffice headless (for Office→PDF preview)"
     echo "  reset-admin Reset administrator password"
+    echo "  reset-approval-code Reset administrator approval security code"
     echo "  help        Show this help message"
     echo ""
     echo "Options:"
@@ -977,6 +978,88 @@ EOF
     fi
 }
 
+# 重置管理员审批安全码
+cmd_reset_approval_code() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}  Reset Administrator Approval Code${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    
+    DB_FILE="$APP_DIR/data/users.db"
+    if [ ! -f "$DB_FILE" ]; then
+        echo -e "${RED}[ERROR] Database not found: $DB_FILE${NC}"
+        exit 1
+    fi
+    
+    # 提示输入新安全码
+    read -sp "Enter new admin approval code (at least 8 characters, letters and digits): " NEW_CODE
+    echo ""
+    read -sp "Confirm new admin approval code: " NEW_CODE_CONFIRM
+    echo ""
+    
+    if [ "$NEW_CODE" != "$NEW_CODE_CONFIRM" ]; then
+        echo -e "${RED}[ERROR] Codes do not match!${NC}"
+        exit 1
+    fi
+    
+    if [ -z "$NEW_CODE" ]; then
+        echo -e "${RED}[ERROR] Code cannot be empty!${NC}"
+        exit 1
+    fi
+    
+    if [ ${#NEW_CODE} -lt 8 ]; then
+        echo -e "${RED}[ERROR] Code must be at least 8 characters long!${NC}"
+        exit 1
+    fi
+    
+    setup_venv
+    
+    # 使用虚拟环境 Python 生成安全码 hash 并更新数据库
+    # 使用环境变量传递安全码，避免shell注入
+    export NEW_CODE="$NEW_CODE"
+    "$PYTHON_BIN" << 'EOF'
+import sqlite3
+import sys
+import os
+from werkzeug.security import generate_password_hash
+
+db_path = "$DB_FILE"
+code = os.environ.get('NEW_CODE', '')
+
+try:
+    code_hash = generate_password_hash(code)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # 先尝试更新 role='admin' 的用户
+    cursor.execute("UPDATE users SET approval_code_hash = ? WHERE role = 'admin'", (code_hash,))
+    if cursor.rowcount == 0:
+        # 如果没有 role='admin' 的用户，尝试更新 username='admin'
+        cursor.execute("UPDATE users SET approval_code_hash = ? WHERE username = 'admin'", (code_hash,))
+    
+    conn.commit()
+    updated = cursor.rowcount
+    conn.close()
+    
+    if updated > 0:
+        print(f"[OK] Updated {updated} admin approval code(s) successfully.")
+    else:
+        print("[WARN] No admin user found. Please check the database.")
+        sys.exit(1)
+except Exception as e:
+    print(f"[ERROR] {e}")
+    sys.exit(1)
+EOF
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}[OK] Admin approval code has been reset successfully!${NC}"
+        echo -e "${YELLOW}The new code will take effect immediately.${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to reset admin approval code.${NC}"
+        exit 1
+    fi
+}
+
 # 查看服务状态
 cmd_service_status() {
     SERVICE_NAME="doc-manager"
@@ -1005,7 +1088,7 @@ COMMAND="start"
 MIRROR_FLAG=""
 while [[ $# -gt 0 ]]; do
     case $1 in
-        start|install|restart|stop|status|logs|log|upgrade|enable|disable|service|reset-admin|help)
+        start|install|restart|stop|status|logs|log|upgrade|enable|disable|service|reset-admin|reset-approval-code|help)
             COMMAND="$1"
             shift
             ;;
@@ -1089,6 +1172,9 @@ case $COMMAND in
         ;;
     reset-admin)
         cmd_reset_admin
+        ;;
+    reset-approval-code)
+        cmd_reset_approval_code
         ;;
     help)
         show_help
