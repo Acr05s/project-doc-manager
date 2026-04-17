@@ -1793,6 +1793,27 @@
                         <input type="number" id="passwordExpireDays" class="form-control" min="0" max="3650" value="0">
                         <small style="color: #666; font-size: 12px;">0 表示不限制有效期</small>
                     </div>
+                    <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                            <label style="font-weight:600; margin:0;">IP封禁列表</label>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="loadIpBlacklist()" style="padding:4px 10px; font-size:12px;">刷新列表</button>
+                        </div>
+                        <div style="overflow-x:auto; max-height:200px; overflow-y:auto; border:1px solid #e0e7ef; border-radius:6px;">
+                            <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                                <thead>
+                                    <tr style="background:#f5f8fc; position:sticky; top:0;">
+                                        <th style="border-bottom:1px solid #dde4ee; padding:6px 8px; text-align:left;">IP地址</th>
+                                        <th style="border-bottom:1px solid #dde4ee; padding:6px 8px; text-align:left;">封禁原因</th>
+                                        <th style="border-bottom:1px solid #dde4ee; padding:6px 8px; text-align:left;">封禁时间</th>
+                                        <th style="border-bottom:1px solid #dde4ee; padding:6px 8px; text-align:left;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ipBlacklistBody">
+                                    <tr><td colspan="4" style="text-align:center;padding:10px;color:#888;">点击"刷新列表"加载封禁IP</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
             

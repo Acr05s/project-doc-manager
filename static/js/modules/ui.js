@@ -1075,6 +1075,15 @@ export function setupEventListeners() {
     });
 
     // 点击模态框外部关闭（需要确认，防止误关闭）
+        // 关闭模态框（close-modal类按钮，如取消按钮）
+        document.querySelectorAll('.close-modal').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const modal = e.target.closest('.modal');
+                if (modal) closeModal(modal);
+            });
+        });
+
+        // 点击模态框外部关闭（需要确认，防止误关闭）
     // 安全码验证等关键弹窗不允许点击背景关闭
     const noBackdropCloseIds = ['inputModal', 'confirmModal', 'archiveApprovalConfirmModal', 'selectPMOApproverModal', 'newProjectModal', 'editProjectModal', 'systemSettingsModal', 'editDocModal', 'zipUploadModal', 'archiveApprovalConfigModal', 'scheduledReportModal', 'scheduledTaskEditorModal', 'packageProgressModal'];
     document.querySelectorAll('.modal').forEach(modal => {
@@ -1191,45 +1200,96 @@ export function setupEventListeners() {
     });
 }
 
-function toggleEmailConfigEditable(enabled) {
-    function toggleWatermarkConfigRows(enabled) {
-        const opacityRow = document.getElementById('watermarkOpacityRow');
-        if (opacityRow) opacityRow.style.display = enabled ? 'flex' : 'none';
-        const fieldRow = document.getElementById('watermarkFieldRow');
-        if (fieldRow) fieldRow.style.display = enabled ? 'flex' : 'none';
-    }
+function toggleWatermarkConfigRows(enabled) {
+    const opacityRow = document.getElementById('watermarkOpacityRow');
+    if (opacityRow) opacityRow.style.display = enabled ? 'flex' : 'none';
+    const fieldRow = document.getElementById('watermarkFieldRow');
+    if (fieldRow) fieldRow.style.display = enabled ? 'flex' : 'none';
+}
 
-    function getWatermarkFieldSelectionFromDom() {
-        const mapping = [
-            { id: 'watermarkFieldUsername', value: 'username' },
-            { id: 'watermarkFieldDisplayName', value: 'display_name' },
-            { id: 'watermarkFieldOrganization', value: 'organization' },
-            { id: 'watermarkFieldDatetime', value: 'datetime' }
-        ];
-        const selected = mapping
-            .filter(item => {
-                const el = document.getElementById(item.id);
-                return !!el && !!el.checked;
-            })
-            .map(item => item.value);
-        return selected.length > 0 ? selected : ['username', 'display_name', 'organization', 'datetime'];
-    }
-
-    function applyWatermarkFieldSelectionToDom(fields) {
-        const selected = new Set(Array.isArray(fields) && fields.length > 0
-            ? fields
-            : ['username', 'display_name', 'organization', 'datetime']);
-        const mapping = [
-            { id: 'watermarkFieldUsername', value: 'username' },
-            { id: 'watermarkFieldDisplayName', value: 'display_name' },
-            { id: 'watermarkFieldOrganization', value: 'organization' },
-            { id: 'watermarkFieldDatetime', value: 'datetime' }
-        ];
-        mapping.forEach(item => {
+function getWatermarkFieldSelectionFromDom() {
+    const mapping = [
+        { id: 'watermarkFieldUsername', value: 'username' },
+        { id: 'watermarkFieldDisplayName', value: 'display_name' },
+        { id: 'watermarkFieldOrganization', value: 'organization' },
+        { id: 'watermarkFieldDatetime', value: 'datetime' }
+    ];
+    const selected = mapping
+        .filter(item => {
             const el = document.getElementById(item.id);
-            if (el) el.checked = selected.has(item.value);
+            return !!el && !!el.checked;
+        })
+        .map(item => item.value);
+    return selected.length > 0 ? selected : ['username', 'display_name', 'organization', 'datetime'];
+}
+
+function applyWatermarkFieldSelectionToDom(fields) {
+    const selected = new Set(Array.isArray(fields) && fields.length > 0
+        ? fields
+        : ['username', 'display_name', 'organization', 'datetime']);
+    const mapping = [
+        { id: 'watermarkFieldUsername', value: 'username' },
+        { id: 'watermarkFieldDisplayName', value: 'display_name' },
+        { id: 'watermarkFieldOrganization', value: 'organization' },
+        { id: 'watermarkFieldDatetime', value: 'datetime' }
+    ];
+    mapping.forEach(item => {
+        const el = document.getElementById(item.id);
+        if (el) el.checked = selected.has(item.value);
+    });
+}
+
+export async function loadIpBlacklist() {
+    const tbody = document.getElementById('ipBlacklistBody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:10px;">加载中...</td></tr>';
+    try {
+        const resp = await fetch('/api/security/blacklist');
+        const result = await resp.json();
+        if (result.status !== 'success' || !Array.isArray(result.blacklist) || result.blacklist.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:10px;color:#666;">暂无封禁IP</td></tr>';
+            return;
+        }
+        tbody.innerHTML = '';
+        result.blacklist.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;">${item.ip_address || '-'}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;">${item.reason || '-'}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;">${item.blocked_at ? String(item.blocked_at).slice(0, 19) : '-'}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;">
+                    <button class="btn btn-sm btn-warning" data-unban-ip="${item.ip_address}">解封</button>
+                </td>
+            `;
+            const btn = tr.querySelector('[data-unban-ip]');
+            if (btn) btn.addEventListener('click', () => _unbanIp(item.ip_address));
+            tbody.appendChild(tr);
         });
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:10px;color:#dc3545;">加载失败</td></tr>';
     }
+}
+
+async function _unbanIp(ip) {
+    try {
+        const resp = await fetch('/api/security/blacklist/unblock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip_address: ip })
+        });
+        const result = await resp.json();
+        if (result.status === 'success') {
+            showNotification('IP解封成功', 'success');
+            loadIpBlacklist();
+        } else {
+            showNotification(result.message || '解封失败', 'error');
+        }
+    } catch (e) {
+        showNotification('解封请求失败', 'error');
+    }
+}
+
+function toggleEmailConfigEditable(enabled) {
     document.querySelectorAll('.email-config-input').forEach((el) => {
         const shouldDisable = !enabled;
         if (el.tagName === 'BUTTON') {
@@ -1243,6 +1303,7 @@ function toggleEmailConfigEditable(enabled) {
         }
     });
 }
+
 
 /**
  * 将系统名称应用到页面标题（供初始化时调用）
@@ -2601,8 +2662,8 @@ if (typeof window !== 'undefined') {
     window.saveAgreementMarkdown = saveAgreementMarkdown;
     window.importAgreementMarkdown = importAgreementMarkdown;
     window.testSmtpConnection = testSmtpConnection;
+    window.loadIpBlacklist = loadIpBlacklist;
 }
-
 /**
  * 测试SMTP邮件连接
  */

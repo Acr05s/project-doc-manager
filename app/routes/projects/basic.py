@@ -220,7 +220,7 @@ def update_project_config(project_id):
         user_manager.add_operation_log(
             int(current_user.id), current_user.username,
             'update_project_config', project_id, '',
-            f'archive_approval_mode={data.get("archive_approval_mode")}, unarchive_requires_approval={data.get("unarchive_requires_approval")}',
+                f'archive_approval_mode={data.get("archive_approval_mode")}, unarchive_requires_approval={data.get("unarchive_requires_approval")}',  # noqa
             request.remote_addr
         )
 

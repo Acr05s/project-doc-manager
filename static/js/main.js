@@ -27,7 +27,8 @@ import {
     openTransferProjectModal, closeTransferProjectModal, submitProjectTransfer
 } from './modules/project.js';
 import {
-    closeScheduledReportModal, runScheduledReportNow, applyScheduledReportConfigToSelected
+    closeScheduledReportModal, runScheduledReportNow, applyScheduledReportConfigToSelected,
+    openScheduledTaskEditorModal, closeScheduledTaskEditorModal
 } from './modules/scheduled-reports.js';
 
 // 将返回看板函数挂载到全局
@@ -88,6 +89,8 @@ if (typeof window !== 'undefined') {
     window.closeScheduledReportModal = closeScheduledReportModal;
     window.runScheduledReportNow = runScheduledReportNow;
     window.applyScheduledReportConfigToSelected = applyScheduledReportConfigToSelected;
+        window.openScheduledTaskEditorModal = openScheduledTaskEditorModal;
+        window.closeScheduledTaskEditorModal = closeScheduledTaskEditorModal;
     // pending approval
     window.sendApproverMessage = sendApproverMessage;
 }
