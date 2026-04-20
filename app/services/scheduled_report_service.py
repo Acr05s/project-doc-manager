@@ -78,6 +78,7 @@ class ScheduledReportService:
                     run_date TEXT DEFAULT '',
                     include_pdf INTEGER DEFAULT 1,
                     in_app_message_enabled INTEGER DEFAULT 1,
+                    email_enabled INTEGER DEFAULT 1,
                     login_popup_enabled INTEGER DEFAULT 1,
                     external_emails TEXT DEFAULT '[]',
                     recipient_user_ids TEXT DEFAULT '[]',
@@ -100,6 +101,10 @@ class ScheduledReportService:
                 conn.execute('ALTER TABLE scheduled_tasks ADD COLUMN skip_weekends INTEGER DEFAULT 0')
             except Exception as e:
                 logger.debug(f'列skip_weekends可能已存在: {e}')  # 列已存在
+            try:
+                conn.execute('ALTER TABLE scheduled_tasks ADD COLUMN skip_holidays INTEGER DEFAULT 0')
+            except Exception as e:
+                logger.debug(f'列skip_holidays可能已存在: {e}')  # 列已存在
             conn.commit()
 
     def _migrate_json_to_db(self):
@@ -146,12 +151,12 @@ class ScheduledReportService:
                 INSERT OR REPLACE INTO scheduled_tasks
                 (task_id, project_id, task_name, task_type, enabled, frequency,
                  send_time, weekday, day_of_month, run_date, include_pdf,
-                 in_app_message_enabled, login_popup_enabled, external_emails,
+                 in_app_message_enabled, email_enabled, login_popup_enabled, external_emails,
                  recipient_user_ids, last_run_key, run_count, last_run_at,
                  valid_until, skip_holidays, skip_weekends, created_by_user_id,
                  created_by_username, created_by_display_name, created_by_organization,
                  created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''', (
                 task['task_id'], task['project_id'], task['task_name'],
                 task['task_type'], 1 if task.get('enabled') else 0,
@@ -159,6 +164,7 @@ class ScheduledReportService:
                 task['day_of_month'], task.get('run_date', ''),
                 1 if task.get('include_pdf', True) else 0,
                 1 if task.get('in_app_message_enabled', True) else 0,
+                1 if task.get('email_enabled', True) else 0,
                 1 if task.get('login_popup_enabled', True) else 0,
                 json.dumps(task.get('external_emails', []), ensure_ascii=False),
                 json.dumps(task.get('recipient_user_ids', []), ensure_ascii=False),
@@ -180,6 +186,7 @@ class ScheduledReportService:
         d['enabled'] = bool(d.get('enabled', 0))
         d['include_pdf'] = bool(d.get('include_pdf', 1))
         d['in_app_message_enabled'] = bool(d.get('in_app_message_enabled', 1))
+        d['email_enabled'] = bool(d.get('email_enabled', 1))
         d['login_popup_enabled'] = bool(d.get('login_popup_enabled', 1))
         d['skip_holidays'] = bool(d.get('skip_holidays', 0))
         d['skip_weekends'] = bool(d.get('skip_weekends', 0))
@@ -208,6 +215,7 @@ class ScheduledReportService:
             'run_date': '',
             'include_pdf': True,
             'in_app_message_enabled': True,
+            'email_enabled': True,
             'login_popup_enabled': True,
             'external_emails': [],
             'recipient_user_ids': [],
@@ -267,6 +275,7 @@ class ScheduledReportService:
 
         merged['include_pdf'] = bool(merged.get('include_pdf', True))
         merged['in_app_message_enabled'] = bool(merged.get('in_app_message_enabled', True))
+        merged['email_enabled'] = bool(merged.get('email_enabled', True))
         merged['login_popup_enabled'] = bool(merged.get('login_popup_enabled', True))
 
         ids = merged.get('recipient_user_ids', [])
@@ -790,7 +799,7 @@ class ScheduledReportService:
 
         success_count = 0
         errors = []
-        if recipients:
+        if recipients and cfg.get('email_enabled', True):
             for email in recipients:
                 result = send_email(email, subject, text_content, html_content=html_content, attachments=attachments)
                 if result.get('status') == 'success':
@@ -799,7 +808,7 @@ class ScheduledReportService:
                     errors.append(f"{email}: {result.get('message', '发送失败')}")
 
         site_sent_count = 0
-        if cfg.get('in_app_message_enabled', True):
+        if site_receiver_ids and cfg.get('in_app_message_enabled', True):
             run_key = self._build_run_key(cfg, now_with_timezone())
             site_sent_count = self._send_site_messages(
                 receiver_ids=site_receiver_ids,
@@ -819,7 +828,14 @@ class ScheduledReportService:
         if errors:
             message += '；' + '；'.join(errors[:3])
 
-        # 记录操作日志
+        # 记录操作日志（含收件人详情）
+        site_receiver_details = []
+        for uid in site_receiver_ids:
+            u = user_manager.get_user_by_id(uid)
+            if u:
+                site_receiver_details.append({'id': uid, 'username': u.username, 'display_name': getattr(u, 'display_name', '') or u.username})
+            else:
+                site_receiver_details.append({'id': uid, 'username': f'用户#{uid}'})
         user_manager.add_operation_log(
             0,
             'system_scheduler' if not manual else 'manual_scheduler',
@@ -830,8 +846,14 @@ class ScheduledReportService:
                 'frequency': frequency,
                 'success_count': success_count,
                 'total': len(recipients),
+                'site_sent_count': site_sent_count,
+                'site_total': len(site_receiver_ids),
+                'email_enabled': bool(cfg.get('email_enabled', True)),
+                'in_app_enabled': bool(cfg.get('in_app_message_enabled', True)),
                 'period_start': period_start.strftime('%Y-%m-%d %H:%M:%S'),
-                'period_end': period_end.strftime('%Y-%m-%d %H:%M:%S')
+                'period_end': period_end.strftime('%Y-%m-%d %H:%M:%S'),
+                'recipients': recipients,
+                'site_receivers': site_receiver_details
             }, ensure_ascii=False),
             None
         )
@@ -1079,6 +1101,17 @@ class ScheduledReportService:
                     if dn:
                         uploaded_unique_by_cycle[cycle].add(dn)
 
+        # ── 统计各周期全量已上传唯一文档（不限日期，用于归档率分母） ──
+        all_uploaded_unique_by_cycle: Dict[str, set] = {}
+        for cycle in cycle_order:
+            cycle_info = docs.get(cycle, {}) if isinstance(docs.get(cycle, {}), dict) else {}
+            uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
+            all_uploaded_unique_by_cycle[cycle] = set()
+            for doc in uploaded_docs:
+                dn = str(doc.get('doc_name') or '').strip()
+                if dn:
+                    all_uploaded_unique_by_cycle[cycle].add(dn)
+
         archived = 0
         # 按周期统计已归档的唯一文档名
         archived_unique_by_cycle: Dict[str, set] = {}
@@ -1126,27 +1159,29 @@ class ScheduledReportService:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
 
         # 计算各周期归档合格率：
-        #   分子 = 本周期内已归档的唯一文档数
-        #   分母 = 本周期内实际上传的唯一文档数（体现本周该类型文档合格率）
-        total_uploaded_unique = 0
+        #   分子 = 本期内已归档的唯一文档数
+        #   分母 = 该周期全部已上传唯一文档数（不限报告期）
+        total_all_uploaded_unique = 0
         total_archived_unique = 0
         for cycle in cycle_order:
             if cycle not in by_cycle:
                 continue
-            # 统计实际上传的唯一文档数
+            # 统计本期上传的唯一文档数（用于报告展示）
             unique_uploaded = len(uploaded_unique_by_cycle.get(cycle, set()))
             by_cycle[cycle]['uploaded_unique'] = unique_uploaded
+            # 归档数直接使用实际归档数，不做上限裁剪
             unique_archived = len(archived_unique_by_cycle.get(cycle, set()))
-            # 归档数不超过本周实际上传的唯一文档数
-            cycle_archived = min(unique_archived, unique_uploaded)
-            by_cycle[cycle]['archived'] = cycle_archived
-            archived += cycle_archived
-            total_uploaded_unique += unique_uploaded
+            by_cycle[cycle]['archived'] = unique_archived
+            archived += unique_archived
+            # 归档率分母：该周期全量已上传唯一文档数
+            all_uploaded = len(all_uploaded_unique_by_cycle.get(cycle, set()))
+            by_cycle[cycle]['all_uploaded_unique'] = all_uploaded
+            total_all_uploaded_unique += all_uploaded
             total_archived_unique += unique_archived
 
-        # 归档合格率 = 已归档唯一文档数 / 实际上传唯一文档数，最大 100%
-        if total_uploaded_unique > 0:
-            archive_rate = round(min(100.0, (total_archived_unique / total_uploaded_unique) * 100), 2)
+        # 归档合格率 = 已归档唯一文档数 / 全部已上传唯一文档数，最大 100%
+        if total_all_uploaded_unique > 0:
+            archive_rate = round(min(100.0, (total_archived_unique / total_all_uploaded_unique) * 100), 2)
         else:
             archive_rate = 0.0
         # 按上传时间倒序排列文档明细
@@ -1301,9 +1336,9 @@ class ScheduledReportService:
             val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
             c_archived = val.get('archived', 0)
-            c_uploaded_unique = val.get('uploaded_unique', 0)
-            if c_uploaded_unique > 0:
-                c_rate = round(min(100.0, (c_archived / c_uploaded_unique) * 100), 2)
+            c_all_uploaded_unique = val.get('all_uploaded_unique', 0)
+            if c_all_uploaded_unique > 0:
+                c_rate = round(min(100.0, (c_archived / c_all_uploaded_unique) * 100), 2)
             else:
                 c_rate = 0.0
             cycle_rows += (
@@ -1390,9 +1425,9 @@ class ScheduledReportService:
             c_uploads = val.get('uploads', 0)
             c_updated = val.get('updated', 0)
             c_archived = val.get('archived', 0)
-            c_uploaded_unique = val.get('uploaded_unique', 0)
-            if c_uploaded_unique > 0:
-                c_rate = round(min(100.0, (c_archived / c_uploaded_unique) * 100), 2)
+            c_all_uploaded_unique = val.get('all_uploaded_unique', 0)
+            if c_all_uploaded_unique > 0:
+                c_rate = round(min(100.0, (c_archived / c_all_uploaded_unique) * 100), 2)
             else:
                 c_rate = 0.0
             bar_width = max(1, min(100, int(c_rate)))

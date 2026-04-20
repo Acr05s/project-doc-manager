@@ -11,6 +11,19 @@ import { buildDisplayRequirementText, buildUploadAttributeSchema, getCustomAttri
 
 let isUploadingDocument = false;
 
+/**
+ * 重新从服务器加载项目配置后刷新文档视图
+ */
+async function reloadProjectAndRender(cycle) {
+    try {
+        const updated = await loadProject(appState.currentProjectId);
+        if (updated) appState.projectConfig = updated;
+    } catch (e) {
+        console.error('重新加载项目配置失败:', e);
+    }
+    await renderCycleDocuments(cycle);
+}
+
 // 辅助函数：转义HTML
 function escapeHtml(text) {
     if (!text) return '';
@@ -134,7 +147,7 @@ export async function handleUploadDocument(e) {
                 await archiveDocument(appState.currentCycle, appState.currentDocument);
             }
             // 刷新文档列表
-            await renderCycleDocuments(appState.currentCycle);
+            await reloadProjectAndRender(appState.currentCycle);
         } else {
             showNotification('上传失败: 所有文件上传失败', 'error');
         }
@@ -1107,7 +1120,7 @@ export async function markDocumentNotInvolved(cycle, docName) {
                     showNotification('操作失败: ' + error.message, 'error');
                 } finally {
                     showLoading(false);
-                    await renderCycleDocuments(cycle);
+                    await reloadProjectAndRender(cycle);
                 }
             });
         } else {
@@ -1122,7 +1135,7 @@ export async function markDocumentNotInvolved(cycle, docName) {
                     );
                     if (result.status === 'success') {
                         showNotification(result.message || '不涉及审批请求已提交，等待审批', 'success');
-                        await renderCycleDocuments(cycle);
+                        await reloadProjectAndRender(cycle);
                     } else {
                         showNotification(result.message || '提交失败', 'error');
                     }
@@ -3290,7 +3303,7 @@ async function submitArchiveReview(cycle, docNames) {
 
         if (result.status === 'success') {
             showNotification('归档审核请求已提交，等待项目经理审批', 'success');
-            await renderCycleDocuments(cycle);
+            await reloadProjectAndRender(cycle);
 
             // 快速审批：如果只有一个 Level 1 审批人，提供快速审批入口
             if (result.approval_id) {
@@ -3332,7 +3345,7 @@ async function submitArchiveReview(cycle, docNames) {
                                 } else {
                                     showNotification(approveResult.message || '快速审批失败', 'error');
                                 }
-                                await renderCycleDocuments(cycle);
+                                await reloadProjectAndRender(cycle);
                             }
                         );
                     }
@@ -3569,7 +3582,7 @@ export async function archiveDocument(cycle, docName) {
                     return result;
                 }
                 showNotification('文档归档成功', 'success');
-                await renderCycleDocuments(cycle);
+                await reloadProjectAndRender(cycle);
                 import('./cycle.js').then(module => { module.refreshCycleProgress(); });
                 return result;
             }
@@ -3578,7 +3591,7 @@ export async function archiveDocument(cycle, docName) {
             const result = await submitArchiveReview(cycle, [docName]);
             if (result.status === 'success') {
                 showNotification('归档审核请求已提交，等待审批', 'success');
-                await renderCycleDocuments(cycle);
+                await reloadProjectAndRender(cycle);
             } else if (result.status !== 'cancelled') {
                 showNotification(result.message || '提交审核失败', 'error');
             }
@@ -3590,7 +3603,7 @@ export async function archiveDocument(cycle, docName) {
             console.log('[DEBUG] Archive review result:', result);
             if (result.status === 'success') {
                 showNotification('归档审核请求已提交，等待项目经理审批', 'success');
-                await renderCycleDocuments(cycle);
+                await reloadProjectAndRender(cycle);
             } else if (result.status !== 'cancelled') {
                 console.error('[ERROR] Archive review failed:', result);
                 showNotification(result.message || '提交审核失败', 'error');
@@ -3758,7 +3771,7 @@ export async function batchArchiveCycle(cycle) {
                     const result = await ensureArchiveApproval(cycle, docsToArchive);
                     if (result.status === 'success') {
                         showNotification(`成功归档 ${docsToArchive.length} 个文档类型`, 'success');
-                        await renderCycleDocuments(cycle);
+                        await reloadProjectAndRender(cycle);
                         import('./cycle.js').then(module => { module.refreshCycleProgress(); });
                     } else if (result.status === 'cancelled') {
                         showNotification('归档已取消', 'warning');
@@ -3769,7 +3782,7 @@ export async function batchArchiveCycle(cycle) {
                     const result = await submitArchiveReview(cycle, docsToArchive);
                     if (result.status === 'success') {
                         showNotification(`已提交 ${docsToArchive.length} 个文档类型的归档审核请求`, 'success');
-                        await renderCycleDocuments(cycle);
+                        await reloadProjectAndRender(cycle);
                     } else if (result.status !== 'cancelled') {
                         showNotification(result.message || '提交审核失败', 'error');
                     }
@@ -3787,7 +3800,7 @@ export async function batchArchiveCycle(cycle) {
                 const result = await submitArchiveReview(cycle, docsToArchive);
                 if (result.status === 'success') {
                     showNotification(`已提交 ${docsToArchive.length} 个文档类型的归档审核请求，等待项目经理审批`, 'success');
-                    await renderCycleDocuments(cycle);
+                    await reloadProjectAndRender(cycle);
                 } else if (result.status !== 'cancelled') {
                     showNotification(result.message || '提交审核失败', 'error');
                 }
@@ -3823,7 +3836,7 @@ export async function unarchiveDocument(cycle, docName) {
             );
             if (result.status === 'success') {
                 showNotification(result.message || '已提交撤销归档审批请求，等待审批', 'success');
-                await renderCycleDocuments(cycle);
+                await reloadProjectAndRender(cycle);
             } else {
                 showNotification(result.message || '提交撤销归档审批失败', 'error');
             }
@@ -3851,7 +3864,7 @@ export async function unarchiveDocument(cycle, docName) {
 
         if (response.ok) {
             showNotification('取消归档成功', 'success');
-            await renderCycleDocuments(cycle);
+            await reloadProjectAndRender(cycle);
             import('./cycle.js').then(module => {
                 module.refreshCycleProgress();
             });
@@ -3874,7 +3887,7 @@ async function handleQuickApproveAction(approvalId, action, cycle) {
         if (result.status === 'success') {
             // 所有阶段完成，文档已归档
             showNotification('🎉 所有审批完成，文档已归档', 'success');
-            await renderCycleDocuments(cycle);
+            await reloadProjectAndRender(cycle);
             if (action === 'approve' || action === 'approve_finalize') {
                 import('./cycle.js').then(module => { module.refreshCycleProgress(); });
             }
@@ -3882,7 +3895,7 @@ async function handleQuickApproveAction(approvalId, action, cycle) {
             // 当前阶段通过，等待下一阶段
             const message = result.message || `第 ${result.current_stage} 阶段已批准，等待第 ${result.next_stage} 阶段审批`;
             showNotification(message, 'info');
-            await renderCycleDocuments(cycle);
+            await reloadProjectAndRender(cycle);
         } else if (result.status !== 'cancelled') {
             showNotification(result.message || '操作失败', 'error');
         }
@@ -3906,7 +3919,7 @@ async function handleWithdrawArchiveAction(projectId, approvalId, cycle) {
             const result = await response.json();
             if (result.status === 'success') {
                 showNotification('已撤回归档审批请求', 'success');
-                await renderCycleDocuments(cycle);
+                await reloadProjectAndRender(cycle);
             } else {
                 showNotification('撤回失败: ' + (result.message || '未知错误'), 'error');
             }
@@ -4391,11 +4404,11 @@ async function handleContractorQuickApproveAction(approvalId, cycle) {
 
         if (result.status === 'success') {
             showNotification('🎉 所有审批完成，文档已归档', 'success');
-            await renderCycleDocuments(cycle);
+            await reloadProjectAndRender(cycle);
             import('./cycle.js').then(module => { module.refreshCycleProgress(); });
         } else if (result.status === 'stage_approved') {
             showNotification(result.message || '第一级审批已通过，等待PMO审批', 'info');
-            await renderCycleDocuments(cycle);
+            await reloadProjectAndRender(cycle);
         } else if (result.status === 'needs_change') {
             const updatedInput = await promptApprovalCodeForArchive(
                 '首次使用审批安全码，请输入当前登录密码并设置新审批安全码', true
@@ -4410,7 +4423,7 @@ async function handleContractorQuickApproveAction(approvalId, cycle) {
                 } else {
                     showNotification(retryResult.message || '审批失败', 'error');
                 }
-                await renderCycleDocuments(cycle);
+                await reloadProjectAndRender(cycle);
             }
         } else {
             showNotification(result.message || '快速审批失败', 'error');
@@ -7151,6 +7164,7 @@ export async function handleBatchMove() {
                     if (appState.currentCycle && appState.currentDocument) {
                         await loadUploadedDocuments(appState.currentCycle, appState.currentDocument);
                     }
+                    await reloadProjectAndRender(appState.currentCycle);
                 }
                 
                 if (errorCount > 0) {

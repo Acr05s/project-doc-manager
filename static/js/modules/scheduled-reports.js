@@ -458,6 +458,10 @@ function fillEditorByTask(task) {
     if (runDate) runDate.value = task.run_date || '';
     var includePdf = document.getElementById('scheduledIncludePdf');
     if (includePdf) includePdf.checked = task.include_pdf !== false;
+    var emailEnabled = document.getElementById('scheduledEmailEnabled');
+    if (emailEnabled) emailEnabled.checked = task.email_enabled !== false;
+    var inAppEnabled = document.getElementById('scheduledInAppEnabled');
+    if (inAppEnabled) inAppEnabled.checked = task.in_app_message_enabled !== false;
     var popupEnabled = document.getElementById('scheduledLoginPopupEnabled');
     if (popupEnabled) popupEnabled.checked = task.login_popup_enabled !== false;
     var skipHolidays = document.getElementById('scheduledSkipHolidays');
@@ -617,7 +621,8 @@ function buildPayloadFromEditorForm() {
         day_of_month: Number(dayOfMonthEl ? dayOfMonthEl.value : 1),
         run_date: taskType === 'one_time' ? (runDateEl ? runDateEl.value : todayDateString()) : '',
         include_pdf: !!(includePdfEl && includePdfEl.checked),
-        in_app_message_enabled: true,
+        email_enabled: !!(document.getElementById('scheduledEmailEnabled')?.checked),
+        in_app_message_enabled: !!(document.getElementById('scheduledInAppEnabled')?.checked),
         login_popup_enabled: !!(popupEl && popupEl.checked),
         recipient_user_ids: collectSelectedRecipientUserIds(),
         external_emails: extEmails,
@@ -944,6 +949,7 @@ async function loadScheduledHistory(append) {
         var freqMap = { daily: '\u65e5\u62a5', weekly: '\u5468\u62a5', monthly: '\u6708\u62a5' };
         logs.forEach(function(log) {
             var tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
             var tz = (appState.systemSettings && appState.systemSettings.timezone) || 'Asia/Shanghai';
             var displayTime = formatDateTimeDisplay(log.operation_time, tz);
             var displayStart = formatDateTimeDisplay(log.period_start, tz);
@@ -955,6 +961,9 @@ async function loadScheduledHistory(append) {
                 '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(log.trigger_type || '-') + '</td>' +
                 '<td style="border:1px solid #e2e8f0; padding:6px; text-align:center;"><span style="color:' + successColor + ';">' + log.success_count + '/' + log.total + '</span></td>' +
                 '<td style="border:1px solid #e2e8f0; padding:6px; font-size:11px;">' + escapeHtml(displayStart) + ' ~ ' + escapeHtml(displayEnd) + '</td>';
+            tr.addEventListener('click', function() { showHistoryDetail(log, tz); });
+            tr.addEventListener('mouseenter', function() { tr.style.background = '#f0f4ff'; });
+            tr.addEventListener('mouseleave', function() { tr.style.background = ''; });
             tbody.appendChild(tr);
         });
         var loadMoreBtn = document.getElementById('scheduledHistoryLoadMoreBtn');
@@ -970,6 +979,62 @@ window.loadMoreScheduledHistory = function() {
     _historyOffset += _historyLimit;
     loadScheduledHistory(true);
 };
+
+function showHistoryDetail(log, tz) {
+    var freqMap = { daily: '日报', weekly: '周报', monthly: '月报' };
+    var displayTime = formatDateTimeDisplay(log.operation_time, tz);
+    var displayStart = formatDateTimeDisplay(log.period_start, tz);
+    var displayEnd = formatDateTimeDisplay(log.period_end, tz);
+
+    var emailList = '';
+    var recipients = log.recipients || [];
+    if (recipients.length > 0) {
+        emailList = recipients.map(function(e) { return '<li style="padding:2px 0;">' + escapeHtml(typeof e === 'string' ? e : e.email || e) + '</li>'; }).join('');
+    } else {
+        emailList = '<li style="color:#999;">无</li>';
+    }
+
+    var siteList = '';
+    var siteReceivers = log.site_receivers || [];
+    if (siteReceivers.length > 0) {
+        siteList = siteReceivers.map(function(r) {
+            var name = r.display_name || r.username || ('用户#' + r.id);
+            return '<li style="padding:2px 0;">' + escapeHtml(name) + ' <span style="color:#888;font-size:11px;">(ID: ' + r.id + ')</span></li>';
+        }).join('');
+    } else {
+        siteList = '<li style="color:#999;">无</li>';
+    }
+
+    var emailStatus = log.email_enabled !== false ? ('成功 ' + (log.success_count || 0) + '/' + (log.total || 0)) : '未启用';
+    var siteStatus = log.in_app_enabled !== false ? ('成功 ' + (log.site_sent_count || 0) + '/' + (log.site_total || 0)) : '未启用';
+
+    var html = '<div style="padding:16px;font-size:13px;line-height:1.6;">' +
+        '<h3 style="margin:0 0 12px 0;font-size:15px;">执行详情</h3>' +
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;">' +
+        '<tr><td style="padding:4px 8px;color:#666;width:80px;">执行时间</td><td style="padding:4px 8px;">' + escapeHtml(displayTime) + '</td></tr>' +
+        '<tr><td style="padding:4px 8px;color:#666;">项目</td><td style="padding:4px 8px;">' + escapeHtml(log.target_name || '-') + '</td></tr>' +
+        '<tr><td style="padding:4px 8px;color:#666;">类型</td><td style="padding:4px 8px;">' + (freqMap[log.frequency] || escapeHtml(log.frequency || '-')) + '</td></tr>' +
+        '<tr><td style="padding:4px 8px;color:#666;">触发方式</td><td style="padding:4px 8px;">' + escapeHtml(log.trigger_type || '-') + '</td></tr>' +
+        '<tr><td style="padding:4px 8px;color:#666;">统计区间</td><td style="padding:4px 8px;">' + escapeHtml(displayStart) + ' ~ ' + escapeHtml(displayEnd) + '</td></tr>' +
+        '<tr><td style="padding:4px 8px;color:#666;">邮件发送</td><td style="padding:4px 8px;">' + emailStatus + '</td></tr>' +
+        '<tr><td style="padding:4px 8px;color:#666;">站内信</td><td style="padding:4px 8px;">' + siteStatus + '</td></tr>' +
+        '</table>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+        '<div><div style="font-weight:600;margin-bottom:4px;">邮件收件人 (' + recipients.length + ')</div><ul style="margin:0;padding-left:18px;max-height:150px;overflow:auto;">' + emailList + '</ul></div>' +
+        '<div><div style="font-weight:600;margin-bottom:4px;">站内信收件人 (' + siteReceivers.length + ')</div><ul style="margin:0;padding-left:18px;max-height:150px;overflow:auto;">' + siteList + '</ul></div>' +
+        '</div></div>';
+
+    // 使用浮层展示详情
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:10100;display:flex;align-items:center;justify-content:center;';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.2);max-width:600px;width:90%;max-height:80vh;overflow:auto;position:relative;';
+    box.innerHTML = '<div style="display:flex;justify-content:flex-end;padding:8px 12px 0;"><span style="cursor:pointer;font-size:20px;color:#666;" id="historyDetailClose">&times;</span></div>' + html;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    box.querySelector('#historyDetailClose').addEventListener('click', function() { overlay.remove(); });
+}
 
 // ============================================================================
 // 节假日数据管理

@@ -242,6 +242,12 @@ def get_report_send_history():
                 entry['total'] = details_obj.get('total', 0)
                 entry['period_start'] = details_obj.get('period_start', '')
                 entry['period_end'] = details_obj.get('period_end', '')
+                entry['recipients'] = details_obj.get('recipients', [])
+                entry['site_receivers'] = details_obj.get('site_receivers', [])
+                entry['site_sent_count'] = details_obj.get('site_sent_count', 0)
+                entry['site_total'] = details_obj.get('site_total', 0)
+                entry['email_enabled'] = details_obj.get('email_enabled', True)
+                entry['in_app_enabled'] = details_obj.get('in_app_enabled', True)
             except Exception:
                 entry['frequency'] = '-'
                 entry['success_count'] = 0
