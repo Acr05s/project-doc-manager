@@ -900,6 +900,11 @@ class ScheduledReportService:
         if not uploaded:
             return False
 
+        # 检查是否有不涉及状态的文档
+        for d in uploaded:
+            if d.get('status') == 'not_involved' or d.get('not_involved'):
+                return True
+
         if not requirement:
             return True
 
@@ -911,39 +916,6 @@ class ScheduledReportService:
                     return v
             return None
 
-        has_party_a_sign_req = '甲方签字' in requirement
-        has_party_b_sign_req = '乙方签字' in requirement
-        has_general_sign_req = '签字' in requirement and not has_party_a_sign_req and not has_party_b_sign_req
-        has_party_a_seal_req = '甲方盖章' in requirement
-        has_party_b_seal_req = '乙方盖章' in requirement
-        has_general_seal_req = '盖章' in requirement and not has_party_a_seal_req and not has_party_b_seal_req
-
-        for d in uploaded:
-            no_sig = get_val(d, 'no_signature')
-            no_seal = get_val(d, 'no_seal')
-
-            if has_party_a_sign_req:
-                if not get_val(d, 'party_a_signer') and not no_sig:
-                    continue
-            if has_party_b_sign_req:
-                if not get_val(d, 'party_b_signer') and not no_sig:
-                    continue
-            if has_general_sign_req:
-                if not get_val(d, 'signer') and not no_sig:
-                    continue
-            if has_party_a_seal_req:
-                if not (get_val(d, 'party_a_seal') or get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or no_seal):
-                    continue
-            if has_party_b_seal_req:
-                if not (get_val(d, 'party_b_seal') or get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or no_seal):
-                    continue
-            if has_general_seal_req:
-                if not (get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or
-                        get_val(d, 'party_a_seal') or get_val(d, 'party_b_seal') or no_seal):
-                    continue
-            # 该文档满足所有要求
-            return True
-        return False
         has_party_a_sign_req = '甲方签字' in requirement
         has_party_b_sign_req = '乙方签字' in requirement
         has_general_sign_req = '签字' in requirement and not has_party_a_sign_req and not has_party_b_sign_req
@@ -1038,13 +1010,22 @@ class ScheduledReportService:
                 if is_completed:
                     completed_docs_count += 1
                 status = '已完成' if is_completed else ('待完善' if same_name_uploaded else '未上传')
+                
+                # 收集自定义文档属性
+                custom_properties = {}
+                for key, value in req.items():
+                    # 排除默认属性
+                    if key not in ['name', 'requirement', 'type', 'id']:
+                        custom_properties[key] = value
+                
                 checklist.append({
                     'cycle': cycle,
                     'index': idx + 1,
                     'doc_name': doc_name,
                     'requirement': requirement,
                     'uploaded_count': len(same_name_uploaded),
-                    'status': status
+                    'status': status,
+                    'custom_properties': custom_properties
                 })
 
             by_cycle.setdefault(cycle, {
@@ -1119,11 +1100,13 @@ class ScheduledReportService:
             with sqlite3.connect(str(user_manager.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
+                # 扩展查询，确保能正确获取归档数据
                 cursor.execute(
                     """
                     SELECT cycle, doc_names, resolved_at
                     FROM archive_approvals
                     WHERE project_id = ? AND status = 'approved' AND request_type = 'archive'
+                    ORDER BY resolved_at DESC
                     """,
                     (project_id,)
                 )
@@ -1134,7 +1117,13 @@ class ScheduledReportService:
                     try:
                         doc_names = json.loads(row['doc_names']) if row['doc_names'] else []
                     except Exception:
-                        doc_names = []
+                        # 尝试其他格式解析
+                        doc_names_str = str(row['doc_names'] or '')
+                        if doc_names_str:
+                            # 简单处理：按逗号分割
+                            doc_names = [name.strip() for name in doc_names_str.split(',') if name.strip()]
+                        else:
+                            doc_names = []
                     cycle = row['cycle'] or '未分组'
                     if cycle not in archived_unique_by_cycle:
                         archived_unique_by_cycle[cycle] = set()
@@ -1576,21 +1565,51 @@ class ScheduledReportService:
             if checklist:
                 elems.append(PageBreak())
                 elems.append(Paragraph('项目文档清单（按系统周期顺序）', h1))
-                cl_data = [['序号', '周期', '文档名称', '要求', '上传数', '状态']]
+                
+                # 检查是否有自定义属性
+                has_custom_properties = any('custom_properties' in item and item['custom_properties'] for item in checklist)
+                
+                # 构建表头
+                if has_custom_properties:
+                    cl_data = [['序号', '周期', '文档名称', '要求', '自定义属性', '上传数', '状态']]
+                else:
+                    cl_data = [['序号', '周期', '文档名称', '要求', '上传数', '状态']]
+                
                 prev_cycle = None
                 for i, item in enumerate(checklist, 1):
                     cur_cycle = str(item.get('cycle', ''))
                     cycle_cell = cur_cycle if cur_cycle != prev_cycle else ''
                     prev_cycle = cur_cycle
                     status = str(item.get('status', ''))
-                    cl_data.append([
-                        str(i),
-                        cycle_cell,
-                        str(item.get('doc_name', '')),
-                        str(item.get('requirement', '') or '-'),
-                        str(item.get('uploaded_count', 0)),
-                        status,
-                    ])
+                    
+                    # 处理自定义属性
+                    custom_props = item.get('custom_properties', {})
+                    custom_props_str = ''
+                    if custom_props:
+                        props = []
+                        for key, value in custom_props.items():
+                            props.append(f"{key}: {value}")
+                        custom_props_str = '\n'.join(props)
+                    
+                    if has_custom_properties:
+                        cl_data.append([
+                            str(i),
+                            cycle_cell,
+                            str(item.get('doc_name', '')),
+                            str(item.get('requirement', '') or '-'),
+                            custom_props_str or '-',
+                            str(item.get('uploaded_count', 0)),
+                            status,
+                        ])
+                    else:
+                        cl_data.append([
+                            str(i),
+                            cycle_cell,
+                            str(item.get('doc_name', '')),
+                            str(item.get('requirement', '') or '-'),
+                            str(item.get('uploaded_count', 0)),
+                            status,
+                        ])
                 # 为不同状态上色
                 cl_style_cmds = [
                     ('FONTNAME', (0, 0), (-1, -1), font_name),
@@ -1616,8 +1635,14 @@ class ScheduledReportService:
                     elif status == '未上传':
                         cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#dc2626')))
                 cl_style = TableStyle(cl_style_cmds)
-                cw = pw / 6
-                elems.append(Table(cl_data, colWidths=[cw*0.5, cw*1.2, cw*1.8, cw*1.3, cw*0.5, cw*0.7], style=cl_style, repeatRows=1))
+                if has_custom_properties:
+                    # 有自定义属性时的列宽设置
+                    cw = pw / 7
+                    elems.append(Table(cl_data, colWidths=[cw*0.5, cw*1.2, cw*1.5, cw*1.0, cw*1.5, cw*0.5, cw*0.8], style=cl_style, repeatRows=1))
+                else:
+                    # 无自定义属性时的列宽设置
+                    cw = pw / 6
+                    elems.append(Table(cl_data, colWidths=[cw*0.5, cw*1.2, cw*1.8, cw*1.3, cw*0.5, cw*0.7], style=cl_style, repeatRows=1))
 
             # 本期文档上传明细
             doc_details = metrics.get('doc_details', [])

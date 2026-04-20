@@ -537,8 +537,35 @@ function clearEditorToNewTask() {
     if (periodic) periodic.checked = true;
     var weekly = document.querySelector('input[name="scheduledFrequency"][value="weekly"]');
     if (weekly) weekly.checked = true;
-    renderRecipientUserList([], []);
+    // 自动加载PMO成员，即使未选择项目
+    var editorProjectSelect = document.getElementById('scheduledEditorProjectSelect');
+    if (editorProjectSelect) {
+        var selected = editorProjectSelect.value;
+        if (selected) {
+            loadProjectRecipients(selected).then(function() {
+                renderRecipientUserList(_recipientOptions, []);
+            });
+        } else {
+            // 加载所有PMO成员
+            loadPMOMembers().then(function() {
+                renderRecipientUserList(_recipientOptions, []);
+            });
+        }
+    }
     toggleEditorFields();
+}
+
+async function loadPMOMembers() {
+    try {
+        var resp = await fetch('/api/users/pmo', { cache: 'no-store' });
+        var result = await safeParseJson(resp);
+        if (result.status === 'success') {
+            _recipientOptions = Array.isArray(result.users) ? result.users : [];
+        }
+    } catch (e) {
+        console.error('加载PMO成员失败:', e);
+        _recipientOptions = [];
+    }
 }
 
 async function safeParseJson(resp) {

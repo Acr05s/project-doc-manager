@@ -26,12 +26,20 @@ def get_fast_preview_threshold():
 
 # 导入预览服务（容错处理）
 try:
-    from src.services.preview_service import PreviewService
+    # 尝试从 src 目录导入
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'src'))
+    from services.preview_service import PreviewService
 except ImportError:
     PreviewService = None
 
 try:
-    from src.services.pdf_conversion_service import PDFConversionService
+    # 尝试从 src 目录导入
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'src'))
+    from services.pdf_conversion_service import PDFConversionService
 except ImportError:
     PDFConversionService = None
 

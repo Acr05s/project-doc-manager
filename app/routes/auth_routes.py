@@ -87,8 +87,42 @@ def get_users_by_role():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def get_pmo_users():
+    """获取PMO成员列表"""
+    try:
+        from app.models.user import user_manager
+
+        # 获取所有PMO和PMO领导角色的用户
+        all_users = user_manager.get_all_users()
+        filtered_users = [u for u in all_users if u.role in ('pmo', 'pmo_leader') and u.status == 'active']
+
+        # 转换为dict格式
+        result_users = []
+        for u in filtered_users:
+            result_users.append({
+                'id': u.id,
+                'uuid': u.uuid,
+                'username': u.username,
+                'display_name': u.display_name or u.username,
+                'role': u.role,
+                'organization': u.organization or '',
+                'email': u.email or '',
+                'source': 'PMO',
+                'recommended': True
+            })
+
+        return jsonify({
+            'status': 'success',
+            'users': result_users
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def init_auth_routes(app):
     """初始化认证路由"""
     app.register_blueprint(auth_routes_bp)
     # 注册获取用户列表的路由（不使用蓝图前缀）
     app.add_url_rule('/api/users', 'get_users_by_role', get_users_by_role, methods=['GET'])
+    # 注册获取PMO成员列表的路由
+    app.add_url_rule('/api/users/pmo', 'get_pmo_users', get_pmo_users, methods=['GET'])

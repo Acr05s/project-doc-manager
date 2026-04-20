@@ -3,6 +3,13 @@
 支持文档收集、版本管理、签字盖章识别和缺失文档统计
 """
 
+# 项目根目录（main.py 所在目录）
+import os as _os
+import sys
+BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
+# 添加 src 目录到 Python 路径
+sys.path.insert(0, _os.path.join(BASE_DIR, 'src'))
+
 import logging
 from typing import Dict, Any, Optional
 from flask import Flask
@@ -15,10 +22,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# 项目根目录（main.py 所在目录）
-import os as _os
-BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
 
 # Flask应用初始化
 def create_app(config: Optional[Dict] = None) -> Flask:

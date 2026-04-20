@@ -8,7 +8,13 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-import pandas as pd
+# 尝试导入pandas，如果失败则使用降级方案
+pandas_available = False
+try:
+    import pandas as pd
+    pandas_available = True
+except ImportError:
+    logging.warning('pandas 未安装，Excel文件加载功能将不可用')
 
 from .base import DocumentConfig, setup_logging
 
@@ -51,6 +57,10 @@ class RequirementsLoader:
         Returns:
             dict: 项目配置
         """
+        if not pandas_available:
+            logger.error('pandas 未安装，无法加载Excel文件')
+            return {'cycles': [], 'documents': {}}
+            
         try:
             logger.info(f"加载Excel文件: {excel_file}")
             
