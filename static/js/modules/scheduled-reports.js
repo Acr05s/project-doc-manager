@@ -499,6 +499,12 @@ function clearEditorToNewTask() {
         var selected = populateProjectSelectOptions(editorProjectSelect, _modalProjects, appState.currentProjectId || '', '-- \u6682\u65e0\u53ef\u914d\u7f6e\u9879\u76ee --');
         editorProjectSelect.disabled = false;
         if (projectIdInput) projectIdInput.value = selected;
+        // 加载默认项目的收件人列表（包含PMO成员）
+        if (selected) {
+            loadProjectRecipients(selected).then(function() {
+                renderRecipientUserList(_recipientOptions, []);
+            });
+        }
     }
     var runAfterSaveWrap = document.getElementById('scheduledRunAfterSaveWrap');
     var runAfterSave = document.getElementById('scheduledRunAfterSaveOnce');
@@ -537,7 +543,16 @@ function clearEditorToNewTask() {
     if (periodic) periodic.checked = true;
     var weekly = document.querySelector('input[name="scheduledFrequency"][value="weekly"]');
     if (weekly) weekly.checked = true;
-    renderRecipientUserList([], []);
+    // 加载当前选中项目的收件人列表（包含PMO成员和承建单位收件人）
+    var projectIdInput = document.getElementById('scheduledEditorProjectId');
+    var defaultProjectId = projectIdInput ? projectIdInput.value : '';
+    if (defaultProjectId) {
+        loadProjectRecipients(defaultProjectId).then(function() {
+            renderRecipientUserList(_recipientOptions, []);
+        });
+    } else {
+        renderRecipientUserList([], []);
+    }
     toggleEditorFields();
 }
 
@@ -571,6 +586,21 @@ async function reloadAllTasks() {
     await loadAllTasks();
 }
 
+async function loadAllPmoUsers() {
+    try {
+        var resp = await fetch('/api/admin/users?status=active');
+        if (!resp.ok) return [];
+        var result = await resp.json();
+        if (result.status === 'success') {
+            return (result.users || []).filter(function(u) {
+                var role = String(u.role || '').toLowerCase();
+                return role === 'pmo' || role === 'pmo_leader';
+            });
+        }
+    } catch (e) { console.error('加载PMO用户失败:', e); }
+    return [];
+}
+
 async function loadProjectRecipients(projectId) {
     if (!projectId) { _recipientOptions = []; return; }
     var resp = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/report-schedules', { cache: 'no-store' });
@@ -578,6 +608,16 @@ async function loadProjectRecipients(projectId) {
     if (result.status === 'success') {
         _recipientOptions = Array.isArray(result.recipient_options) ? result.recipient_options : [];
         _currentProjectMeta = result.project_meta || { party_b: '', project_name: '' };
+    }
+    // 合并全局PMO用户（PMO成员管理所有项目）
+    var pmoUsers = await loadAllPmoUsers();
+    if (pmoUsers.length > 0) {
+        var existingIds = new Set(_recipientOptions.map(function(u) { return Number(u.id); }));
+        pmoUsers.forEach(function(u) {
+            if (!existingIds.has(Number(u.id))) {
+                _recipientOptions.push(u);
+            }
+        });
     }
 }
 
