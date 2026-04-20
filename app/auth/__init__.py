@@ -333,8 +333,8 @@ def _notify_user_approvers(user_id, username, organization_name, is_new_org, rol
 
 @auth_bp.route('/organizations', methods=['GET'])
 def list_organizations():
-    """获取承建单位列表（公开）"""
-    orgs = user_manager.list_organizations()
+    """获取承建单位列表（公开，仅返回已审批的）"""
+    orgs = user_manager.list_organizations(status_filter='approved')
     return jsonify({'status': 'success', 'organizations': [o['name'] for o in orgs]})
 
 
@@ -1001,6 +1001,26 @@ def admin_delete_organization():
         ip = get_real_ip()
         user_manager.add_operation_log(current_user.id, current_user.username, 'delete_organization', None, name, None, ip)
     return jsonify(result)
+
+
+@auth_bp.route('/api/admin/organizations/approve', methods=['POST'])
+@login_required
+def admin_approve_organization():
+    """审批承建单位（PMO/管理员）"""
+    if current_user.role not in ('admin', 'pmo'):
+        return jsonify({'status': 'error', 'message': '权限不足'}), 403
+    data = request.get_json()
+    name = data.get('name', '').strip()
+    action = data.get('action', 'approve')  # approve / reject
+    if not name:
+        return jsonify({'status': 'error', 'message': '单位名称不能为空'}), 400
+    new_status = 'approved' if action == 'approve' else 'rejected'
+    result = user_manager.update_organization_status(name, new_status)
+    if result['status'] == 'success':
+        ip = get_real_ip()
+        user_manager.add_operation_log(current_user.id, current_user.username, f'{action}_organization', None, name, None, ip)
+    return jsonify(result)
+
 
 @auth_bp.route('/api/admin/users/batch-delete', methods=['POST'])
 @login_required

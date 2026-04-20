@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -561,16 +561,18 @@ class ScheduledReportService:
             return now.strftime('%Y-%m-%d') == run_date
 
         frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
+
+        # 跳过周末（适用于所有周期频率）
+        if cfg.get('skip_weekends'):
+            if now.weekday() >= 5:  # 5=Saturday, 6=Sunday
+                return False
+        # 跳过中国法定节假日（适用于所有周期频率）
+        if cfg.get('skip_holidays'):
+            from app.services.china_holidays import is_holiday
+            if is_holiday(now.date()):
+                return False
+
         if frequency == 'daily':
-            # 跳过周末
-            if cfg.get('skip_weekends'):
-                if now.weekday() >= 5:  # 5=Saturday, 6=Sunday
-                    return False
-            # 跳过中国法定节假日
-            if cfg.get('skip_holidays'):
-                from app.services.china_holidays import is_holiday
-                if is_holiday(now.date()):
-                    return False
             return True
         if frequency == 'weekly':
             weekday = int(cfg.get('weekday', 1))
@@ -589,6 +591,162 @@ class ScheduledReportService:
         if frequency == 'weekly':
             return now.strftime('W%Y-%W')
         return now.strftime('M%Y-%m')
+
+    def _calc_next_run_date(self, task: Dict[str, Any], now: Optional[datetime] = None) -> Optional[date]:
+        """计算下一次执行日期"""
+        if now is None:
+            now = datetime.now()
+        task_type = str(task.get('task_type', 'periodic')).strip().lower()
+        if task_type == 'one_time':
+            run_date_str = str(task.get('run_date', '')).strip()
+            if not run_date_str:
+                return None
+            try:
+                rd = datetime.strptime(run_date_str, '%Y-%m-%d').date()
+                return rd if rd >= now.date() else None
+            except Exception:
+                return None
+
+        frequency = str(task.get('frequency', 'weekly')).strip().lower()
+        skip_weekends = bool(task.get('skip_weekends'))
+        skip_holidays = bool(task.get('skip_holidays'))
+
+        # 判断今天的send_time是否已过
+        send_time = str(task.get('send_time', '09:00'))
+        try:
+            sh = int(send_time.split(':')[0])
+            sm = int(send_time.split(':')[1])
+        except Exception:
+            sh, sm = 9, 0
+        today_send = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+        # 已有 last_run_key，检查今天是否已执行
+        last_key = str(task.get('last_run_key', '')).strip()
+
+        if frequency == 'daily':
+            candidate = now.date() if now < today_send else now.date() + timedelta(days=1)
+            for _ in range(90):
+                if self._is_skip_day(candidate, skip_weekends, skip_holidays):
+                    candidate += timedelta(days=1)
+                    continue
+                key = candidate.strftime('D%Y-%m-%d')
+                if key == last_key:
+                    candidate += timedelta(days=1)
+                    continue
+                return candidate
+            return None
+
+        if frequency == 'weekly':
+            weekday_cfg = int(task.get('weekday', 1))  # 1=Mon...7=Sun
+            target_wd = weekday_cfg - 1  # convert to Python weekday 0=Mon
+            candidate = now.date()
+            if now >= today_send:
+                candidate += timedelta(days=1)
+            for _ in range(90):
+                if candidate.weekday() == target_wd:
+                    if not self._is_skip_day(candidate, skip_weekends, skip_holidays):
+                        key = candidate.strftime('W%Y-%W')
+                        if key != last_key:
+                            return candidate
+                    # 如果这周的目标日跳过了，跳到下周
+                    candidate += timedelta(days=7)
+                else:
+                    candidate += timedelta(days=1)
+            return None
+
+        # monthly
+        dom = int(task.get('day_of_month', 1))
+        candidate = now.date().replace(day=1)
+        if now.day > dom or (now.day == dom and now >= today_send):
+            # 已过本月目标日，跳下月
+            if candidate.month == 12:
+                candidate = candidate.replace(year=candidate.year + 1, month=1)
+            else:
+                candidate = candidate.replace(month=candidate.month + 1)
+        try:
+            candidate = candidate.replace(day=dom)
+        except ValueError:
+            # 如果目标日超出月范围（如31日但只有30天），用月末
+            import calendar
+            last_day = calendar.monthrange(candidate.year, candidate.month)[1]
+            candidate = candidate.replace(day=min(dom, last_day))
+        for _ in range(12):
+            if not self._is_skip_day(candidate, skip_weekends, skip_holidays):
+                key = candidate.strftime('M%Y-%m')
+                if key != last_key:
+                    return candidate
+            # 下个月
+            if candidate.month == 12:
+                candidate = candidate.replace(year=candidate.year + 1, month=1, day=1)
+            else:
+                candidate = candidate.replace(month=candidate.month + 1, day=1)
+            try:
+                candidate = candidate.replace(day=dom)
+            except ValueError:
+                import calendar
+                last_day = calendar.monthrange(candidate.year, candidate.month)[1]
+                candidate = candidate.replace(day=min(dom, last_day))
+        return None
+
+    @staticmethod
+    def _is_skip_day(d, skip_weekends: bool, skip_holidays: bool) -> bool:
+        """判断给定日期是否应跳过"""
+        if skip_weekends and d.weekday() >= 5:
+            return True
+        if skip_holidays:
+            from app.services.china_holidays import is_holiday
+            if is_holiday(d):
+                return True
+        return False
+
+    def calc_next_execution_time(self, task: Dict[str, Any]) -> Optional[str]:
+        """计算下一次执行时间，返回 'YYYY-MM-DD HH:MM:SS' 或 None"""
+        if not task.get('enabled'):
+            return None
+        next_date = self._calc_next_run_date(task)
+        if next_date is None:
+            return None
+        send_time = str(task.get('send_time', '09:00'))
+        return f'{next_date.strftime("%Y-%m-%d")} {send_time}:00'
+
+    def skip_next_execution(self, project_id: str, task_id: str) -> Dict[str, Any]:
+        """跳过指定任务的下一次执行"""
+        tasks = self._load_tasks(project_id)
+        task = None
+        for t in tasks:
+            if t.get('task_id') == task_id:
+                task = t
+                break
+        if task is None:
+            raise ValueError(f'任务不存在: {task_id}')
+
+        next_date = self._calc_next_run_date(task)
+        if next_date is None:
+            return {'status': 'error', 'message': '无法计算下一次执行时间'}
+
+        # 生成下次的 run_key 并设为 last_run_key
+        task_type = str(task.get('task_type', 'periodic')).strip().lower()
+        frequency = str(task.get('frequency', 'weekly')).strip().lower()
+        if task_type == 'one_time':
+            run_key = next_date.strftime('O%Y-%m-%d')
+        elif frequency == 'daily':
+            run_key = next_date.strftime('D%Y-%m-%d')
+        elif frequency == 'weekly':
+            run_key = next_date.strftime('W%Y-%W')
+        else:
+            run_key = next_date.strftime('M%Y-%m')
+
+        task['last_run_key'] = run_key
+        self._save_tasks(project_id, tasks)
+        # 更新数据库
+        self._db_insert_task(self._normalize_task(project_id, task, task.get('task_name', '')))
+
+        # 计算跳过后的下次执行时间
+        next_after_skip = self.calc_next_execution_time(task)
+        return {
+            'status': 'success',
+            'message': f'已跳过 {next_date.strftime("%Y-%m-%d")} 的执行',
+            'next_execution': next_after_skip,
+        }
 
     def _run_project_report(
         self,

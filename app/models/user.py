@@ -552,12 +552,26 @@ class UserManager:
             cursor.execute(f'SELECT id FROM users WHERE uuid IN ({placeholders})', tuple(uuids))
             return [row[0] for row in cursor.fetchall()]
     
-    def list_organizations(self):
-        """获取所有承建单位列表"""
+    def list_organizations(self, status_filter=None):
+        """获取承建单位列表
+
+        Args:
+            status_filter: 按状态过滤，None 返回全部，'approved' 只返回已审批的
+        """
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT id, name, admin_id FROM organizations ORDER BY name')
-            return [{'id': row[0], 'name': row[1], 'admin_id': row[2]} for row in cursor.fetchall()]
+            # 检查是否有 status 列
+            columns = [row[1] for row in cursor.execute('PRAGMA table_info(organizations)')]
+            has_status = 'status' in columns
+            if has_status:
+                if status_filter:
+                    cursor.execute('SELECT id, name, admin_id, status FROM organizations WHERE status = ? ORDER BY name', (status_filter,))
+                else:
+                    cursor.execute('SELECT id, name, admin_id, status FROM organizations ORDER BY name')
+                return [{'id': r[0], 'name': r[1], 'admin_id': r[2], 'status': r[3] or 'approved'} for r in cursor.fetchall()]
+            else:
+                cursor.execute('SELECT id, name, admin_id FROM organizations ORDER BY name')
+                return [{'id': r[0], 'name': r[1], 'admin_id': r[2], 'status': 'approved'} for r in cursor.fetchall()]
     
     def get_pending_users(self, viewer_role, viewer_org=None):
         """获取待审核用户列表
@@ -872,12 +886,17 @@ class UserManager:
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
 
-    def create_organization(self, name, admin_id=None):
+    def create_organization(self, name, admin_id=None, status='approved'):
         """创建承建单位"""
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.cursor()
-                cursor.execute('INSERT INTO organizations (name, admin_id) VALUES (?, ?)', (name, admin_id))
+                # 检查 status 列是否存在
+                cols = [row[1] for row in cursor.execute('PRAGMA table_info(organizations)')]
+                if 'status' in cols:
+                    cursor.execute('INSERT INTO organizations (name, admin_id, status) VALUES (?, ?, ?)', (name, admin_id, status))
+                else:
+                    cursor.execute('INSERT INTO organizations (name, admin_id) VALUES (?, ?)', (name, admin_id))
                 conn.commit()
                 return {'status': 'success', 'message': '承建单位创建成功'}
         except sqlite3.IntegrityError:
@@ -926,6 +945,22 @@ class UserManager:
                 cursor.execute('UPDATE organizations SET admin_id = ? WHERE name = ?', (admin_id, org_name))
                 conn.commit()
                 return {'status': 'success', 'message': '管理员已设置'}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def update_organization_status(self, name, status):
+        """更新承建单位审批状态"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                columns = [row[1] for row in cursor.execute('PRAGMA table_info(organizations)')]
+                if 'status' not in columns:
+                    return {'status': 'error', 'message': '数据库未迁移，缺少status字段'}
+                cursor.execute('UPDATE organizations SET status = ? WHERE name = ?', (status, name))
+                if cursor.rowcount == 0:
+                    return {'status': 'error', 'message': '承建单位不存在'}
+                conn.commit()
+                return {'status': 'success', 'message': f'承建单位已{"审批通过" if status == "approved" else "拒绝"}'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
 

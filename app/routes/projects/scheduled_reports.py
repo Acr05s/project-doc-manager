@@ -69,9 +69,12 @@ def list_project_report_tasks(project_id):
     try:
         detail = scheduled_report_service.get_schedule_detail(project_id)
         project = scheduled_report_service._load_project(project_id)  # noqa: SLF001 - 路由层展示用途
+        tasks = detail.get('tasks', [])
+        for t in tasks:
+            t['_next_execution'] = scheduled_report_service.calc_next_execution_time(t)
         return jsonify({
             'status': 'success',
-            'tasks': detail.get('tasks', []),
+            'tasks': tasks,
             'recipient_options': detail.get('recipient_options', []),
             'project_meta': {
                 'party_b': project.get('party_b', ''),
@@ -154,6 +157,20 @@ def run_project_report_task_now(project_id, task_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def skip_next_project_report_task(project_id, task_id):
+    """跳过指定任务的下一次执行。"""
+    try:
+        if not _is_pmo_plus():
+            return _forbidden_resp()
+        result = scheduled_report_service.skip_next_execution(project_id, task_id)
+        code = 200 if result.get('status') == 'success' else 400
+        return jsonify(result), code
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def list_all_report_tasks():
     """获取全平台所有定时报告任务（平台级功能）。"""
     try:
@@ -168,6 +185,7 @@ def list_all_report_tasks():
             task['_party_b'] = project.get('party_b', '')
             task['_recipient_options'] = recipient_options
             task['_creator_name'] = task.get('created_by_display_name') or task.get('created_by_username') or '-'
+            task['_next_execution'] = scheduled_report_service.calc_next_execution_time(task)
             enriched.append(task)
         resp = jsonify({'status': 'success', 'tasks': enriched})
         resp.headers['Cache-Control'] = 'no-store'

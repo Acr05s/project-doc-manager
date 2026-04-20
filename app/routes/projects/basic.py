@@ -39,6 +39,11 @@ def create_project():
         if not party_b:
             party_b = 'PMO'
 
+        # 处理新建承建单位
+        is_new_org = data.get('is_new_org', False)
+        if is_new_org and party_b and party_b != 'PMO':
+            _handle_new_organization(party_b)
+
         creator_id = int(current_user.id) if current_user.is_authenticated else None
         creator_username = current_user.username if current_user.is_authenticated else None
         creator_role = current_user.role if current_user.is_authenticated else None
@@ -85,6 +90,32 @@ def _notify_project_approvers(project_id, project_name, party_b, creator_id, cre
         print(f"通知项目审批人失败: {e}")
 
 
+def _handle_new_organization(org_name: str):
+    """处理新建承建单位：创建pending状态记录并通知PMO审批"""
+    try:
+        # 检查是否已存在
+        existing_orgs = user_manager.list_organizations()
+        if org_name in existing_orgs:
+            return  # 已存在，无需处理
+        # 创建新组织（pending状态）
+        user_manager.create_organization(org_name, status='pending')
+        # 通知PMO审批
+        approvers = user_manager.get_users_by_roles(['admin', 'pmo', 'pmo_leader'])
+        creator_name = getattr(current_user, 'display_name', '') or getattr(current_user, 'username', '') or ''
+        for approver in approvers:
+            if approver['id'] == int(getattr(current_user, 'id', 0)):
+                continue
+            message_manager.send_message(
+                receiver_id=approver['id'],
+                title='新承建单位待审批',
+                content=f'用户 "{creator_name}" 申请新增承建单位 "{org_name}"，请在承建单位管理中审批。',
+                msg_type='approval',
+                related_type='organization'
+            )
+    except Exception as e:
+        print(f"处理新建承建单位失败: {e}")
+
+
 def get_accessible_projects():
     """获取当前用户可访问的项目列表"""
     try:
@@ -97,7 +128,9 @@ def get_accessible_projects():
         user_organization = getattr(current_user, 'organization', '') or ''
         
         result = doc_manager.get_user_accessible_projects(user_id, user_role, user_organization)
-        return jsonify(result)
+        resp = jsonify(result)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -180,6 +213,11 @@ def update_project(project_id):
     try:
         doc_manager = get_doc_manager()
         data = request.get_json()
+        # 处理新建承建单位
+        is_new_org = data.pop('is_new_org', False)
+        party_b = data.get('party_b', '')
+        if is_new_org and party_b:
+            _handle_new_organization(party_b)
         result = doc_manager.update_project(project_id, data)
         return jsonify(result)
     except Exception as e:
@@ -290,6 +328,29 @@ def get_report_data():
         report_service = ReportService(doc_manager, user_manager, user_context)
         data = report_service.generate_report(report_type)
         return jsonify({'status': 'success', 'type': report_type, 'data': data})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def get_doc_changes():
+    """获取文档变化统计数据（真实数据，替代前端mock）"""
+    try:
+        period = request.args.get('period', 'day')
+        doc_manager = get_doc_manager()
+        user_context = None
+        if current_user.is_authenticated:
+            user_context = {
+                'id': int(current_user.id),
+                'role': current_user.role,
+                'organization': getattr(current_user, 'organization', '') or ''
+            }
+        report_service = ReportService(doc_manager, user_manager, user_context)
+        data = report_service.get_doc_changes(period)
+        resp = jsonify({'status': 'success', 'data': data})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -3,7 +3,7 @@
 from flask import Blueprint
 from flask_login import login_required
 from .utils import init_doc_manager, project_access_required, pmo_admin_required
-from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects, get_archive_stats, bulk_approve_archive_requests
+from .basic import list_projects, create_project, get_accessible_projects, approve_project, get_project, update_project, update_project_config, delete_project, get_dashboard_stats, get_report_types, get_report_data, get_doc_changes, initiate_project_transfer, respond_project_transfer, batch_delete_projects, batch_update_projects, batch_update_project_status, list_all_projects, get_archive_stats, bulk_approve_archive_requests
 from .requirements import load_project_config, apply_requirements_to_project_route, list_requirements_configs, export_requirements, get_document_directories, create_document_directory, delete_document_directory, preview_excel_file, parse_excel_with_mapping
 from .recycle import list_deleted_projects, restore_project, permanent_delete_project
 from .structure import update_project_structure, confirm_cycle_documents
@@ -25,6 +25,7 @@ from .scheduled_reports import (
     delete_project_report_task,
     toggle_project_report_task,
     run_project_report_task_now,
+    skip_next_project_report_task,
     list_all_report_tasks,
     get_report_send_history,
     get_holiday_status,
@@ -46,6 +47,7 @@ project_bp.route('/approve', methods=['POST'])(login_required(approve_project))
 project_bp.route('/dashboard', methods=['GET'])(login_required(get_dashboard_stats))
 project_bp.route('/reports/types', methods=['GET'])(login_required(get_report_types))
 project_bp.route('/reports/data', methods=['GET'])(login_required(get_report_data))
+project_bp.route('/reports/doc-changes', methods=['GET'])(login_required(get_doc_changes))
 project_bp.route('/archive-stats', methods=['GET'])(login_required(get_archive_stats))
 project_bp.route('/bulk-approve', methods=['POST'])(login_required(bulk_approve_archive_requests))
 project_bp.route('/transfer/respond', methods=['POST'])(login_required(respond_project_transfer))
@@ -129,6 +131,7 @@ project_bp.route('/<project_id>/report-schedules/<task_id>', methods=['PATCH'])(
 project_bp.route('/<project_id>/report-schedules/<task_id>', methods=['DELETE'])(project_access_required(delete_project_report_task))
 project_bp.route('/<project_id>/report-schedules/<task_id>/toggle', methods=['POST'])(project_access_required(toggle_project_report_task))
 project_bp.route('/<project_id>/report-schedules/<task_id>/run', methods=['POST'])(project_access_required(run_project_report_task_now))
+project_bp.route('/<project_id>/report-schedules/<task_id>/skip-next', methods=['POST'])(project_access_required(skip_next_project_report_task))
 
 # 文档目录映射相关路由
 project_bp.route('/<project_id>/document-directories', methods=['GET'])(project_access_required(get_document_directories))

@@ -89,7 +89,7 @@ function toggleEditorFields() {
     if (runDateWrap) runDateWrap.style.display = taskType === 'one_time' ? 'block' : 'none';
     if (weekWrap) weekWrap.style.display = taskType === 'periodic' && frequency === 'weekly' ? 'block' : 'none';
     if (monthWrap) monthWrap.style.display = taskType === 'periodic' && frequency === 'monthly' ? 'block' : 'none';
-    if (skipHolidaysWrap) skipHolidaysWrap.style.display = taskType === 'periodic' && frequency === 'daily' ? 'block' : 'none';
+    if (skipHolidaysWrap) skipHolidaysWrap.style.display = taskType === 'periodic' ? 'block' : 'none';
 }
 
 function populateProjectSelectOptions(select, projects, preferredProjectId, emptyText) {
@@ -272,7 +272,7 @@ function renderTaskList(tasks) {
     table.style.cssText = 'width:100%; border-collapse:collapse; font-size:12px; table-layout:auto;';
     var headHtml = '<thead><tr style="background:#f5f8fc;">';
     headHtml += '<th style="border:1px solid #e2e8f0; padding:6px;"><input type="checkbox" id="scheduledTaskSelectAll"></th>';
-    ['\u9879\u76ee\u540d\u79f0','\u4efb\u52a1\u540d\u79f0','\u521b\u5efa\u4eba','\u4efb\u52a1\u7c7b\u578b','\u9891\u7387','\u6267\u884c\u6b21\u6570','\u627f\u5efa\u5355\u4f4d','\u627f\u5efa\u5355\u4f4d\u6536\u4ef6\u4eba','PMO\u7ec4\u6536\u4ef6\u4eba','\u5916\u90e8\u6536\u4ef6\u4eba','\u72b6\u6001','\u64cd\u4f5c'].forEach(function(h) {
+    ['\u9879\u76ee\u540d\u79f0','\u4efb\u52a1\u540d\u79f0','\u521b\u5efa\u4eba','\u4efb\u52a1\u7c7b\u578b','\u9891\u7387','\u6267\u884c\u6b21\u6570','\u4e0b\u4e00\u6b21\u6267\u884c','\u627f\u5efa\u5355\u4f4d','\u627f\u5efa\u5355\u4f4d\u6536\u4ef6\u4eba','PMO\u7ec4\u6536\u4ef6\u4eba','\u5916\u90e8\u6536\u4ef6\u4eba','\u72b6\u6001','\u64cd\u4f5c'].forEach(function(h) {
         headHtml += '<th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + h + '</th>';
     });
     headHtml += '</tr></thead><tbody></tbody>';
@@ -296,6 +296,7 @@ function renderTaskList(tasks) {
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + taskTypeLabel(task.task_type) + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + freqText + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; text-align:center;">' + Number(task.run_count || 0) + '</td>';
+        cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap; font-size:11px;">' + (task._next_execution ? formatDateTimeDisplay(task._next_execution) : '-') + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + escapeHtml(task._party_b || '-') + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(groups.contractor) + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(groups.pmo) + '</td>';
@@ -306,6 +307,7 @@ function renderTaskList(tasks) {
         cells += '<button type="button" class="btn btn-info btn-sm" data-action="toggle" data-task-id="' + tid + '" data-project-id="' + pid + '">' + (task.enabled ? '\u505c\u7528' : '\u542f\u7528') + '</button> ';
         cells += '<button type="button" class="btn btn-warning btn-sm" data-action="run" data-task-id="' + tid + '" data-project-id="' + pid + '">\u6267\u884c</button> ';
         cells += '<button type="button" class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" data-action="history" data-task-id="' + tid + '" data-project-id="' + pid + '">\u5386\u53f2</button> ';
+        cells += '<button type="button" class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none;" data-action="skip-next" data-task-id="' + tid + '" data-project-id="' + pid + '">\u8df3\u8fc7\u4e0b\u6b21</button> ';
         cells += '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-task-id="' + tid + '" data-project-id="' + pid + '">\u5220\u9664</button>';
         cells += '</td>';
         tr.innerHTML = cells;
@@ -329,6 +331,7 @@ function renderTaskList(tasks) {
             if (action === 'toggle') { await toggleTask(taskId, projectId); return; }
             if (action === 'run') { await runTaskNow(taskId, projectId); return; }
             if (action === 'history') { openScheduledTaskHistoryModal(taskId, projectId); return; }
+            if (action === 'skip-next') { await skipNextTask(taskId, projectId); return; }
             if (action === 'delete') { await deleteTask(taskId, projectId); }
         };
     });
@@ -676,6 +679,20 @@ async function toggleTask(taskId, projectId) {
         await reloadAllTasks();
         showNotification(task.enabled ? '\u4efb\u52a1\u5df2\u505c\u7528' : '\u4efb\u52a1\u5df2\u542f\u7528', 'success');
     } catch (e) { showNotification(e.message || '\u66f4\u65b0\u72b6\u6001\u5931\u8d25', 'error'); }
+    finally { showLoading(false); }
+}
+
+async function skipNextTask(taskId, projectId) {
+    var targetProjectId = String(projectId || '').trim();
+    if (!targetProjectId || !taskId) return;
+    try {
+        showLoading(true);
+        var resp = await fetch('/api/projects/' + encodeURIComponent(targetProjectId) + '/report-schedules/' + encodeURIComponent(taskId) + '/skip-next', { method: 'POST' });
+        var result = await safeParseJson(resp);
+        if (result.status !== 'success') { showNotification(result.message || '\u8df3\u8fc7\u5931\u8d25', 'error'); return; }
+        await reloadAllTasks();
+        showNotification(result.message || '\u5df2\u8df3\u8fc7\u4e0b\u4e00\u6b21\u6267\u884c', 'success');
+    } catch (e) { showNotification(e.message || '\u8df3\u8fc7\u5931\u8d25', 'error'); }
     finally { showLoading(false); }
 }
 

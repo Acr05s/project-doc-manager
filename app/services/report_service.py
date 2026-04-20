@@ -1,6 +1,6 @@
 """多维报表服务"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
 
@@ -432,3 +432,152 @@ class ReportService:
             'acceptance': [acceptance_by_month.get(m, 0) for m in all_months],
             'doc_uploads': [doc_upload_by_month.get(m, 0) for m in all_months]
         }
+
+    def get_doc_changes(self, period: str = 'day') -> Dict[str, Any]:
+        """获取文档变化统计数据（真实数据）
+
+        Args:
+            period: day / 3days / 7days / month
+
+        Returns:
+            {labels, added, updated, deleted, details}
+        """
+        now = datetime.now()
+        period_map = {'day': 1, '3days': 3, '7days': 7, 'month': 30}
+        days = period_map.get(period, 1)
+        cutoff = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 生成日期标签
+        date_labels = []
+        for i in range(days):
+            d = cutoff + timedelta(days=i + 1)
+            date_labels.append(d.strftime('%m-%d'))
+        if days == 1:
+            date_labels = [now.strftime('%m-%d')]
+            cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 按日期统计
+        added_by_date = {lbl: 0 for lbl in date_labels}
+        updated_by_date = {lbl: 0 for lbl in date_labels}
+        deleted_by_date = {lbl: 0 for lbl in date_labels}
+        details = []
+
+        projects = self._load_all_project_details()
+        for p in projects:
+            cfg = p['config']
+            project_id = p.get('id', '')
+            project_name = cfg.get('name', project_id)
+            documents = cfg.get('documents', {})
+
+            for cycle in cfg.get('cycles', []):
+                cycle_info = documents.get(cycle, {})
+                if not isinstance(cycle_info, dict):
+                    continue
+                uploaded_docs = cycle_info.get('uploaded_docs', [])
+                # 统计每个文档名出现次数来判断新增/更新
+                doc_name_counts = {}
+                for doc in uploaded_docs:
+                    dn = str(doc.get('doc_name', '')).strip()
+                    if not dn:
+                        continue
+                    doc_name_counts[dn] = doc_name_counts.get(dn, 0) + 1
+
+                seen_in_period = {}
+                for doc in uploaded_docs:
+                    upload_time_str = str(doc.get('upload_time', '')).strip()
+                    if not upload_time_str:
+                        continue
+                    ut = self._parse_upload_time(upload_time_str)
+                    if ut is None or ut < cutoff:
+                        continue
+
+                    dn = str(doc.get('doc_name', '')).strip()
+                    if not dn:
+                        continue
+                    date_key = ut.strftime('%m-%d')
+                    if date_key not in added_by_date:
+                        continue
+
+                    is_update = doc_name_counts.get(dn, 1) > 1 and dn in seen_in_period
+                    seen_in_period[dn] = True
+
+                    if is_update:
+                        updated_by_date[date_key] = updated_by_date.get(date_key, 0) + 1
+                        change_type = 'updated'
+                    else:
+                        added_by_date[date_key] = added_by_date.get(date_key, 0) + 1
+                        change_type = 'added'
+
+                    details.append({
+                        'doc_name': dn,
+                        'project_name': project_name,
+                        'project_id': project_id,
+                        'cycle': cycle,
+                        'time': ut.strftime('%Y-%m-%d %H:%M:%S'),
+                        'type': change_type,
+                        'doc_id': doc.get('doc_id', ''),
+                    })
+
+        # 归档记录 (从 archive_approvals 查询)
+        try:
+            if self.user_manager and hasattr(self.user_manager, 'db_path'):
+                import sqlite3
+                conn = sqlite3.connect(self.user_manager.db_path)
+                conn.row_factory = sqlite3.Row
+                cutoff_str = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+                rows = conn.execute(
+                    "SELECT project_id, doc_name, cycle, created_at FROM archive_approvals "
+                    "WHERE status = 'approved' AND created_at >= ? ORDER BY created_at DESC",
+                    (cutoff_str,)
+                ).fetchall()
+                conn.close()
+                for row in rows:
+                    ct = self._parse_upload_time(str(row['created_at']))
+                    if ct is None:
+                        continue
+                    date_key = ct.strftime('%m-%d')
+                    if date_key in deleted_by_date:
+                        deleted_by_date[date_key] = deleted_by_date.get(date_key, 0) + 1
+                    details.append({
+                        'doc_name': row['doc_name'] or '',
+                        'project_name': '',
+                        'project_id': row['project_id'] or '',
+                        'cycle': row['cycle'] or '',
+                        'time': ct.strftime('%Y-%m-%d %H:%M:%S'),
+                        'type': 'archived',
+                        'doc_id': '',
+                    })
+        except Exception:
+            pass
+
+        # 按时间倒序排列
+        details.sort(key=lambda x: x.get('time', ''), reverse=True)
+        # 限制明细数量
+        details = details[:200]
+
+        return {
+            'labels': date_labels,
+            'added': [added_by_date.get(lbl, 0) for lbl in date_labels],
+            'updated': [updated_by_date.get(lbl, 0) for lbl in date_labels],
+            'deleted': [deleted_by_date.get(lbl, 0) for lbl in date_labels],
+            'details': details,
+        }
+
+    @staticmethod
+    def _parse_upload_time(value: str):
+        """解析上传时间字符串"""
+        if not value:
+            return None
+        s = value.strip()
+        candidates = [
+            s, s.replace('T', ' '), s.split('.')[0],
+            s.replace('T', ' ').split('.')[0],
+        ]
+        for c in candidates:
+            c = c.split('+')[0].split('Z')[0].strip()
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(c, fmt)
+                except Exception:
+                    continue
+        return None

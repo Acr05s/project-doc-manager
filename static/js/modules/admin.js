@@ -448,43 +448,57 @@ export async function loadOrgManagementList() {
     const tbody = document.getElementById('orgManagementTableBody');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;">加载中...</td></tr>';
 
     try {
         const response = await fetch('/api/admin/organizations');
         const result = await response.json();
 
         if (result.status !== 'success' || !result.organizations) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#dc3545;">加载失败</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:#dc3545;">加载失败</td></tr>`;
             return;
         }
 
         if (result.organizations.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;">暂无承建单位</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;">暂无承建单位</td></tr>';
             return;
         }
 
         tbody.innerHTML = '';
         result.organizations.forEach(org => {
             const tr = document.createElement('tr');
+            const isPending = org.status === 'pending';
+            const statusLabel = isPending ? '待审批' : (org.status === 'rejected' ? '已拒绝' : '已审批');
+            const statusColor = isPending ? '#fd7e14' : (org.status === 'rejected' ? '#dc3545' : '#28a745');
             tr.innerHTML = `
                 <td style="padding:8px;border-bottom:1px solid #eee;"><input type="checkbox" class="org-checkbox" value="${org.name}"></td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${org.name}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${org.admin_name || '-'}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${org.user_count || 0}</td>
+                <td style="padding:8px;border-bottom:1px solid #eee;"><span style="color:${statusColor};font-weight:500;">${statusLabel}</span></td>
                 <td style="padding:8px;border-bottom:1px solid #eee;white-space:nowrap;">
+                    ${isPending ? `<button class="btn btn-sm" style="margin-right:4px;padding:4px 8px;font-size:12px;background:#28a745;color:#fff;border:none;border-radius:3px;cursor:pointer;" data-action="approve">审批通过</button>` : ''}
+                    ${isPending ? `<button class="btn btn-sm" style="margin-right:4px;padding:4px 8px;font-size:12px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;" data-action="reject">拒绝</button>` : ''}
                     <button class="btn btn-sm btn-primary" style="margin-right:4px;padding:4px 8px;font-size:12px;">编辑</button>
                     <button class="btn btn-sm btn-danger" style="padding:4px 8px;font-size:12px;">删除</button>
                 </td>
             `;
-            const buttons = tr.querySelectorAll('button');
-            buttons[0].addEventListener('click', () => openOrgEditModal(org));
-            buttons[1].addEventListener('click', () => deleteOrganization(org.name));
+            // Bind approve/reject buttons
+            const approveBtn = tr.querySelector('[data-action="approve"]');
+            const rejectBtn = tr.querySelector('[data-action="reject"]');
+            if (approveBtn) approveBtn.addEventListener('click', () => approveOrganization(org.name, 'approve'));
+            if (rejectBtn) rejectBtn.addEventListener('click', () => approveOrganization(org.name, 'reject'));
+            // Bind edit/delete buttons
+            const actionBtns = tr.querySelectorAll('.btn-primary, .btn-danger');
+            const editBtn = tr.querySelector('.btn-primary');
+            const deleteBtn = tr.querySelector('.btn-danger');
+            if (editBtn) editBtn.addEventListener('click', () => openOrgEditModal(org));
+            if (deleteBtn) deleteBtn.addEventListener('click', () => deleteOrganization(org.name));
             tbody.appendChild(tr);
         });
     } catch (error) {
         console.error('加载承建单位列表失败:', error);
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#dc3545;">加载失败，请稍后重试</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:#dc3545;">加载失败，请稍后重试</td></tr>`;
     }
 }
 
@@ -508,6 +522,25 @@ export async function batchDeleteOrganizations() {
         }
         showNotification(msg, result.status === 'success' ? 'success' : 'error');
         if (result.status === 'success') loadOrgManagementList();
+    });
+}
+
+async function approveOrganization(name, action) {
+    const label = action === 'approve' ? '审批通过' : '拒绝';
+    showConfirmModal(`${label}承建单位`, `确定${label}承建单位「${name}」吗？`, async () => {
+        try {
+            const response = await fetch('/api/admin/organizations/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, action })
+            });
+            const result = await response.json();
+            showNotification(result.message || (result.status === 'success' ? '操作成功' : '操作失败'), result.status === 'success' ? 'success' : 'error');
+            if (result.status === 'success') loadOrgManagementList();
+        } catch (error) {
+            console.error('审批承建单位失败:', error);
+            showNotification('审批失败，请稍后重试', 'error');
+        }
     });
 }
 

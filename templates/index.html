@@ -229,9 +229,12 @@
         
         .dashboard-charts {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: 1fr 1fr;
             gap: 24px;
             margin-bottom: 30px;
+        }
+        @media (max-width: 768px) {
+            .dashboard-charts { grid-template-columns: 1fr; }
         }
         
         .chart-box {
@@ -1272,7 +1275,13 @@
                 </div>
                 <div class="form-group">
                     <label>乙方（施工单位）</label>
-                    <input type="text" id="newProjectPartyB" placeholder="输入乙方单位名称">
+                    <select id="newProjectPartyB" class="form-control">
+                        <option value="">-- 请选择承建单位 --</option>
+                    </select>
+                    <div id="newProjectPartyBCustomWrap" style="display:none; margin-top:6px;">
+                        <input type="text" id="newProjectPartyBCustom" placeholder="输入新承建单位名称" class="form-control">
+                        <div style="font-size:11px; color:#e67e22; margin-top:2px;">新增承建单位需PMO审批后生效</div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>监理单位</label>
@@ -1314,7 +1323,13 @@
                 </div>
                 <div class="form-group">
                     <label>乙方（施工单位）</label>
-                    <input type="text" id="editProjectPartyB" placeholder="输入乙方单位名称">
+                    <select id="editProjectPartyB" class="form-control">
+                        <option value="">-- 请选择承建单位 --</option>
+                    </select>
+                    <div id="editProjectPartyBCustomWrap" style="display:none; margin-top:6px;">
+                        <input type="text" id="editProjectPartyBCustom" placeholder="输入新承建单位名称" class="form-control">
+                        <div style="font-size:11px; color:#e67e22; margin-top:2px;">新增承建单位需PMO审批后生效</div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>监理单位</label>
@@ -3068,11 +3083,12 @@
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">名称</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">管理员</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">用户数量</th>
+                            <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">状态</th>
                             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="orgManagementTableBody">
-                        <tr><td colspan="5" style="padding:20px;text-align:center;color:#999;">加载中...</td></tr>
+                        <tr><td colspan="6" style="padding:20px;text-align:center;color:#999;">加载中...</td></tr>
                     </tbody>
                 </table>
             </div>

@@ -44,6 +44,19 @@ export async function getReportData(reportType) {
 }
 
 /**
+ * 获取文档变化统计数据
+ */
+export async function getDocChangesData(period) {
+    try {
+        const response = await fetch(`/api/projects/reports/doc-changes?period=${encodeURIComponent(period)}`);
+        return await response.json();
+    } catch (error) {
+        console.error('获取文档变化数据失败:', error);
+        return { status: 'error', message: '获取文档变化数据失败' };
+    }
+}
+
+/**
  * 获取消息列表
  */
 export async function getMessages(isRead, limit = 50, offset = 0) {

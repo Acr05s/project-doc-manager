@@ -232,7 +232,13 @@ export async function handleCreateProject(e) {
     
     const projectName = document.getElementById('newProjectName').value;
     const partyA = document.getElementById('newProjectPartyA').value;
-    const partyB = document.getElementById('newProjectPartyB').value;
+    const partyBSelect = document.getElementById('newProjectPartyB');
+    let partyB = partyBSelect ? partyBSelect.value : '';
+    let isNewOrg = false;
+    if (partyB === '__new__') {
+        partyB = (document.getElementById('newProjectPartyBCustom') || {}).value || '';
+        isNewOrg = true;
+    }
     const supervisor = document.getElementById('newProjectSupervisor').value;
     const manager = document.getElementById('newProjectManager').value;
     const duration = document.getElementById('newProjectDuration').value;
@@ -248,11 +254,12 @@ export async function handleCreateProject(e) {
         const response = await fetch('/api/projects/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                name: projectName, 
+            body: JSON.stringify({
+                name: projectName,
                 description: projectDescription,
                 party_a: partyA,
                 party_b: partyB,
+                is_new_org: isNewOrg,
                 supervisor: supervisor,
                 manager: manager,
                 duration: duration
@@ -299,7 +306,7 @@ export async function openEditProjectModal(projectId) {
         document.getElementById('editProjectId').value = project.id;
         document.getElementById('editProjectName').value = project.name || '';
         document.getElementById('editProjectPartyA').value = project.party_a || '';
-        document.getElementById('editProjectPartyB').value = project.party_b || '';
+        await loadOrganizationsForDropdown('editProjectPartyB', project.party_b || '');
         document.getElementById('editProjectSupervisor').value = project.supervisor || '';
         document.getElementById('editProjectManager').value = project.manager || '';
         document.getElementById('editProjectDuration').value = project.duration || '';
@@ -336,7 +343,13 @@ export async function handleEditProjectSave(e) {
     const projectId = document.getElementById('editProjectId').value;
     const projectName = document.getElementById('editProjectName').value;
     const partyA = document.getElementById('editProjectPartyA').value;
-    const partyB = document.getElementById('editProjectPartyB').value;
+    const editPartyBSelect = document.getElementById('editProjectPartyB');
+    let partyB = editPartyBSelect ? editPartyBSelect.value : '';
+    let isNewOrg = false;
+    if (partyB === '__new__') {
+        partyB = (document.getElementById('editProjectPartyBCustom') || {}).value || '';
+        isNewOrg = true;
+    }
     const supervisor = document.getElementById('editProjectSupervisor').value;
     const manager = document.getElementById('editProjectManager').value;
     const duration = document.getElementById('editProjectDuration').value;
@@ -357,6 +370,7 @@ export async function handleEditProjectSave(e) {
                 description: projectDescription,
                 party_a: partyA,
                 party_b: partyB,
+                is_new_org: isNewOrg,
                 supervisor: supervisor,
                 manager: manager,
                 duration: duration
@@ -368,8 +382,10 @@ export async function handleEditProjectSave(e) {
         if (result.status === 'success') {
             showNotification('项目信息更新成功', 'success');
             closeEditProjectModal();
-            // 刷新项目列表
+            // 刷新项目列表（侧栏 + 下拉选择）
             await loadProjectSelectList();
+            await loadProjectsList();
+            renderProjectsList();
             // 如果当前打开的就是该项目，刷新显示
             if (appState.currentProjectId === projectId) {
                 const project = await loadProject(projectId);
@@ -3920,19 +3936,22 @@ export function toggleDeletedProjects() {
  */
 export function openNewProjectModal() {
     closeProjectSelectModal();
-    
+
     const modal = document.getElementById('newProjectModal');
     if (modal) {
         modal.classList.add('show');
-        // 承建单位角色自动带入乙方信息
-        const partyBInput = document.getElementById('newProjectPartyB');
-        if (partyBInput && !partyBInput.value) {
-            const user = getCurrentUser();
-            if (user && user.organization &&
-                (user.role === 'project_admin' || user.role === 'contractor')) {
-                partyBInput.value = user.organization;
+        // 加载承建单位下拉
+        loadOrganizationsForDropdown('newProjectPartyB').then(() => {
+            // 承建单位角色自动带入乙方信息
+            const partyBSelect = document.getElementById('newProjectPartyB');
+            if (partyBSelect) {
+                const user = getCurrentUser();
+                if (user && user.organization &&
+                    (user.role === 'project_admin' || user.role === 'contractor')) {
+                    partyBSelect.value = user.organization;
+                }
             }
-        }
+        });
     }
 }
 
@@ -3944,6 +3963,57 @@ function formatDateTime(dateStr) {
         return date.toLocaleString('zh-CN');
     } catch {
         return dateStr;
+    }
+}
+
+/**
+ * 加载承建单位列表到下拉框
+ */
+async function loadOrganizationsForDropdown(selectId, currentValue) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const customWrapId = selectId + 'CustomWrap';
+    const customWrap = document.getElementById(customWrapId);
+    select.innerHTML = '<option value="">-- 请选择承建单位 --</option>';
+    try {
+        const resp = await fetch('/organizations');
+        const result = await resp.json();
+        const orgs = result.organizations || [];
+        orgs.forEach(function(name) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('加载承建单位列表失败:', e);
+    }
+    // 添加"新建"选项
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new__';
+    newOpt.textContent = '+ 新建承建单位...';
+    select.appendChild(newOpt);
+
+    // 如果有当前值且不在列表中，添加为选项
+    if (currentValue) {
+        const exists = Array.from(select.options).some(function(o) { return o.value === currentValue; });
+        if (!exists) {
+            const opt = document.createElement('option');
+            opt.value = currentValue;
+            opt.textContent = currentValue + ' (未审批)';
+            select.insertBefore(opt, select.lastChild);
+        }
+        select.value = currentValue;
+    }
+
+    // 切换显示自定义输入框
+    select.onchange = function() {
+        if (customWrap) {
+            customWrap.style.display = select.value === '__new__' ? 'block' : 'none';
+        }
+    };
+    if (customWrap) {
+        customWrap.style.display = select.value === '__new__' ? 'block' : 'none';
     }
 }
 
