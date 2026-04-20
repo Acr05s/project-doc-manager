@@ -1,5 +1,6 @@
 import { appState } from './app-state.js';
 import { showLoading, showNotification, showConfirmModal } from './ui.js';
+import { formatDateTimeDisplay } from './utils.js';
 
 let _modalProjects = [];
 let _recipientOptions = [];
@@ -458,6 +459,8 @@ function fillEditorByTask(task) {
     if (popupEnabled) popupEnabled.checked = task.login_popup_enabled !== false;
     var skipHolidays = document.getElementById('scheduledSkipHolidays');
     if (skipHolidays) skipHolidays.checked = !!task.skip_holidays;
+    var skipWeekends = document.getElementById('scheduledSkipWeekends');
+    if (skipWeekends) skipWeekends.checked = !!task.skip_weekends;
     var ext = document.getElementById('scheduledExternalEmails');
     var extVal = Array.isArray(task.external_emails) ? task.external_emails.join(', ') : '';
     if (ext) ext.value = extVal;
@@ -512,6 +515,8 @@ function clearEditorToNewTask() {
     if (popupEnabled) popupEnabled.checked = true;
     var skipHolidays = document.getElementById('scheduledSkipHolidays');
     if (skipHolidays) skipHolidays.checked = false;
+    var skipWeekends = document.getElementById('scheduledSkipWeekends');
+    if (skipWeekends) skipWeekends.checked = false;
     var ext = document.getElementById('scheduledExternalEmails');
     if (ext) ext.value = '';
     var enableExtCb = document.getElementById('scheduledEnableExternalEmails');
@@ -598,6 +603,7 @@ function buildPayloadFromEditorForm() {
     var vuCb = document.getElementById('scheduledEnableValidUntil');
     if (vuCb && vuCb.checked) validUntil = (document.getElementById('scheduledValidUntil') || {}).value || '';
     var skipHolidaysEl = document.getElementById('scheduledSkipHolidays');
+    var skipWeekendsEl = document.getElementById('scheduledSkipWeekends');
     return {
         task_name: taskName,
         task_type: taskType,
@@ -613,7 +619,8 @@ function buildPayloadFromEditorForm() {
         recipient_user_ids: collectSelectedRecipientUserIds(),
         external_emails: extEmails,
         valid_until: validUntil,
-        skip_holidays: !!(skipHolidaysEl && skipHolidaysEl.checked)
+        skip_holidays: !!(skipHolidaysEl && skipHolidaysEl.checked),
+        skip_weekends: !!(skipWeekendsEl && skipWeekendsEl.checked)
     };
 }
 
@@ -770,6 +777,10 @@ export async function openScheduledReportModal() {
         if (batchEnableBtn) batchEnableBtn.onclick = batchEnableTasks;
         var batchDeleteBtn = document.getElementById('scheduledTaskBatchDeleteBtn');
         if (batchDeleteBtn) batchDeleteBtn.onclick = batchDeleteTasks;
+        var allHistoryBtn = document.getElementById('scheduledAllHistoryBtn');
+        if (allHistoryBtn) allHistoryBtn.onclick = openAllHistoryModal;
+        var holidayBtn = document.getElementById('scheduledHolidayMgmtBtn');
+        if (holidayBtn) holidayBtn.onclick = openHolidayModal;
         var modal = document.getElementById('scheduledReportModal');
         if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
     } catch (e) {
@@ -844,7 +855,8 @@ export async function applyScheduledReportConfigToSelected() {
 // ============== 发送历史 ==============
 let _historyProjectId = '';
 let _historyOffset = 0;
-const _historyLimit = 50;
+let _historyDays = 7;
+const _historyLimit = 200;
 
 function openScheduledTaskHistoryModal(taskId, projectId) {
     _historyProjectId = projectId || '';
@@ -856,10 +868,33 @@ function openScheduledTaskHistoryModal(taskId, projectId) {
         var projectName = task ? (task._project_name || projectId) : projectId;
         infoEl.textContent = '\u9879\u76ee: ' + projectName + ' | \u4efb\u52a1: ' + taskName;
     }
+    var daysFilter = document.getElementById('scheduledHistoryDaysFilter');
+    if (daysFilter) daysFilter.value = '7';
+    _historyDays = 7;
     var modal = document.getElementById('scheduledTaskHistoryModal');
     if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
     loadScheduledHistory(false);
 }
+
+function openAllHistoryModal() {
+    _historyProjectId = '';
+    _historyOffset = 0;
+    var infoEl = document.getElementById('scheduledHistoryTaskInfo');
+    if (infoEl) infoEl.textContent = '\u5168\u90e8\u53d1\u9001\u8bb0\u5f55';
+    var daysFilter = document.getElementById('scheduledHistoryDaysFilter');
+    if (daysFilter) daysFilter.value = '3';
+    _historyDays = 3;
+    var modal = document.getElementById('scheduledTaskHistoryModal');
+    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
+    loadScheduledHistory(false);
+}
+
+window.applyHistoryDaysFilter = function() {
+    var daysFilter = document.getElementById('scheduledHistoryDaysFilter');
+    _historyDays = daysFilter ? Number(daysFilter.value) : 0;
+    _historyOffset = 0;
+    loadScheduledHistory(false);
+};
 
 function closeScheduledTaskHistoryModal() {
     var modal = document.getElementById('scheduledTaskHistoryModal');
@@ -874,6 +909,7 @@ async function loadScheduledHistory(append) {
     try {
         var query = 'limit=' + _historyLimit + '&offset=' + _historyOffset;
         if (_historyProjectId) query += '&project_id=' + encodeURIComponent(_historyProjectId);
+        if (_historyDays > 0) query += '&days=' + _historyDays;
         var resp = await fetch('/api/projects/report-schedules/history?' + query, { cache: 'no-store' });
         var result = await safeParseJson(resp);
         if (result.status !== 'success') {
@@ -891,13 +927,17 @@ async function loadScheduledHistory(append) {
         var freqMap = { daily: '\u65e5\u62a5', weekly: '\u5468\u62a5', monthly: '\u6708\u62a5' };
         logs.forEach(function(log) {
             var tr = document.createElement('tr');
+            var tz = (appState.systemSettings && appState.systemSettings.timezone) || 'Asia/Shanghai';
+            var displayTime = formatDateTimeDisplay(log.operation_time, tz);
+            var displayStart = formatDateTimeDisplay(log.period_start, tz);
+            var displayEnd = formatDateTimeDisplay(log.period_end, tz);
             var successColor = Number(log.success_count) >= Number(log.total) ? '#28a745' : '#dc3545';
-            tr.innerHTML = '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + escapeHtml(log.operation_time || '-') + '</td>' +
+            tr.innerHTML = '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + escapeHtml(displayTime) + '</td>' +
                 '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(log.target_name || log.target_id || '-') + '</td>' +
                 '<td style="border:1px solid #e2e8f0; padding:6px;">' + (freqMap[log.frequency] || escapeHtml(log.frequency)) + '</td>' +
                 '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(log.trigger_type || '-') + '</td>' +
                 '<td style="border:1px solid #e2e8f0; padding:6px; text-align:center;"><span style="color:' + successColor + ';">' + log.success_count + '/' + log.total + '</span></td>' +
-                '<td style="border:1px solid #e2e8f0; padding:6px; font-size:11px;">' + escapeHtml(log.period_start || '') + ' ~ ' + escapeHtml(log.period_end || '') + '</td>';
+                '<td style="border:1px solid #e2e8f0; padding:6px; font-size:11px;">' + escapeHtml(displayStart) + ' ~ ' + escapeHtml(displayEnd) + '</td>';
             tbody.appendChild(tr);
         });
         var loadMoreBtn = document.getElementById('scheduledHistoryLoadMoreBtn');
@@ -913,6 +953,130 @@ window.loadMoreScheduledHistory = function() {
     _historyOffset += _historyLimit;
     loadScheduledHistory(true);
 };
+
+// ============================================================================
+// 节假日数据管理
+// ============================================================================
+async function openHolidayModal() {
+    var modal = document.getElementById('scheduledHolidayModal');
+    if (!modal) return;
+    modal.classList.add('show');
+    modal.style.display = 'flex';
+    // 填充年份选项
+    var sel = document.getElementById('holidayUpdateYear');
+    if (sel) {
+        sel.innerHTML = '';
+        var curYear = new Date().getFullYear();
+        for (var y = curYear; y <= curYear + 2; y++) {
+            var opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y + '\u5e74';
+            sel.appendChild(opt);
+        }
+    }
+    document.getElementById('holidayUpdateResult').style.display = 'none';
+    document.getElementById('holidayFetchStatus').textContent = '';
+    await loadHolidayStatus();
+}
+
+function closeHolidayModal() {
+    var modal = document.getElementById('scheduledHolidayModal');
+    if (modal) { modal.classList.remove('show'); modal.style.display = 'none'; }
+}
+window.closeHolidayModal = closeHolidayModal;
+
+async function loadHolidayStatus() {
+    var area = document.getElementById('holidayStatusArea');
+    if (!area) return;
+    area.innerHTML = '<div style="font-size:12px; color:#999;">\u52a0\u8f7d\u4e2d...</div>';
+    try {
+        var resp = await fetch('/api/projects/report-schedules/holidays/status', { cache: 'no-store' });
+        var result = await safeParseJson(resp);
+        if (result.status !== 'success') {
+            area.innerHTML = '<div style="color:#dc3545; font-size:13px;">\u52a0\u8f7d\u5931\u8d25</div>';
+            return;
+        }
+        var data = result.data || {};
+        var years = data.years || {};
+        var html = '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
+        html += '<thead><tr style="background:#f0fdf4;">';
+        html += '<th style="border:1px solid #d1fae5; padding:5px;">年份</th>';
+        html += '<th style="border:1px solid #d1fae5; padding:5px;">数据来源</th>';
+        html += '<th style="border:1px solid #d1fae5; padding:5px;">假日数</th>';
+        html += '<th style="border:1px solid #d1fae5; padding:5px;">调休数</th>';
+        html += '</tr></thead><tbody>';
+        var yearKeys = Object.keys(years).sort();
+        if (yearKeys.length === 0) {
+            html += '<tr><td colspan="4" style="text-align:center; padding:10px; color:#999;">暂无数据</td></tr>';
+        }
+        for (var i = 0; i < yearKeys.length; i++) {
+            var yr = yearKeys[i];
+            var info = years[yr];
+            var srcLabel = info.source === 'builtin' ? '内置' : info.source === 'online' ? '在线' : '内置+在线';
+            var srcColor = info.source === 'builtin' ? '#6b7280' : '#059669';
+            html += '<tr>';
+            html += '<td style="border:1px solid #e5e7eb; padding:5px; text-align:center;">' + yr + '</td>';
+            html += '<td style="border:1px solid #e5e7eb; padding:5px; text-align:center; color:' + srcColor + ';">' + srcLabel + '</td>';
+            html += '<td style="border:1px solid #e5e7eb; padding:5px; text-align:center;">' + (info.holidays || 0) + '</td>';
+            html += '<td style="border:1px solid #e5e7eb; padding:5px; text-align:center;">' + (info.shifts || 0) + '</td>';
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        if (data.cache_updated_at) {
+            html += '<div style="font-size:11px; color:#999; margin-top:6px;">缓存更新时间: ' + data.cache_updated_at.replace('T', ' ').substring(0, 19) + '</div>';
+        }
+        area.innerHTML = html;
+    } catch (e) {
+        area.innerHTML = '<div style="color:#dc3545; font-size:13px;">加载异常: ' + e.message + '</div>';
+    }
+}
+
+async function fetchHolidayData() {
+    var sel = document.getElementById('holidayUpdateYear');
+    var year = sel ? parseInt(sel.value) : new Date().getFullYear();
+    var statusEl = document.getElementById('holidayFetchStatus');
+    var resultEl = document.getElementById('holidayUpdateResult');
+    var btn = document.getElementById('holidayFetchBtn');
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = '\u6b63\u5728\u83b7\u53d6...';
+    if (resultEl) resultEl.style.display = 'none';
+    try {
+        var resp = await fetch('/api/projects/report-schedules/holidays/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ year: year }),
+        });
+        var result = await safeParseJson(resp);
+        if (statusEl) statusEl.textContent = '';
+        if (resultEl) {
+            resultEl.style.display = 'block';
+            if (result.status === 'success') {
+                resultEl.style.background = '#f0fdf4';
+                resultEl.style.color = '#065f46';
+                resultEl.style.border = '1px solid #a7f3d0';
+                resultEl.textContent = result.message || (year + '\u5e74\u6570\u636e\u5df2\u66f4\u65b0');
+            } else {
+                resultEl.style.background = '#fef2f2';
+                resultEl.style.color = '#991b1b';
+                resultEl.style.border = '1px solid #fecaca';
+                resultEl.textContent = result.message || '\u83b7\u53d6\u5931\u8d25';
+            }
+        }
+        await loadHolidayStatus();
+    } catch (e) {
+        if (statusEl) statusEl.textContent = '';
+        if (resultEl) {
+            resultEl.style.display = 'block';
+            resultEl.style.background = '#fef2f2';
+            resultEl.style.color = '#991b1b';
+            resultEl.style.border = '1px solid #fecaca';
+            resultEl.textContent = '\u7f51\u7edc\u8bf7\u6c42\u5931\u8d25: ' + e.message;
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+window.fetchHolidayData = fetchHolidayData;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('change', function(e) {

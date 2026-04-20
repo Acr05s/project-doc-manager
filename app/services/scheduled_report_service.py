@@ -95,6 +95,11 @@ class ScheduledReportService:
                 )
             ''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_project ON scheduled_tasks(project_id)')
+            # 自动添加新列（如果不存在）
+            try:
+                conn.execute('ALTER TABLE scheduled_tasks ADD COLUMN skip_weekends INTEGER DEFAULT 0')
+            except Exception as e:
+                logger.debug(f'列skip_weekends可能已存在: {e}')  # 列已存在
             conn.commit()
 
     def _migrate_json_to_db(self):
@@ -143,10 +148,10 @@ class ScheduledReportService:
                  send_time, weekday, day_of_month, run_date, include_pdf,
                  in_app_message_enabled, login_popup_enabled, external_emails,
                  recipient_user_ids, last_run_key, run_count, last_run_at,
-                 valid_until, skip_holidays, created_by_user_id, created_by_username,
-                 created_by_display_name, created_by_organization,
+                 valid_until, skip_holidays, skip_weekends, created_by_user_id,
+                 created_by_username, created_by_display_name, created_by_organization,
                  created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''', (
                 task['task_id'], task['project_id'], task['task_name'],
                 task['task_type'], 1 if task.get('enabled') else 0,
@@ -160,6 +165,7 @@ class ScheduledReportService:
                 task.get('last_run_key', ''), task.get('run_count', 0),
                 task.get('last_run_at', ''), task.get('valid_until', ''),
                 1 if task.get('skip_holidays') else 0,
+                1 if task.get('skip_weekends') else 0,
                 task.get('created_by_user_id', 0),
                 task.get('created_by_username', ''),
                 task.get('created_by_display_name', ''),
@@ -176,6 +182,7 @@ class ScheduledReportService:
         d['in_app_message_enabled'] = bool(d.get('in_app_message_enabled', 1))
         d['login_popup_enabled'] = bool(d.get('login_popup_enabled', 1))
         d['skip_holidays'] = bool(d.get('skip_holidays', 0))
+        d['skip_weekends'] = bool(d.get('skip_weekends', 0))
         try:
             d['external_emails'] = json.loads(d.get('external_emails') or '[]')
         except Exception:
@@ -209,6 +216,7 @@ class ScheduledReportService:
         'last_run_at': '',
         'valid_until': '',
         'skip_holidays': False,
+        'skip_weekends': False,
         'created_by_user_id': 0,
             'created_by_username': '',
             'created_by_display_name': '',
@@ -292,6 +300,7 @@ class ScheduledReportService:
         valid_until = str(merged.get('valid_until') or '').strip()[:10]
         merged['valid_until'] = valid_until
         merged['skip_holidays'] = bool(merged.get('skip_holidays', False))
+        merged['skip_weekends'] = bool(merged.get('skip_weekends', False))
         try:
             merged['created_by_user_id'] = int(merged.get('created_by_user_id') or 0)
         except Exception:
@@ -479,40 +488,43 @@ class ScheduledReportService:
         # 直接从数据库获取所有启用的任务
         all_tasks = self.list_all_tasks()
         for task in all_tasks:
-            project_id = str(task.get('project_id') or '')
-            if not project_id:
-                continue
-            if not task.get('enabled'):
-                continue
-            # 检查截止日期：到期则自动禁用
-            valid_until = str(task.get('valid_until') or '').strip()
-            if valid_until:
-                try:
-                    deadline = datetime.strptime(valid_until, '%Y-%m-%d')
-                    if now.replace(tzinfo=None) > deadline:
-                        logger.info(f'[ScheduledReportService] task {task.get("task_id")} expired ({valid_until}), auto-disabling')
-                        self.update_task(project_id, str(task.get('task_id') or ''), {'enabled': False})
-                        continue
-                except Exception:
-                    pass
-            if not self._is_due(task, now):
-                continue
-            run_key = self._build_run_key(task, now)
-            if run_key and task.get('last_run_key') == run_key:
-                continue
-            logger.info(f'[ScheduledReportService] task {task.get("task_id")} is due (project={project_id}, run_key={run_key}), executing...')
             try:
-                result = self._run_project_report(project_id, cfg=task, manual=False)
-                success = result.get('status') == 'success'
+                project_id = str(task.get('project_id') or '')
+                if not project_id:
+                    continue
+                if not task.get('enabled'):
+                    continue
+                # 检查截止日期：到期则自动禁用
+                valid_until = str(task.get('valid_until') or '').strip()
+                if valid_until:
+                    try:
+                        deadline = datetime.strptime(valid_until, '%Y-%m-%d')
+                        if now.replace(tzinfo=None) > deadline:
+                            logger.info(f'[ScheduledReportService] task {task.get("task_id")} expired ({valid_until}), auto-disabling')
+                            self.update_task(project_id, str(task.get('task_id') or ''), {'enabled': False})
+                            continue
+                    except Exception:
+                        pass
+                if not self._is_due(task, now):
+                    continue
+                run_key = self._build_run_key(task, now)
+                if run_key and task.get('last_run_key') == run_key:
+                    continue
+                logger.info(f'[ScheduledReportService] task {task.get("task_id")} is due (project={project_id}, run_key={run_key}), executing...')
+                try:
+                    result = self._run_project_report(project_id, cfg=task, manual=False)
+                    success = result.get('status') == 'success'
+                except Exception as e:
+                    logger.error(f'[ScheduledReportService] run report failed for {project_id}/{task.get("task_id")}: {e}')
+                    success = False
+                self._mark_task_run_result(
+                    project_id=project_id,
+                    task_id=str(task.get('task_id') or ''),
+                    success=success,
+                    run_key=run_key,
+                )
             except Exception as e:
-                logger.error(f'[ScheduledReportService] run report failed for {project_id}/{task.get("task_id")}: {e}')
-                success = False
-            self._mark_task_run_result(
-                project_id=project_id,
-                task_id=str(task.get('task_id') or ''),
-                success=success,
-                run_key=run_key,
-            )
+                logger.error(f'[ScheduledReportService] error processing task {task.get("task_id", "?")}: {e}')
 
     def _list_project_ids(self) -> List[str]:
         if not self.doc_manager:
@@ -550,9 +562,14 @@ class ScheduledReportService:
 
         frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
         if frequency == 'daily':
+            # 跳过周末
+            if cfg.get('skip_weekends'):
+                if now.weekday() >= 5:  # 5=Saturday, 6=Sunday
+                    return False
+            # 跳过中国法定节假日
             if cfg.get('skip_holidays'):
-                from app.services.china_holidays import is_workday
-                if not is_workday(now.date()):
+                from app.services.china_holidays import is_holiday
+                if is_holiday(now.date()):
                     return False
             return True
         if frequency == 'weekly':
@@ -563,6 +580,9 @@ class ScheduledReportService:
         return now.day == day_of_month
 
     def _build_run_key(self, cfg: Dict[str, Any], now: datetime) -> str:
+        task_type = str(cfg.get('task_type', 'periodic')).strip().lower()
+        if task_type == 'one_time':
+            return now.strftime('O%Y-%m-%d')
         frequency = str(cfg.get('frequency', 'weekly')).strip().lower()
         if frequency == 'daily':
             return now.strftime('D%Y-%m-%d')

@@ -1439,6 +1439,8 @@
                             <button type="button" class="btn btn-secondary btn-sm" id="scheduledTaskSelectAllBtn">全选</button>
                             <button type="button" class="btn btn-warning btn-sm" id="scheduledTaskBatchEnableBtn">批量启用</button>
                             <button type="button" class="btn btn-danger btn-sm" id="scheduledTaskBatchDeleteBtn">批量删除</button>
+                            <button type="button" class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" id="scheduledAllHistoryBtn">发送历史</button>
+                            <button type="button" class="btn btn-sm" style="background:#059669;color:#fff;border:none;" id="scheduledHolidayMgmtBtn">节假日管理</button>
                             <button type="button" class="btn btn-info btn-sm" id="scheduledTaskNewBtn">+ 新建任务</button>
                         </div>
                     </div>
@@ -1499,9 +1501,13 @@
                             <label style="display:inline;"><input type="radio" name="scheduledFrequency" value="monthly"> 每月（月报）</label>
                         </div>
                         <div id="scheduledSkipHolidaysWrap" style="display:none; margin-top:8px;">
+                            <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; margin-right:16px;">
+                                <input type="checkbox" id="scheduledSkipWeekends">
+                                跳过周末（周六、周日不执行）
+                            </label>
                             <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
                                 <input type="checkbox" id="scheduledSkipHolidays">
-                                跳过非工作日（法定节假日及周末不执行）
+                                跳过中国法定节假日（春节、国庆等不执行）
                             </label>
                         </div>
                     </div>
@@ -1605,9 +1611,18 @@
         <div class="modal-content" style="max-width:90vw; min-width:500px; width:900px; max-height:90vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both;">
             <span class="close" onclick="closeScheduledTaskHistoryModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时任务发送记录</h2>
-            <div style="padding:12px 18px 4px; font-size:13px; color:#456;">
+            <div style="padding:12px 18px 4px; font-size:13px; color:#456; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                 <span id="scheduledHistoryTaskInfo"></span>
-                <span id="scheduledHistoryTotal" style="margin-left:12px; color:#888;"></span>
+                <span id="scheduledHistoryTotal" style="color:#888;"></span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:6px;">
+                    <label style="font-size:12px; color:#666;">时间范围:</label>
+                    <select id="scheduledHistoryDaysFilter" style="font-size:12px; padding:2px 6px; border:1px solid #d0dbe8; border-radius:4px;" onchange="applyHistoryDaysFilter()">
+                        <option value="3">最近3天</option>
+                        <option value="7" selected>最近7天</option>
+                        <option value="30">最近30天</option>
+                        <option value="0">全部</option>
+                    </select>
+                </div>
             </div>
             <div style="padding:8px 18px 18px; overflow-y:auto; flex:1;">
                 <table style="width:100%; border-collapse:collapse; font-size:12px;">
@@ -1631,6 +1646,33 @@
             </div>
             <div style="display:flex; justify-content:flex-end; padding:10px 18px; border-top:1px dashed #d7e3f3;">
                 <button type="button" class="btn btn-secondary" onclick="closeScheduledTaskHistoryModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 节假日数据管理 Modal -->
+    <div id="scheduledHolidayModal" class="modal" style="z-index:10060;">
+        <div class="modal-content" style="max-width:90vw; min-width:400px; width:560px; max-height:90vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both;">
+            <span class="close" onclick="closeHolidayModal()">&times;</span>
+            <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f0fdf4,#ecfdf5); border-bottom:1px solid #d1fae5;">中国法定节假日数据管理</h2>
+            <div style="padding:14px 18px; overflow-y:auto; flex:1;">
+                <div style="font-size:13px; color:#555; margin-bottom:12px;">
+                    数据来源: 国务院办公厅发布 + 在线API自动获取。可手动更新指定年份的节假日和调休数据。
+                </div>
+                <div id="holidayStatusArea" style="margin-bottom:14px;">
+                    <div style="font-size:12px; color:#999;">加载中...</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                    <label style="font-size:13px; white-space:nowrap;">更新年份:</label>
+                    <select id="holidayUpdateYear" style="font-size:13px; padding:4px 8px; border:1px solid #d0dbe8; border-radius:4px;">
+                    </select>
+                    <button type="button" class="btn btn-sm" style="background:#059669;color:#fff;border:none;" id="holidayFetchBtn" onclick="fetchHolidayData()">从网络获取</button>
+                    <span id="holidayFetchStatus" style="font-size:12px; color:#888;"></span>
+                </div>
+                <div id="holidayUpdateResult" style="display:none; margin-top:8px; padding:10px; border-radius:6px; font-size:13px;"></div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; padding:10px 18px; border-top:1px dashed #d7e3f3;">
+                <button type="button" class="btn btn-secondary" onclick="closeHolidayModal()">关闭</button>
             </div>
         </div>
     </div>

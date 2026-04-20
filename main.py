@@ -30,10 +30,14 @@ def create_app(config: Optional[Dict] = None) -> Flask:
     print(f"Template directory exists: {os.path.exists(template_dir)}")
     print(f"Test.html exists: {os.path.exists(os.path.join(template_dir, 'test.html'))}")
     
-    app = Flask(__name__, 
+    app = Flask(__name__,
                 template_folder=template_dir,
                 static_folder='static')
-    
+
+    # ── 反向代理支持：信任 X-Forwarded-For / X-Real-IP 头获取真实 IP ────
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
     # ── 安全加固：Secret Key（环境变量 > 持久化文件 > 自动生成）───────────
     from app.utils.security import load_or_create_secret_key, register_security_hooks
     from datetime import timedelta

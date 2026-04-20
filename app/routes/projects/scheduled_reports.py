@@ -1,7 +1,7 @@
 """项目定时报告路由。"""
 
 from flask import jsonify, request
-from flask_login import current_user, login_required
+from flask_login import current_user
 
 from app.services.scheduled_report_service import scheduled_report_service
 from app.models.user import user_manager
@@ -180,8 +180,9 @@ def get_report_send_history():
     """获取定时报告发送历史记录。"""
     try:
         project_id = request.args.get('project_id', '').strip()
-        limit = request.args.get('limit', 50, type=int)
+        limit = request.args.get('limit', 200, type=int)
         offset = request.args.get('offset', 0, type=int)
+        days = request.args.get('days', 0, type=int)  # 最近N天
 
         result = user_manager.get_operation_logs(
             limit=limit,
@@ -193,9 +194,22 @@ def get_report_send_history():
             return jsonify(result), 500
 
         logs = result.get('logs', [])
+
         # 按 project_id 过滤（target_id 存储的是 project_id）
         if project_id:
             logs = [log for log in logs if str(log.get('target_id', '')).strip() == project_id]
+
+        # 按日期范围过滤
+        if days > 0:
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=days)
+            cutoff_str = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+            filtered = []
+            for log in logs:
+                op_time = str(log.get('operation_time', '') or '').replace('T', ' ')[:19]
+                if op_time >= cutoff_str:
+                    filtered.append(log)
+            logs = filtered
 
         # 丰富日志信息：解析 details JSON
         enriched = []
@@ -216,11 +230,42 @@ def get_report_send_history():
                 entry['total'] = 0
                 entry['period_start'] = ''
                 entry['period_end'] = ''
-            entry['trigger_type'] = '手动' if log.get('username', '') == 'manual_scheduler' else '自动'
+            entry['trigger_type'] = '\u624b\u52a8' if log.get('username', '') == 'manual_scheduler' else '\u81ea\u52a8'
             enriched.append(entry)
 
-        # 重新计算过滤后的 total
-        total = result.get('total', 0) if not project_id else len(enriched)
+        total = len(enriched)
         return jsonify({'status': 'success', 'logs': enriched, 'total': total})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def get_holiday_status():
+    """获取中国法定节假日数据状态。"""
+    try:
+        from app.services.china_holidays import get_holiday_status as _get_status
+        status = _get_status()
+        return jsonify({'status': 'success', 'data': status})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def update_holiday_data():
+    """手动更新中国法定节假日数据（从在线API获取）。"""
+    try:
+        if not _is_pmo_plus():
+            return _forbidden_resp()
+
+        data = request.get_json() or {}
+        year = data.get('year')
+        if year is not None:
+            year = int(year)
+
+        from app.services.china_holidays import fetch_holidays_from_api
+        result = fetch_holidays_from_api(year)
+
+        if result.get('status') == 'success':
+            return jsonify({'status': 'success', 'message': result['message'], 'data': result})
+        else:
+            return jsonify({'status': 'error', 'message': result.get('message', '获取失败')}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

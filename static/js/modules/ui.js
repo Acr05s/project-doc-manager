@@ -1489,7 +1489,13 @@ function buildWatermarkImage(text, color = '#3c3c3c') {
     ctx.textBaseline = 'middle';
     ctx.font = '16px Microsoft YaHei';
     ctx.fillStyle = color || '#3c3c3c';
-    ctx.fillText(text, 0, 0);
+    // 支持多行：按 \n 分割
+    const lines = text.split('\n');
+    const lineHeight = 22;
+    const startY = -((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, i) => {
+        ctx.fillText(line, 0, startY + i * lineHeight);
+    });
     return canvas.toDataURL('image/png');
 }
 
@@ -1523,13 +1529,21 @@ function applyDynamicWatermark(settings) {
 
     const render = () => {
         const layer = ensureWatermarkLayer(opacity);
-        const parts = [];
-        if (selectedFields.includes('username')) parts.push(username);
-        if (selectedFields.includes('display_name')) parts.push(displayName);
-        if (selectedFields.includes('organization')) parts.push(org);
-        if (selectedFields.includes('datetime')) parts.push(formatNow());
-        if (selectedFields.includes('copyright')) parts.push(`版权所有:${copyrightText}`);
-        const text = parts.length > 0 ? parts.join(' | ') : `${username} | ${displayName} | ${org} | ${formatNow()}`;
+        const line1Parts = [];
+        const line2Parts = [];
+        if (selectedFields.includes('username')) line1Parts.push(username);
+        if (selectedFields.includes('display_name')) line1Parts.push(displayName);
+        if (selectedFields.includes('organization')) line1Parts.push(org);
+        if (selectedFields.includes('datetime')) line2Parts.push(formatNow());
+        if (selectedFields.includes('copyright')) line2Parts.push(`版权所有:${copyrightText}`);
+        let text;
+        if (line1Parts.length > 0 || line2Parts.length > 0) {
+            const l1 = line1Parts.length > 0 ? line1Parts.join(' | ') : '';
+            const l2 = line2Parts.length > 0 ? line2Parts.join(' | ') : '';
+            text = [l1, l2].filter(Boolean).join('\n');
+        } else {
+            text = `${username} | ${displayName} | ${org}\n${formatNow()}`;
+        }
         layer.style.backgroundImage = `url(${buildWatermarkImage(text, wmColor)})`;
         layer.style.display = 'block';
     };
