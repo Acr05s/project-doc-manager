@@ -26,6 +26,7 @@ from .scheduled_reports import (
     toggle_project_report_task,
     run_project_report_task_now,
     list_all_report_tasks,
+    get_report_send_history,
 )
 from .modules import modules_bp
 
@@ -117,6 +118,7 @@ project_bp.route('/<project_id>/report-schedule/run', methods=['POST'])(project_
 
 # 项目定时报告任务管理（新）
 project_bp.route('/report-schedules/all', methods=['GET'])(login_required(list_all_report_tasks))
+project_bp.route('/report-schedules/history', methods=['GET'])(login_required(get_report_send_history))
 project_bp.route('/<project_id>/report-schedules', methods=['GET'])(project_access_required(list_project_report_tasks))
 project_bp.route('/<project_id>/report-schedules', methods=['POST'])(project_access_required(create_project_report_task))
 project_bp.route('/<project_id>/report-schedules/<task_id>', methods=['PATCH'])(project_access_required(update_project_report_task))

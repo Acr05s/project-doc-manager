@@ -1,9 +1,10 @@
 """项目定时报告路由。"""
 
 from flask import jsonify, request
-from flask_login import current_user
+from flask_login import current_user, login_required
 
 from app.services.scheduled_report_service import scheduled_report_service
+from app.models.user import user_manager
 
 
 def _is_pmo_plus() -> bool:
@@ -171,5 +172,55 @@ def list_all_report_tasks():
         resp = jsonify({'status': 'success', 'tasks': enriched})
         resp.headers['Cache-Control'] = 'no-store'
         return resp
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def get_report_send_history():
+    """获取定时报告发送历史记录。"""
+    try:
+        project_id = request.args.get('project_id', '').strip()
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+
+        result = user_manager.get_operation_logs(
+            limit=limit,
+            offset=offset,
+            operation_types=['scheduled_report_send'],
+        )
+
+        if result.get('status') != 'success':
+            return jsonify(result), 500
+
+        logs = result.get('logs', [])
+        # 按 project_id 过滤（target_id 存储的是 project_id）
+        if project_id:
+            logs = [log for log in logs if str(log.get('target_id', '')).strip() == project_id]
+
+        # 丰富日志信息：解析 details JSON
+        enriched = []
+        import json as _json
+        for log in logs:
+            entry = dict(log)
+            details_raw = str(log.get('details', '') or '')
+            try:
+                details_obj = _json.loads(details_raw)
+                entry['frequency'] = details_obj.get('frequency', '-')
+                entry['success_count'] = details_obj.get('success_count', 0)
+                entry['total'] = details_obj.get('total', 0)
+                entry['period_start'] = details_obj.get('period_start', '')
+                entry['period_end'] = details_obj.get('period_end', '')
+            except Exception:
+                entry['frequency'] = '-'
+                entry['success_count'] = 0
+                entry['total'] = 0
+                entry['period_start'] = ''
+                entry['period_end'] = ''
+            entry['trigger_type'] = '手动' if log.get('username', '') == 'manual_scheduler' else '自动'
+            enriched.append(entry)
+
+        # 重新计算过滤后的 total
+        total = result.get('total', 0) if not project_id else len(enriched)
+        return jsonify({'status': 'success', 'logs': enriched, 'total': total})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

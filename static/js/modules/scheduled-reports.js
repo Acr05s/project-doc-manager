@@ -19,6 +19,41 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function enableColumnResize(table) {
+    if (!table) return;
+    var ths = table.querySelectorAll('thead th');
+    ths.forEach(function(th) {
+        th.style.position = 'relative';
+        var handle = document.createElement('div');
+        handle.className = 'col-resize-handle';
+        th.appendChild(handle);
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var startX = e.pageX;
+            var startWidth = th.offsetWidth;
+            handle.classList.add('active');
+            table.style.tableLayout = 'fixed';
+            // Snapshot widths so other columns stay put
+            Array.from(table.querySelectorAll('thead th')).forEach(function(h) {
+                h.style.width = h.offsetWidth + 'px';
+            });
+            function onMove(ev) {
+                var diff = ev.pageX - startX;
+                var newWidth = Math.max(40, startWidth + diff);
+                th.style.width = newWidth + 'px';
+            }
+            function onUp() {
+                handle.classList.remove('active');
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
+}
+
 function todayDateString() {
     return new Date().toISOString().split('T')[0];
 }
@@ -269,12 +304,14 @@ function renderTaskList(tasks) {
         cells += '<button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-task-id="' + tid + '" data-project-id="' + pid + '">\u7f16\u8f91</button> ';
         cells += '<button type="button" class="btn btn-info btn-sm" data-action="toggle" data-task-id="' + tid + '" data-project-id="' + pid + '">' + (task.enabled ? '\u505c\u7528' : '\u542f\u7528') + '</button> ';
         cells += '<button type="button" class="btn btn-warning btn-sm" data-action="run" data-task-id="' + tid + '" data-project-id="' + pid + '">\u6267\u884c</button> ';
+        cells += '<button type="button" class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" data-action="history" data-task-id="' + tid + '" data-project-id="' + pid + '">\u5386\u53f2</button> ';
         cells += '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-task-id="' + tid + '" data-project-id="' + pid + '">\u5220\u9664</button>';
         cells += '</td>';
         tr.innerHTML = cells;
         tbody.appendChild(tr);
     });
     container.appendChild(table);
+    enableColumnResize(table);
     var selectAll = document.getElementById('scheduledTaskSelectAll');
     if (selectAll) {
         selectAll.onchange = function() {
@@ -290,6 +327,7 @@ function renderTaskList(tasks) {
             if (action === 'edit') { await openScheduledTaskEditorModal(taskId, projectId); return; }
             if (action === 'toggle') { await toggleTask(taskId, projectId); return; }
             if (action === 'run') { await runTaskNow(taskId, projectId); return; }
+            if (action === 'history') { openScheduledTaskHistoryModal(taskId, projectId); return; }
             if (action === 'delete') { await deleteTask(taskId, projectId); }
         };
     });
@@ -802,6 +840,79 @@ export async function runScheduledReportNow() {
 export async function applyScheduledReportConfigToSelected() {
     showNotification('\u5df2\u5347\u7ea7\u4e3a\u201c\u4efb\u52a1\u5217\u8868\u7ba1\u7406\u6a21\u5f0f\u201d', 'info');
 }
+
+// ============== 发送历史 ==============
+let _historyProjectId = '';
+let _historyOffset = 0;
+const _historyLimit = 50;
+
+function openScheduledTaskHistoryModal(taskId, projectId) {
+    _historyProjectId = projectId || '';
+    _historyOffset = 0;
+    var task = _allLoadedTasks.find(function(x) { return String(x.task_id) === String(taskId); });
+    var infoEl = document.getElementById('scheduledHistoryTaskInfo');
+    if (infoEl) {
+        var taskName = task ? (task.task_name || '\u672a\u547d\u540d') : taskId;
+        var projectName = task ? (task._project_name || projectId) : projectId;
+        infoEl.textContent = '\u9879\u76ee: ' + projectName + ' | \u4efb\u52a1: ' + taskName;
+    }
+    var modal = document.getElementById('scheduledTaskHistoryModal');
+    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
+    loadScheduledHistory(false);
+}
+
+function closeScheduledTaskHistoryModal() {
+    var modal = document.getElementById('scheduledTaskHistoryModal');
+    if (modal) { modal.classList.remove('show'); modal.style.display = 'none'; }
+}
+window.closeScheduledTaskHistoryModal = closeScheduledTaskHistoryModal;
+
+async function loadScheduledHistory(append) {
+    var tbody = document.getElementById('scheduledHistoryTableBody');
+    if (!tbody) return;
+    if (!append) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">\u52a0\u8f7d\u4e2d...</td></tr>';
+    try {
+        var query = 'limit=' + _historyLimit + '&offset=' + _historyOffset;
+        if (_historyProjectId) query += '&project_id=' + encodeURIComponent(_historyProjectId);
+        var resp = await fetch('/api/projects/report-schedules/history?' + query, { cache: 'no-store' });
+        var result = await safeParseJson(resp);
+        if (result.status !== 'success') {
+            if (!append) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#dc3545;">\u52a0\u8f7d\u5931\u8d25</td></tr>';
+            return;
+        }
+        var totalEl = document.getElementById('scheduledHistoryTotal');
+        if (totalEl) totalEl.textContent = '\u5171 ' + (result.total || 0) + ' \u6761';
+        var logs = result.logs || [];
+        if (logs.length === 0 && !append) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">\u6682\u65e0\u53d1\u9001\u8bb0\u5f55</td></tr>';
+            return;
+        }
+        if (!append) tbody.innerHTML = '';
+        var freqMap = { daily: '\u65e5\u62a5', weekly: '\u5468\u62a5', monthly: '\u6708\u62a5' };
+        logs.forEach(function(log) {
+            var tr = document.createElement('tr');
+            var successColor = Number(log.success_count) >= Number(log.total) ? '#28a745' : '#dc3545';
+            tr.innerHTML = '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + escapeHtml(log.operation_time || '-') + '</td>' +
+                '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(log.target_name || log.target_id || '-') + '</td>' +
+                '<td style="border:1px solid #e2e8f0; padding:6px;">' + (freqMap[log.frequency] || escapeHtml(log.frequency)) + '</td>' +
+                '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(log.trigger_type || '-') + '</td>' +
+                '<td style="border:1px solid #e2e8f0; padding:6px; text-align:center;"><span style="color:' + successColor + ';">' + log.success_count + '/' + log.total + '</span></td>' +
+                '<td style="border:1px solid #e2e8f0; padding:6px; font-size:11px;">' + escapeHtml(log.period_start || '') + ' ~ ' + escapeHtml(log.period_end || '') + '</td>';
+            tbody.appendChild(tr);
+        });
+        var loadMoreBtn = document.getElementById('scheduledHistoryLoadMoreBtn');
+        if (loadMoreBtn) {
+            loadMoreBtn.style.display = (_historyOffset + logs.length) < (result.total || 0) ? 'inline-block' : 'none';
+        }
+    } catch (e) {
+        if (!append) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#dc3545;">' + escapeHtml(e.message || '\u52a0\u8f7d\u5931\u8d25') + '</td></tr>';
+    }
+}
+
+window.loadMoreScheduledHistory = function() {
+    _historyOffset += _historyLimit;
+    loadScheduledHistory(true);
+};
 
 if (typeof document !== 'undefined') {
     document.addEventListener('change', function(e) {

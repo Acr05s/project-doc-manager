@@ -500,6 +500,7 @@ class ScheduledReportService:
             run_key = self._build_run_key(task, now)
             if run_key and task.get('last_run_key') == run_key:
                 continue
+            logger.info(f'[ScheduledReportService] task {task.get("task_id")} is due (project={project_id}, run_key={run_key}), executing...')
             try:
                 result = self._run_project_report(project_id, cfg=task, manual=False)
                 success = result.get('status') == 'success'
@@ -534,7 +535,11 @@ class ScheduledReportService:
         except Exception:
             hour, minute = 9, 0
 
-        if now.hour != hour or now.minute != minute:
+        # 容错窗口：允许±2分钟偏差，防止调度线程延迟导致漏执行
+        target_minutes = hour * 60 + minute
+        now_minutes = now.hour * 60 + now.minute
+        diff = abs(now_minutes - target_minutes)
+        if diff > 2:
             return False
 
         if task_type == 'one_time':

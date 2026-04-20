@@ -26,6 +26,40 @@ const roleMap = {
     'contractor': '一般员工'
 };
 
+function enableColumnResize(table) {
+    if (!table) return;
+    var ths = table.querySelectorAll('thead th');
+    ths.forEach(function(th) {
+        th.style.position = 'relative';
+        var handle = document.createElement('div');
+        handle.className = 'col-resize-handle';
+        th.appendChild(handle);
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var startX = e.pageX;
+            var startWidth = th.offsetWidth;
+            handle.classList.add('active');
+            table.style.tableLayout = 'fixed';
+            Array.from(table.querySelectorAll('thead th')).forEach(function(h) {
+                h.style.width = h.offsetWidth + 'px';
+            });
+            function onMove(ev) {
+                var diff = ev.pageX - startX;
+                var newWidth = Math.max(40, startWidth + diff);
+                th.style.width = newWidth + 'px';
+            }
+            function onUp() {
+                handle.classList.remove('active');
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
+}
+
 const statusMap = {
     'active': { label: '正常', color: '#28a745' },
     'inactive': { label: '已禁用', color: '#6c757d' },
@@ -801,6 +835,8 @@ let logMgmtOffset = 0;
 const logMgmtLimit = 50;
 let logMgmtPresetTypes = [];
 let logMgmtLockTypeFilter = false;
+let _logMgmtAllLogs = [];
+let _logDetailIndex = -1;
 
 export function openLogManagementModal(options = {}) {
     const modal = document.getElementById('logManagementModal');
@@ -893,12 +929,22 @@ export async function loadLogManagementList(append = false) {
             return;
         }
 
-        if (!append) tbody.innerHTML = '';
+        if (!append) {
+            tbody.innerHTML = '';
+            _logMgmtAllLogs = [];
+        }
 
-        result.logs.forEach(log => {
+        result.logs.forEach((log, idx) => {
+            _logMgmtAllLogs.push(log);
+            const logIndex = _logMgmtAllLogs.length - 1;
             const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
             const displayTime = formatDateTimeDisplay(log.operation_time, tz);
             const tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
+            tr.title = '点击查看详情';
+            tr.addEventListener('mouseenter', function() { tr.style.backgroundColor = '#f0f7ff'; });
+            tr.addEventListener('mouseleave', function() { tr.style.backgroundColor = ''; });
+            tr.addEventListener('click', function() { openLogDetailModal(logIndex); });
             tr.innerHTML = `
                 <td style="padding:8px;border-bottom:1px solid #eee;white-space:nowrap;">${displayTime}</td>
                 <td style="padding:8px;border-bottom:1px solid #eee;">${log.username || '-'}</td>
@@ -915,6 +961,15 @@ export async function loadLogManagementList(append = false) {
             const hasMore = (logMgmtOffset + result.logs.length) < (result.total || 0);
             loadMoreBtn.style.display = hasMore ? 'inline-block' : 'none';
         }
+
+        // Enable column resize on first load
+        if (!append) {
+            const logTable = tbody.closest('table');
+            if (logTable && !logTable.dataset.resizeInit) {
+                logTable.dataset.resizeInit = '1';
+                enableColumnResize(logTable);
+            }
+        }
     } catch (error) {
         console.error('加载日志列表失败:', error);
         if (!append) {
@@ -927,3 +982,54 @@ export function loadMoreLogs() {
     logMgmtOffset += logMgmtLimit;
     loadLogManagementList(true);
 }
+
+// ============== 日志详情弹窗 ==============
+function openLogDetailModal(index) {
+    if (index < 0 || index >= _logMgmtAllLogs.length) return;
+    _logDetailIndex = index;
+    renderLogDetail();
+    const modal = document.getElementById('logDetailModal');
+    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
+}
+
+function renderLogDetail() {
+    const log = _logMgmtAllLogs[_logDetailIndex];
+    if (!log) return;
+    const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
+    const displayTime = formatDateTimeDisplay(log.operation_time, tz);
+    const timeEl = document.getElementById('logDetailTime');
+    const userEl = document.getElementById('logDetailUser');
+    const typeEl = document.getElementById('logDetailType');
+    const detailsEl = document.getElementById('logDetailDetails');
+    const targetEl = document.getElementById('logDetailTarget');
+    const ipEl = document.getElementById('logDetailIp');
+    if (timeEl) timeEl.textContent = displayTime || '-';
+    if (userEl) userEl.textContent = log.username || '-';
+    if (typeEl) typeEl.textContent = log.operation_type || '-';
+    if (detailsEl) detailsEl.textContent = log.details || '-';
+    if (targetEl) targetEl.textContent = log.target_name || log.target_id || '-';
+    if (ipEl) ipEl.textContent = log.ip_address || '-';
+    // 更新导航按钮状态
+    const prevBtn = document.getElementById('logDetailPrevBtn');
+    const nextBtn = document.getElementById('logDetailNextBtn');
+    const posEl = document.getElementById('logDetailPosition');
+    if (prevBtn) prevBtn.disabled = _logDetailIndex <= 0;
+    if (nextBtn) nextBtn.disabled = _logDetailIndex >= _logMgmtAllLogs.length - 1;
+    if (posEl) posEl.textContent = (_logDetailIndex + 1) + ' / ' + _logMgmtAllLogs.length;
+}
+
+function closeLogDetailModal() {
+    const modal = document.getElementById('logDetailModal');
+    if (modal) { modal.classList.remove('show'); modal.style.display = 'none'; }
+}
+
+function navigateLogDetail(direction) {
+    const newIndex = _logDetailIndex + direction;
+    if (newIndex < 0 || newIndex >= _logMgmtAllLogs.length) return;
+    _logDetailIndex = newIndex;
+    renderLogDetail();
+}
+
+// Expose to global for inline onclick handlers
+window.closeLogDetailModal = closeLogDetailModal;
+window.navigateLogDetail = navigateLogDetail;

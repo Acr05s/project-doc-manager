@@ -1221,6 +1221,24 @@ body {
     margin-top: 20px;
 }
 
+/* 表格列宽拖拽调整 */
+.col-resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 1;
+}
+.col-resize-handle:hover,
+.col-resize-handle.active {
+    background: #3b82f6;
+    opacity: 0.4;
+    border-radius: 2px;
+}
+
 /* 加载指示器 */
 .loading-indicator {
     display: none;

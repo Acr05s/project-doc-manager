@@ -1396,7 +1396,7 @@
 
     <!-- 定时报告任务管理弹窗 -->
     <div id="scheduledReportModal" class="modal">
-        <div class="modal-content" style="max-width:1100px; min-width:600px; max-height:90vh; min-height:400px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:vertical;">
+        <div class="modal-content" style="max-width:90vw; min-width:600px; max-height:90vh; min-height:400px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both; width:1100px;">
             <span class="close" onclick="closeScheduledReportModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时报告任务管理</h2>
             <input type="hidden" id="scheduledReportProjectId">
@@ -1456,7 +1456,7 @@
 
     <!-- 新建/编辑 定时任务弹窗 -->
     <div id="scheduledTaskEditorModal" class="modal">
-        <div class="modal-content" style="max-width:1000px; min-width:500px; max-height:90vh; min-height:400px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:vertical;">
+        <div class="modal-content" style="max-width:90vw; min-width:500px; max-height:90vh; min-height:400px; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both; width:1000px;">
             <span class="close" onclick="closeScheduledTaskEditorModal()">&times;</span>
             <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">新建/编辑定时任务</h2>
             <input type="hidden" id="scheduledEditingTaskId">
@@ -1597,6 +1597,41 @@
                     </div>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- 定时任务发送历史弹窗 -->
+    <div id="scheduledTaskHistoryModal" class="modal" style="z-index:10060;">
+        <div class="modal-content" style="max-width:90vw; min-width:500px; width:900px; max-height:90vh; border-radius:14px; overflow:hidden; border:1px solid #dbe7f5; box-shadow:0 24px 60px rgba(9, 53, 101, 0.2); display:flex; flex-direction:column; resize:both;">
+            <span class="close" onclick="closeScheduledTaskHistoryModal()">&times;</span>
+            <h2 style="margin:0; padding:16px 18px; background:linear-gradient(135deg,#f7fbff,#eef6ff); border-bottom:1px solid #dfeaf7;">定时任务发送记录</h2>
+            <div style="padding:12px 18px 4px; font-size:13px; color:#456;">
+                <span id="scheduledHistoryTaskInfo"></span>
+                <span id="scheduledHistoryTotal" style="margin-left:12px; color:#888;"></span>
+            </div>
+            <div style="padding:8px 18px 18px; overflow-y:auto; flex:1;">
+                <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                    <thead>
+                        <tr style="background:#f5f8fc;">
+                            <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">时间</th>
+                            <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">项目</th>
+                            <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">频率</th>
+                            <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">触发方式</th>
+                            <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">邮件成功/总数</th>
+                            <th style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">统计区间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scheduledHistoryTableBody">
+                        <tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">加载中...</td></tr>
+                    </tbody>
+                </table>
+                <div style="text-align:center; margin-top:10px;">
+                    <button id="scheduledHistoryLoadMoreBtn" class="btn btn-sm btn-secondary" style="display:none;" onclick="loadMoreScheduledHistory()">加载更多</button>
+                </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; padding:10px 18px; border-top:1px dashed #d7e3f3;">
+                <button type="button" class="btn btn-secondary" onclick="closeScheduledTaskHistoryModal()">关闭</button>
+            </div>
         </div>
     </div>
 
@@ -3082,7 +3117,7 @@
 
     <!-- 日志管理模态框 -->
     <div id="logManagementModal" class="modal">
-        <div class="modal-content" style="max-width: 980px;">
+        <div class="modal-content" style="max-width:90vw; min-width:500px; width:980px; resize:both; overflow:hidden;">
             <span class="close" onclick="closeLogManagementModal()">&times;</span>
             <h2>日志管理</h2>
             <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
@@ -3111,6 +3146,7 @@
                     <option value="batch_delete_projects">批量删除项目</option>
                     <option value="batch_update_projects">批量修改项目</option>
                     <option value="batch_update_project_status">批量修改项目状态</option>
+                    <option value="scheduled_report_send">定时报告发送</option>
                 </select>
                 <button class="btn btn-primary" onclick="loadLogManagementList()">搜索</button>
             </div>
@@ -3139,6 +3175,32 @@
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeLogManagementModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志详情模态框 -->
+    <div id="logDetailModal" class="modal" style="z-index:10060;">
+        <div class="modal-content" style="max-width:700px; min-width:400px; width:600px; resize:both; overflow:hidden;">
+            <span class="close" onclick="closeLogDetailModal()">&times;</span>
+            <h2>日志详情</h2>
+            <div id="logDetailContent" style="padding:10px 0; font-size:13px;">
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr><td style="padding:8px; font-weight:600; width:80px; vertical-align:top; border-bottom:1px solid #eee;">时间</td><td id="logDetailTime" style="padding:8px; border-bottom:1px solid #eee;"></td></tr>
+                    <tr><td style="padding:8px; font-weight:600; vertical-align:top; border-bottom:1px solid #eee;">用户</td><td id="logDetailUser" style="padding:8px; border-bottom:1px solid #eee;"></td></tr>
+                    <tr><td style="padding:8px; font-weight:600; vertical-align:top; border-bottom:1px solid #eee;">操作类型</td><td id="logDetailType" style="padding:8px; border-bottom:1px solid #eee;"></td></tr>
+                    <tr><td style="padding:8px; font-weight:600; vertical-align:top; border-bottom:1px solid #eee;">详情</td><td id="logDetailDetails" style="padding:8px; border-bottom:1px solid #eee; word-break:break-all; white-space:pre-wrap;"></td></tr>
+                    <tr><td style="padding:8px; font-weight:600; vertical-align:top; border-bottom:1px solid #eee;">目标</td><td id="logDetailTarget" style="padding:8px; border-bottom:1px solid #eee;"></td></tr>
+                    <tr><td style="padding:8px; font-weight:600; vertical-align:top;">IP</td><td id="logDetailIp" style="padding:8px;"></td></tr>
+                </table>
+            </div>
+            <div class="modal-actions" style="justify-content:space-between;">
+                <div>
+                    <button id="logDetailPrevBtn" class="btn btn-secondary btn-sm" onclick="navigateLogDetail(-1)">&larr; 上一条</button>
+                    <button id="logDetailNextBtn" class="btn btn-secondary btn-sm" onclick="navigateLogDetail(1)">下一条 &rarr;</button>
+                </div>
+                <span id="logDetailPosition" style="font-size:12px; color:#888;"></span>
+                <button class="btn btn-secondary" onclick="closeLogDetailModal()">关闭</button>
             </div>
         </div>
     </div>
