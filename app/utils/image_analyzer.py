@@ -7,8 +7,14 @@ import logging
 from pathlib import Path
 from typing import Tuple
 
-import cv2
-import numpy as np
+# 尝试导入cv2，如果失败则使用降级方案
+cv2_available = False
+try:
+    import cv2
+    import numpy as np
+    cv2_available = True
+except ImportError:
+    logging.warning('OpenCV 未安装，图像分析功能将不可用')
 
 from .base import DocumentConfig, setup_logging
 
@@ -42,6 +48,10 @@ class ImageAnalyzer:
         Returns:
             tuple: (是否有签字, 置信度)
         """
+        if not cv2_available:
+            logger.warning('OpenCV 未安装，无法检测签字')
+            return False, 0.0
+            
         try:
             # 读取图像并限制大小以减少内存使用
             image = cv2.imread(image_path)
@@ -149,6 +159,10 @@ class ImageAnalyzer:
         Returns:
             tuple: (是否有盖章, 置信度)
         """
+        if not cv2_available:
+            logger.warning('OpenCV 未安装，无法检测盖章')
+            return False, 0.0
+            
         try:
             # 读取图像并限制大小以减少内存使用
             image = cv2.imread(image_path)
@@ -302,6 +316,16 @@ class ImageAnalyzer:
         Returns:
             dict: 分析结果
         """
+        if not cv2_available:
+            logger.warning('OpenCV 未安装，无法分析文档')
+            return {
+                'has_signature': False,
+                'signature_confidence': 0.0,
+                'has_seal': False,
+                'seal_confidence': 0.0,
+                'analysis_complete': False
+            }
+            
         has_sig, sig_conf = self.detect_signature(image_path)
         has_seal, seal_conf = self.detect_seal(image_path)
         
@@ -322,6 +346,10 @@ class ImageAnalyzer:
         Returns:
             list: 分析结果列表
         """
+        if not cv2_available:
+            logger.warning('OpenCV 未安装，无法批量分析图像')
+            return []
+            
         import gc
         results = []
         batch_size = 5  # 分批处理，每批5个图像
