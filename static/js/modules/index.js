@@ -217,12 +217,12 @@ function renderOverviewReport(data) {
                         <span class="progress-value">${docs.empty}</span>
                     </div>
                 </div>
-        <div class="chart-summary" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
-            <div style="display: flex; justify-content: space-between; font-size: 13px; color: #666;">
-                <span>需求文档总数: <strong>${docs.total_required}</strong></span>
-                <span>已归档文档数: <strong>${docs.total_completed}</strong></span>
-            </div>
-        </div>
+                <div class="chart-summary" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #666;">
+                        <span>需求文档总数: <strong>${docs.total_required}</strong></span>
+                        <span>已归档文档数: <strong>${docs.total_completed}</strong></span>
+                    </div>
+                </div>
             </div>
         </div>
         
