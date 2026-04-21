@@ -2943,7 +2943,8 @@ export function initResizableColumns(tableEl, storageKey) {
             }
 
             document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+            document.addEventListener('mouseup', onMouseUp);
+        });
     });
 }
 
