@@ -1178,6 +1178,12 @@ export function setupEventListeners() {
     if (saveSettingsBtn) {
         saveSettingsBtn.addEventListener('click', saveSystemSettings);
     }
+    
+    // 保存权限配置按钮
+    const savePermissionsBtn = document.getElementById('savePermissionsBtn');
+    if (savePermissionsBtn) {
+        savePermissionsBtn.addEventListener('click', savePermissionsConfig);
+    }
 
     const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
     if (agreementMarkdownInput) {
@@ -1679,6 +1685,9 @@ async function loadSystemSettings() {
             if (smtpSender) smtpSender.value = settings.smtp_sender || '';
             const smtpEncryption = document.getElementById('smtpEncryption');
             if (smtpEncryption) smtpEncryption.value = settings.smtp_encryption || 'ssl';
+            
+            // 加载权限配置
+            loadPermissionsConfig();
         }
     } catch (error) {
         console.error('加载系统设置失败:', error);
@@ -2934,7 +2943,142 @@ export function initResizableColumns(tableEl, storageKey) {
             }
 
             document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        });
+        document.addEventListener('mouseup', onMouseUp);
     });
+}
+
+/**
+ * 加载权限配置
+ */
+export async function loadPermissionsConfig() {
+    try {
+        const response = await fetch('/api/settings/permissions');
+        const result = await response.json();
+        
+        if (result.status === 'success' && result.data) {
+            renderPermissionsConfig(result.data);
+        } else {
+            document.getElementById('permissionsContent').innerHTML = '<p style="text-align: center; color: #dc3545;">加载权限配置失败</p>';
+        }
+    } catch (error) {
+        console.error('加载权限配置失败:', error);
+        document.getElementById('permissionsContent').innerHTML = '<p style="text-align: center; color: #dc3545;">加载失败，请稍后重试</p>';
+    }
+}
+
+/**
+ * 渲染权限配置界面
+ */
+function renderPermissionsConfig(permissions) {
+    const content = document.getElementById('permissionsContent');
+    if (!content) return;
+    
+    const roles = ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'];
+    const roleLabels = {
+        'admin': '系统管理员',
+        'pmo': '项目管理组织',
+        'pmo_leader': 'PMO负责人',
+        'project_admin': '项目经理',
+        'contractor': '一般员工'
+    };
+    
+    // 按分组排序
+    const groupedPermissions = {
+        'top': [],
+        'sidebar': []
+    };
+    
+    Object.entries(permissions).forEach(([key, config]) => {
+        const group = config.group || 'sidebar';
+        if (groupedPermissions[group]) {
+            groupedPermissions[group].push({ key, ...config });
+        }
+    });
+    
+    let html = '';
+    
+    // 渲染顶部菜单权限
+    if (groupedPermissions.top.length > 0) {
+        html += '<div style="margin-bottom: 20px;"><h4 style="margin-bottom: 10px; color: #333;">顶部菜单权限</h4>';
+        groupedPermissions.top.forEach(({ key, label, roles: menuRoles }) => {
+            html += `
+                <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                    <div style="font-weight: 500; margin-bottom: 8px;">${label || key}</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        ${roles.map(role => `
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px;">
+                                <input type="checkbox" name="${key}" value="${role}" ${menuRoles.includes(role) ? 'checked' : ''}>
+                                <span>${roleLabels[role]}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+    
+    // 渲染侧边栏菜单权限
+    if (groupedPermissions.sidebar.length > 0) {
+        html += '<div><h4 style="margin-bottom: 10px; color: #333;">侧边栏菜单权限</h4>';
+        groupedPermissions.sidebar.forEach(({ key, label, roles: menuRoles }) => {
+            html += `
+                <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                    <div style="font-weight: 500; margin-bottom: 8px;">${label || key}</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        ${roles.map(role => `
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px;">
+                                <input type="checkbox" name="${key}" value="${role}" ${menuRoles.includes(role) ? 'checked' : ''}>
+                                <span>${roleLabels[role]}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+    
+    content.innerHTML = html;
+}
+
+/**
+ * 保存权限配置
+ */
+export async function savePermissionsConfig() {
+    try {
+        const permissions = {};
+        
+        // 收集所有权限设置
+        document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            const menuKey = checkbox.name;
+            const role = checkbox.value;
+            
+            if (!permissions[menuKey]) {
+                permissions[menuKey] = {
+                    roles: []
+                };
+            }
+            
+            if (checkbox.checked) {
+                permissions[menuKey].roles.push(role);
+            }
+        });
+        
+        const response = await fetch('/api/settings/permissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(permissions)
+        });
+        
+        const result = await response.json();
+        if (result.status === 'success') {
+            showNotification('权限配置已保存', 'success');
+        } else {
+            showNotification('保存失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('保存权限配置失败:', error);
+        showNotification('保存失败，请稍后重试', 'error');
+    }
 }

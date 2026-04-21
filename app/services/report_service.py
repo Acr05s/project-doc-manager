@@ -558,7 +558,26 @@ class ReportService:
                         'time': ut.strftime('%Y-%m-%d %H:%M:%S'),
                         'type': change_type,
                         'doc_id': doc.get('doc_id', ''),
+                        'filename': doc.get('filename', ''),
                     })
+
+                    # 检查文档属性是否有更新
+                    if 'updated_at' in doc:
+                        updated_at_str = str(doc.get('updated_at', '')).strip()
+                        if updated_at_str:
+                            updated_at = self._parse_upload_time(updated_at_str)
+                            if updated_at and updated_at >= cutoff:
+                                updated_by_date[date_key] = updated_by_date.get(date_key, 0) + 1
+                                details.append({
+                                    'doc_name': dn,
+                                    'project_name': project_name,
+                                    'project_id': project_id,
+                                    'cycle': cycle,
+                                    'time': updated_at.strftime('%Y-%m-%d %H:%M:%S'),
+                                    'type': 'updated',
+                                    'doc_id': doc.get('doc_id', ''),
+                                    'filename': doc.get('filename', ''),
+                                })
 
         # 归档记录 (从 archive_approvals 查询)
         try:
@@ -588,6 +607,7 @@ class ReportService:
                         'time': ct.strftime('%Y-%m-%d %H:%M:%S'),
                         'type': 'archived',
                         'doc_id': '',
+                        'filename': '',
                     })
         except Exception:
             pass

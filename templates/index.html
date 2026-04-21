@@ -1795,6 +1795,7 @@
                 <button class="settings-tab-btn active" data-tab="basic">基本信息</button>
                 <button class="settings-tab-btn" data-tab="features">功能设置</button>
                 <button class="settings-tab-btn" data-tab="security">安全设置</button>
+                <button class="settings-tab-btn" data-tab="permissions">权限配置</button>
                 <button class="settings-tab-btn" data-tab="email">邮件配置</button>
                 <button class="settings-tab-btn" data-tab="update">系统更新</button>
             </div>
@@ -2025,6 +2026,22 @@
                     <div class="form-group" style="margin-top: 15px;">
                         <button type="button" class="btn btn-info email-config-input" onclick="testSmtpConnection()">测试邮件连接</button>
                         <span id="smtpTestResult" style="margin-left: 10px; font-size: 13px;"></span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 权限配置标签页 -->
+            <div id="settingsTab-permissions" class="settings-tab-content">
+                <div class="settings-section">
+                    <h3>权限配置</h3>
+                    <div class="form-group">
+                        <label>文档菜单权限控制：</label>
+                        <div id="permissionsContent" style="margin-top: 10px; max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 10px;">
+                            <p style="text-align: center; color: #999;">加载中...</p>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top: 15px;">
+                        <button type="button" class="btn btn-primary" id="savePermissionsBtn">保存权限配置</button>
                     </div>
                 </div>
             </div>

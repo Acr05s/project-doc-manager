@@ -986,6 +986,7 @@ class ScheduledReportService:
     def _build_metrics(self, project_id: str, project: Dict[str, Any], start: datetime, end: datetime) -> Dict[str, Any]:
         uploads = 0
         updated_docs = 0   # 本周期内重新上传（版本更新）次数
+        document_changes = 0  # 文档变更总数（包括属性更新、更新文件、刷新文件）
         by_cycle: Dict[str, Dict[str, Any]] = {}
         doc_details: List[Dict[str, Any]] = []   # 文档明细列表
         checklist: List[Dict[str, Any]] = []     # 项目文档清单
@@ -1032,6 +1033,7 @@ class ScheduledReportService:
                 'uploads': 0,
                 'updated': 0,
                 'archived': 0,
+                'document_changes': 0,
                 'required': len(required_docs),
                 'completed': completed_docs_count,
                 'pending': max(0, len(required_docs) - completed_docs_count),
@@ -1057,6 +1059,8 @@ class ScheduledReportService:
                     if is_update:
                         updated_docs += 1
                         cycle_update_count += 1
+                    # 统计文档变更（所有上传和更新都视为变更）
+                    document_changes += 1
                     # 添加文档明细
                     doc_details.append({
                         'cycle': cycle,
@@ -1068,6 +1072,7 @@ class ScheduledReportService:
                     })
             by_cycle[cycle]['uploads'] = cycle_upload_count
             by_cycle[cycle]['updated'] = cycle_update_count
+            by_cycle[cycle]['document_changes'] = cycle_upload_count + cycle_update_count
 
         # ── 统计本周期内实际上传的唯一文档（按 doc_name 去重） ──
         uploaded_unique_by_cycle: Dict[str, set] = {}
@@ -1202,6 +1207,7 @@ class ScheduledReportService:
             'uploads': uploads,
             'updated_docs': updated_docs,
             'archived': archived,
+            'document_changes': document_changes,
             'archive_rate': archive_rate,
             'by_cycle': by_cycle,
             'doc_details': doc_details,

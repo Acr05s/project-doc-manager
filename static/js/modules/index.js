@@ -236,13 +236,13 @@ function renderOverviewReport(data) {
                     <button class="doc-change-tab" data-period="7days">最近7天</button>
                     <button class="doc-change-tab" data-period="month">最近1个月</button>
                 </div>
-                <div class="doc-changes-content">
+                <div class="doc-changes-content" style="width: 100%; max-width: 1200px;">
                     <div class="doc-changes-chart" style="height: 300px; margin-bottom: 20px;">
                         <canvas id="docChangesChart"></canvas>
                     </div>
-                    <div class="doc-changes-details">
+                    <div class="doc-changes-details" style="width: 100%;">
                         <h4>变化明细</h4>
-                        <div class="doc-changes-list" id="docChangesList">
+                        <div class="doc-changes-list" id="docChangesList" style="width: 100%;">
                             <div class="loading" style="padding: 20px; text-align: center;">加载中...</div>
                         </div>
                     </div>
@@ -1575,31 +1575,68 @@ function updateDocChangesChart(data) {
 /**
  * 更新文档变化明细列表
  */
+let currentPage = 1;
+const itemsPerPage = 10;
+let allDocChanges = [];
+
 function updateDocChangesList(details) {
     const container = document.getElementById('docChangesList');
     if (!container) return;
+    
+    allDocChanges = details;
+    currentPage = 1;
     
     if (!details.length) {
         container.innerHTML = '<p class="empty-tip">暂无变化记录</p>';
         return;
     }
     
-    container.innerHTML = details.map(item => `
-        <div class="doc-change-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee;">
-            <div style="flex: 1;">
-                <div style="font-weight: 500;">${item.doc_name}</div>
-                <div style="font-size: 12px; color: #666;">${item.project_name} - ${item.cycle}</div>
+    renderDocChangesPage();
+}
+
+function renderDocChangesPage() {
+    const container = document.getElementById('docChangesList');
+    if (!container) return;
+    
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    const paginatedDetails = allDocChanges.slice(start, end);
+    
+    const html = paginatedDetails.map(item => `
+        <div class="doc-change-item" style="display: flex; justify-content: space-between; align-items: flex-start; padding: 10px; border-bottom: 1px solid #eee; min-height: 80px;">
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 500; margin-bottom: 4px; word-break: break-word;">${item.doc_name}</div>
+                ${item.filename ? `<div style="font-size: 11px; color: #888; margin-bottom: 4px; word-break: break-all;">${item.filename}</div>` : ''}
+                <div style="font-size: 12px; color: #666; margin-bottom: 4px;">${item.project_name} - ${item.cycle}</div>
                 <div style="font-size: 11px; color: #999;">${item.time}</div>
             </div>
-            <div style="display: flex; gap: 8px;">
-                <span class="doc-change-type" style="padding: 2px 8px; border-radius: 12px; font-size: 12px; background-color: ${getChangeTypeColor(item.type)}; color: white;">
+            <div style="display: flex; gap: 8px; flex-shrink: 0; margin-left: 10px;">
+                <span class="doc-change-type" style="padding: 2px 8px; border-radius: 12px; font-size: 12px; background-color: ${getChangeTypeColor(item.type)}; color: white; align-self: center;">
                     ${item.type === 'added' ? '新增' : item.type === 'updated' ? '更新' : item.type === 'archived' ? '归档' : '删除'}
                 </span>
-                <button class="btn btn-sm btn-primary" onclick="previewDocument('${item.doc_id}')" style="padding: 4px 8px; font-size: 12px;">预览</button>
-                <button class="btn btn-sm btn-secondary" onclick="jumpToDocument('${item.project_id}', '${item.cycle}', '${item.doc_name}')" style="padding: 4px 8px; font-size: 12px;">管理</button>
+                <button class="btn btn-sm btn-primary" onclick="previewDocument('${item.doc_id}')" style="padding: 4px 8px; font-size: 12px; align-self: center;">预览</button>
+                <button class="btn btn-sm btn-secondary" onclick="jumpToDocument('${item.project_id}', '${item.cycle}', '${item.doc_name}')" style="padding: 4px 8px; font-size: 12px; align-self: center;">管理</button>
             </div>
         </div>
     `).join('');
+    
+    const totalPages = Math.ceil(allDocChanges.length / itemsPerPage);
+    const paginationHtml = totalPages > 1 ? `
+        <div class="pagination" style="margin-top: 15px; display: flex; justify-content: center; gap: 5px;">
+            <button ${currentPage === 1 ? 'disabled' : ''} onclick="changeDocChangesPage(${currentPage - 1})" class="btn btn-sm btn-secondary" style="padding: 4px 10px;">上一页</button>
+            ${Array.from({ length: totalPages }, (_, i) => i + 1).map(page => `
+                <button onclick="changeDocChangesPage(${page})" class="btn btn-sm ${currentPage === page ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 10px; min-width: 30px;">${page}</button>
+            `).join('')}
+            <button ${currentPage === totalPages ? 'disabled' : ''} onclick="changeDocChangesPage(${currentPage + 1})" class="btn btn-sm btn-secondary" style="padding: 4px 10px;">下一页</button>
+        </div>
+    ` : '';
+    
+    container.innerHTML = html + paginationHtml;
+}
+
+function changeDocChangesPage(page) {
+    currentPage = page;
+    renderDocChangesPage();
 }
 
 /**
