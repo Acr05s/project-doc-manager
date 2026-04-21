@@ -593,8 +593,11 @@ function openScheduledReportMessageModal(message) {
     const tz = appState.systemSettings?.timezone || 'Asia/Shanghai';
     const createdAt = formatDateTimeDisplay(message?.created_at, tz);
     const title = escapeHtml(message?.title || '定时报告通知');
-    // 总是对内容进行HTML转义，屏蔽HTML代码
     const rawContent = message?.content || '';
+    
+    // 判断内容是否为HTML格式（定时报告消息包含HTML标签，直接渲染；其他消息转义显示）
+    const isHtmlContent = /<(div|span|table|p|h[1-6]|ul|ol|li|br|hr|b|i|strong|em|a|img)[\s>]/i.test(rawContent);
+    const displayContent = isHtmlContent ? rawContent : escapeHtml(rawContent).replace(/\n/g, '<br>');
 
     modal.innerHTML = `
         <div class="modal-content" style="max-width:760px;border-radius:12px;border:1px solid #dbe7f5;box-shadow:0 20px 50px rgba(8,36,74,.25);">
@@ -603,7 +606,7 @@ function openScheduledReportMessageModal(message) {
             <div style="padding:16px;max-height:60vh;overflow:auto;background:#f9fcff;">
                 <div style="font-size:16px;font-weight:600;color:#153a6b;">${title}</div>
                 <div style="font-size:12px;color:#6c7b90;margin-top:4px;">${createdAt}</div>
-                <div style="margin-top:12px;font-size:13px;line-height:1.7;color:#334;">${escapeHtml(rawContent).replace(/\n/g, '<br>') || '-'}</div>
+                <div style="margin-top:12px;font-size:13px;line-height:1.7;color:#334;">${displayContent || '-'}</div>
             </div>
             <div style="padding:12px 16px;border-top:1px solid #e6eef8;display:flex;justify-content:flex-end;gap:10px;">
                 <button type="button" class="btn btn-secondary" id="scheduledReportMessageCloseBtn2">关闭</button>

@@ -2740,6 +2740,17 @@ export function openUploadModal(cycle, docName) {
     
     console.log('[openUploadModal] 更新appState:', { currentCycle: appState.currentCycle, currentDocument: appState.currentDocument });
     
+    // 清理上传文件列表
+    const uploadedFilesList = document.getElementById('uploadedFilesList');
+    if (uploadedFilesList) {
+        uploadedFilesList.innerHTML = '<p class="placeholder">暂无上传文件</p>';
+    }
+    // 清理文件输入框
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+    
     // 打开第一个标签页（上传/选择文档）
     document.querySelectorAll('.main-tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.main-tab-content').forEach(content => content.style.display = 'none');

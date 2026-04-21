@@ -224,12 +224,14 @@ class DatabaseManager:
             finally:
                 conn.close()
 
-    def update(self, sql: str, update_func: Callable[[List[Dict]], None]) -> bool:
+    def update(self, sql: str, update_func: Callable[[List[Dict]], None], 
+               write_func: Optional[Callable[[sqlite3.Connection, List[Dict]], None]] = None) -> bool:
         """原子性更新数据（读-改-写 作为一个整体）
 
         Args:
             sql: 查询语句
             update_func: 更新函数，接收当前数据列表，修改后返回
+            write_func: 可选的写入函数，接收数据库连接和修改后的数据列表，执行实际的写入操作
 
         Returns:
             bool: 是否更新成功
@@ -248,6 +250,11 @@ class DatabaseManager:
                 # 如果是空列表，则什么都不做
                 if not data:
                     return True
+
+                # 如果提供了写入函数，执行写入操作
+                if write_func:
+                    write_func(conn, data)
+                    conn.commit()
 
                 return True
             except Exception as e:
@@ -707,6 +714,16 @@ class ProjectsIndexDB(DatabaseManager):
             bool: 是否保存成功
         """
         import json
+        from datetime import datetime, date
+        
+        def json_serial(obj):
+            """JSON serializer for objects not serializable by default json code"""
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            if hasattr(obj, '__dict__'):
+                return obj.__dict__
+            raise TypeError(f"Type {type(obj)} not serializable")
+        
         try:
             sql = '''
                 INSERT INTO project_configs (project_id, config_type, config_data, updated_time)
@@ -718,7 +735,7 @@ class ProjectsIndexDB(DatabaseManager):
             self.execute_write(sql, (
                 project_id,
                 config_type,
-                json.dumps(config_data, ensure_ascii=False, indent=2),
+                json.dumps(config_data, ensure_ascii=False, indent=2, default=json_serial),
                 datetime.now().isoformat()
             ))
             return True
