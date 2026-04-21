@@ -2880,7 +2880,9 @@ function generateDynamicEditForm(doc, cycle, docName) {
                     console.log('[generateDynamicEditForm] docInfo.attributes:', docInfo.attributes);
                     console.log('[generateDynamicEditForm] docInfo.attributes[attrDef.id]:', docInfo.attributes && docInfo.attributes[attrDef.id]);
                     
-                    if (docInfo.attributes && docInfo.attributes[attrDef.id] && !attributes.some(attr => attr.id === attrDef.id)) {
+                    // 修复：始终显示所有自定义属性定义中的属性，不管 docInfo.attributes 中是否设置
+                    // 只要不在 attributes 列表中且是自定义属性定义中的，就添加
+                    if (!attributes.some(attr => attr.id === attrDef.id)) {
                         if (attrDef.type === 'checkbox') {
                             attributes.push({
                                 type: 'checkbox',

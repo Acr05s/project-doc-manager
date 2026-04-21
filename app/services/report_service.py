@@ -116,6 +116,49 @@ class ReportService:
                 details.append({**proj_info, 'config': config})
         return details
     
+    def _load_project_docs_metadata(self):
+        """轻量级加载项目文档元数据（仅用于 get_doc_changes，避免加载完整配置）"""
+        all_projects = self.doc_manager.projects.list_all()
+        results = []
+        for proj_info in all_projects:
+            pid = proj_info['id']
+            # 权限检查
+            if self.user_context and self.user_context.get('role') not in ('admin', 'pmo', 'pmo_leader', None):
+                cfg = self.doc_manager.projects.load(pid)
+                if not cfg:
+                    continue
+                party_b = cfg.get('party_b', '')
+                creator_id = cfg.get('creator_id', 0)
+                user_id = self.user_context['id']
+                user_org = self.user_context.get('organization', '')
+                user_role = self.user_context['role']
+                # contractor 只能看 approved 项目和自己的项目
+                if user_role == 'contractor':
+                    status = cfg.get('status', 'approved')
+                    if status != 'approved' and creator_id != user_id and party_b != user_org:
+                        continue
+                # project_admin 只能看自己创建或自己单位的项目
+                elif user_role == 'project_admin':
+                    if creator_id != user_id and party_b != user_org:
+                        continue
+                results.append({
+                    'id': pid,
+                    'name': cfg.get('name', pid),
+                    'cycles': cfg.get('cycles', []),
+                    'documents': cfg.get('documents', {})
+                })
+            else:
+                # 管理员/PMO: 只加载 cycles 和 documents，不加载完整 requirements
+                cfg = self.doc_manager.projects.load(pid)
+                if cfg:
+                    results.append({
+                        'id': pid,
+                        'name': cfg.get('name', pid),
+                        'cycles': cfg.get('cycles', []),
+                        'documents': cfg.get('documents', {})
+                    })
+        return results
+    
     def _overview_report(self):
         """平台概览报表"""
         projects = self._load_all_project_details()
@@ -462,14 +505,13 @@ class ReportService:
         deleted_by_date = {lbl: 0 for lbl in date_labels}
         details = []
 
-        projects = self._load_all_project_details()
+        projects = self._load_project_docs_metadata()
         for p in projects:
-            cfg = p['config']
             project_id = p.get('id', '')
-            project_name = cfg.get('name', project_id)
-            documents = cfg.get('documents', {})
+            project_name = p.get('name', project_id)
+            documents = p.get('documents', {})
 
-            for cycle in cfg.get('cycles', []):
+            for cycle in p.get('cycles', []):
                 cycle_info = documents.get(cycle, {})
                 if not isinstance(cycle_info, dict):
                     continue

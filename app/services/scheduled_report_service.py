@@ -1147,6 +1147,29 @@ class ScheduledReportService:
         except Exception as e:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
 
+        # 额外统计 documents_archived 中的归档数据（从项目配置JSON中读取）
+        docs_archived = project.get('documents_archived', {})
+        if docs_archived:
+            for cycle, archived_docs in docs_archived.items():
+                if not isinstance(archived_docs, dict):
+                    continue
+                for doc_name in archived_docs:
+                    if cycle not in archived_unique_by_cycle:
+                        archived_unique_by_cycle[cycle] = set()
+                    # documents_archived 中存储的是 doc_name -> True/时间戳
+                    archived_unique_by_cycle[cycle].add(doc_name)
+                    if cycle not in by_cycle:
+                        by_cycle[cycle] = {
+                            'uploads': 0,
+                            'updated': 0,
+                            'archived': 0,
+                            'required': 0,
+                            'completed': 0,
+                            'pending': 0,
+                            'uploaded_unique': 0,
+                        }
+                        cycle_order.append(cycle)
+
         # 计算各周期归档合格率：
         #   分子 = 本期内已归档的唯一文档数
         #   分母 = 该周期全部已上传唯一文档数（不限报告期）
