@@ -1236,6 +1236,13 @@ class ScheduledReportService:
                     continue
             add_user(user, '项目经理', True)
 
+        for user in user_manager.get_users_by_roles(['contractor']) or []:
+            if party_b:
+                user_org = (user.get('organization') or '').strip()
+                if user_org and user_org != party_b:
+                    continue
+            add_user(user, '一般员工', False)
+
         manager_username = (project.get('manager') or '').strip()
         if manager_username:
             manager_user = user_manager.get_user_by_username(manager_username)
