@@ -561,13 +561,15 @@ class ReportService:
                         'filename': doc.get('filename', ''),
                     })
 
-                    # 检查文档属性是否有更新
+                    # 检查文档属性是否有更新（与上传时间不同才算属性更新）
                     if 'updated_at' in doc:
                         updated_at_str = str(doc.get('updated_at', '')).strip()
-                        if updated_at_str:
+                        if updated_at_str and updated_at_str != upload_time_str:
                             updated_at = self._parse_upload_time(updated_at_str)
                             if updated_at and updated_at >= cutoff:
-                                updated_by_date[date_key] = updated_by_date.get(date_key, 0) + 1
+                                date_key2 = updated_at.strftime('%m-%d')
+                                if date_key2 in updated_by_date:
+                                    updated_by_date[date_key2] = updated_by_date.get(date_key2, 0) + 1
                                 details.append({
                                     'doc_name': dn,
                                     'project_name': project_name,

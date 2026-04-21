@@ -94,6 +94,11 @@ export async function switchReport(reportType) {
     if (reportType === 'trends' && data.months && data.months.length > 0) {
         initTrendsChart(data);
     }
+
+    // overview 报表需要初始化文档变化统计
+    if (reportType === 'overview') {
+        initDocChangesStats();
+    }
 }
 
 function renderReportTabs() {
@@ -1486,14 +1491,18 @@ let docChangesChartInstance = null;
  * 初始化文档变化统计
  */
 export function initDocChangesStats() {
-    // 绑定标签页事件
-    document.querySelectorAll('.doc-change-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
+    // 绑定标签页事件（使用事件委托避免重复绑定）
+    const tabsContainer = document.querySelector('.doc-changes-tabs');
+    if (tabsContainer && !tabsContainer.dataset.bound) {
+        tabsContainer.dataset.bound = 'true';
+        tabsContainer.addEventListener('click', (e) => {
+            const tab = e.target.closest('.doc-change-tab');
+            if (!tab) return;
             document.querySelectorAll('.doc-change-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             loadDocChangesData(tab.dataset.period);
         });
-    });
+    }
     
     // 初始加载今日数据
     loadDocChangesData('day');
@@ -1639,6 +1648,8 @@ function changeDocChangesPage(page) {
     renderDocChangesPage();
 }
 
+window.changeDocChangesPage = changeDocChangesPage;
+
 /**
  * 获取变化类型的颜色
  */
@@ -1656,11 +1667,8 @@ function getChangeTypeColor(type) {
  * 跳转到文档管理界面
  */
 function jumpToDocument(projectId, cycle, docName) {
-    // 加载项目
     selectProject(projectId).then(() => {
-        // 切换到指定周期
         appState.currentCycle = cycle;
-        // 这里可以添加更多逻辑来定位到具体文档
         showNotification(`已跳转到项目: ${projectId}, 周期: ${cycle}`, 'success');
     }).catch(error => {
         console.error('跳转失败:', error);
@@ -1668,12 +1676,4 @@ function jumpToDocument(projectId, cycle, docName) {
     });
 }
 
-// 确保在页面加载后初始化文档变化统计
-document.addEventListener('DOMContentLoaded', () => {
-    // 延迟初始化，确保DOM已完全加载
-    setTimeout(() => {
-        if (document.querySelector('.doc-change-tab')) {
-            initDocChangesStats();
-        }
-    }, 1000);
-});
+window.jumpToDocument = jumpToDocument;
