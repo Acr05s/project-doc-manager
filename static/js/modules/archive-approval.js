@@ -257,7 +257,7 @@ export async function handleArchiveApprovalConfirm() {
 /**
  * 弹出审批安全码输入对话框
  */
-async function promptArchiveApprovalCode(projectId, approvalId) {
+async function promptArchiveApprovalCode(projectId, approvalId, errorMsg = null) {
     // 获取当前阶段的审批人列表
     let approvers = [];
     try {
@@ -293,13 +293,21 @@ async function promptArchiveApprovalCode(projectId, approvalId) {
                 placeholder: '请选择你的身份'
             });
         }
+        if (errorMsg) {
+            fields.push({
+                label: `❌ ${errorMsg}，请重新输入`,
+                key: '_err',
+                type: 'info'
+            });
+        }
         fields.push({
             label: '审批安全码',
             key: 'approval_code',
             type: 'password',
             placeholder: '输入审批安全码'
         });
-        showInputModal('文档归档审批 - 请输入审批安全码', fields, (result) => {
+        const modalTitle = errorMsg ? '审批安全码错误 - 请重新输入' : '文档归档审批 - 请输入审批安全码';
+        showInputModal(modalTitle, fields, (result) => {
             if (!result || !result.approval_code) {
                 resolve(null);
                 return;
@@ -369,7 +377,21 @@ async function submitArchiveApproval(projectId, approvalId, selectPMOId = null, 
             }
             showNotification('已取消审批', 'info');
         } else {
-            showNotification('批准失败: ' + (result.message || '未知错误'), 'error');
+            const errMsg = result.message || '未知错误';
+            if (errMsg.includes('安全码')) {
+                // 安全码错误：重新弹出输入框，不关闭
+                const retryResult = await promptArchiveApprovalCode(projectId, approvalId, errMsg);
+                if (!retryResult) {
+                    showNotification('已取消审批', 'info');
+                    closeArchiveApprovalConfirmModal();
+                    closeSelectPMOApproverModal();
+                    await loadPendingArchiveApprovals();
+                } else {
+                    await submitArchiveApproval(projectId, approvalId, selectPMOId, retryResult.approver_id, retryResult.approval_code, retryResult.new_approval_code);
+                }
+                return;
+            }
+            showNotification('批准失败: ' + errMsg, 'error');
         }
         closeArchiveApprovalConfirmModal();
         closeSelectPMOApproverModal();

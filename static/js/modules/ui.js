@@ -2190,6 +2190,9 @@ export function showInputModal(title, fields, onConfirm) {
 
     // 渲染字段
     fieldsEl.innerHTML = fields.map(f => {
+        if (f.type === 'info') {
+            return `<div class="input-modal-field" style="color:#c0392b;font-size:13px;padding:4px 0 2px;">${f.label}</div>`;
+        }
         if (f.type === 'select' && f.options) {
             return `
                 <div class="input-modal-field">

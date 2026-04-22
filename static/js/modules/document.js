@@ -3319,6 +3319,11 @@ async function submitArchiveReview(cycle, docNames) {
         console.log('[DEBUG] submitArchiveRequest result:', result);
 
         if (result.status === 'success') {
+            if (result.direct) {
+                showNotification('文档已归档（无需审批流程）', 'success');
+                await reloadProjectAndRender(cycle);
+                return result;
+            }
             showNotification('归档审核请求已提交，等待项目经理审批', 'success');
             await reloadProjectAndRender(cycle);
 

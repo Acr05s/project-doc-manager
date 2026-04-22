@@ -248,6 +248,11 @@ def update_project_config(project_id):
                 return jsonify({'status': 'error', 'message': '仅PMO及以上可配置撤销归档审批开关'}), 403
             project_config['unarchive_requires_approval'] = bool(data['unarchive_requires_approval'])
 
+        if 'require_archive_approval' in data:
+            if current_user.role not in ('admin', 'pmo', 'pmo_leader'):
+                return jsonify({'status': 'error', 'message': '仅PMO及以上可配置归档审批开关'}), 403
+            project_config['require_archive_approval'] = bool(data['require_archive_approval'])
+
         # 保存项目配置
         save_result = doc_manager.save_project(project_config)
         if save_result.get('status') != 'success':
@@ -266,7 +271,8 @@ def update_project_config(project_id):
             'status': 'success',
             'config': {
                 'archive_approval_mode': project_config.get('archive_approval_mode', 'two_level'),
-                'unarchive_requires_approval': bool(project_config.get('unarchive_requires_approval', False))
+                'unarchive_requires_approval': bool(project_config.get('unarchive_requires_approval', False)),
+                'require_archive_approval': bool(project_config.get('require_archive_approval', True))
             }
         })
     except Exception as e:

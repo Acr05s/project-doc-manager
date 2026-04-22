@@ -431,6 +431,14 @@ export async function openArchiveApprovalConfigModal(projectId) {
             unarchiveCheckbox.checked = !!project.unarchive_requires_approval;
         }
 
+        const requireApprovalToggle = document.getElementById('requireArchiveApproval');
+        if (requireApprovalToggle) {
+            const requireApproval = project.require_archive_approval !== false; // default true
+            requireApprovalToggle.checked = requireApproval;
+            const section = document.getElementById('approvalOptionsSection');
+            if (section) section.style.display = requireApproval ? 'block' : 'none';
+        }
+
         const modal = document.getElementById('archiveApprovalConfigModal');
         if (modal) {
             modal.classList.add('show');
@@ -464,7 +472,9 @@ export async function handleArchiveApprovalConfigSave(e) {
     e.preventDefault();
 
     const projectId = document.getElementById('archiveConfigProjectId').value;
-    const approvalMode = document.querySelector('input[name="archiveApprovalMode"]:checked').value;
+    const requireArchiveApproval = !!document.getElementById('requireArchiveApproval')?.checked;
+    const approvalModeEl = document.querySelector('input[name="archiveApprovalMode"]:checked');
+    const approvalMode = approvalModeEl ? approvalModeEl.value : 'two_level';
     const unarchiveRequiresApproval = !!document.getElementById('unarchiveRequiresApproval')?.checked;
 
     if (!projectId || !approvalMode) {
@@ -479,7 +489,8 @@ export async function handleArchiveApprovalConfigSave(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 archive_approval_mode: approvalMode,
-                unarchive_requires_approval: unarchiveRequiresApproval
+                unarchive_requires_approval: unarchiveRequiresApproval,
+                require_archive_approval: requireArchiveApproval
             })
         });
 
@@ -492,6 +503,7 @@ export async function handleArchiveApprovalConfigSave(e) {
             if (appState.currentProjectId === projectId && appState.projectConfig) {
                 appState.projectConfig.archive_approval_mode = approvalMode;
                 appState.projectConfig.unarchive_requires_approval = unarchiveRequiresApproval;
+                appState.projectConfig.require_archive_approval = requireArchiveApproval;
             }
         } else {
             showNotification('保存失败: ' + result.message, 'error');

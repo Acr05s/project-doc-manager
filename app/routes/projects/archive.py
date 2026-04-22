@@ -36,6 +36,17 @@ def _can_user_handle_archive_approval(user):
 
 # ===== 多级审批 Helper 函数 =====
 
+def _build_default_approval_chain(approval_mode):
+    """根据审批模式生成默认审批链（当项目未配置自定义审批链时使用）"""
+    if approval_mode == 'pmo_only':
+        return [{'level': 1, 'required_role': 'pmo', 'org_match': 'pmo'}]
+    # default: two_level — 项目经理初审 → PMO最终审批
+    return [
+        {'level': 1, 'required_role': 'project_admin', 'org_match': 'party_b'},
+        {'level': 2, 'required_role': 'pmo', 'org_match': 'pmo'},
+    ]
+
+
 def initialize_approval_stages(project_config, approval_chain=None):
     """根据项目配置初始化审批阶段结构"""
     approval_mode = project_config.get('archive_approval_mode', 'two_level')
@@ -366,6 +377,30 @@ def submit_archive_request(project_id):
         if request_type not in ('archive', 'not_involved', 'unarchive'):
             return jsonify({'status': 'error', 'message': '不支持的审批类型'}), 400
 
+        # 如果项目配置了无需审批，直接执行归档/不涉及（unarchive 始终需要审批）
+        if not bool(project_config.get('require_archive_approval', True)) and request_type in ('archive', 'not_involved'):
+            if 'documents_archived' not in project_config:
+                project_config['documents_archived'] = {}
+            if cycle not in project_config['documents_archived']:
+                project_config['documents_archived'][cycle] = {}
+            if request_type == 'not_involved':
+                if 'documents_not_involved' not in project_config:
+                    project_config['documents_not_involved'] = {}
+                if cycle not in project_config['documents_not_involved']:
+                    project_config['documents_not_involved'][cycle] = {}
+                for dn in doc_names:
+                    if isinstance(dn, str) and dn:
+                        project_config['documents_not_involved'][cycle][dn] = True
+                        project_config['documents_archived'][cycle][dn] = True
+            else:
+                for dn in doc_names:
+                    if isinstance(dn, str) and dn:
+                        project_config['documents_archived'][cycle][dn] = True
+            save_result = doc_manager.save_project(project_config)
+            if save_result.get('status') != 'success':
+                return jsonify({'status': 'error', 'message': '归档保存失败'}), 500
+            return jsonify({'status': 'success', 'message': '归档成功（无需审批）', 'direct': True})
+
         if request_type == 'unarchive':
             if not bool(project_config.get('unarchive_requires_approval', False)):
                 return jsonify({'status': 'error', 'message': '当前项目未开启撤销归档审批开关'}), 400
@@ -385,6 +420,10 @@ def submit_archive_request(project_id):
                 {'level': 2, 'required_role': 'project_admin', 'org_match': 'party_b'},
                 {'level': 3, 'required_role': 'pmo_leader', 'org_match': 'pmo'},
             ]
+        elif not approval_chain:
+            # 没有自定义审批链时，根据 archive_approval_mode 生成默认链
+            approval_mode = project_config.get('archive_approval_mode', 'two_level')
+            approval_chain = _build_default_approval_chain(approval_mode)
 
         # 初始化audit approval_stages
         approval_stages = initialize_approval_stages(project_config, approval_chain)
