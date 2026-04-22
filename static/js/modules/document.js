@@ -3108,7 +3108,9 @@ function checkMissingRequirements(doc, requirement, attributes) {
         // 检查签字要求（分别检查甲方签字和乙方签字）
         const hasPartyASignReq = requirement.includes('甲方签字');
         const hasPartyBSignReq = requirement.includes('乙方签字');
-        const hasGeneralSignReq = requirement.includes('签字') && !hasPartyASignReq && !hasPartyBSignReq;
+        // 去掉甲方签字、乙方签字等特定要求，以及签字日期、签字人等独立要求后再检查通用"签字"，避免误匹配
+        const reqStrippedSign = requirement.replace(/甲方签字/g, '').replace(/乙方签字/g, '').replace(/签字日期/g, '').replace(/签字人/g, '');
+        const hasGeneralSignReq = reqStrippedSign.includes('签字');
         
         // 检查甲方签字
         if (hasPartyASignReq && !getDocValue('party_a_signer') && !getDocValue('no_signature')) {
@@ -4610,7 +4612,9 @@ function renderMainFileRow(d, cycle, docInfo, depth = 0) {
     
     if (requirement.includes('甲方签字') && !getDocValue('party_a_signer') && !getDocValue('no_signature')) missingRequirements.push('甲方签字');
     if (requirement.includes('乙方签字') && !getDocValue('party_b_signer') && !getDocValue('no_signature')) missingRequirements.push('乙方签字');
-    if (requirement.includes('签字') && !requirement.includes('甲方签字') && !requirement.includes('乙方签字') && !getDocValue('signer') && !getDocValue('no_signature')) missingRequirements.push('签字');
+    // 去掉复合词后再检查通用"签字"，避免"签字日期"等误匹配
+    const reqStrippedForSign = requirement.replace(/甲方签字/g, '').replace(/乙方签字/g, '').replace(/签字日期/g, '').replace(/签字人/g, '');
+    if (reqStrippedForSign.includes('签字') && !getDocValue('signer') && !getDocValue('no_signature')) missingRequirements.push('签字');
     
     if ((requirement.includes('盖章') || requirement.includes('甲方盖章') || requirement.includes('乙方盖章')) && !hasSealMarked && !partyASeal && !partyBSeal && !noSeal) {
         if (requirement.includes('甲方盖章') && requirement.includes('乙方盖章')) missingRequirements.push('甲乙方盖章');
