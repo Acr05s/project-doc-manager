@@ -2887,32 +2887,28 @@ function generateDynamicEditForm(doc, cycle, docName) {
                 }
 
                 getCustomAttributeDefinitions(appState.projectConfig, docInfo).forEach(attrDef => {
-                    console.log('[generateDynamicEditForm] attrDef:', attrDef);
-                    console.log('[generateDynamicEditForm] docInfo.attributes:', docInfo.attributes);
-                    console.log('[generateDynamicEditForm] docInfo.attributes[attrDef.id]:', docInfo.attributes && docInfo.attributes[attrDef.id]);
-                    
-                    // 修复：始终显示所有自定义属性定义中的属性，不管 docInfo.attributes 中是否设置
-                    // 只要不在 attributes 列表中且是自定义属性定义中的，就添加
-                    if (!attributes.some(attr => attr.id === attrDef.id)) {
-                        if (attrDef.type === 'checkbox') {
-                            attributes.push({
-                                type: 'checkbox',
-                                id: attrDef.id,
-                                name: attrDef.id,
-                                label: attrDef.name,
-                                inline: true,  // 设置为内联显示
-                                isCustom: true
-                            });
-                        } else {
-                            attributes.push({
-                                type: 'text',
-                                id: attrDef.id,
-                                name: attrDef.id,
-                                label: attrDef.name,
-                                placeholder: `输入${attrDef.name}`,
-                                isCustom: true
-                            });
-                        }
+                    // 只显示本文档要求的自定义属性（docInfo.attributes 中标记为 true 的）
+                    if (!(docInfo.attributes && docInfo.attributes[attrDef.id] === true)) return;
+                    if (attributes.some(attr => attr.id === attrDef.id)) return;
+
+                    if (attrDef.type === 'checkbox') {
+                        attributes.push({
+                            type: 'checkbox',
+                            id: attrDef.id,
+                            name: attrDef.id,
+                            label: attrDef.name,
+                            inline: true,
+                            isCustom: true
+                        });
+                    } else {
+                        attributes.push({
+                            type: 'text',
+                            id: attrDef.id,
+                            name: attrDef.id,
+                            label: attrDef.name,
+                            placeholder: `输入${attrDef.name}`,
+                            isCustom: true
+                        });
                     }
                 });
             }
@@ -4995,9 +4991,16 @@ function renderDocItem(doc, cycle, docName, indent) {
         }
     }
 
-    // 自定义属性
+    // 自定义属性：只显示本文档要求的属性
     const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
+    const reqDocInfo = (() => {
+        if (!appState.projectConfig || !cycle || !docName) return null;
+        const cycleDocs = appState.projectConfig.documents?.[cycle];
+        return cycleDocs?.required_docs?.find(d => d.name === docName) || null;
+    })();
     customDefs.forEach(attrDef => {
+        // 若能找到文档要求配置，则只展示该文档要求的属性
+        if (reqDocInfo && !(reqDocInfo.attributes?.[attrDef.id] === true)) return;
         const value = getField(attrDef.id);
         const isCompleted = value === true || (value !== undefined && value !== null && value !== '' && value !== false);
         if (isCompleted) {
