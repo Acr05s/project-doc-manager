@@ -268,6 +268,8 @@ function _extractMenuLabel(element) {
     if (!element) return '';
     const clone = element.cloneNode(true);
     clone.querySelectorAll('.menu-badge').forEach(node => node.remove());
+    // 移除子下拉菜单内容，避免父菜单标签包含子菜单文本
+    clone.querySelectorAll('.dropdown-menu, [class*="dropdown-menu"]').forEach(node => node.remove());
     return (clone.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
@@ -479,6 +481,25 @@ async function openPermissionConfigModal() {
     const merged = _buildMergedPermissions(permissions);
     const mergedPermissions = merged.permissions;
     const menuOrderByGroup = merged.order;
+
+    // 文档操作权限的默认定义（若后端未配置则使用默认值）
+    const DOC_OP_DEFAULTS = {
+        doc_op_upload:       { label: '上传文档', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'] },
+        doc_op_edit:         { label: '编辑文档属性', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'] },
+        doc_op_delete:       { label: '删除文档', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'] },
+        doc_op_archive:      { label: '申请归档', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'] },
+        doc_op_preview:      { label: '预览文档', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'] },
+        doc_op_download:     { label: '下载文档', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'] },
+        doc_op_not_involved: { label: '标记为不涉及', group: 'document', roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'] },
+    };
+    for (const [key, def] of Object.entries(DOC_OP_DEFAULTS)) {
+        if (!mergedPermissions[key]) {
+            mergedPermissions[key] = { ...def };
+        } else {
+            mergedPermissions[key].group = 'document';
+            mergedPermissions[key].label = mergedPermissions[key].label || def.label;
+        }
+    }
 
     function getOrderedEntries(group) {
         const entries = Object.entries(mergedPermissions).filter(([, d]) => d.group === group);

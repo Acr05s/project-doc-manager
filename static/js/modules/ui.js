@@ -1178,12 +1178,6 @@ export function setupEventListeners() {
     if (saveSettingsBtn) {
         saveSettingsBtn.addEventListener('click', saveSystemSettings);
     }
-    
-    // 保存权限配置按钮
-    const savePermissionsBtn = document.getElementById('savePermissionsBtn');
-    if (savePermissionsBtn) {
-        savePermissionsBtn.addEventListener('click', savePermissionsConfig);
-    }
 
     const agreementMarkdownInput = document.getElementById('agreementMarkdownInput');
     if (agreementMarkdownInput) {
@@ -1685,9 +1679,6 @@ async function loadSystemSettings() {
             if (smtpSender) smtpSender.value = settings.smtp_sender || '';
             const smtpEncryption = document.getElementById('smtpEncryption');
             if (smtpEncryption) smtpEncryption.value = settings.smtp_encryption || 'ssl';
-            
-            // 加载权限配置
-            loadPermissionsConfig();
         }
     } catch (error) {
         console.error('加载系统设置失败:', error);

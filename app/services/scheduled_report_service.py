@@ -984,9 +984,13 @@ class ScheduledReportService:
             return None
 
     def _build_metrics(self, project_id: str, project: Dict[str, Any], start: datetime, end: datetime) -> Dict[str, Any]:
-        uploads = 0
-        updated_docs = 0   # 本周期内重新上传（版本更新）次数
-        document_changes = 0  # 文档变更总数（包括属性更新、更新文件、刷新文件）
+        # 本期上传/更新（用于周期明细表）
+        period_uploads = 0
+        period_updated_docs = 0
+        # 累计全量上传/更新（用于摘要统计框）
+        total_uploads = 0
+        total_updated_docs = 0
+        document_changes = 0
         by_cycle: Dict[str, Dict[str, Any]] = {}
         doc_details: List[Dict[str, Any]] = []   # 文档明细列表
         checklist: List[Dict[str, Any]] = []     # 项目文档清单
@@ -1011,14 +1015,10 @@ class ScheduledReportService:
                 if is_completed:
                     completed_docs_count += 1
                 status = '已完成' if is_completed else ('待完善' if same_name_uploaded else '未上传')
-                
-                # 收集自定义文档属性
-                custom_properties = {}
-                for key, value in req.items():
-                    # 排除默认属性
-                    if key not in ['name', 'requirement', 'type', 'id']:
-                        custom_properties[key] = value
-                
+
+                # 收集自定义文档属性（只保留有意义的简单值）
+                custom_properties = self._extract_display_properties(req)
+
                 checklist.append({
                     'cycle': cycle,
                     'index': idx + 1,
@@ -1030,38 +1030,46 @@ class ScheduledReportService:
                 })
 
             by_cycle.setdefault(cycle, {
-                'uploads': 0,
-                'updated': 0,
-                'archived': 0,
+                'uploads': 0,       # 本期上传次数
+                'updated': 0,       # 本期更新次数
+                'archived': 0,      # 本期归档数
+                'total_archived': 0,  # 累计归档数
                 'document_changes': 0,
                 'required': len(required_docs),
                 'completed': completed_docs_count,
                 'pending': max(0, len(required_docs) - completed_docs_count),
                 'uploaded_unique': 0,
+                'all_uploaded_unique': 0,
             })
 
-        # 统计本期上传/更新
+        # 统计全量和本期上传/更新
         for cycle in cycle_order:
             cycle_info = docs.get(cycle, {}) if isinstance(docs.get(cycle, {}), dict) else {}
             uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
-            cycle_upload_count = 0
-            cycle_update_count = 0
-            # 记录每个文档名已经遍历到第几次，判断是否是更新
-            doc_name_seen: Dict[str, int] = {}
+            cycle_period_upload = 0
+            cycle_period_update = 0
+            cycle_total_upload = 0
+            cycle_total_update = 0
+            doc_name_seen_all: Dict[str, int] = {}     # 全量：判断累计更新
+            doc_name_seen_period: Dict[str, int] = {}  # 本期：判断本期更新
             for doc in uploaded_docs:
                 dn = doc.get('doc_name', '')
-                doc_name_seen[dn] = doc_name_seen.get(dn, 0) + 1
+                doc_name_seen_all[dn] = doc_name_seen_all.get(dn, 0) + 1
+                # 累计统计（无日期限制）
+                cycle_total_upload += 1
+                if doc_name_seen_all[dn] > 1:
+                    cycle_total_update += 1
+
                 t = self._parse_time(doc.get('upload_time'))
                 if t and start <= t <= end:
-                    uploads += 1
-                    cycle_upload_count += 1
-                    is_update = doc_name_seen[dn] > 1   # 同文档名第2次及以上视为更新
+                    doc_name_seen_period[dn] = doc_name_seen_period.get(dn, 0) + 1
+                    is_update = doc_name_seen_period[dn] > 1
+                    cycle_period_upload += 1
+                    period_uploads += 1
                     if is_update:
-                        updated_docs += 1
-                        cycle_update_count += 1
-                    # 统计文档变更（所有上传和更新都视为变更）
+                        cycle_period_update += 1
+                        period_updated_docs += 1
                     document_changes += 1
-                    # 添加文档明细
                     doc_details.append({
                         'cycle': cycle,
                         'doc_name': dn,
@@ -1070,9 +1078,11 @@ class ScheduledReportService:
                         'filename': doc.get('original_filename', doc.get('filename', '')),
                         'is_update': is_update,
                     })
-            by_cycle[cycle]['uploads'] = cycle_upload_count
-            by_cycle[cycle]['updated'] = cycle_update_count
-            by_cycle[cycle]['document_changes'] = cycle_upload_count + cycle_update_count
+            total_uploads += cycle_total_upload
+            total_updated_docs += cycle_total_update
+            by_cycle[cycle]['uploads'] = cycle_period_upload
+            by_cycle[cycle]['updated'] = cycle_period_update
+            by_cycle[cycle]['document_changes'] = cycle_period_upload + cycle_period_update
 
         # ── 统计本周期内实际上传的唯一文档（按 doc_name 去重） ──
         uploaded_unique_by_cycle: Dict[str, set] = {}
@@ -1087,7 +1097,7 @@ class ScheduledReportService:
                     if dn:
                         uploaded_unique_by_cycle[cycle].add(dn)
 
-        # ── 统计各周期全量已上传唯一文档（不限日期，用于归档率分母） ──
+        # ── 统计各周期全量已上传唯一文档（不限日期） ──
         all_uploaded_unique_by_cycle: Dict[str, set] = {}
         for cycle in cycle_order:
             cycle_info = docs.get(cycle, {}) if isinstance(docs.get(cycle, {}), dict) else {}
@@ -1098,14 +1108,13 @@ class ScheduledReportService:
                 if dn:
                     all_uploaded_unique_by_cycle[cycle].add(dn)
 
-        archived = 0
-        # 按周期统计已归档的唯一文档名
-        archived_unique_by_cycle: Dict[str, set] = {}
+        # ── 统计本期和累计归档数 ──
+        archived_in_period_by_cycle: Dict[str, set] = {}   # 本期归档
+        archived_total_by_cycle: Dict[str, set] = {}        # 累计归档
         try:
             with sqlite3.connect(str(user_manager.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                # 扩展查询，确保能正确获取归档数据
                 cursor.execute(
                     """
                     SELECT cycle, doc_names, resolved_at
@@ -1116,104 +1125,141 @@ class ScheduledReportService:
                     (project_id,)
                 )
                 for row in cursor.fetchall():
-                    resolved_at = self._parse_time(row['resolved_at'])
-                    if not resolved_at or not (start <= resolved_at <= end):
-                        continue
                     try:
                         doc_names = json.loads(row['doc_names']) if row['doc_names'] else []
                     except Exception:
-                        # 尝试其他格式解析
                         doc_names_str = str(row['doc_names'] or '')
-                        if doc_names_str:
-                            # 简单处理：按逗号分割
-                            doc_names = [name.strip() for name in doc_names_str.split(',') if name.strip()]
-                        else:
-                            doc_names = []
-                    cycle = row['cycle'] or '未分组'
-                    if cycle not in archived_unique_by_cycle:
-                        archived_unique_by_cycle[cycle] = set()
+                        doc_names = [n.strip() for n in doc_names_str.split(',') if n.strip()] if doc_names_str else []
+                    c = row['cycle'] or '未分组'
+                    if c not in archived_total_by_cycle:
+                        archived_total_by_cycle[c] = set()
                     for dn in doc_names:
                         dn_s = str(dn).strip()
                         if dn_s:
-                            archived_unique_by_cycle[cycle].add(dn_s)
-
-                    if cycle not in by_cycle:
-                        by_cycle[cycle] = {
-                            'uploads': 0,
-                            'updated': 0,
-                            'archived': 0,
-                            'required': 0,
-                            'completed': 0,
-                            'pending': 0,
-                            'uploaded_unique': 0,
+                            archived_total_by_cycle[c].add(dn_s)
+                    # 本期归档（按解决时间过滤）
+                    resolved_at = self._parse_time(row['resolved_at'])
+                    if resolved_at and start <= resolved_at <= end:
+                        if c not in archived_in_period_by_cycle:
+                            archived_in_period_by_cycle[c] = set()
+                        for dn in doc_names:
+                            dn_s = str(dn).strip()
+                            if dn_s:
+                                archived_in_period_by_cycle[c].add(dn_s)
+                    if c not in by_cycle:
+                        by_cycle[c] = {
+                            'uploads': 0, 'updated': 0, 'archived': 0, 'total_archived': 0,
+                            'required': 0, 'completed': 0, 'pending': 0,
+                            'uploaded_unique': 0, 'all_uploaded_unique': 0,
                         }
-                        cycle_order.append(cycle)
-
+                        cycle_order.append(c)
         except Exception as e:
             logger.warning(f'[ScheduledReportService] query archive approvals failed: {e}')
 
-        # 额外统计 documents_archived 中的归档数据（从项目配置JSON中读取）
+        # 额外统计 documents_archived 中的归档数据（全量累计）
         docs_archived = project.get('documents_archived', {})
         if docs_archived:
             for cycle, archived_docs in docs_archived.items():
                 if not isinstance(archived_docs, dict):
                     continue
+                if cycle not in archived_total_by_cycle:
+                    archived_total_by_cycle[cycle] = set()
                 for doc_name in archived_docs:
-                    if cycle not in archived_unique_by_cycle:
-                        archived_unique_by_cycle[cycle] = set()
-                    # documents_archived 中存储的是 doc_name -> True/时间戳
-                    archived_unique_by_cycle[cycle].add(doc_name)
-                    if cycle not in by_cycle:
-                        by_cycle[cycle] = {
-                            'uploads': 0,
-                            'updated': 0,
-                            'archived': 0,
-                            'required': 0,
-                            'completed': 0,
-                            'pending': 0,
-                            'uploaded_unique': 0,
-                        }
-                        cycle_order.append(cycle)
+                    archived_total_by_cycle[cycle].add(doc_name)
+                if cycle not in by_cycle:
+                    by_cycle[cycle] = {
+                        'uploads': 0, 'updated': 0, 'archived': 0, 'total_archived': 0,
+                        'required': 0, 'completed': 0, 'pending': 0,
+                        'uploaded_unique': 0, 'all_uploaded_unique': 0,
+                    }
+                    cycle_order.append(cycle)
 
-        # 计算各周期归档合格率：
-        #   分子 = 本期内已归档的唯一文档数
-        #   分母 = 该周期全部已上传唯一文档数（不限报告期）
-        total_all_uploaded_unique = 0
-        total_archived_unique = 0
+        # 汇总各周期数据
+        total_archived = 0
         for cycle in cycle_order:
             if cycle not in by_cycle:
                 continue
-            # 统计本期上传的唯一文档数（用于报告展示）
             unique_uploaded = len(uploaded_unique_by_cycle.get(cycle, set()))
             by_cycle[cycle]['uploaded_unique'] = unique_uploaded
-            # 归档数直接使用实际归档数，不做上限裁剪
-            unique_archived = len(archived_unique_by_cycle.get(cycle, set()))
-            by_cycle[cycle]['archived'] = unique_archived
-            archived += unique_archived
-            # 归档率分母：该周期全量已上传唯一文档数
             all_uploaded = len(all_uploaded_unique_by_cycle.get(cycle, set()))
             by_cycle[cycle]['all_uploaded_unique'] = all_uploaded
-            total_all_uploaded_unique += all_uploaded
-            total_archived_unique += unique_archived
 
-        # 归档合格率 = 已归档唯一文档数 / 全部已上传唯一文档数，最大 100%
-        if total_all_uploaded_unique > 0:
-            archive_rate = round(min(100.0, (total_archived_unique / total_all_uploaded_unique) * 100), 2)
+            # 本期归档数（用于表格）
+            period_archived = len(archived_in_period_by_cycle.get(cycle, set()))
+            by_cycle[cycle]['archived'] = period_archived
+
+            # 累计归档数
+            cum_archived = len(archived_total_by_cycle.get(cycle, set()))
+            by_cycle[cycle]['total_archived'] = cum_archived
+            total_archived += cum_archived
+
+        # 摘要统计：归档率 = 累计归档数 / 累计上传次数（不重复计）
+        if total_uploads > 0:
+            archive_rate = round(min(100.0, (total_archived / total_uploads) * 100), 2)
         else:
             archive_rate = 0.0
+
         # 按上传时间倒序排列文档明细
         doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
         return {
-            'uploads': uploads,
-            'updated_docs': updated_docs,
-            'archived': archived,
+            'uploads': period_uploads,          # 本期上传次数（用于明细表格）
+            'updated_docs': period_updated_docs, # 本期更新次数
+            'total_uploads': total_uploads,      # 累计上传次数（用于摘要框）
+            'total_updated_docs': total_updated_docs,  # 累计更新次数
+            'archived': total_archived,          # 累计归档通过文档数（摘要框）
             'document_changes': document_changes,
-            'archive_rate': archive_rate,
+            'archive_rate': archive_rate,        # 归档率 = 累计归档/累计上传
             'by_cycle': by_cycle,
             'doc_details': doc_details,
             'cycle_order': cycle_order,
             'checklist': checklist,
         }
+
+    @staticmethod
+    def _extract_display_properties(req: Dict[str, Any]) -> Dict[str, str]:
+        """从文档需求中提取可展示的自定义属性（过滤空值和复杂对象）"""
+        SKIP_KEYS = {'name', 'requirement', 'type', 'id', 'attributes',
+                     'exclude_keywords', 'match_keywords', 'filename_template'}
+        ATTR_LABEL_MAP = {
+            'need_doc_date': '需注明文件日期',
+            'need_doc_number': '需注明文件编号',
+            'need_sign_date': '需注明签字日期',
+            'party_a_seal': '甲方盖章',
+            'party_a_sign': '甲方签字',
+            'party_b_seal': '乙方盖章',
+            'party_b_sign': '乙方签字',
+            'need_seal': '需盖章',
+            'need_sign': '需签字',
+        }
+        result: Dict[str, str] = {}
+
+        # 展示 doc_note（备注）
+        note = str(req.get('doc_note') or '').strip()
+        if note:
+            result['备注'] = note
+
+        # 从 attributes 中提取已启用的标志
+        attrs = req.get('attributes')
+        if isinstance(attrs, dict):
+            enabled_flags = []
+            for k, v in attrs.items():
+                if v is True or v == 'true' or v == 1:
+                    label = ATTR_LABEL_MAP.get(k, k)
+                    enabled_flags.append(label)
+            if enabled_flags:
+                result['要求'] = '、'.join(enabled_flags)
+
+        # 其他简单字符串属性
+        for key, value in req.items():
+            if key in SKIP_KEYS or key == 'doc_note':
+                continue
+            if isinstance(value, (dict, list)):
+                continue
+            s = str(value).strip()
+            if s and s not in ('False', 'None', '0', 'false', 'null'):
+                result[key] = s
+
+        return result
 
     def _load_project(self, project_id: str) -> Dict[str, Any]:
         if not self.doc_manager:
@@ -1348,8 +1394,8 @@ class ScheduledReportService:
         title = f"【{project_name}】{self._frequency_label(frequency)}已生成"
         party_b_line = f"承建单位：{party_b}<br>" if party_b else ''
         # 站内信内容使用HTML表格格式便于渲染
-        uploads_val = metrics.get('uploads', 0)
-        updated_val = metrics.get('updated_docs', 0)
+        total_uploads_val = metrics.get('total_uploads', 0)
+        total_updated_val = metrics.get('total_updated_docs', 0)
         archived_val = metrics.get('archived', 0)
         rate_val = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
@@ -1360,16 +1406,18 @@ class ScheduledReportService:
         for cycle in ordered_cycles:
             val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
-            c_archived = val.get('archived', 0)
-            c_all_uploaded_unique = val.get('all_uploaded_unique', 0)
-            if c_all_uploaded_unique > 0:
-                c_rate = round(min(100.0, (c_archived / c_all_uploaded_unique) * 100), 2)
+            c_updated = val.get('updated', 0)
+            c_archived = val.get('archived', 0)      # 本期归档
+            c_all_uploaded = val.get('all_uploaded_unique', 0)
+            if c_all_uploaded > 0:
+                c_rate = round(min(100.0, (c_archived / c_all_uploaded) * 100), 2)
             else:
                 c_rate = 0.0
             cycle_rows += (
                 f"<tr>"
                 f"<td style='padding:4px 8px;border:1px solid #c9d7e8;'>{cycle}</td>"
                 f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_uploads}</td>"
+                f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_updated}</td>"
                 f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_archived}</td>"
                 f"<td style='padding:4px 8px;border:1px solid #c9d7e8;text-align:center;'>{c_rate}%</td>"
                 f"</tr>"
@@ -1378,9 +1426,10 @@ class ScheduledReportService:
             "<table style='border-collapse:collapse;width:100%;font-size:12px;margin-top:8px;'>"
             "<thead><tr style='background:#e8f0f9;'>"
             "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:left;'>\u5468\u671f</th>"
-            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u4e0a\u4f20</th>"
-            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u5f52\u6863</th>"
-            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u5f52\u6863\u7387</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u4e0a\u4f20\u6570</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u66f4\u65b0\u6570</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u5f52\u6863\u6570</th>"
+            "<th style='padding:5px 8px;border:1px solid #b0c4d8;text-align:center;'>\u5f52\u6863\u901a\u8fc7\u7387</th>"
             f"</tr></thead><tbody>{cycle_rows}</tbody></table>"
         ) if cycle_rows else '<p style="color:#888;font-size:12px;">\u6682\u65e0\u5468\u671f\u6570\u636e</p>'
 
@@ -1390,11 +1439,12 @@ class ScheduledReportService:
             f"<p style='margin:0 0 6px;'>{party_b_line}<b>\u7c7b\u578b\uff1a</b>{self._frequency_label(frequency)}</p>"
             f"<p style='margin:0 0 6px;color:#888;'>\u7edf\u8ba1\u533a\u95f4\uff1a{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}</p>"
             f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'>"
-            f"<span style='background:#eef6ff;padding:4px 10px;border-radius:6px;'><b style='color:#2563eb;'>{uploads_val}</b> \u4e0a\u4f20\u901a\u8fc7</span>"
-            f"<span style='background:#f0fff4;padding:4px 10px;border-radius:6px;'><b style='color:#16a34a;'>{archived_val}</b> \u5f52\u6863\u901a\u8fc7</span>"
+            f"<span style='background:#eef6ff;padding:4px 10px;border-radius:6px;'><b style='color:#2563eb;'>{total_uploads_val}</b> \u7d2f\u8ba1\u4e0a\u4f20\u6b21\u6570</span>"
+            f"<span style='background:#fff7ed;padding:4px 10px;border-radius:6px;'><b style='color:#d97706;'>{total_updated_val}</b> \u7d2f\u8ba1\u66f4\u65b0\u6b21\u6570</span>"
+            f"<span style='background:#f0fff4;padding:4px 10px;border-radius:6px;'><b style='color:#16a34a;'>{archived_val}</b> \u5f52\u6863\u901a\u8fc7\u6587\u6863\u6570</span>"
             f"<span style='background:#fdf4ff;padding:4px 10px;border-radius:6px;'><b style='color:#7c3aed;'>{rate_val}%</b> \u5f52\u6863\u7387</span>"
             f"</div>"
-            f"<p style='margin:8px 0 4px;font-weight:600;'>\u6309\u5468\u671f\u7edf\u8ba1\uff1a</p>"
+            f"<p style='margin:8px 0 4px;font-weight:600;'>\u672c\u671f\u6309\u5468\u671f\u7edf\u8ba1\uff1a</p>"
             f"{cycle_table}"
             f"<p style='margin:10px 0 0;color:#888;font-size:11px;'>\u6587\u6863\u6e05\u5355\u8bf7\u67e5\u770bPDF\u9644\u4ef6\u3002</p>"
             f"</div>"
@@ -1422,8 +1472,8 @@ class ScheduledReportService:
         metrics: Dict[str, Any], party_b: str = ''
     ) -> Tuple[str, str]:
         title = self._frequency_label(frequency)
-        uploads = metrics.get('uploads', 0)
-        updated_docs = metrics.get('updated_docs', 0)
+        total_uploads = metrics.get('total_uploads', 0)
+        total_updated_docs = metrics.get('total_updated_docs', 0)
         archived = metrics.get('archived', 0)
         rate = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
@@ -1436,9 +1486,9 @@ class ScheduledReportService:
             + party_b_line
             + f"报告类型：{title}\n"
             f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}\n"
-            f"上传审核通过次数：{uploads}\n"
-            f"文档更新次数：{updated_docs}\n"
-            f"归档通过次数：{archived}\n"
+            f"累计上传次数：{total_uploads}\n"
+            f"累计文档更新次数：{total_updated_docs}\n"
+            f"当前归档通过文档数：{archived}\n"
             f"归档率：{rate}%\n"
             f"项目文档清单条目数：{len(checklist)}\n"
         )
@@ -1449,10 +1499,10 @@ class ScheduledReportService:
             val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
             c_updated = val.get('updated', 0)
-            c_archived = val.get('archived', 0)
-            c_all_uploaded_unique = val.get('all_uploaded_unique', 0)
-            if c_all_uploaded_unique > 0:
-                c_rate = round(min(100.0, (c_archived / c_all_uploaded_unique) * 100), 2)
+            c_archived = val.get('archived', 0)      # 本期归档数
+            c_all_uploaded = val.get('all_uploaded_unique', 0)
+            if c_all_uploaded > 0:
+                c_rate = round(min(100.0, (c_archived / c_all_uploaded) * 100), 2)
             else:
                 c_rate = 0.0
             bar_width = max(1, min(100, int(c_rate)))
@@ -1468,12 +1518,11 @@ class ScheduledReportService:
                 f"</td></tr>"
             )
 
-
         party_b_html = (f"<p style='margin:4px 0;color:#666;font-size:13px'>承建单位：<b>{party_b}</b></p>"
                         if party_b else '')
         no_data_row = "<tr><td colspan='5' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
 
-        # 邮件只包含概括摘要 + 按周期统计表，文档清单和上传明细通过PDF附件发送
+        # 邮件包含概括摘要 + 按周期统计表，文档清单和上传明细通过PDF附件发送
         html = (
             f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
             f"<h2 style='margin:0 0 4px;font-size:18px'>项目{title} — {project_name}</h2>"
@@ -1481,25 +1530,25 @@ class ScheduledReportService:
             f"<p style='margin:4px 0;color:#888;font-size:13px'>统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}</p>"
             f"<div style='display:flex;flex-wrap:wrap;gap:10px;margin:14px 0;'>"
             f"<div style='padding:10px 14px;background:#eef6ff;border-radius:8px;min-width:110px;text-align:center;'>"
-            f"<div style='font-size:22px;font-weight:bold;color:#2563eb'>{uploads}</div>"
-            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>上传审核通过</div></div>"
+            f"<div style='font-size:22px;font-weight:bold;color:#2563eb'>{total_uploads}</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>累计上传次数</div></div>"
             f"<div style='padding:10px 14px;background:#fff7ed;border-radius:8px;min-width:110px;text-align:center;'>"
-            f"<div style='font-size:22px;font-weight:bold;color:#d97706'>{updated_docs}</div>"
-            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>文档更新次数</div></div>"
+            f"<div style='font-size:22px;font-weight:bold;color:#d97706'>{total_updated_docs}</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>累计文档更新次数</div></div>"
             f"<div style='padding:10px 14px;background:#f0fff4;border-radius:8px;min-width:110px;text-align:center;'>"
             f"<div style='font-size:22px;font-weight:bold;color:#16a34a'>{archived}</div>"
-            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>归档通过</div></div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>当前归档通过文档数</div></div>"
             f"<div style='padding:10px 14px;background:#fdf4ff;border-radius:8px;min-width:110px;text-align:center;'>"
             f"<div style='font-size:22px;font-weight:bold;color:#7c3aed'>{rate}%</div>"
             f"<div style='font-size:12px;color:#64748b;margin-top:2px'>归档率</div></div></div>"
-            f"<h3 style='font-size:14px;margin:18px 0 8px;color:#374151'>按周期统计</h3>"
+            f"<h3 style='font-size:14px;margin:18px 0 8px;color:#374151'>按周期统计（本期）</h3>"
             f"<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
             f"<thead><tr style='background:#f8fafc;'>"
             f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>周期</th>"
-            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>上传通过</th>"
-            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>更新次数</th>"
-            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>归档通过</th>"
-            f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>归档率图示</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>上传数</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>更新数</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>归档数</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>当周期归档通过率</th>"
             f"</tr></thead>"
             f"<tbody>{rows or no_data_row}</tbody></table>"
             f"<p style='margin:18px 0 4px;color:#888;font-size:12px'>文档清单及上传明细请查看PDF附件。</p>"
@@ -1529,6 +1578,8 @@ class ScheduledReportService:
             h1 = ParagraphStyle('h1', fontName=font_name, fontSize=14, spaceAfter=4)
             h2 = ParagraphStyle('h2', fontName=font_name, fontSize=11, spaceAfter=4, spaceBefore=10)
             body = ParagraphStyle('body', fontName=font_name, fontSize=9, spaceAfter=2)
+            cell_style = ParagraphStyle('cell', fontName=font_name, fontSize=8, leading=12, wordWrap='CJK')
+            cell_center = ParagraphStyle('cell_c', fontName=font_name, fontSize=8, leading=12, wordWrap='CJK', alignment=TA_CENTER)
 
             title_label = self._frequency_label(frequency)
             party_b = metrics.get('party_b', '')
@@ -1540,14 +1591,14 @@ class ScheduledReportService:
             elems.append(Paragraph(f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}", body))
             elems.append(Spacer(1, 6))
 
-            # 概况统计行
-            uploads = metrics.get('uploads', 0)
-            updated_docs = metrics.get('updated_docs', 0)
+            # 摘要统计（累计数据）
+            total_uploads = metrics.get('total_uploads', 0)
+            total_updated_docs = metrics.get('total_updated_docs', 0)
             archived = metrics.get('archived', 0)
             rate = metrics.get('archive_rate', 0.0)
             summary_data = [
-                ['上传审核通过', '文档更新次数', '归档通过', '归档率'],
-                [str(uploads), str(updated_docs), str(archived), f'{rate}%'],
+                ['累计上传次数', '累计文档更新次数', '当前归档通过文档数', '归档率'],
+                [str(total_uploads), str(total_updated_docs), str(archived), f'{rate}%'],
             ]
             summary_style = TableStyle([
                 ('FONTNAME', (0, 0), (-1, -1), font_name),
@@ -1566,20 +1617,23 @@ class ScheduledReportService:
             elems.append(Table(summary_data, colWidths=[w, w, w, w], style=summary_style))
             elems.append(Spacer(1, 8))
 
-            # 按周期统计
-            elems.append(Paragraph('按周期统计', h2))
+            # 按周期统计（本期数据）
+            elems.append(Paragraph('按周期统计（本期）', h2))
             by_cycle = metrics.get('by_cycle', {})
             cycle_order = metrics.get('cycle_order', [])
             ordered_cycles = [x for x in cycle_order if x in by_cycle] + [x for x in by_cycle.keys() if x not in set(cycle_order)]
-            cycle_data = [['周期', '上传通过', '更新次数', '归档通过', '归档率']]
+            cycle_data = [['周期', '上传数', '更新数', '归档数', '当周期归档通过率']]
             for cycle in ordered_cycles:
                 val = by_cycle.get(cycle, {})
                 u = val.get('uploads', 0)
                 upd = val.get('updated', 0)
-                a = val.get('archived', 0)
-                uniq = val.get('uploaded_unique', 0)
+                a = val.get('archived', 0)       # 本期归档
+                uniq = val.get('all_uploaded_unique', 0)
                 r = round(min(100.0, (a / uniq) * 100), 2) if uniq > 0 else 0.0
-                cycle_data.append([str(cycle), str(u), str(upd), str(a), f'{r}%'])
+                cycle_data.append([
+                    Paragraph(str(cycle), cell_style),
+                    str(u), str(upd), str(a), f'{r}%'
+                ])
             cycle_style = TableStyle([
                 ('FONTNAME', (0, 0), (-1, -1), font_name),
                 ('FONTSIZE', (0, 0), (-1, -1), 9),
@@ -1594,98 +1648,118 @@ class ScheduledReportService:
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ])
             pw = A4[0] - 80
-            elems.append(Table(cycle_data, colWidths=[pw*0.35, pw*0.15, pw*0.15, pw*0.15, pw*0.2], style=cycle_style))
+            elems.append(Table(cycle_data, colWidths=[pw*0.35, pw*0.13, pw*0.13, pw*0.13, pw*0.26], style=cycle_style))
 
             # 项目文档清单
             checklist = metrics.get('checklist', [])
             if checklist:
                 elems.append(PageBreak())
                 elems.append(Paragraph('项目文档清单（按系统周期顺序）', h1))
-                
+
                 # 检查是否有自定义属性
-                has_custom_properties = any('custom_properties' in item and item['custom_properties'] for item in checklist)
-                
-                # 构建表头
+                has_custom_properties = any(item.get('custom_properties') for item in checklist)
+
                 if has_custom_properties:
-                    cl_data = [['序号', '周期', '文档名称', '要求', '自定义属性', '上传数', '状态']]
+                    cl_data = [[
+                        Paragraph('序号', cell_center),
+                        Paragraph('周期', cell_style),
+                        Paragraph('文档名称', cell_style),
+                        Paragraph('要求', cell_style),
+                        Paragraph('自定义属性', cell_style),
+                        Paragraph('上传数', cell_center),
+                        Paragraph('状态', cell_center),
+                    ]]
                 else:
-                    cl_data = [['序号', '周期', '文档名称', '要求', '上传数', '状态']]
-                
+                    cl_data = [[
+                        Paragraph('序号', cell_center),
+                        Paragraph('周期', cell_style),
+                        Paragraph('文档名称', cell_style),
+                        Paragraph('要求', cell_style),
+                        Paragraph('上传数', cell_center),
+                        Paragraph('状态', cell_center),
+                    ]]
+
                 prev_cycle = None
                 for i, item in enumerate(checklist, 1):
                     cur_cycle = str(item.get('cycle', ''))
                     cycle_cell = cur_cycle if cur_cycle != prev_cycle else ''
                     prev_cycle = cur_cycle
                     status = str(item.get('status', ''))
-                    
-                    # 处理自定义属性
+                    doc_name = str(item.get('doc_name', ''))
+                    requirement = str(item.get('requirement', '') or '-')
+
+                    # 处理自定义属性（已过滤为可展示内容）
                     custom_props = item.get('custom_properties', {})
                     custom_props_str = ''
                     if custom_props:
-                        props = []
-                        for key, value in custom_props.items():
-                            props.append(f"{key}: {value}")
+                        props = [f"{k}: {v}" for k, v in custom_props.items()]
                         custom_props_str = '\n'.join(props)
-                    
+
                     if has_custom_properties:
                         cl_data.append([
-                            str(i),
-                            cycle_cell,
-                            str(item.get('doc_name', '')),
-                            str(item.get('requirement', '') or '-'),
-                            custom_props_str or '-',
-                            str(item.get('uploaded_count', 0)),
-                            status,
+                            Paragraph(str(i), cell_center),
+                            Paragraph(cycle_cell, cell_style),
+                            Paragraph(doc_name, cell_style),
+                            Paragraph(requirement, cell_style),
+                            Paragraph(custom_props_str or '-', cell_style),
+                            Paragraph(str(item.get('uploaded_count', 0)), cell_center),
+                            Paragraph(status, cell_center),
                         ])
                     else:
                         cl_data.append([
-                            str(i),
-                            cycle_cell,
-                            str(item.get('doc_name', '')),
-                            str(item.get('requirement', '') or '-'),
-                            str(item.get('uploaded_count', 0)),
-                            status,
+                            Paragraph(str(i), cell_center),
+                            Paragraph(cycle_cell, cell_style),
+                            Paragraph(doc_name, cell_style),
+                            Paragraph(requirement, cell_style),
+                            Paragraph(str(item.get('uploaded_count', 0)), cell_center),
+                            Paragraph(status, cell_center),
                         ])
+
                 # 为不同状态上色
                 cl_style_cmds = [
                     ('FONTNAME', (0, 0), (-1, -1), font_name),
                     ('FONTSIZE', (0, 0), (-1, -1), 8),
-                    ('ALIGN', (0, 0), (0, -1), 'CENTER'),   # 序号居中
-                    ('ALIGN', (4, 0), (5, -1), 'CENTER'),   # 上传数、状态居中
-                    ('ALIGN', (1, 0), (3, -1), 'LEFT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                     ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
                     ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
                     ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
                     ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
-                    ('TOPPADDING', (0, 0), (-1, -1), 3),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                    ('WORDWRAP', (2, 1), (3, -1), True),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
                 ]
+                status_col = 6 if has_custom_properties else 5
                 for row_idx, item in enumerate(checklist, 1):
                     status = str(item.get('status', ''))
                     if status == '已完成':
-                        cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#16a34a')))
+                        cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#16a34a')))
                     elif status == '待完善':
-                        cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#d97706')))
+                        cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#d97706')))
                     elif status == '未上传':
-                        cl_style_cmds.append(('TEXTCOLOR', (5, row_idx), (5, row_idx), rl_colors.HexColor('#dc2626')))
+                        cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#dc2626')))
                 cl_style = TableStyle(cl_style_cmds)
                 if has_custom_properties:
-                    # 有自定义属性时的列宽设置
                     cw = pw / 7
-                    elems.append(Table(cl_data, colWidths=[cw*0.5, cw*1.2, cw*1.5, cw*1.0, cw*1.5, cw*0.5, cw*0.8], style=cl_style, repeatRows=1))
+                    elems.append(Table(cl_data, colWidths=[cw*0.4, cw*1.0, cw*1.5, cw*1.0, cw*1.5, cw*0.5, cw*0.6], style=cl_style, repeatRows=1))
                 else:
-                    # 无自定义属性时的列宽设置
                     cw = pw / 6
-                    elems.append(Table(cl_data, colWidths=[cw*0.5, cw*1.2, cw*1.8, cw*1.3, cw*0.5, cw*0.7], style=cl_style, repeatRows=1))
+                    elems.append(Table(cl_data, colWidths=[cw*0.4, cw*1.0, cw*1.8, cw*1.5, cw*0.5, cw*0.8], style=cl_style, repeatRows=1))
 
-            # 本期文档上传明细
+            # 本期文档变化明细（上传 + 更新）
             doc_details = metrics.get('doc_details', [])
             if doc_details:
                 elems.append(PageBreak())
-                elems.append(Paragraph('本期文档上传明细', h1))
-                dd_data = [['序号', '周期', '文档名称', '文件名', '上传人', '上传时间']]
+                elems.append(Paragraph('本期文档变化明细', h1))
+                dd_data = [[
+                    Paragraph('序号', cell_center),
+                    Paragraph('周期', cell_style),
+                    Paragraph('文档名称', cell_style),
+                    Paragraph('文件名', cell_style),
+                    Paragraph('上传人', cell_style),
+                    Paragraph('上传时间', cell_center),
+                ]]
                 prev_cycle = None
                 for idx, d in enumerate(doc_details, 1):
                     cur_cycle = str(d.get('cycle', ''))
@@ -1693,31 +1767,33 @@ class ScheduledReportService:
                     prev_cycle = cur_cycle
                     doc_name = str(d.get('doc_name', ''))
                     if d.get('is_update'):
-                        doc_name += '(更新)'
+                        doc_name += '（更新）'
+                    filename = str(d.get('filename', '') or '')
                     upload_time = str(d.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
                     dd_data.append([
-                        str(idx),
-                        cycle_cell,
-                        doc_name,
-                        str(d.get('filename', '') or '')[:30],
-                        str(d.get('uploader', '-') or '-'),
-                        upload_time,
+                        Paragraph(str(idx), cell_center),
+                        Paragraph(cycle_cell, cell_style),
+                        Paragraph(doc_name, cell_style),
+                        Paragraph(filename[:40], cell_style),
+                        Paragraph(str(d.get('uploader', '-') or '-'), cell_style),
+                        Paragraph(upload_time, cell_center),
                     ])
                 dd_style = TableStyle([
                     ('FONTNAME', (0, 0), (-1, -1), font_name),
                     ('FONTSIZE', (0, 0), (-1, -1), 8),
-                    ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                    ('ALIGN', (1, 0), (-1, -1), 'LEFT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                     ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
                     ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
                     ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
                     ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
                     ('TOPPADDING', (0, 0), (-1, -1), 3),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
                 ])
                 dw = pw / 6
-                elems.append(Table(dd_data, colWidths=[dw*0.4, dw*0.9, dw*1.4, dw*1.5, dw*0.9, dw*0.9], style=dd_style, repeatRows=1))
+                elems.append(Table(dd_data, colWidths=[dw*0.3, dw*0.8, dw*1.3, dw*1.5, dw*0.8, dw*0.9], style=dd_style, repeatRows=1))
 
             doc = SimpleDocTemplate(
                 str(pdf_path), pagesize=A4,

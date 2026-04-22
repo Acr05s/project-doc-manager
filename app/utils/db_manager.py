@@ -226,7 +226,7 @@ class DatabaseManager:
                 conn.close()
 
     def update(self, sql: str, update_func: Callable[[List[Dict]], None], 
-               write_func: Callable[[sqlite3.Connection, List[Dict]], None] = None) -> bool:
+               write_func: Optional[Callable[[sqlite3.Connection, List[Dict]], None]] = None) -> bool:
         """原子性更新数据（读-改-写 作为一个整体）
 
         Args:
