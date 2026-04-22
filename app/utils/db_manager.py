@@ -12,6 +12,7 @@
 import json
 import os
 import sys
+import shutil
 import sqlite3
 import threading
 import tempfile
@@ -225,13 +226,14 @@ class DatabaseManager:
                 conn.close()
 
     def update(self, sql: str, update_func: Callable[[List[Dict]], None], 
-               write_func: Optional[Callable[[sqlite3.Connection, List[Dict]], None]] = None) -> bool:
+               write_func: Callable[[sqlite3.Connection, List[Dict]], None] = None) -> bool:
         """原子性更新数据（读-改-写 作为一个整体）
 
         Args:
             sql: 查询语句
             update_func: 更新函数，接收当前数据列表，修改后返回
-            write_func: 可选的写入函数，接收数据库连接和修改后的数据列表，执行实际的写入操作
+            write_func: 写入函数，接收数据库连接和修改后的数据列表，执行实际的写入操作。
+                        如果未提供，将自动根据表的主键生成UPDATE语句。
 
         Returns:
             bool: 是否更新成功
@@ -251,10 +253,12 @@ class DatabaseManager:
                 if not data:
                     return True
 
-                # 如果提供了写入函数，执行写入操作
+                # 执行写入操作
                 if write_func:
                     write_func(conn, data)
-                    conn.commit()
+                else:
+                    self._auto_write_updates(conn, sql, data, cursor)
+                conn.commit()
 
                 return True
             except Exception as e:
@@ -263,6 +267,49 @@ class DatabaseManager:
                 return False
             finally:
                 conn.close()
+
+    def _auto_write_updates(self, conn, sql: str, data: List[Dict], cursor):
+        """根据查询SQL自动推断表名和主键，生成UPDATE语句写回数据"""
+        from sqlite3 import Cursor
+        
+        # 从SQL语句中提取表名
+        import re
+        table_match = re.search(r'FROM\s+(\w+)', sql, re.IGNORECASE)
+        if not table_match:
+            raise ValueError(f"无法从SQL语句中提取表名: {sql}")
+        table_name = table_match.group(1)
+        
+        # 获取表的主键列
+        pk_columns = []
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        for col_info in cursor.fetchall():
+            # col_info: (cid, name, type, notnull, dflt_value, pk)
+            if col_info[5] > 0:  # pk > 0 表示是主键
+                pk_columns.append((col_info[1], col_info[5]))  # (name, pk_order)
+        
+        # 按主键顺序排序
+        pk_columns.sort(key=lambda x: x[1])
+        pk_names = [col[0] for col in pk_columns]
+        
+        if not pk_names:
+            raise ValueError(f"表 {table_name} 没有主键，无法自动生成UPDATE语句，请提供write_func")
+        
+        # 获取所有列名
+        all_columns = list(data[0].keys()) if data else []
+        update_columns = [c for c in all_columns if c not in pk_names]
+        
+        if not update_columns:
+            return
+        
+        # 生成UPDATE语句
+        set_clause = ', '.join([f'{c} = ?' for c in update_columns])
+        where_clause = ' AND '.join([f'{c} = ?' for c in pk_names])
+        update_sql = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause}"
+        
+        for row in data:
+            set_values = [row.get(c) for c in update_columns]
+            pk_values = [row.get(c) for c in pk_names]
+            conn.execute(update_sql, set_values + pk_values)
 
 
 # ============================================================================
@@ -299,29 +346,98 @@ class ProjectsIndexDB(DatabaseManager):
             print(f"[DB] 初始化数据库表失败: {e}")
             import traceback
             traceback.print_exc()
-            # 如果数据库文件损坏，尝试删除后重建
+            
+            # 如果数据库文件损坏，尝试备份后重建
             try:
                 if os.path.exists(self.db_path):
+                    backup_path = self.db_path + '.backup'
+                    
+                    try:
+                        # 尝试备份数据库文件
+                        shutil.copy2(self.db_path, backup_path)
+                        print(f"[DB] 已创建数据库备份: {backup_path}")
+                    except Exception as backup_err:
+                        print(f"[DB] 备份失败（继续执行重建）: {backup_err}")
+                    
+                    # 删除损坏的数据库文件及其 WAL/SHM 文件
                     print(f"[DB] 尝试删除损坏的数据库文件: {self.db_path}")
                     os.remove(self.db_path)
-                    # 同时删除 WAL 和 SHM 文件
                     for suffix in ('-wal', '-shm'):
                         wal_path = self.db_path + suffix
                         if os.path.exists(wal_path):
                             os.remove(wal_path)
-                # 重新创建
+                
+                # 重新创建数据库
                 with _file_lock(self.db_path, exclusive=True):
                     conn = self._get_connection()
                     try:
                         self._create_tables(conn)
                         conn.commit()
                         print(f"[DB] 数据库重建成功: {self.db_path}")
+                        
+                        # 尝试从备份恢复数据
+                        backup_path = self.db_path + '.backup'
+                        if os.path.exists(backup_path):
+                            try:
+                                self._try_recover_from_backup(conn, backup_path)
+                                print(f"[DB] 数据恢复完成")
+                                os.remove(backup_path)  # 成功后删除备份
+                            except Exception as recover_err:
+                                print(f"[DB] 数据恢复失败（使用空数据库）: {recover_err}")
+                                
                     finally:
                         conn.close()
             except Exception as e2:
                 print(f"[DB] 数据库重建也失败了: {e2}")
                 import traceback
                 traceback.print_exc()
+
+    def _try_recover_from_backup(self, conn, backup_path):
+        """尝试从备份恢复数据"""
+        try:
+            import sqlite3 as sqlite3_module
+            
+            # 读取备份数据库中的所有数据
+            with sqlite3_module.connect(backup_path) as backup_conn:
+                backup_cursor = backup_conn.cursor()
+                
+                # 获取所有表名
+                backup_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                tables = [row[0] for row in backup_cursor.fetchall()]
+                
+                for table in tables:
+                    try:
+                        # 获取表结构
+                        backup_cursor.execute(f"PRAGMA table_info({table})")
+                        columns = [row[1] for row in backup_cursor.fetchall()]
+                        
+                        if not columns:
+                            continue
+                        
+                        # 读取所有数据
+                        backup_cursor.execute(f"SELECT * FROM {table}")
+                        rows = backup_cursor.fetchall()
+                        
+                        if rows:
+                            placeholders = ','.join(['?' for _ in columns])
+                            columns_str = ','.join(columns)
+                            
+                            # 插入到新数据库
+                            conn.executemany(
+                                f"INSERT OR IGNORE INTO {table} ({columns_str}) VALUES ({placeholders})",
+                                rows
+                            )
+                            
+                            print(f"[DB] 已从备份恢复表 {table}: {len(rows)} 条记录")
+                            
+                    except Exception as table_err:
+                        print(f"[DB] 恢复表 {table} 失败: {table_err}")
+                        continue
+                
+                conn.commit()
+                
+        except Exception as e:
+            raise Exception(f"数据恢复失败: {e}")
 
     def _create_tables(self, conn):
         """创建所有数据库表"""
