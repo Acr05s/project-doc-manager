@@ -2965,9 +2965,8 @@ function generateDynamicEditForm(doc, cycle, docName) {
                 `;
             } else if (attr1.type === 'checkbox' && attr1.inline) {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr1.label}</label></td>
-                    <td class="input-cell">
-                        <label class="checkbox-item">
+                    <td class="input-cell" colspan="2" style="padding: 4px 8px;">
+                        <label class="checkbox-item" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
                             <input type="checkbox" id="edit${attr1.id.charAt(0).toUpperCase() + attr1.id.slice(1)}" ${attr1.isCustom ? `data-field-name="${attr1.name}"` : ''} ${actualValue ? 'checked' : ''}>
                             <span>${attr1.label}</span>
                         </label>
@@ -3011,9 +3010,8 @@ function generateDynamicEditForm(doc, cycle, docName) {
                 `;
             } else if (attr2.type === 'checkbox' && attr2.inline) {
                 rowHtml += `
-                    <td class="label-cell"><label>${attr2.label}</label></td>
-                    <td class="input-cell">
-                        <label class="checkbox-item">
+                    <td class="input-cell" colspan="2" style="padding: 4px 8px;">
+                        <label class="checkbox-item" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
                             <input type="checkbox" id="edit${attr2.id.charAt(0).toUpperCase() + attr2.id.slice(1)}" ${attr2.isCustom ? `data-field-name="${attr2.name}"` : ''} ${actualValue ? 'checked' : ''}>
                             <span>${attr2.label}</span>
                         </label>

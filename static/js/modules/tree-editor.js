@@ -1042,18 +1042,18 @@ function renderPredefinedAttributes(targetNodes) {
     container.innerHTML = groups.map(group => `
         <div class="attr-subgroup" style="margin-bottom: 14px;">
             <h4 style="margin: 0 0 8px; font-size: 13px; color: #555;">${escapeHtml(group.title)}</h4>
-            <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 4px;">
                 ${group.items.map(item => {
                     const values = nodes.map(node => !!node?.attributes?.[item.key]);
                     const allTrue = values.length > 0 && values.every(Boolean);
                     const allFalse = values.length > 0 && values.every(value => !value);
                     const mixed = !allTrue && !allFalse;
                     return `
-                        <label class="attr-checkbox" style="margin: 0; display: flex; align-items: flex-start; gap: 8px; min-width: 180px;">
-                            <input type="checkbox" id="attr_${item.key}" ${allTrue ? 'checked' : ''} data-mixed="${mixed ? 'true' : 'false'}">
-                            <span>
-                                <span>${escapeHtml(item.label)}</span>
-                                ${item.description ? `<small style="display:block; color:#888; margin-top:2px;">${escapeHtml(item.description)}</small>` : ''}
+                        <label class="attr-checkbox" style="margin: 0; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="attr_${item.key}" ${allTrue ? 'checked' : ''} data-mixed="${mixed ? 'true' : 'false'}" style="flex-shrink:0;">
+                            <span style="font-size:13px;">
+                                ${escapeHtml(item.label)}
+                                ${item.description ? `<small style="display:block; color:#888; margin-top:1px; font-size:11px;">${escapeHtml(item.description)}</small>` : ''}
                             </span>
                         </label>
                     `;
@@ -1901,11 +1901,22 @@ function renderCustomAttributesForBatch(nodes) {
                 inputHtml = `<input type="date" id="custom_attr_${attrDef.id}" value="${escapeHtml(value)}" style="width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">`;
                 break;
         }
-        
+
+        if (attrDef.type === 'checkbox') {
+            return `
+                <div class="custom-attr-item" style="margin-bottom: 6px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        ${inputHtml}
+                        <span style="font-size:13px; font-weight:500;">${escapeHtml(attrDef.name)}</span>
+                        ${!allSame ? '<span style="color: #999; font-size: 11px;">(混合)</span>' : ''}
+                    </label>
+                </div>
+            `;
+        }
         return `
-            <div class="custom-attr-item" style="margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <label style="font-weight: 500;">${escapeHtml(attrDef.name)}</label>
+            <div class="custom-attr-item" style="margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                    <label style="font-weight: 500; font-size:13px;">${escapeHtml(attrDef.name)}</label>
                     ${!allSame ? '<span style="color: #999; font-size: 11px;">(混合)</span>' : ''}
                 </div>
                 ${inputHtml}
@@ -3268,12 +3279,14 @@ function renderCustomAttributes(node) {
         }
 
         return `
-            <div class="custom-attr-item" style="margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <label style="font-weight: 500;">${escapeHtml(attrDef.name)}</label>
-                    <button class="btn btn-sm btn-danger" onclick="deleteCustomAttr('${attrDef.id}')" style="padding: 2px 6px; font-size: 11px;">删除</button>
-                </div>
-                ${inputHtml}
+            <div class="custom-attr-item" style="margin-bottom: 6px;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; justify-content:space-between;">
+                    <span style="display:flex; align-items:center; gap:6px; flex:1; min-width:0;">
+                        ${inputHtml}
+                        <span style="font-size:13px; font-weight:500;">${escapeHtml(attrDef.name)}</span>
+                    </span>
+                    <button class="btn btn-sm btn-danger" onclick="deleteCustomAttr('${attrDef.id}')" style="padding: 2px 6px; font-size: 11px; flex-shrink:0;">删除</button>
+                </label>
             </div>
         `;
     }).join('');
