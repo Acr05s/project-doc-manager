@@ -281,7 +281,8 @@ function recipientGroups(task) {
         contractor.push(name);
     });
     var external = (task.external_emails || []).map(function(x) { return String(x).trim(); }).filter(Boolean);
-    return { contractor: contractor.join('\u3001') || '-', pmo: pmo.join('\u3001') || '-', external: external.join(', ') || '-' };
+    var externalEnabled = task.hasOwnProperty('external_emails_enabled') ? !!task.external_emails_enabled : external.length > 0;
+    return { contractor: contractor.join('\u3001') || '-', pmo: pmo.join('\u3001') || '-', external: external.join(', ') || '-', externalEnabled: externalEnabled };
 }
 
 function renderTaskList(tasks) {
@@ -324,7 +325,15 @@ function renderTaskList(tasks) {
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + escapeHtml(task._party_b || '-') + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(groups.contractor) + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(groups.pmo) + '</td>';
-        cells += '<td style="border:1px solid #e2e8f0; padding:6px;">' + escapeHtml(groups.external) + '</td>';
+        var externalCell;
+        if (groups.external === '-') {
+            externalCell = '-';
+        } else if (groups.externalEnabled) {
+            externalCell = escapeHtml(groups.external);
+        } else {
+            externalCell = '<span style="color:#aaa; text-decoration:line-through;" title="外部收件人已保存但未启用">' + escapeHtml(groups.external) + '</span><span style="margin-left:4px; font-size:11px; color:#bbb;">(未启用)</span>';
+        }
+        cells += '<td style="border:1px solid #e2e8f0; padding:6px;">' + externalCell + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">' + (task.enabled ? '\u542f\u7528' : '\u505c\u7528') + '</td>';
         cells += '<td style="border:1px solid #e2e8f0; padding:6px; white-space:nowrap;">';
         cells += '<button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-task-id="' + tid + '" data-project-id="' + pid + '">\u7f16\u8f91</button> ';
