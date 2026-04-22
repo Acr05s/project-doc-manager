@@ -210,13 +210,15 @@ export function buildUploadAttributeSchema(docInfo, config) {
 
     getCustomAttributeDefinitions(config, docInfo).forEach(attrDef => {
         if (attributes[attrDef.id]) {
+            const isCheckbox = attrDef.type === 'checkbox';
             schema.push({
-                type: attrDef.type === 'checkbox' ? 'checkbox' : 'text',
+                type: isCheckbox ? 'checkbox' : 'text',
                 id: attrDef.id,
                 name: attrDef.id,
                 label: attrDef.name,
                 placeholder: `请输入${attrDef.name}`,
-                isCustom: true
+                isCustom: true,
+                ...(isCheckbox && { inline: true })
             });
         }
     });
