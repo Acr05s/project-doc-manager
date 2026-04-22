@@ -836,9 +836,19 @@ class ScheduledReportService:
                 site_receiver_details.append({'id': uid, 'username': u.username, 'display_name': getattr(u, 'display_name', '') or u.username})
             else:
                 site_receiver_details.append({'id': uid, 'username': f'用户#{uid}'})
+
+        # 确定日志用户名：手动触发时使用真实用户名
+        if manual and requester_user_id:
+            requester = user_manager.get_user_by_id(requester_user_id)
+            log_username = getattr(requester, 'username', '') or f'用户#{requester_user_id}'
+            log_user_id = requester_user_id
+        else:
+            log_username = 'system_scheduler'
+            log_user_id = 0
+
         user_manager.add_operation_log(
-            0,
-            'system_scheduler' if not manual else 'manual_scheduler',
+            log_user_id,
+            log_username,
             'scheduled_report_send',
             project_id,
             project_name,
@@ -1201,6 +1211,43 @@ class ScheduledReportService:
 
         # 按上传时间倒序排列文档明细
         doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
+
+        # ── 统计本期删除文档 ──
+        period_deleted = 0
+        deleted_details: List[Dict[str, Any]] = []
+        try:
+            project_name_for_log = project.get('name', project_id)
+            with sqlite3.connect(str(user_manager.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT username, details, operation_time
+                    FROM operation_logs
+                    WHERE operation_type = 'document_delete'
+                      AND (target_id = ? OR target_name = ?)
+                    ORDER BY operation_time DESC
+                    """,
+                    (project_name_for_log, project_name_for_log),
+                )
+                for row in cursor.fetchall():
+                    t = self._parse_time(row['operation_time'])
+                    if t and start <= t <= end:
+                        period_deleted += 1
+                        try:
+                            d = json.loads(row['details'] or '{}')
+                        except Exception:
+                            d = {}
+                        deleted_details.append({
+                            'cycle': d.get('cycle', ''),
+                            'doc_name': d.get('doc_name', ''),
+                            'filename': d.get('filename', ''),
+                            'operator': row['username'] or '',
+                            'delete_time': d.get('delete_time', str(row['operation_time'])),
+                        })
+        except Exception as e:
+            logger.warning(f'[ScheduledReportService] query document_delete logs failed: {e}')
+
         return {
             'uploads': period_uploads,          # 本期上传次数（用于明细表格）
             'updated_docs': period_updated_docs, # 本期更新次数
@@ -1209,6 +1256,8 @@ class ScheduledReportService:
             'archived': total_archived,          # 累计归档通过文档数（摘要框）
             'document_changes': document_changes,
             'archive_rate': archive_rate,        # 归档率 = 累计归档/累计上传
+            'deleted': period_deleted,           # 本期删除文档数
+            'deleted_details': deleted_details,  # 本期删除明细
             'by_cycle': by_cycle,
             'doc_details': doc_details,
             'cycle_order': cycle_order,
@@ -1476,6 +1525,7 @@ class ScheduledReportService:
         total_updated_docs = metrics.get('total_updated_docs', 0)
         archived = metrics.get('archived', 0)
         rate = metrics.get('archive_rate', 0.0)
+        period_deleted = metrics.get('deleted', 0)
         by_cycle = metrics.get('by_cycle', {})
         cycle_order = metrics.get('cycle_order', [])
         checklist = metrics.get('checklist', [])
@@ -1490,6 +1540,7 @@ class ScheduledReportService:
             f"累计文档更新次数：{total_updated_docs}\n"
             f"当前归档通过文档数：{archived}\n"
             f"归档率：{rate}%\n"
+            f"本期删除文档数：{period_deleted}\n"
             f"项目文档清单条目数：{len(checklist)}\n"
         )
 
@@ -1540,7 +1591,10 @@ class ScheduledReportService:
             f"<div style='font-size:12px;color:#64748b;margin-top:2px'>当前归档通过文档数</div></div>"
             f"<div style='padding:10px 14px;background:#fdf4ff;border-radius:8px;min-width:110px;text-align:center;'>"
             f"<div style='font-size:22px;font-weight:bold;color:#7c3aed'>{rate}%</div>"
-            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>归档率</div></div></div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>归档率</div></div>"
+            f"<div style='padding:10px 14px;background:#fff1f2;border-radius:8px;min-width:110px;text-align:center;'>"
+            f"<div style='font-size:22px;font-weight:bold;color:#dc2626'>{period_deleted}</div>"
+            f"<div style='font-size:12px;color:#64748b;margin-top:2px'>本期删除文档数</div></div></div>"
             f"<h3 style='font-size:14px;margin:18px 0 8px;color:#374151'>按周期统计（本期）</h3>"
             f"<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
             f"<thead><tr style='background:#f8fafc;'>"

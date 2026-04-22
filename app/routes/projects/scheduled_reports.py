@@ -254,7 +254,7 @@ def get_report_send_history():
                 entry['total'] = 0
                 entry['period_start'] = ''
                 entry['period_end'] = ''
-            entry['trigger_type'] = '\u624b\u52a8' if log.get('username', '') == 'manual_scheduler' else '\u81ea\u52a8'
+            entry['trigger_type'] = '自动' if log.get('username', '') == 'system_scheduler' else '手动'
             enriched.append(entry)
 
         total = len(enriched)

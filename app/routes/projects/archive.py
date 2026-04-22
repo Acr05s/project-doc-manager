@@ -206,8 +206,16 @@ def complete_archive_if_all_stages_done(approval_id, project_id, approval_record
         for doc_name in doc_names:
             if isinstance(doc_name, str) and doc_name:
                 project_config['documents_not_involved'][cycle][doc_name] = True
+        # 不涉及也标记为已归档
+        if 'documents_archived' not in project_config:
+            project_config['documents_archived'] = {}
+        if cycle not in project_config['documents_archived']:
+            project_config['documents_archived'][cycle] = {}
+        for doc_name in doc_names:
+            if isinstance(doc_name, str) and doc_name:
+                project_config['documents_archived'][cycle][doc_name] = True
 
-    if request_type == 'unarchive':
+    elif request_type == 'unarchive':
         # 撤销归档：移除已归档标记
         archived = project_config.get('documents_archived', {})
         if cycle in archived and isinstance(archived.get(cycle), dict):
@@ -218,8 +226,9 @@ def complete_archive_if_all_stages_done(approval_id, project_id, approval_record
                 archived.pop(cycle, None)
         if not archived:
             project_config.pop('documents_archived', None)
+
     else:
-        # 归档/不涉及：标记为已归档
+        # 归档：标记为已归档
         if 'documents_archived' not in project_config:
             project_config['documents_archived'] = {}
         if cycle not in project_config['documents_archived']:

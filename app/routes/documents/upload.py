@@ -1,6 +1,7 @@
 """文档上传相关路由"""
 
 from flask import request, jsonify
+from flask_login import current_user
 from pathlib import Path
 from datetime import datetime
 from .utils import get_doc_manager
@@ -30,7 +31,8 @@ def upload_document():
         project_name = request.form.get('project_name', None)
         source_dir = (request.form.get('source_dir') or '').strip()
         root_directory = (request.form.get('root_directory') or '').strip()
-        
+        uploader = getattr(current_user, 'username', '') or ''
+
         if not all([file, cycle, doc_name]):
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
@@ -103,17 +105,18 @@ def upload_document():
                 'source': 'upload',
                 'file_size': result.get('size'),
                 'doc_id': doc_id,
+                'uploader': uploader,
                 'directory': normalized_directory,  # 目录：默认根目录
                 'root_directory': root_directory,
                 'custom_attrs': custom_attributes  # 自定义属性
             }
-            
+
             # 添加到documents_db
             doc_manager.documents_db[doc_id] = doc_metadata
-            
+
             # 添加doc_id到结果中
             result['doc_id'] = doc_id
-            
+
             # 保存到项目配置中，记录文件路径
             if project_id:
                 project_result = doc_manager.load_project(project_id)
@@ -127,15 +130,15 @@ def upload_document():
                             project_config['documents'][cycle] = {'uploaded_docs': []}
                         if 'uploaded_docs' not in project_config['documents'][cycle]:
                             project_config['documents'][cycle]['uploaded_docs'] = []
-                        
+
                         # 添加文档到项目配置
                         project_config['documents'][cycle]['uploaded_docs'].append(doc_metadata)
-                        
+
                         # 保存更新后的项目配置
                         doc_manager.save_project(project_config)
-        
+
         return jsonify(result)
-    
+
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -194,7 +197,10 @@ def merge_chunks():
         other_seal = request.form.get('other_seal', '')
         project_id = request.form.get('project_id')
         project_name = request.form.get('project_name')
-        
+        source_dir = (request.form.get('source_dir') or '').strip()
+        root_directory = (request.form.get('root_directory') or '').strip()
+        uploader = getattr(current_user, 'username', '') or ''
+
         if not all([file_name, cycle, doc_name, total_chunks]):
             return jsonify({'status': 'error', 'message': '缺少必要参数'}), 400
         
@@ -314,17 +320,18 @@ def merge_chunks():
                 'source': 'upload',
                 'file_size': result.get('size'),
                 'doc_id': doc_id,
+                'uploader': uploader,
                 'directory': normalized_directory,  # 目录：默认根目录
                 'root_directory': root_directory,
                 'custom_attrs': custom_attributes  # 自定义属性
             }
-            
+
             # 添加到documents_db
             doc_manager.documents_db[doc_id] = doc_metadata
-            
+
             # 添加doc_id到结果中
             result['doc_id'] = doc_id
-            
+
             # 保存到项目配置中，记录文件路径
             if project_id:
                 project_result = doc_manager.load_project(project_id)
@@ -338,15 +345,15 @@ def merge_chunks():
                             project_config['documents'][cycle] = {'uploaded_docs': []}
                         if 'uploaded_docs' not in project_config['documents'][cycle]:
                             project_config['documents'][cycle]['uploaded_docs'] = []
-                        
+
                         # 添加文档到项目配置
                         project_config['documents'][cycle]['uploaded_docs'].append(doc_metadata)
-                        
+
                         # 保存更新后的项目配置
                         doc_manager.save_project(project_config)
-        
+
         return jsonify(result)
-    
+
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
