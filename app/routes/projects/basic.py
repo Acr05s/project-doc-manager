@@ -780,33 +780,44 @@ def bulk_approve_archive_requests():
                     failed.append({'id': approval_id, 'error': '方案不存在'})
                     continue
 
-                # 权限检查
-                current_stage = approval.get('current_stage', 1)
-                if current_stage == 1 and current_user.role not in ('project_admin', 'admin'):
-                    failed.append({'id': approval_id, 'error': '权限不足'})
-                    continue
-                elif current_stage == 2 and current_user.role not in ('pmo', 'pmo_leader', 'admin'):
-                    failed.append({'id': approval_id, 'error': '权限不足'})
-                    continue
-
                 if approval['status'] != 'pending':
                     failed.append({'id': approval_id, 'error': '已处理'})
                     continue
 
-                if action == 'approve':
-                    # 调用批准逻辑
-                    user_manager.resolve_archive_approval(
-                        approval['id'], 'approved', user_id,
-                        current_user.username, ''
-                    )
+                # 权限检查：从 approval_stages 读取当前阶段要求的角色
+                import json as _json
+                approval_stages = approval.get('approval_stages') or []
+                if isinstance(approval_stages, str):
+                    approval_stages = _json.loads(approval_stages)
+                current_stage_idx = approval.get('current_stage', 1) - 1
+
+                if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
+                    failed.append({'id': approval_id, 'error': '审批阶段异常'})
+                    continue
+
+                required_role = (approval_stages[current_stage_idx].get('required_role') or '').strip()
+                if current_user.role != 'admin':
+                    allowed_roles = [required_role]
+                    if required_role == 'pmo':
+                        allowed_roles = ['pmo', 'pmo_leader']
+                    if required_role and current_user.role not in allowed_roles:
+                        failed.append({'id': approval_id, 'error': f'当前阶段需要角色: {required_role}'})
+                        continue
+
+                # 调用正确的逐阶段审批逻辑（通过内部函数，不直接改总状态）
+                from app.routes.projects.archive import _do_stage_approval
+                result_msg = _do_stage_approval(
+                    approval_id=approval['id'],
+                    project_id=approval['project_id'],
+                    approver=current_user,
+                    action=action,
+                    reject_reason=reason,
+                    complete_now=False,
+                )
+                if result_msg is None:
                     success_count += 1
-                else:  # reject
-                    # 调用驳回逻辑
-                    user_manager.resolve_archive_approval(
-                        approval['id'], 'rejected', user_id,
-                        current_user.username, reason
-                    )
-                    success_count += 1
+                else:
+                    failed.append({'id': approval_id, 'error': result_msg})
 
             except Exception as e:
                 failed.append({'id': approval_id, 'error': str(e)})

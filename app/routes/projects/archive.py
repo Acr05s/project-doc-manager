@@ -135,7 +135,7 @@ def should_proceed_to_next_stage(approval_stages):
     return True, len(approval_stages)
 
 
-def append_stage_history(approval_id, action, user_id=None, username=None, stage=None, detail=None):
+def append_stage_history(approval_id, action, user_id=None, username=None, stage=None, detail=None, display_name=None):
     """追加一条流程历史记录到 stage_history 字段"""
     from pathlib import Path
     db_path = Path(user_manager.db_path)
@@ -158,6 +158,7 @@ def append_stage_history(approval_id, action, user_id=None, username=None, stage
                 'timestamp': now_with_timezone().strftime('%Y-%m-%d %H:%M:%S'),
                 'user_id': user_id,
                 'username': username,
+                'display_name': display_name or username,
             }
             if stage is not None:
                 entry['stage'] = stage
@@ -328,6 +329,14 @@ def submit_archive_request(project_id):
 
         print(f'[DEBUG] submit_archive_request - project_id: {project_id}, cycle: {cycle}, doc_names: {doc_names}, type: {request_type}', file=sys.stderr, flush=True)
 
+        # 后端权限检查：doc_op_archive（申请归档）
+        from app.routes.settings import load_permissions as _load_perms
+        _perms = _load_perms()
+        _archive_perm = _perms.get('doc_op_archive', {})
+        _allowed_roles = _archive_perm.get('roles', [])
+        if _allowed_roles and current_user.role not in _allowed_roles:
+            return jsonify({'status': 'error', 'message': '您没有申请归档的权限'}), 403
+
         if doc_name and not doc_names:
             doc_names = [doc_name]
 
@@ -342,6 +351,7 @@ def submit_archive_request(project_id):
 
         requester_id = int(current_user.id)
         requester_username = current_user.username
+        requester_display_name = getattr(current_user, 'display_name', None) or current_user.username
 
         # 加载项目配置以获取审批链
         doc_manager = get_doc_manager()
@@ -389,6 +399,11 @@ def submit_archive_request(project_id):
             print(f'[DEBUG] No Level 1 approvers found', file=sys.stderr, flush=True)
             return jsonify({'status': 'error', 'message': '未找到项目经理，请联系管理员配置'}), 400
 
+        # 验证每个阶段都有配置审批角色
+        for _s in approval_stages:
+            if not (_s.get('required_role') or '').strip():
+                return jsonify({'status': 'error', 'message': '审批链配置不完整：存在未设置审批角色的阶段，请先在审批流程配置中完善'}), 400
+
         print(f'[DEBUG] Found {len(level_1_approvers)} Level 1 approvers', file=sys.stderr, flush=True)
 
         # 创建归档审批记录（带有approval_stages）
@@ -431,7 +446,7 @@ def submit_archive_request(project_id):
         if len(doc_names) > 5:
             doc_list_str += f'等{len(doc_names)}个文档'
         type_label = {'archive': '归档', 'not_involved': '不涉及', 'unarchive': '撤销归档'}.get(request_type, '归档')
-        append_stage_history(approval_id, 'submit', requester_id, requester_username, detail=f'提交{type_label}申请：{doc_list_str}')
+        append_stage_history(approval_id, 'submit', requester_id, requester_username, detail=f'提交{type_label}申请：{doc_list_str}', display_name=requester_display_name)
 
         # 向第一阶段的所有审批人发送通知
         doc_list = '、'.join(doc_names[:5])
@@ -593,6 +608,164 @@ def get_pending_archive_approvals():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def _validate_approver_role(approver, project_config, approval_stages, current_stage_idx, complete_now=False):
+    """
+    验证审批人角色是否与当前审批阶段匹配。
+    返回 (error_message, required_role)，如果验证通过则 error_message 为 None。
+    """
+    if approver.role != 'admin':
+        current_stage = approval_stages[current_stage_idx]
+        required_role = (current_stage.get('required_role') or '').strip()
+        org_match = (current_stage.get('org_match') or '').strip()
+        if not required_role:
+            return '当前审批阶段未配置审批角色，无法审批', required_role
+        allowed_roles = [required_role]
+        if required_role == 'pmo':
+            allowed_roles = ['pmo', 'pmo_leader']
+        if approver.role not in allowed_roles:
+            return '当前审批阶段与审批人角色不匹配', required_role
+
+        approver_org = (getattr(approver, 'organization', '') or '').strip()
+        project_org = (project_config.get('party_b') or '').strip()
+        if org_match == 'party_b' and project_org and approver_org and approver_org != project_org:
+            return '当前审批阶段要求项目经理（承建单位）审批', required_role
+        if org_match == 'pmo' and approver_org != 'PMO':
+            return '当前审批阶段要求PMO组织审批', required_role
+
+    if complete_now and approver.role != 'admin':
+        current_stage = approval_stages[current_stage_idx]
+        required_role = (current_stage.get('required_role') or '').strip()
+        if required_role != 'pmo_leader':
+            return '仅PMO负责人可直接完成归档', required_role
+
+    required_role = (approval_stages[current_stage_idx].get('required_role') or '').strip()
+    return None, required_role
+
+
+def _do_stage_approval(approval_id, project_id, approver, action='approve', reject_reason='', complete_now=False):
+    """
+    执行单阶段审批逻辑（供批量审批调用）。
+    成功返回 None，失败返回错误消息字符串。
+    """
+    import sqlite3
+    from pathlib import Path
+    try:
+        approval = user_manager.get_archive_approval_by_id(approval_id)
+        if not approval:
+            return '审批请求不存在'
+        if approval['status'] != 'pending':
+            return '该请求已处理'
+
+        doc_manager = get_doc_manager()
+        project_result = doc_manager.load_project(project_id)
+        if project_result.get('status') != 'success':
+            return '项目加载失败'
+        project_config = project_result.get('project', {})
+
+        approval_stages = approval.get('approval_stages') or []
+        if isinstance(approval_stages, str):
+            approval_stages = json.loads(approval_stages)
+        current_stage_idx = approval.get('current_stage', 1) - 1
+
+        if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
+            return '审批阶段异常'
+
+        # 验证审批人角色是否与当前审批阶段匹配
+        err_msg, _ = _validate_approver_role(approver, project_config, approval_stages, current_stage_idx, complete_now)
+        if err_msg:
+            return err_msg
+
+        doc_names = approval.get('doc_names') or []
+        if isinstance(doc_names, str):
+            doc_names = json.loads(doc_names)
+
+        req_type = approval.get('request_type', 'archive')
+        type_label = {'archive': '归档', 'not_involved': '不涉及', 'unarchive': '撤销归档'}.get(req_type, '归档')
+        approver_display = getattr(approver, 'display_name', None) or approver.username
+
+        if action == 'reject':
+            approval_stages[current_stage_idx]['status'] = 'rejected'
+            approval_stages[current_stage_idx]['approved_by_id'] = approver.id
+            approval_stages[current_stage_idx]['approved_by_username'] = approver.username
+            approval_stages[current_stage_idx]['reject_reason'] = reject_reason
+            approval_stages[current_stage_idx]['approved_at'] = now_with_timezone().strftime('%Y-%m-%d %H:%M:%S')
+            db_path = Path(user_manager.db_path)
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'UPDATE archive_approvals SET approval_stages = ?, status = ?, reject_reason = ?, resolved_at = ? WHERE id = ?',
+                    (json.dumps(approval_stages, ensure_ascii=False), 'rejected', reject_reason, now_with_timezone().isoformat(), approval_id)
+                )
+                conn.commit()
+            reason_text = f'：{reject_reason}' if reject_reason else ''
+            append_stage_history(approval_id, 'reject', approver.id, approver.username,
+                                 detail=f'驳回{type_label}申请{reason_text}', display_name=approver_display)
+            return None
+
+        # approve
+        approval_stages[current_stage_idx]['status'] = 'approved'
+        approval_stages[current_stage_idx]['approved_by_id'] = approver.id
+        approval_stages[current_stage_idx]['approved_by_username'] = approver.username
+        approval_stages[current_stage_idx]['approved_at'] = now_with_timezone().strftime('%Y-%m-%d %H:%M:%S')
+
+        role_label = {'project_admin': '项目经理', 'pmo': 'PMO', 'pmo_leader': 'PMO负责人', 'admin': '管理员'}.get(
+            approval_stages[current_stage_idx].get('required_role', ''), f'Level{current_stage_idx + 1}')
+        append_stage_history(approval_id, 'stage_approve', approver.id, approver.username,
+                             stage=current_stage_idx + 1,
+                             detail=f'{role_label}审批通过（第{current_stage_idx + 1}阶段）',
+                             display_name=approver_display)
+
+        # PMO负责人直接完成：跳过后续阶段
+        if complete_now and approver.role in ('admin', 'pmo_leader'):
+            for i in range(current_stage_idx + 1, len(approval_stages)):
+                if approval_stages[i].get('status') == 'pending':
+                    approval_stages[i]['status'] = 'approved'
+                    approval_stages[i]['approved_by_id'] = approver.id
+                    approval_stages[i]['approved_by_username'] = approver.username
+                    approval_stages[i]['approved_at'] = now_with_timezone().strftime('%Y-%m-%d %H:%M:%S')
+                    approval_stages[i]['reject_reason'] = 'skipped_by_pmo_leader'
+                    append_stage_history(approval_id, 'stage_approve', approver.id, approver.username,
+                                         stage=i + 1, detail=f'PMO负责人选择直接完成，跳过第{i + 1}阶段',
+                                         display_name=approver_display)
+
+        all_completed = all(s['status'] == 'approved' for s in approval_stages)
+
+        if all_completed:
+            approval['approval_stages'] = approval_stages
+            if complete_archive_if_all_stages_done(approval_id, project_id, approval, doc_manager):
+                user_manager.resolve_archive_approval(approval_id, 'approved', approver.id, approver.username)
+                append_stage_history(approval_id, 'archived', approver.id, approver.username,
+                                     detail=f'所有审批阶段完成，文档已{type_label}', display_name=approver_display)
+                db_path = Path(user_manager.db_path)
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        'UPDATE archive_approvals SET approval_stages = ?, stage_completed = 1 WHERE id = ?',
+                        (json.dumps(approval_stages, ensure_ascii=False), approval_id)
+                    )
+                    conn.commit()
+        else:
+            # 推进到下一阶段
+            next_stage_idx = current_stage_idx + 1
+            next_approvers = get_next_stage_approvers(project_id, next_stage_idx, approval_stages, project_config)
+            if next_approvers:
+                next_ids = [str(a.get('internal_id') or a.get('id')) for a in next_approvers]
+                next_names = [a.get('display_name') or a.get('username') or '' for a in next_approvers]
+                approval_stages[next_stage_idx]['assigned_to_id'] = ','.join([x for x in next_ids if x])
+                approval_stages[next_stage_idx]['assigned_to_username'] = '、'.join([x for x in next_names if x])
+            db_path = Path(user_manager.db_path)
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'UPDATE archive_approvals SET approval_stages = ?, current_stage = ? WHERE id = ?',
+                    (json.dumps(approval_stages, ensure_ascii=False), next_stage_idx + 1, approval_id)
+                )
+                conn.commit()
+
+        return None
+    except Exception as e:
+        return str(e)
+
 
 def approve_archive_request(project_id):
     """审批当前阶段的归档请求（支持多级审批）"""
@@ -685,25 +858,9 @@ def approve_archive_request(project_id):
             return jsonify({'status': 'error', 'message': '审批阶段异常'}), 400
 
         # 强制按当前阶段角色/组织审批（admin 可越级）
-        current_stage = approval_stages[current_stage_idx]
-        required_role = (current_stage.get('required_role') or '').strip()
-        org_match = (current_stage.get('org_match') or '').strip()
-        if approver.role != 'admin':
-            allowed_roles = [required_role]
-            if required_role == 'pmo':
-                allowed_roles = ['pmo', 'pmo_leader']
-            if required_role and approver.role not in allowed_roles:
-                return jsonify({'status': 'error', 'message': '当前审批阶段与审批人角色不匹配'}), 403
-
-            approver_org = (getattr(approver, 'organization', '') or '').strip()
-            project_org = (project_config.get('party_b') or '').strip()
-            if org_match == 'party_b' and project_org and approver_org and approver_org != project_org:
-                return jsonify({'status': 'error', 'message': '当前审批阶段要求项目经理（承建单位）审批'}), 403
-            if org_match == 'pmo' and approver_org != 'PMO':
-                return jsonify({'status': 'error', 'message': '当前审批阶段要求PMO组织审批'}), 403
-
-        if complete_now and approver.role != 'admin' and required_role != 'pmo_leader':
-            return jsonify({'status': 'error', 'message': '仅PMO负责人可直接完成归档'}), 403
+        err_msg, required_role = _validate_approver_role(approver, project_config, approval_stages, current_stage_idx, complete_now)
+        if err_msg:
+            return jsonify({'status': 'error', 'message': err_msg}), (403 if required_role else 400)
 
         # 更新当前阶段为已批准
         approval_stages[current_stage_idx]['status'] = 'approved'
@@ -715,7 +872,7 @@ def approve_archive_request(project_id):
 
         # 记录流程历史：阶段通过
         role_label = {'project_admin': '项目经理', 'pmo': 'PMO', 'pmo_leader': 'PMO负责人', 'admin': '管理员'}.get(approval_stages[current_stage_idx].get('required_role', ''), f'Level{current_stage_idx+1}')
-        append_stage_history(approval['id'], 'stage_approve', actual_approver_id, approver.username, stage=current_stage_idx + 1, detail=f'{role_label}审批通过（第{current_stage_idx+1}阶段）')
+        append_stage_history(approval['id'], 'stage_approve', actual_approver_id, approver.username, stage=current_stage_idx + 1, detail=f'{role_label}审批通过（第{current_stage_idx+1}阶段）', display_name=getattr(approver, 'display_name', None) or approver.username)
 
         # PMO负责人可选择直接完成：将后续待审阶段标记为已通过（流程跳转）
         if complete_now and not all(stage['status'] == 'approved' for stage in approval_stages):
@@ -732,7 +889,8 @@ def approve_archive_request(project_id):
                         actual_approver_id,
                         approver.username,
                         stage=i + 1,
-                        detail=f'PMO负责人选择直接完成，跳过第{i + 1}阶段'
+                        detail=f'PMO负责人选择直接完成，跳过第{i + 1}阶段',
+                        display_name=getattr(approver, 'display_name', None) or approver.username
                     )
 
         # 检查是否所有阶段都已完成
@@ -750,7 +908,7 @@ def approve_archive_request(project_id):
                 user_manager.resolve_archive_approval(approval['id'], 'approved', actual_approver_id, approver.username)
 
                 # 记录流程历史
-                append_stage_history(approval['id'], 'archived', actual_approver_id, approver.username, detail=f'所有审批阶段完成，文档已{type_label}')
+                append_stage_history(approval['id'], 'archived', actual_approver_id, approver.username, detail=f'所有审批阶段完成，文档已{type_label}', display_name=getattr(approver, 'display_name', None) or approver.username)
 
                 # 通知申请人
                 doc_list_msg = '、'.join(doc_names[:5])
@@ -993,7 +1151,7 @@ def reject_archive_request(project_id):
 
         # 记录流程历史：驳回
         reason_text_log = f'：{reject_reason}' if reject_reason else ''
-        append_stage_history(approval['id'], 'reject', actual_approver_id, approver.username, detail=f'驳回{type_label}申请{reason_text_log}')
+        append_stage_history(approval['id'], 'reject', actual_approver_id, approver.username, detail=f'驳回{type_label}申请{reason_text_log}', display_name=getattr(approver, 'display_name', None) or approver.username)
 
         # 通知申请人
         reason_text = f'（原因：{reject_reason}）' if reject_reason else ''
@@ -1029,8 +1187,7 @@ def reject_archive_request(project_id):
 
         _reject_doc_names = approval.get('doc_names') or []
         if isinstance(_reject_doc_names, str):
-            import json as _json
-            try: _reject_doc_names = _json.loads(_reject_doc_names)
+            try: _reject_doc_names = json.loads(_reject_doc_names)
             except: _reject_doc_names = []
         _reject_doc_label = '、'.join(_reject_doc_names[:3]) + (f'等{len(_reject_doc_names)}个' if len(_reject_doc_names) > 3 else '')
         user_manager.add_operation_log(
@@ -1146,7 +1303,7 @@ def withdraw_archive_request(project_id):
             conn.commit()
 
         # 记录流程历史：撤回
-        append_stage_history(approval['id'], 'withdraw', int(current_user.id), current_user.username, detail='申请人撤回归档申请')
+        append_stage_history(approval['id'], 'withdraw', int(current_user.id), current_user.username, detail='申请人撤回归档申请', display_name=getattr(current_user, 'display_name', None) or current_user.username)
 
         # 记录操作日志
         _wd_cycle = approval.get('cycle', '')

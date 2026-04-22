@@ -4015,7 +4015,7 @@ async function showApprovalTimeline(approvalId, cycle, overrideProjectId) {
                             <span class="timeline-time">${displayTime}</span>
                         </div>
                         <div class="timeline-detail">${escapeHtml(item.detail || '')}</div>
-                        ${item.username ? `<div class="timeline-user">操作人: ${escapeHtml(item.username)}</div>` : ''}
+                        ${item.username ? `<div class="timeline-user">操作人: ${escapeHtml(item.display_name || item.username)}</div>` : ''}
                     </div>
                 </div>`;
         });
