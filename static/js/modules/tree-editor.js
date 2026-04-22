@@ -1078,7 +1078,12 @@ function renderPredefinedAttributes(targetNodes) {
  */
 window.openAttributePanel = function(nodeId) {
     const node = findNode(currentTreeData, nodeId);
-    if (!node || node.type !== 'document') return;
+    if (!node || node.type !== 'document') {
+        // 找不到节点时清空面板，避免展示上一个节点的残留数据
+        const panel = document.getElementById('attributePanel');
+        if (panel) panel.style.display = 'none';
+        return;
+    }
 
     const panel = document.getElementById('attributePanel');
     if (!panel) return;
@@ -1875,8 +1880,13 @@ function renderCustomAttributesForBatch(nodes) {
     container.innerHTML = customAttributeDefinitions.map(attrDef => {
         const values = nodes.map(n => n.attributes?.[attrDef.id]).filter(v => v !== undefined);
         const allSame = values.length > 0 && values.every(v => v === values[0]);
-        
-        let value = allSame ? values[0] : (attrDef.type === 'checkbox' ? false : '');
+
+        let value;
+        if (attrDef.type === 'checkbox') {
+            value = allSame ? (values[0] === true) : false;
+        } else {
+            value = allSame ? (values[0] != null && values[0] !== false ? values[0] : '') : '';
+        }
         let placeholder = allSame ? '' : '（混合值）';
         
         let inputHtml = '';
@@ -2132,11 +2142,15 @@ export async function saveTreeConfig() {
             showLoading(true);
             updateAutoSaveStatus('saving');
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
                 const response = await fetch(`/api/projects/${appState.currentProjectId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newConfig)
+                    body: JSON.stringify(newConfig),
+                    signal: controller.signal,
                 });
+                clearTimeout(timeoutId);
 
                 const result = await response.json();
 
@@ -2148,7 +2162,7 @@ export async function saveTreeConfig() {
                     updateAutoSaveStatus('saved', new Date().toISOString());
                     closeTreeEditor();
                     renderCycles(newConfig.cycles || []);
-                    
+
                     // 如果当前正在查看某个周期，刷新文档列表
                     if (appState.currentCycle) {
                         const { renderCycleDocuments } = await import('./document.js');
@@ -2158,10 +2172,13 @@ export async function saveTreeConfig() {
                     }
                 } else {
                     showNotification('保存失败: ' + result.message, 'error');
+                    updateAutoSaveStatus('unsaved');
                 }
             } catch (error) {
                 console.error('保存配置失败:', error);
-                showNotification('保存失败: ' + error.message, 'error');
+                const msg = error.name === 'AbortError' ? '保存超时，请重试' : error.message;
+                showNotification('保存失败: ' + msg, 'error');
+                updateAutoSaveStatus('unsaved');
             } finally {
                 showLoading(false);
             }
@@ -3220,18 +3237,24 @@ export function savePredefinedAttrDefinitions() {
 function renderCustomAttributes(node) {
     const container = document.getElementById('customAttributesList');
     if (!container) return;
-    
+
     if (customAttributeDefinitions.length === 0) {
         container.innerHTML = '<p style="color: #999; font-size: 12px;">暂无自定义属性</p>';
         return;
     }
-    
+
     const attrs = node.attributes || {};
-    
+
     container.innerHTML = customAttributeDefinitions.map(attrDef => {
-        const value = attrs[attrDef.id] || (attrDef.type === 'checkbox' ? false : '');
+        // 使用严格比较避免 "false" 字符串被误判为 truthy
+        let value;
+        if (attrDef.type === 'checkbox') {
+            value = attrs[attrDef.id] === true;
+        } else {
+            value = (attrs[attrDef.id] != null && attrs[attrDef.id] !== false) ? attrs[attrDef.id] : '';
+        }
         let inputHtml = '';
-        
+
         switch (attrDef.type) {
             case 'checkbox':
                 inputHtml = `<input type="checkbox" id="custom_attr_${attrDef.id}" ${value ? 'checked' : ''}>`;
@@ -3243,7 +3266,7 @@ function renderCustomAttributes(node) {
                 inputHtml = `<input type="date" id="custom_attr_${attrDef.id}" value="${escapeHtml(value)}" style="width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">`;
                 break;
         }
-        
+
         return `
             <div class="custom-attr-item" style="margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">

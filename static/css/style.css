@@ -44,7 +44,7 @@ body {
     flex-wrap: nowrap;
     overflow: visible;
     position: relative;
-    z-index: 100;
+    z-index: 300;
     gap: 12px;
 }
 
