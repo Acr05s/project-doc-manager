@@ -105,6 +105,10 @@ class ScheduledReportService:
                 conn.execute('ALTER TABLE scheduled_tasks ADD COLUMN skip_holidays INTEGER DEFAULT 0')
             except Exception as e:
                 logger.debug(f'列skip_holidays可能已存在: {e}')  # 列已存在
+            try:
+                conn.execute('ALTER TABLE scheduled_tasks ADD COLUMN external_emails_enabled INTEGER DEFAULT 1')
+            except Exception as e:
+                logger.debug(f'列external_emails_enabled可能已存在: {e}')
             conn.commit()
 
     def _migrate_json_to_db(self):
@@ -152,11 +156,12 @@ class ScheduledReportService:
                 (task_id, project_id, task_name, task_type, enabled, frequency,
                  send_time, weekday, day_of_month, run_date, include_pdf,
                  in_app_message_enabled, email_enabled, login_popup_enabled, external_emails,
+                 external_emails_enabled,
                  recipient_user_ids, last_run_key, run_count, last_run_at,
                  valid_until, skip_holidays, skip_weekends, created_by_user_id,
                  created_by_username, created_by_display_name, created_by_organization,
                  created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''', (
                 task['task_id'], task['project_id'], task['task_name'],
                 task['task_type'], 1 if task.get('enabled') else 0,
@@ -167,6 +172,7 @@ class ScheduledReportService:
                 1 if task.get('email_enabled', True) else 0,
                 1 if task.get('login_popup_enabled', True) else 0,
                 json.dumps(task.get('external_emails', []), ensure_ascii=False),
+                1 if task.get('external_emails_enabled', True) else 0,
                 json.dumps(task.get('recipient_user_ids', []), ensure_ascii=False),
                 task.get('last_run_key', ''), task.get('run_count', 0),
                 task.get('last_run_at', ''), task.get('valid_until', ''),
@@ -190,6 +196,7 @@ class ScheduledReportService:
         d['login_popup_enabled'] = bool(d.get('login_popup_enabled', 1))
         d['skip_holidays'] = bool(d.get('skip_holidays', 0))
         d['skip_weekends'] = bool(d.get('skip_weekends', 0))
+        d['external_emails_enabled'] = bool(d.get('external_emails_enabled', 1))
         try:
             d['external_emails'] = json.loads(d.get('external_emails') or '[]')
         except Exception:
@@ -1415,10 +1422,11 @@ class ScheduledReportService:
             if email:
                 recipients.add(email)
 
-        for email in cfg.get('external_emails', []) or []:
-            s = str(email).strip()
-            if s:
-                recipients.add(s)
+        if cfg.get('external_emails_enabled', True):
+            for email in cfg.get('external_emails', []) or []:
+                s = str(email).strip()
+                if s:
+                    recipients.add(s)
 
         return {
             'emails': sorted([x for x in recipients if '@' in x]),

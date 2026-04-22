@@ -2,6 +2,30 @@ import { appState } from './app-state.js';
 import { showLoading, showNotification, showConfirmModal } from './ui.js';
 import { formatDateTimeDisplay } from './utils.js';
 
+// --- 弹窗尺寸记忆工具 ---
+function _saveModalSize(storageKey, modalId) {
+    var modal = document.getElementById(modalId);
+    if (!modal) return;
+    var inner = modal.querySelector('.modal-content');
+    if (!inner) return;
+    try {
+        localStorage.setItem(storageKey, JSON.stringify({ width: inner.offsetWidth, height: inner.offsetHeight }));
+    } catch (e) { /* ignore */ }
+}
+function _restoreModalSize(storageKey, modalId) {
+    var modal = document.getElementById(modalId);
+    if (!modal) return;
+    var inner = modal.querySelector('.modal-content');
+    if (!inner) return;
+    try {
+        var saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+        if (saved && saved.width && saved.height) {
+            inner.style.width = saved.width + 'px';
+            inner.style.height = saved.height + 'px';
+        }
+    } catch (e) { /* ignore */ }
+}
+
 let _modalProjects = [];
 let _recipientOptions = [];
 let _taskList = [];
@@ -472,7 +496,12 @@ function fillEditorByTask(task) {
     var extVal = Array.isArray(task.external_emails) ? task.external_emails.join(', ') : '';
     if (ext) ext.value = extVal;
     var enableExtCb = document.getElementById('scheduledEnableExternalEmails');
-    if (enableExtCb) { enableExtCb.checked = !!(extVal.trim()); window.toggleExternalEmailsInput && window.toggleExternalEmailsInput(); }
+    if (enableExtCb) {
+        // Use explicit external_emails_enabled flag if present; fall back to whether emails are non-empty
+        var extEnabled = task.hasOwnProperty('external_emails_enabled') ? !!task.external_emails_enabled : !!(extVal.trim());
+        enableExtCb.checked = extEnabled;
+        window.toggleExternalEmailsInput && window.toggleExternalEmailsInput();
+    }
     var validUntilCb = document.getElementById('scheduledEnableValidUntil');
     var validUntilInput2 = document.getElementById('scheduledValidUntil');
     var validUntilVal = String(task.valid_until || '').trim().slice(0, 10);
@@ -660,10 +689,9 @@ function buildPayloadFromEditorForm() {
     var popupEl = document.getElementById('scheduledLoginPopupEnabled');
     var extEmails = [];
     var enableExtCb = document.getElementById('scheduledEnableExternalEmails');
-    if (enableExtCb && enableExtCb.checked) {
-        var rawVal = (document.getElementById('scheduledExternalEmails') || {}).value || '';
-        if (rawVal.trim()) extEmails = rawVal.split(/[,\uff0c\n]/).map(function(s) { return s.trim(); }).filter(Boolean);
-    }
+    var rawVal = (document.getElementById('scheduledExternalEmails') || {}).value || '';
+    if (rawVal.trim()) extEmails = rawVal.split(/[,\uff0c\n]/).map(function(s) { return s.trim(); }).filter(Boolean);
+    var externalEmailsEnabled = !!(enableExtCb && enableExtCb.checked);
     var validUntil = '';
     var vuCb = document.getElementById('scheduledEnableValidUntil');
     if (vuCb && vuCb.checked) validUntil = (document.getElementById('scheduledValidUntil') || {}).value || '';
@@ -684,6 +712,7 @@ function buildPayloadFromEditorForm() {
         login_popup_enabled: !!(popupEl && popupEl.checked),
         recipient_user_ids: collectSelectedRecipientUserIds(),
         external_emails: extEmails,
+        external_emails_enabled: externalEmailsEnabled,
         valid_until: validUntil,
         skip_holidays: !!(skipHolidaysEl && skipHolidaysEl.checked),
         skip_weekends: !!(skipWeekendsEl && skipWeekendsEl.checked)
@@ -706,10 +735,11 @@ export async function openScheduledTaskEditorModal(taskId, projectId) {
     var form = document.getElementById('scheduledTaskEditorForm');
     if (form) form.onsubmit = saveScheduledReportConfig;
     var modal = document.getElementById('scheduledTaskEditorModal');
-    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
+    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; _restoreModalSize('scheduledTaskEditorModalSize', 'scheduledTaskEditorModal'); }
 }
 
 export function closeScheduledTaskEditorModal() {
+    _saveModalSize('scheduledTaskEditorModalSize', 'scheduledTaskEditorModal');
     var modal = document.getElementById('scheduledTaskEditorModal');
     if (modal) { modal.classList.remove('show'); modal.style.display = 'none'; }
 }
@@ -862,7 +892,7 @@ export async function openScheduledReportModal() {
         var holidayBtn = document.getElementById('scheduledHolidayMgmtBtn');
         if (holidayBtn) holidayBtn.onclick = openHolidayModal;
         var modal = document.getElementById('scheduledReportModal');
-        if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; }
+        if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; _restoreModalSize('scheduledReportModalSize', 'scheduledReportModal'); }
     } catch (e) {
         console.error('\u52a0\u8f7d\u5b9a\u65f6\u62a5\u544a\u4efb\u52a1\u5931\u8d25:', e);
         showNotification('\u52a0\u8f7d\u5b9a\u65f6\u62a5\u544a\u4efb\u52a1\u5931\u8d25', 'error');
@@ -870,6 +900,7 @@ export async function openScheduledReportModal() {
 }
 
 export function closeScheduledReportModal() {
+    _saveModalSize('scheduledReportModalSize', 'scheduledReportModal');
     var modal = document.getElementById('scheduledReportModal');
     if (modal) { modal.classList.remove('show'); modal.style.display = 'none'; }
     closeScheduledTaskEditorModal();
