@@ -238,7 +238,7 @@ const SAFE_FALLBACK_PERMISSIONS = {
 /**
  * 获取菜单权限配置（带缓存，平台级）
  */
-async function fetchMenuPermissions(forceRefresh = false) {
+export async function fetchMenuPermissions(forceRefresh = false) {
     if (_cachedPermissions && !forceRefresh) return _cachedPermissions;
     try {
         const resp = await fetch('/api/settings/permissions');
@@ -891,6 +891,7 @@ export function openLoginModal() {
 }
 
 /**
+/**
  * 检查用户是否有指定角色
  */
 export function hasRole(roles) {
@@ -901,6 +902,27 @@ export function hasRole(roles) {
     } else {
         return authState.user.role === roles;
     }
+}
+
+/**
+ * 检查当前用户是否有指定文档操作权限（doc_op_*）
+ * 依赖 _cachedPermissions（由 fetchMenuPermissions 加载）和 authState.user.role
+ */
+export function hasDocOpPermission(key) {
+    const role = authState.user?.role;
+    if (!role) return false;
+    const DOC_OP_DEFAULT_ROLES = {
+        doc_op_upload:       ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'],
+        doc_op_edit:         ['admin', 'pmo', 'pmo_leader', 'project_admin'],
+        doc_op_delete:       ['admin', 'pmo', 'pmo_leader', 'project_admin'],
+        doc_op_archive:      ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'],
+        doc_op_preview:      ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'],
+        doc_op_download:     ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'],
+        doc_op_not_involved: ['admin', 'pmo', 'pmo_leader', 'project_admin'],
+    };
+    const perm = _cachedPermissions?.[key];
+    const roles = perm ? (perm.roles || []) : (DOC_OP_DEFAULT_ROLES[key] || []);
+    return roles.includes(role);
 }
 
 /**

@@ -584,33 +584,41 @@ class ReportService:
         # 归档记录 (从 archive_approvals 查询)
         try:
             if self.user_manager and hasattr(self.user_manager, 'db_path'):
-                import sqlite3
+                import sqlite3, json as _json
                 conn = sqlite3.connect(self.user_manager.db_path)
                 conn.row_factory = sqlite3.Row
                 cutoff_str = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+                # 使用 resolved_at（归档完成时间）而非 created_at（提交时间）
                 rows = conn.execute(
-                    "SELECT project_id, doc_name, cycle, created_at FROM archive_approvals "
-                    "WHERE status = 'approved' AND created_at >= ? ORDER BY created_at DESC",
+                    "SELECT project_id, doc_names, cycle, resolved_at FROM archive_approvals "
+                    "WHERE status = 'approved' AND resolved_at IS NOT NULL AND resolved_at >= ? ORDER BY resolved_at DESC",
                     (cutoff_str,)
                 ).fetchall()
                 conn.close()
                 for row in rows:
-                    ct = self._parse_upload_time(str(row['created_at']))
+                    ct = self._parse_upload_time(str(row['resolved_at']))
                     if ct is None:
                         continue
                     date_key = ct.strftime('%m-%d')
-                    if date_key in deleted_by_date:
-                        deleted_by_date[date_key] = deleted_by_date.get(date_key, 0) + 1
-                    details.append({
-                        'doc_name': row['doc_name'] or '',
-                        'project_name': '',
-                        'project_id': row['project_id'] or '',
-                        'cycle': row['cycle'] or '',
-                        'time': ct.strftime('%Y-%m-%d %H:%M:%S'),
-                        'type': 'archived',
-                        'doc_id': '',
-                        'filename': '',
-                    })
+                    # doc_names 是 JSON 数组，展开每个文档名
+                    raw_names = row['doc_names'] or '[]'
+                    try:
+                        names = _json.loads(raw_names) if isinstance(raw_names, str) else raw_names
+                    except Exception:
+                        names = [raw_names]
+                    for dname in (names if isinstance(names, list) else [names]):
+                        if date_key in deleted_by_date:
+                            deleted_by_date[date_key] = deleted_by_date.get(date_key, 0) + 1
+                        details.append({
+                            'doc_name': str(dname) if dname else '',
+                            'project_name': '',
+                            'project_id': row['project_id'] or '',
+                            'cycle': row['cycle'] or '',
+                            'time': ct.strftime('%Y-%m-%d %H:%M:%S'),
+                            'type': 'archived',
+                            'doc_id': '',
+                            'filename': '',
+                        })
         except Exception:
             pass
 

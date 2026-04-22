@@ -3,7 +3,7 @@
  */
 
 import { appState, elements } from './app-state.js';
-import { authState } from './auth.js';
+import { authState, hasDocOpPermission, fetchMenuPermissions } from './auth.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal, initResizableColumns } from './ui.js';
 import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers, getApprovalHistory } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
@@ -142,12 +142,11 @@ export async function handleUploadDocument(e) {
             if (uploadedFilesList) {
                 uploadedFilesList.innerHTML = '<p class="placeholder">暂无上传文件</p>';
             }
-            // 上传成功后自动归档
-            if (appState.currentCycle && appState.currentDocument) {
-                await archiveDocument(appState.currentCycle, appState.currentDocument);
-            }
             // 刷新文档列表
             await reloadProjectAndRender(appState.currentCycle);
+            // 关闭上传弹窗，让用户通过正常审批流程归档
+            const uploadModal = document.getElementById('uploadModal');
+            if (uploadModal) uploadModal.classList.remove('show');
         } else {
             showNotification('上传失败: 所有文件上传失败', 'error');
         }
@@ -159,7 +158,7 @@ export async function handleUploadDocument(e) {
         isUploadingDocument = false;
         if (uploadBtn) {
             uploadBtn.disabled = false;
-            uploadBtn.textContent = '✅ 确认归档';
+            uploadBtn.textContent = '✅ 完成上传';
         }
     }
 }
@@ -643,7 +642,10 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
         elements.contentArea.innerHTML = '<p class="placeholder">请先加载项目配置</p>';
         return;
     }
-    
+
+    // 确保文档操作权限已加载（hasDocOpPermission 依赖缓存）
+    await fetchMenuPermissions();
+
     // 如果没有传入筛选选项，使用全局保存的筛选选项
     if (filterOptions === null) {
         filterOptions = appState.filterOptions || {};
@@ -976,20 +978,22 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 </button>
                                             ` : ''}
                                         ` : `
-                                            ${!isNotInvolved ? `
+                                            ${!isNotInvolved && hasDocOpPermission('doc_op_upload') ? `
                                                 <button class="btn btn-primary btn-sm" onclick="openUploadModal('${cycle}', '${doc.name}')">
                                                     📁 上传/选择文档
                                                 </button>
-                                                ${docsList.length > 0 ? `
+                                                ${docsList.length > 0 && hasDocOpPermission('doc_op_edit') ? `
                                                     <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
                                                         ✏️ 编辑
                                                     </button>
                                                 ` : ''}
                                             ` : ''}
-                                            <button class="btn btn-warning btn-sm" onclick="markDocumentNotInvolved('${cycle}', '${doc.name}')">
-                                                ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
-                                            </button>
-                                            ${!isNotInvolved ? `
+                                            ${hasDocOpPermission('doc_op_not_involved') ? `
+                                                <button class="btn btn-warning btn-sm" onclick="markDocumentNotInvolved('${cycle}', '${doc.name}')">
+                                                    ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
+                                                </button>
+                                            ` : ''}
+                                            ${!isNotInvolved && hasDocOpPermission('doc_op_archive') ? `
                                                 <button class="btn btn-info btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
                                                     📦 确认归档
                                                 </button>
@@ -1179,6 +1183,10 @@ function getFileIcon(fileExt) {
  * 预览文档（渐进式预览）- 带进度条
  */
 export async function previewDocument(docId) {
+    if (!hasDocOpPermission('doc_op_preview')) {
+        showNotification('您没有预览文档的权限', 'error');
+        return;
+    }
     try {
         // 先获取文档信息（对docId做URL编码，防止特殊字符如:导致404）
         const encodedDocId = encodeURIComponent(docId);
