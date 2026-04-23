@@ -5835,16 +5835,24 @@ async function showSendReportDialog() {
         return;
     }
 
-    // 获取项目的收件人候选列表
+    // 并行加载：项目收件人候选 + 外部联系人地址簿
     let recipientOptions = [];
+    let savedContacts = [];
     try {
-        const resp = await fetch(`/api/projects/${projectId}/report-schedule`);
-        if (resp.ok) {
-            const data = await resp.json();
+        const [schedResp, contactsResp] = await Promise.all([
+            fetch(`/api/projects/${projectId}/report-schedule`),
+            fetch(`/api/external-contacts`)
+        ]);
+        if (schedResp.ok) {
+            const data = await schedResp.json();
             recipientOptions = data.recipient_options || [];
         }
+        if (contactsResp.ok) {
+            const data = await contactsResp.json();
+            savedContacts = data.contacts || [];
+        }
     } catch (e) {
-        // ignore, dialog will show empty list
+        // ignore
     }
 
     const userListHtml = recipientOptions.length > 0 ? recipientOptions.map(u => {
@@ -5856,6 +5864,18 @@ async function showSendReportDialog() {
             <span>${label}${org}${badge}</span>
         </label>`;
     }).join('') : '<p style="color:#888;font-size:13px;">暂无候选收件人</p>';
+
+    const contactPickerHtml = savedContacts.length > 0 ? `
+        <div style="margin-top:6px;">
+            <div style="font-size:12px;color:#888;margin-bottom:4px;">📋 从地址簿选择：</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                ${savedContacts.map(c => `<button type="button" onclick="window._addExternalEmail('${escapeAttr(c.email)}','${escapeAttr(c.name||'')}','${escapeAttr(c.organization||'')}','${escapeAttr(c.remark||'')}',event)"
+                    style="font-size:12px;padding:2px 8px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;cursor:pointer;color:#0969da;"
+                    title="${escapeAttr(c.email)}${c.organization ? ' · ' + escapeAttr(c.organization) : ''}">
+                    ${escapeHtml(c.name || c.email)}${c.organization ? ' <span style=color:#999>(' + escapeHtml(c.organization) + ')</span>' : ''}
+                </button>`).join('')}
+            </div>
+        </div>` : '';
 
     let dialog = document.getElementById('sendReportDialog');
     if (!dialog) {
@@ -5888,8 +5908,26 @@ async function showSendReportDialog() {
             </div>
 
             <div style="margin-bottom:16px;">
-                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">外部收件人邮箱 <span style="font-weight:400;color:#888;font-size:12px;">（仅邮件，每行一个）</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <div style="font-weight:600;font-size:14px;">外部收件人邮箱 <span style="font-weight:400;color:#888;font-size:12px;">（仅邮件，每行一个）</span></div>
+                    <button type="button" onclick="window._showAddExternalContactForm()" style="font-size:12px;padding:2px 8px;border:1px solid #17a2b8;border-radius:4px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">+ 保存到地址簿</button>
+                </div>
                 <textarea id="sendReportExternalEmails" rows="3" placeholder="example@domain.com" style="width:100%;box-sizing:border-box;border:1px solid #d9d9d9;border-radius:4px;padding:6px 10px;font-size:13px;resize:vertical;"></textarea>
+                ${contactPickerHtml}
+            </div>
+
+            <div id="addContactForm" style="display:none;margin-bottom:16px;padding:12px;background:#f6f8fa;border-radius:6px;border:1px solid #e0e0e0;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:8px;">保存外部联系人到地址簿</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                    <input id="newContactName" type="text" placeholder="姓名*" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                    <input id="newContactEmail" type="email" placeholder="邮箱*" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                    <input id="newContactOrg" type="text" placeholder="单位/组织" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                    <input id="newContactRemark" type="text" placeholder="备注" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button type="button" onclick="window._saveExternalContact()" style="padding:4px 14px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:13px;">保存</button>
+                    <button type="button" onclick="document.getElementById('addContactForm').style.display='none'" style="padding:4px 14px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;">取消</button>
+                </div>
             </div>
 
             <div style="margin-bottom:20px;">
@@ -5900,12 +5938,68 @@ async function showSendReportDialog() {
 
             <div style="display:flex;justify-content:flex-end;gap:10px;">
                 <button onclick="document.getElementById('sendReportDialog').style.display='none'" style="padding:7px 18px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:14px;">取消</button>
-                <button onclick="submitSendReport()" style="padding:7px 18px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">发送</button>
+                <button id="sendReportSubmitBtn" onclick="submitSendReport()" style="padding:7px 18px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">发送</button>
             </div>
         </div>
     `;
     dialog.style.display = 'flex';
 }
+
+// 辅助：将邮箱插入外部收件人文本框
+window._addExternalEmail = function(email, name, org, remark, event) {
+    if (event) event.preventDefault();
+    const ta = document.getElementById('sendReportExternalEmails');
+    if (!ta) return;
+    const cur = ta.value.trim();
+    const lines = cur ? cur.split(/\n/).map(l => l.trim()).filter(Boolean) : [];
+    if (!lines.includes(email)) {
+        lines.push(email);
+        ta.value = lines.join('\n');
+    }
+};
+
+// 辅助：显示新增联系人表单
+window._showAddExternalContactForm = function() {
+    const form = document.getElementById('addContactForm');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    // 自动填入文本框里已有的第一个邮箱
+    const ta = document.getElementById('sendReportExternalEmails');
+    if (ta && ta.value.trim()) {
+        const firstEmail = ta.value.trim().split(/[\n,;]/)[0].trim();
+        if (firstEmail && firstEmail.includes('@')) {
+            const emailInput = document.getElementById('newContactEmail');
+            if (emailInput && !emailInput.value) emailInput.value = firstEmail;
+        }
+    }
+};
+
+// 辅助：保存新联系人
+window._saveExternalContact = async function() {
+    const name = document.getElementById('newContactName')?.value.trim();
+    const email = document.getElementById('newContactEmail')?.value.trim();
+    const org = document.getElementById('newContactOrg')?.value.trim() || '';
+    const remark = document.getElementById('newContactRemark')?.value.trim() || '';
+    if (!name || !email) { showNotification('姓名和邮箱不能为空', 'error'); return; }
+    try {
+        const resp = await fetch('/api/external-contacts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, organization: org, remark }),
+        });
+        const result = await resp.json();
+        if (result.status === 'created' || result.status === 'updated') {
+            showNotification('联系人已保存到地址簿', 'success');
+            document.getElementById('addContactForm').style.display = 'none';
+            // 自动插入邮箱到外部收件人文本框
+            window._addExternalEmail(email, name, org, remark, null);
+        } else {
+            showNotification('保存失败: ' + (result.message || ''), 'error');
+        }
+    } catch (e) {
+        showNotification('保存出错: ' + e.message, 'error');
+    }
+};
 
 /**
  * 提交发送报告请求
@@ -5932,7 +6026,7 @@ async function submitSendReport() {
         return;
     }
 
-    const btn = document.querySelector('#sendReportDialog button[onclick="submitSendReport()"]');
+    const btn = document.getElementById('sendReportSubmitBtn');
     if (btn) { btn.disabled = true; btn.textContent = '发送中...'; }
 
     try {
@@ -5944,7 +6038,9 @@ async function submitSendReport() {
         const result = await resp.json();
         document.getElementById('sendReportDialog').style.display = 'none';
         if (result.status === 'success' || result.status === 'partial') {
-            showNotification(result.message || '报告已发送', result.status === 'partial' ? 'warning' : 'success');
+            let msg = result.message || '报告已发送';
+            if (result.pdf_warning) msg += `\n⚠️ ${result.pdf_warning}`;
+            showNotification(msg, result.status === 'partial' || result.pdf_warning ? 'warning' : 'success');
         } else {
             showNotification('发送失败: ' + (result.message || ''), 'error');
         }

@@ -410,6 +410,20 @@ class UserManager:
                 )
             ''')
 
+            # 创建外部联系人地址表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS external_contacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    organization TEXT,
+                    remark TEXT,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(email)
+                )
+            ''')
+
             # 兼容历史库：补充密码更新时间列
             cursor.execute('PRAGMA table_info(users)')
             user_columns = {row[1] for row in cursor.fetchall()}
@@ -1672,6 +1686,70 @@ class UserManager:
             return ''
         except Exception as e:
             return ''
+
+    # ------------------------------------------------------------------ #
+    # 外部联系人地址簿                                                      #
+    # ------------------------------------------------------------------ #
+
+    def list_external_contacts(self, keyword: str = '') -> list:
+        """列出外部联系人，可按姓名/邮箱/组织模糊搜索"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                if keyword:
+                    like = f'%{keyword}%'
+                    rows = conn.execute(
+                        'SELECT id, name, email, organization, remark, created_by, created_at '
+                        'FROM external_contacts WHERE name LIKE ? OR email LIKE ? OR organization LIKE ? '
+                        'ORDER BY name', (like, like, like)
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        'SELECT id, name, email, organization, remark, created_by, created_at '
+                        'FROM external_contacts ORDER BY name'
+                    ).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def add_external_contact(self, name: str, email: str, organization: str = '', remark: str = '', created_by: int = 0) -> dict:
+        """新增外部联系人，邮箱唯一，若已存在则更新姓名/组织/备注"""
+        import re
+        name = (name or '').strip()
+        email = (email or '').strip().lower()
+        if not name or not email:
+            return {'status': 'error', 'message': '姓名和有效邮箱不能为空'}
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return {'status': 'error', 'message': '邮箱格式不正确'}
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                existing = conn.execute('SELECT id FROM external_contacts WHERE email = ?', (email,)).fetchone()
+                if existing:
+                    conn.execute(
+                        'UPDATE external_contacts SET name=?, organization=?, remark=? WHERE email=?',
+                        (name, organization or '', remark or '', email)
+                    )
+                    conn.commit()
+                    return {'status': 'updated', 'message': '联系人信息已更新', 'id': existing[0]}
+                cursor = conn.execute(
+                    'INSERT INTO external_contacts (name, email, organization, remark, created_by) VALUES (?,?,?,?,?)',
+                    (name, email, organization or '', remark or '', created_by)
+                )
+                conn.commit()
+                return {'status': 'created', 'message': '联系人已添加', 'id': cursor.lastrowid}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def delete_external_contact(self, contact_id: int) -> bool:
+        """删除外部联系人"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute('DELETE FROM external_contacts WHERE id = ?', (contact_id,))
+                conn.commit()
+            return True
+        except Exception:
+            return False
+
 
 # 创建全局用户管理器实例
 user_manager = UserManager()

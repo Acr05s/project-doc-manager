@@ -502,3 +502,58 @@ def update_permissions():
             return jsonify({'status': 'error', 'message': '保存失败'}), 500
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ─────────────────────── 外部联系人地址簿 ─────────────────────── #
+
+@settings_bp.route('/api/external-contacts', methods=['GET'])
+def list_external_contacts():
+    """列出外部联系人（所有已登录用户可读）"""
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return jsonify({'status': 'error', 'message': '未登录'}), 401
+        from app.models.user import user_manager
+        keyword = request.args.get('keyword', '').strip()
+        contacts = user_manager.list_external_contacts(keyword)
+        return jsonify({'status': 'success', 'contacts': contacts})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@settings_bp.route('/api/external-contacts', methods=['POST'])
+def add_external_contact():
+    """新增或更新外部联系人"""
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return jsonify({'status': 'error', 'message': '未登录'}), 401
+        from app.models.user import user_manager
+        data = request.get_json() or {}
+        name = str(data.get('name', '')).strip()
+        email = str(data.get('email', '')).strip()
+        organization = str(data.get('organization', '')).strip()
+        remark = str(data.get('remark', '')).strip()
+        result = user_manager.add_external_contact(
+            name, email, organization, remark,
+            created_by=int(getattr(current_user, 'id', 0) or 0)
+        )
+        code = 200 if result.get('status') in ('created', 'updated') else 400
+        return jsonify(result), code
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@settings_bp.route('/api/external-contacts/<int:contact_id>', methods=['DELETE'])
+def delete_external_contact(contact_id):
+    """删除外部联系人"""
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return jsonify({'status': 'error', 'message': '未登录'}), 401
+        from app.models.user import user_manager
+        ok = user_manager.delete_external_contact(contact_id)
+        return jsonify({'status': 'success' if ok else 'error', 'message': '已删除' if ok else '删除失败'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+

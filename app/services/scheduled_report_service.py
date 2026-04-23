@@ -796,14 +796,20 @@ class ScheduledReportService:
         )
 
         attachments: List[Dict[str, str]] = []
+        pdf_error: Optional[str] = None
         if include_pdf:
-            pdf_path = self._build_pdf_report(
+            pdf_path, pdf_err = self._build_pdf_report(
                 project_name, frequency, period_start, period_end, metrics,
                 report_label=report_label
             )
+            if pdf_err:
+                pdf_error = pdf_err
+                logger.error(f'[send_manual_report] PDF生成失败: {pdf_err}')
             if pdf_path:
+                abs_path = str(Path(pdf_path).resolve())
                 safe_name = project_name.replace('/', '_').replace('\\', '_')
-                attachments.append({'path': str(pdf_path.resolve()), 'name': f'{safe_name}_实时报告_{period_end.strftime("%Y%m%d%H%M")}.pdf'})
+                attachments.append({'path': abs_path, 'name': f'{safe_name}_实时报告_{period_end.strftime("%Y%m%d%H%M")}.pdf'})
+                logger.info(f'[send_manual_report] PDF已生成: {abs_path}')
 
         success_count = 0
         error_messages: List[str] = []
@@ -851,9 +857,13 @@ class ScheduledReportService:
                 'status': 'partial',
                 'message': f'部分发送失败: {"; ".join(error_messages)}',
                 'success_count': success_count,
+                'pdf_error': pdf_error,
             }
         total = len(set(external_emails or [])) + len(recipient_user_ids or [])
-        return {'status': 'success', 'message': f'报告已发送（共 {total} 位收件人）', 'success_count': success_count}
+        result: Dict[str, Any] = {'status': 'success', 'message': f'报告已发送（共 {total} 位收件人）', 'success_count': success_count}
+        if pdf_error:
+            result['pdf_warning'] = f'PDF生成失败: {pdf_error}'
+        return result
 
     def _run_project_report(
         self,
@@ -891,9 +901,11 @@ class ScheduledReportService:
         # 手动执行时默认附带PDF，定时执行按任务配置决定
         should_attach_pdf = bool(cfg.get('include_pdf', True)) or manual
         if should_attach_pdf:
-            pdf_path = self._build_pdf_report(project_name, frequency, period_start, period_end, metrics)
+            pdf_path, _pdf_err = self._build_pdf_report(project_name, frequency, period_start, period_end, metrics)
+            if _pdf_err:
+                logger.error(f'[_run_project_report] PDF生成失败: {_pdf_err}')
             if pdf_path:
-                attachments.append({'path': str(pdf_path), 'name': pdf_path.name})
+                attachments.append({'path': str(pdf_path.resolve()), 'name': pdf_path.name})
 
         success_count = 0
         errors = []
@@ -1533,6 +1545,7 @@ class ScheduledReportService:
         if not receiver_ids:
             return 0
         _label = report_label if report_label is not None else self._frequency_label(frequency)
+        _is_manual = report_label is not None
         title = f"【{project_name}】{_label}已生成"
         party_b_line = f"承建单位：{party_b}<br>" if party_b else ''
         # 站内信内容使用HTML表格格式便于渲染
@@ -1579,7 +1592,9 @@ class ScheduledReportService:
             f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;font-size:13px;color:#222;'>"
             f"<p style='margin:0 0 6px;'><b>\u9879\u76ee\uff1a</b>{project_name}</p>"
             f"<p style='margin:0 0 6px;'>{party_b_line}<b>\u7c7b\u578b\uff1a</b>{_label}</p>"
-            f"<p style='margin:0 0 6px;color:#888;'>\u7edf\u8ba1\u533a\u95f4\uff1a{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}</p>"
+            + (f"<p style='margin:0 0 6px;color:#888;'>\u622a\u6b62\u65f6\u95f4\uff1a{period_end.strftime('%Y-%m-%d %H:%M')}</p>" if _is_manual
+               else f"<p style='margin:0 0 6px;color:#888;'>\u7edf\u8ba1\u533a\u95f4\uff1a{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}</p>")
+            +
             f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'>"
             f"<span style='background:#eef6ff;padding:4px 10px;border-radius:6px;'><b style='color:#2563eb;'>{total_uploads_val}</b> \u7d2f\u8ba1\u4e0a\u4f20\u6b21\u6570</span>"
             f"<span style='background:#fff7ed;padding:4px 10px;border-radius:6px;'><b style='color:#d97706;'>{total_updated_val}</b> \u7d2f\u8ba1\u66f4\u65b0\u6b21\u6570</span>"
@@ -1623,13 +1638,16 @@ class ScheduledReportService:
         cycle_order = metrics.get('cycle_order', [])
         checklist = metrics.get('checklist', [])
 
+        is_manual = report_label is not None
         party_b_line = f"承建单位：{party_b}\n" if party_b else ''
+        time_line = (f"截止时间：{end.strftime('%Y-%m-%d %H:%M')}\n" if is_manual
+                     else f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}\n")
         text = (
             f"项目：{project_name}\n"
             + party_b_line
             + f"报告类型：{title}\n"
-            f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}\n"
-            f"累计上传次数：{total_uploads}\n"
+            + time_line
+            + f"累计上传次数：{total_uploads}\n"
             f"累计文档更新次数：{total_updated_docs}\n"
             f"当前归档通过文档数：{archived}\n"
             f"归档率：{rate}%\n"
@@ -1666,12 +1684,14 @@ class ScheduledReportService:
                         if party_b else '')
         no_data_row = "<tr><td colspan='5' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
 
+        time_html = (f"<p style='margin:4px 0;color:#888;font-size:13px'>截止时间：{end.strftime('%Y-%m-%d %H:%M')}</p>" if is_manual
+                     else f"<p style='margin:4px 0;color:#888;font-size:13px'>统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}</p>")
         # 邮件包含概括摘要 + 按周期统计表，文档清单和上传明细通过PDF附件发送
         html = (
             f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
             f"<h2 style='margin:0 0 4px;font-size:18px'>项目{title} — {project_name}</h2>"
             f"{party_b_html}"
-            f"<p style='margin:4px 0;color:#888;font-size:13px'>统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}</p>"
+            f"{time_html}"
             f"<div style='display:flex;flex-wrap:wrap;gap:10px;margin:14px 0;'>"
             f"<div style='padding:10px 14px;background:#eef6ff;border-radius:8px;min-width:110px;text-align:center;'>"
             f"<div style='font-size:22px;font-weight:bold;color:#2563eb'>{total_uploads}</div>"
@@ -1702,7 +1722,7 @@ class ScheduledReportService:
             f"</div>"
         )
         return text, html
-    def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any], report_label: Optional[str] = None) -> Optional[Path]:
+    def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any], report_label: Optional[str] = None) -> Tuple[Optional[Path], Optional[str]]:
         try:
             from reportlab.lib import colors as rl_colors
             from reportlab.lib.pagesizes import A4
@@ -1726,17 +1746,22 @@ class ScheduledReportService:
             h1 = ParagraphStyle('h1', fontName=font_name, fontSize=14, spaceAfter=4)
             h2 = ParagraphStyle('h2', fontName=font_name, fontSize=11, spaceAfter=4, spaceBefore=10)
             body = ParagraphStyle('body', fontName=font_name, fontSize=9, spaceAfter=2)
+            body_gray = ParagraphStyle('body_g', fontName=font_name, fontSize=9, spaceAfter=2, textColor=rl_colors.HexColor('#888888'))
             cell_style = ParagraphStyle('cell', fontName=font_name, fontSize=8, leading=12, wordWrap='CJK')
             cell_center = ParagraphStyle('cell_c', fontName=font_name, fontSize=8, leading=12, wordWrap='CJK', alignment=TA_CENTER)
 
             title_label = report_label if report_label is not None else self._frequency_label(frequency)
+            is_manual = report_label is not None
             party_b = metrics.get('party_b', '')
 
             elems = []
-            elems.append(Paragraph(f'项目定时{title_label}：{project_name}', h1))
+            elems.append(Paragraph(f'项目{title_label}：{project_name}', h1))
             if party_b:
                 elems.append(Paragraph(f'承建单位：{party_b}', body))
-            elems.append(Paragraph(f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}", body))
+            if is_manual:
+                elems.append(Paragraph(f"截止时间：{end.strftime('%Y-%m-%d %H:%M')}", body_gray))
+            else:
+                elems.append(Paragraph(f"统计区间：{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}", body_gray))
             elems.append(Spacer(1, 6))
 
             # 摘要统计（累计数据）
@@ -1948,10 +1973,12 @@ class ScheduledReportService:
                 leftMargin=40, rightMargin=40, topMargin=40, bottomMargin=40
             )
             doc.build(elems)
-            return pdf_path
+            return pdf_path, None
         except Exception as e:
-            logger.warning(f'[ScheduledReportService] build pdf failed: {e}')
-            return None
+            import traceback
+            err_detail = traceback.format_exc()
+            logger.error(f'[ScheduledReportService] build pdf failed: {e}\n{err_detail}')
+            return None, str(e)
 
 
 scheduled_report_service = ScheduledReportService()
