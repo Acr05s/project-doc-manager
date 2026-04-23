@@ -5,6 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+from email.header import Header
 from pathlib import Path
 import json
 
@@ -73,13 +74,17 @@ def send_email(to_email, subject, content, html_content=None, attachments=None):
                 try:
                     file_path = Path(item.get('path', ''))
                     if not file_path.exists() or not file_path.is_file():
+                        print(f'[notification] 附件文件不存在或不是文件: {file_path}')
                         continue
                     filename = item.get('name') or file_path.name
-                    part = MIMEBase('application', 'octet-stream')
+                    mime_sub = 'pdf' if filename.lower().endswith('.pdf') else 'octet-stream'
+                    part = MIMEBase('application', mime_sub)
                     with open(file_path, 'rb') as f:
                         part.set_payload(f.read())
                     encoders.encode_base64(part)
-                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    part.set_param('name', filename, charset='utf-8')
+                    part.add_header('Content-Disposition', 'attachment',
+                                    filename=('utf-8', '', filename))
                     msg.attach(part)
                 except Exception as attach_error:
                     print(f'[notification] 附件加载失败: {attach_error}')

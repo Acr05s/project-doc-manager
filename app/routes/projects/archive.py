@@ -291,6 +291,21 @@ def get_archive_approvers(project_id):
                 effective_chain = stages_source if stages_source else approval_chain
                 print(f'[DEBUG] Filtering approvers for stage {current_stage} (idx={stage_idx})', file=sys.stderr, flush=True)
                 stage_approvers = get_next_stage_approvers(project_id, stage_idx, effective_chain, project_config)
+
+                # 排除上一阶段的审批人（防止同一用户连续审批多个阶段）
+                if stage_idx > 0 and stages_source:
+                    prev_stage = stages_source[stage_idx - 1]
+                    prev_approver_id = prev_stage.get('approved_by_id')
+                    if prev_approver_id is not None:
+                        stage_approvers = [a for a in stage_approvers
+                                           if str(a.get('internal_id', a.get('id'))) != str(prev_approver_id)]
+
+                # 排除申请人自己
+                requester_id = approval.get('requester_id')
+                if requester_id is not None:
+                    stage_approvers = [a for a in stage_approvers
+                                       if str(a.get('internal_id', a.get('id'))) != str(requester_id)]
+
                 print(f'[DEBUG] Found {len(stage_approvers)} stage-filtered approvers', file=sys.stderr, flush=True)
                 return jsonify({'status': 'success', 'approvers': stage_approvers, 'current_stage': current_stage})
 
@@ -714,6 +729,16 @@ def _do_stage_approval(approval_id, project_id, approver, action='approve', reje
         if err_msg:
             return err_msg
 
+        # 禁止审批人审批自己提交的请求
+        if approver.id == approval.get('requester_id'):
+            return '不能审批自己提交的请求'
+
+        # 禁止同一用户连续审批多个阶段（admin 除外）
+        if approver.role != 'admin' and current_stage_idx > 0:
+            prev_stage = approval_stages[current_stage_idx - 1]
+            if prev_stage.get('approved_by_id') == approver.id:
+                return '同一审批人不能连续审批多个阶段，请由其他审批人处理'
+
         doc_names = approval.get('doc_names') or []
         if isinstance(doc_names, str):
             doc_names = json.loads(doc_names)
@@ -900,6 +925,16 @@ def approve_archive_request(project_id):
         err_msg, required_role = _validate_approver_role(approver, project_config, approval_stages, current_stage_idx, complete_now)
         if err_msg:
             return jsonify({'status': 'error', 'message': err_msg}), (403 if required_role else 400)
+
+        # 禁止审批人审批自己提交的请求
+        if actual_approver_id == approval.get('requester_id'):
+            return jsonify({'status': 'error', 'message': '不能审批自己提交的请求'}), 403
+
+        # 禁止同一用户连续审批多个阶段（admin 除外）
+        if approver.role != 'admin' and current_stage_idx > 0:
+            prev_stage = approval_stages[current_stage_idx - 1]
+            if prev_stage.get('approved_by_id') == actual_approver_id:
+                return jsonify({'status': 'error', 'message': '同一审批人不能连续审批多个阶段，请由其他审批人处理'}), 403
 
         # 更新当前阶段为已批准
         approval_stages[current_stage_idx]['status'] = 'approved'

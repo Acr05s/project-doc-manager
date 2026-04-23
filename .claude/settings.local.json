@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from reportlab.pdfbase.cidfonts import UnicodeCIDFont; from reportlab.pdfbase import pdfmetrics; pdfmetrics.registerFont\\(UnicodeCIDFont\\('STSong-Light'\\)\\); print\\('Font OK'\\)\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

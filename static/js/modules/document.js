@@ -936,6 +936,12 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                     if (!(currentStage.required_role === 'pmo' && userRole === 'pmo_leader')) return '';
                                                 }
                                                 if (currentStage && currentStage.status === 'approved') return '';
+                                                // 禁止同一用户连续审批多个阶段
+                                                if (userRole !== 'admin' && currentStageIdx > 0) {
+                                                    const prevStage = stages[currentStageIdx - 1];
+                                                    const currentUserId = authState.user?.id;
+                                                    if (prevStage && String(prevStage.approved_by_id) === String(currentUserId)) return '';
+                                                }
                                                 if (currentStage && currentStage.required_role === 'pmo_leader') {
                                                     // 判断是否有下一个待审阶段（project_admin），决定是否显示"流转"选项
                                                     const nextStage = stages[currentStageIdx + 1];
@@ -3327,47 +3333,42 @@ async function submitArchiveReview(cycle, docNames) {
             showNotification('归档审核请求已提交，等待项目经理审批', 'success');
             await reloadProjectAndRender(cycle);
 
-            // 快速审批：如果只有一个 Level 1 审批人，提供快速审批入口
+            // 快速审批：如果有审批人可用，提供快速审批入口
             if (result.approval_id) {
                 try {
                     const approversResult = await getArchiveApprovers(appState.currentProjectId, result.approval_id);
-                    if (approversResult.status === 'success' && approversResult.approvers?.length === 1) {
-                        const pmName = approversResult.approvers[0].username;
+                    if (approversResult.status === 'success' && approversResult.approvers?.length > 0) {
+                        const approverNames = approversResult.approvers.map(a => a.display_name || a.username).join('、');
                         showConfirmModal('快速审批',
-                            `检测到仅有一位项目经理 "${pmName}" 可审批此请求。\n如项目经理在场，可由其输入审批安全码快速完成第一级审批。\n\n是否现在进行快速审批？`,
+                            `如审批人（${approverNames}）在场，可由其输入审批安全码快速完成审批。\n\n是否现在进行快速审批？`,
                             async () => {
-                                const requireCode = appState.systemSettings?.require_approval_code !== false;
-                                let approvalCode = '';
-                                if (requireCode) {
-                                    const codeInput = await promptApprovalCodeForArchive('项目经理快速审批 - 请输入审批安全码');
-                                    if (!codeInput?.approval_code) return;
-                                    approvalCode = codeInput.approval_code;
+                                let approveResult = await quickApproveArchive(result.approval_id, 'approve', { forceRequireCode: true });
+
+                                // 链式推进
+                                while (approveResult.status === 'stage_approved') {
+                                    const stageMsg = approveResult.message || `第 ${approveResult.current_stage} 阶段已批准`;
+                                    showNotification(stageMsg, 'info');
+                                    await reloadProjectAndRender(cycle);
+
+                                    const doContinue = await new Promise((resolve) => {
+                                        showConfirmModal('继续审批',
+                                            `${stageMsg}\n\n如下一阶段审批人在场，可由其输入审批安全码继续完成审批。\n是否继续？`,
+                                            () => resolve(true),
+                                            () => resolve(false)
+                                        );
+                                    });
+                                    if (!doContinue) break;
+
+                                    approveResult = await quickApproveArchive(result.approval_id, 'approve', { forceRequireCode: true });
                                 }
-                                const approveResult = await approveArchiveRequest(
-                                    appState.currentProjectId, result.approval_id,
-                                    approversResult.approvers[0].id, approvalCode
-                                );
+
                                 if (approveResult.status === 'success') {
                                     showNotification('🎉 所有审批完成，文档已归档', 'success');
-                                } else if (approveResult.status === 'stage_approved') {
-                                    showNotification(approveResult.message || '第一级审批已通过，等待PMO审批', 'info');
-                                } else if (approveResult.status === 'needs_change') {
-                                    const updatedInput = await promptApprovalCodeForArchive('首次使用审批安全码，请输入当前登录密码并设置新审批安全码', true);
-                                    if (updatedInput?.approval_code && updatedInput?.new_approval_code) {
-                                        const retryResult = await approveArchiveRequest(
-                                            appState.currentProjectId, result.approval_id,
-                                            approversResult.approvers[0].id, updatedInput.approval_code, updatedInput.new_approval_code
-                                        );
-                                        if (retryResult.status === 'success' || retryResult.status === 'stage_approved') {
-                                            showNotification(retryResult.message || '审批完成', 'success');
-                                        } else {
-                                            showNotification(retryResult.message || '审批失败', 'error');
-                                        }
-                                    }
-                                } else {
+                                } else if (approveResult.status !== 'cancelled' && approveResult.status !== 'stage_approved') {
                                     showNotification(approveResult.message || '快速审批失败', 'error');
                                 }
                                 await reloadProjectAndRender(cycle);
+                                import('./cycle.js').then(module => { module.refreshCycleProgress(); });
                             }
                         );
                     }
@@ -3388,21 +3389,24 @@ async function submitArchiveReview(cycle, docNames) {
 }
 
 /**
- * 快速审批归档请求（项目经理在文档页面操作）
+ * 快速审批归档请求（当前阶段审批人输入安全码完成审批）
+ * @param {string} approvalId - 审批记录UUID
+ * @param {string} action - 'approve' | 'approve_finalize' | 'reject'
+ * @param {object} options - { forceRequireCode: bool } 快速审批链式调用时强制要求安全码
  */
-async function quickApproveArchive(approvalId, action = 'approve') {
+async function quickApproveArchive(approvalId, action = 'approve', options = {}) {
     // 获取当前阶段的审批人（按 approval_id 过滤）
     const approversResult = await getArchiveApprovers(appState.currentProjectId, approvalId);
     if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
-        showNotification('获取审批人信息失败', 'error');
+        showNotification('当前阶段没有可用的审批人（可能需要其他角色审批）', 'error');
         return { status: 'error' };
     }
 
-    const title = action === 'approve' ? '审批通过 - 请验证身份' : '驳回归档 - 请验证身份';
+    const title = action === 'approve' ? '审批通过 - 请验证身份' : action === 'approve_finalize' ? '直接归档 - 请验证身份' : '驳回归档 - 请验证身份';
     let approvalInput;
 
-    // 检查是否需要审批安全码
-    const requireCode = appState.systemSettings?.require_approval_code !== false;
+    // 快速审批始终要求安全码（核心安全机制）
+    const requireCode = options.forceRequireCode || appState.systemSettings?.require_approval_code !== false;
 
     // 自动匹配当前登录用户
     const currentUserId = authState.user?.id;
@@ -3901,23 +3905,36 @@ export async function unarchiveDocument(cycle, docName) {
 
 /**
  * 快速审批/驳回归档请求操作（供 onclick 调用）
+ * 审批通过后自动链式推进：提示下一阶段审批人输入安全码继续流程
  */
 async function handleQuickApproveAction(approvalId, action, cycle) {
     try {
-        const result = await quickApproveArchive(approvalId, action);
+        let result = await quickApproveArchive(approvalId, action);
+
+        // 链式推进：当前阶段通过后，提示下一阶段审批人继续
+        while (result.status === 'stage_approved') {
+            const stageMsg = result.message || `第 ${result.current_stage} 阶段已批准，等待第 ${result.next_stage} 阶段审批`;
+            showNotification(stageMsg, 'info');
+            await reloadProjectAndRender(cycle);
+
+            const doContinue = await new Promise((resolve) => {
+                showConfirmModal('继续审批',
+                    `${stageMsg}\n\n如下一阶段审批人在场，可由其输入审批安全码继续完成审批。\n是否继续？`,
+                    () => resolve(true),
+                    () => resolve(false)
+                );
+            });
+            if (!doContinue) return;
+
+            result = await quickApproveArchive(approvalId, 'approve', { forceRequireCode: true });
+        }
 
         if (result.status === 'success') {
-            // 所有阶段完成，文档已归档
             showNotification('🎉 所有审批完成，文档已归档', 'success');
             await reloadProjectAndRender(cycle);
             if (action === 'approve' || action === 'approve_finalize') {
                 import('./cycle.js').then(module => { module.refreshCycleProgress(); });
             }
-        } else if (result.status === 'stage_approved') {
-            // 当前阶段通过，等待下一阶段
-            const message = result.message || `第 ${result.current_stage} 阶段已批准，等待第 ${result.next_stage} 阶段审批`;
-            showNotification(message, 'info');
-            await reloadProjectAndRender(cycle);
         } else if (result.status !== 'cancelled') {
             showNotification(result.message || '操作失败', 'error');
         }
@@ -4370,67 +4387,35 @@ export async function showGlobalApprovalHistory() {
 }
 
 /**
- * 承建方快速审批（由项目经理输入安全码完成审批）
+ * 承建方快速审批（申请人发起，由各阶段审批人依次输入安全码完成审批）
+ * 链式推进：每个阶段通过后自动提示下一阶段审批人继续
  */
 async function handleContractorQuickApproveAction(approvalId, cycle) {
     try {
-        // 获取当前阶段的审批人
-        const approversResult = await getArchiveApprovers(appState.currentProjectId, approvalId);
-        if (approversResult.status !== 'success' || !approversResult.approvers?.length) {
-            showNotification('获取审批人信息失败', 'error');
-            return;
-        }
+        let result = await quickApproveArchive(approvalId, 'approve', { forceRequireCode: true });
 
-        const approvers = approversResult.approvers;
-        const requireCode = appState.systemSettings?.require_approval_code !== false;
+        // 链式推进
+        while (result.status === 'stage_approved') {
+            const stageMsg = result.message || `第 ${result.current_stage} 阶段已批准`;
+            showNotification(stageMsg, 'info');
+            await reloadProjectAndRender(cycle);
 
-        let selectedApprover;
-        let approvalCode = '';
-
-        // 自动匹配当前登录用户
-        const currentUserId = authState.user?.id;
-        const currentUsername = authState.user?.username;
-        let matchedApprover = null;
-        if (currentUserId) {
-            matchedApprover = approvers.find(a => String(a.id) === String(currentUserId));
-        }
-        if (!matchedApprover && currentUsername) {
-            matchedApprover = approvers.find(a => a.username === currentUsername);
-        }
-
-        if (matchedApprover || approvers.length === 1) {
-            selectedApprover = matchedApprover || approvers[0];
-            if (requireCode) {
-                const codeInput = await promptApprovalCodeForArchive(
-                    `${selectedApprover.username} 快速审批 - 请输入审批安全码`
+            const doContinue = await new Promise((resolve) => {
+                showConfirmModal('继续审批',
+                    `${stageMsg}\n\n如下一阶段审批人在场，可由其输入审批安全码继续完成审批。\n是否继续？`,
+                    () => resolve(true),
+                    () => resolve(false)
                 );
-                if (!codeInput?.approval_code) return;
-                approvalCode = codeInput.approval_code;
-            }
-        } else {
-            // 多个审批人且无法自动匹配，需要选择 + 输入安全码
-            const input = await promptApprovalCodeForArchive(
-                '快速审批 - 选择审批人并输入安全码',
-                false, approvers, !requireCode
-            );
-            if (!input) return;
-            if (requireCode && !input.approval_code) return;
-            selectedApprover = approvers.find(a => String(a.id) === input.approver_id) || approvers[0];
-            approvalCode = requireCode ? input.approval_code : '';
-        }
+            });
+            if (!doContinue) return;
 
-        const result = await approveArchiveRequest(
-            appState.currentProjectId, approvalId,
-            selectedApprover.id, approvalCode
-        );
+            result = await quickApproveArchive(approvalId, 'approve', { forceRequireCode: true });
+        }
 
         if (result.status === 'success') {
             showNotification('🎉 所有审批完成，文档已归档', 'success');
             await reloadProjectAndRender(cycle);
             import('./cycle.js').then(module => { module.refreshCycleProgress(); });
-        } else if (result.status === 'stage_approved') {
-            showNotification(result.message || '第一级审批已通过，等待PMO审批', 'info');
-            await reloadProjectAndRender(cycle);
         } else if (result.status === 'needs_change') {
             const updatedInput = await promptApprovalCodeForArchive(
                 '首次使用审批安全码，请输入当前登录密码并设置新审批安全码', true
@@ -4438,7 +4423,7 @@ async function handleContractorQuickApproveAction(approvalId, cycle) {
             if (updatedInput?.approval_code && updatedInput?.new_approval_code) {
                 const retryResult = await approveArchiveRequest(
                     appState.currentProjectId, approvalId,
-                    selectedApprover.id, updatedInput.approval_code, updatedInput.new_approval_code
+                    updatedInput.approver_id || authState.user?.id, updatedInput.approval_code, updatedInput.new_approval_code
                 );
                 if (retryResult.status === 'success' || retryResult.status === 'stage_approved') {
                     showNotification(retryResult.message || '审批完成', 'success');
@@ -4447,7 +4432,7 @@ async function handleContractorQuickApproveAction(approvalId, cycle) {
                 }
                 await reloadProjectAndRender(cycle);
             }
-        } else {
+        } else if (result.status !== 'cancelled') {
             showNotification(result.message || '快速审批失败', 'error');
         }
     } catch (error) {
