@@ -5868,14 +5868,17 @@ async function showSendReportDialog() {
     const contactPickerHtml = savedContacts.length > 0 ? `
         <div style="margin-top:6px;">
             <div style="font-size:12px;color:#888;margin-bottom:4px;">📋 从地址簿选择：</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                ${savedContacts.map(c => `<button type="button" onclick="window._addExternalEmail('${escapeAttr(c.email)}','${escapeAttr(c.name||'')}','${escapeAttr(c.organization||'')}','${escapeAttr(c.remark||'')}',event)"
+            <div id="contactPickerBtns" style="display:flex;flex-wrap:wrap;gap:6px;">
+                ${savedContacts.map(c => `<button type="button" data-email="${escapeAttr(c.email)}" onclick="window._toggleExternalContact('${escapeAttr(c.email)}','${escapeAttr(c.name||'')}','${escapeAttr(c.organization||'')}',event)"
                     style="font-size:12px;padding:2px 8px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;cursor:pointer;color:#0969da;"
                     title="${escapeAttr(c.email)}${c.organization ? ' · ' + escapeAttr(c.organization) : ''}">
                     ${escapeHtml(c.name || c.email)}${c.organization ? ' <span style=color:#999>(' + escapeHtml(c.organization) + ')</span>' : ''}
                 </button>`).join('')}
             </div>
+            <div id="selectedContactTags" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;"></div>
         </div>` : '';
+
+    window._selectedAddressBookEmails = new Map();
 
     let dialog = document.getElementById('sendReportDialog');
     if (!dialog) {
@@ -5945,7 +5948,7 @@ async function showSendReportDialog() {
     dialog.style.display = 'flex';
 }
 
-// 辅助：将邮箱插入外部收件人文本框
+// 辅助：将邮箱插入外部收件人文本框（用于保存联系人后自动填入）
 window._addExternalEmail = function(email, name, org, remark, event) {
     if (event) event.preventDefault();
     const ta = document.getElementById('sendReportExternalEmails');
@@ -5956,6 +5959,67 @@ window._addExternalEmail = function(email, name, org, remark, event) {
         lines.push(email);
         ta.value = lines.join('\n');
     }
+};
+
+// 辅助：从地址簿切换选中状态
+window._toggleExternalContact = function(email, name, org, event) {
+    if (event) event.preventDefault();
+    if (!window._selectedAddressBookEmails) window._selectedAddressBookEmails = new Map();
+    if (window._selectedAddressBookEmails.has(email)) {
+        window._selectedAddressBookEmails.delete(email);
+        const ta = document.getElementById('sendReportExternalEmails');
+        if (ta) {
+            const lines = ta.value.split(/\n/).map(l => l.trim()).filter(l => l && l !== email);
+            ta.value = lines.join('\n');
+        }
+    } else {
+        window._selectedAddressBookEmails.set(email, {name, org});
+        const ta = document.getElementById('sendReportExternalEmails');
+        if (ta) {
+            const cur = ta.value.trim();
+            const lines = cur ? cur.split(/\n/).map(l => l.trim()).filter(Boolean) : [];
+            if (!lines.includes(email)) { lines.push(email); ta.value = lines.join('\n'); }
+        }
+    }
+    window._renderSelectedContactTags();
+    window._updateContactBtnStyles();
+};
+
+// 辅助：移除已选联系人标签
+window._removeSelectedContact = function(email) {
+    if (window._selectedAddressBookEmails) window._selectedAddressBookEmails.delete(email);
+    const ta = document.getElementById('sendReportExternalEmails');
+    if (ta) {
+        const lines = ta.value.split(/\n/).map(l => l.trim()).filter(l => l && l !== email);
+        ta.value = lines.join('\n');
+    }
+    window._renderSelectedContactTags();
+    window._updateContactBtnStyles();
+};
+
+// 辅助：渲染已选联系人标签
+window._renderSelectedContactTags = function() {
+    const container = document.getElementById('selectedContactTags');
+    if (!container) return;
+    if (!window._selectedAddressBookEmails || window._selectedAddressBookEmails.size === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = Array.from(window._selectedAddressBookEmails.entries()).map(([email, {name, org}]) => {
+        const label = escapeHtml((name || email) + (org ? ` (${org})` : ''));
+        return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px 2px 8px;background:#e8f4ff;border:1px solid #91caff;border-radius:12px;font-size:12px;color:#1677ff;">${label}<button type="button" onclick="window._removeSelectedContact('${escapeAttr(email)}')" style="background:none;border:none;cursor:pointer;color:#aaa;font-size:15px;padding:0 0 0 2px;line-height:1;">×</button></span>`;
+    }).join('');
+};
+
+// 辅助：更新地址簿按钮选中样式
+window._updateContactBtnStyles = function() {
+    document.querySelectorAll('#contactPickerBtns button[data-email]').forEach(btn => {
+        const email = btn.getAttribute('data-email');
+        const selected = window._selectedAddressBookEmails && window._selectedAddressBookEmails.has(email);
+        btn.style.background = selected ? '#e8f4ff' : '#f6f8fa';
+        btn.style.borderColor = selected ? '#91caff' : '#d0d7de';
+        btn.style.color = selected ? '#1677ff' : '#0969da';
+    });
 };
 
 // 辅助：显示新增联系人表单

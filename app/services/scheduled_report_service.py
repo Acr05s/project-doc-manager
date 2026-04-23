@@ -1562,7 +1562,7 @@ class ScheduledReportService:
             val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
             c_updated = val.get('updated', 0)
-            c_archived = val.get('archived', 0)      # 本期归档
+            c_archived = val.get('total_archived', 0)      # 累计归档
             c_all_uploaded = val.get('all_uploaded_unique', 0)
             if c_all_uploaded > 0:
                 c_rate = round(min(100.0, (c_archived / c_all_uploaded) * 100), 2)
@@ -1661,7 +1661,7 @@ class ScheduledReportService:
             val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
             c_updated = val.get('updated', 0)
-            c_archived = val.get('archived', 0)      # 本期归档数
+            c_archived = val.get('total_archived', 0)      # 累计归档数
             c_all_uploaded = val.get('all_uploaded_unique', 0)
             if c_all_uploaded > 0:
                 c_rate = round(min(100.0, (c_archived / c_all_uploaded) * 100), 2)
@@ -1800,7 +1800,7 @@ class ScheduledReportService:
                 val = by_cycle.get(cycle, {})
                 u = val.get('uploads', 0)
                 upd = val.get('updated', 0)
-                a = val.get('archived', 0)       # 本期归档
+                a = val.get('total_archived', 0)       # 累计归档
                 uniq = val.get('all_uploaded_unique', 0)
                 r = round(min(100.0, (a / uniq) * 100), 2) if uniq > 0 else 0.0
                 cycle_data.append([
