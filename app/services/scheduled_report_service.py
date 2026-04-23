@@ -764,6 +764,87 @@ class ScheduledReportService:
             'next_execution': next_after_skip,
         }
 
+    def send_manual_report(
+        self,
+        project_id: str,
+        send_type: str = 'both',
+        recipient_user_ids: Optional[List[int]] = None,
+        external_emails: Optional[List[str]] = None,
+        include_pdf: bool = True,
+        requester_user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """手动发送项目报告到指定收件人。"""
+        if not self.doc_manager:
+            return {'status': 'error', 'message': '文档管理器未初始化'}
+        project = self._load_project(project_id)
+        if not project:
+            return {'status': 'error', 'message': '项目加载失败'}
+        project_name = project.get('name', project_id)
+        party_b = project.get('party_b', '')
+        frequency = 'monthly'
+        period_start, period_end = self._calc_period(now_with_timezone(), frequency)
+        metrics = self._build_metrics(project_id, project, period_start, period_end)
+
+        subject = f"【项目报告】{project_name}"
+        text_content, html_content = self._build_email_content(
+            project_name, frequency, period_start, period_end, metrics, party_b=party_b
+        )
+
+        attachments: List[Dict[str, str]] = []
+        if include_pdf:
+            pdf_path = self._build_pdf_report(project_name, frequency, period_start, period_end, metrics)
+            if pdf_path:
+                attachments.append({'path': str(pdf_path), 'name': f'{project_name}_报告.pdf'})
+
+        success_count = 0
+        error_messages: List[str] = []
+
+        if send_type in ('email', 'both'):
+            all_emails: List[str] = [e.strip() for e in (external_emails or []) if str(e).strip()]
+            if recipient_user_ids:
+                for uid in recipient_user_ids:
+                    user = user_manager.get_user_by_id(uid)
+                    if user:
+                        email = str(getattr(user, 'email', '') or '').strip()
+                        if email and '@' in email:
+                            all_emails.append(email)
+            for email in set(all_emails):
+                result = send_email(
+                    email, subject, text_content,
+                    html_content=html_content,
+                    attachments=attachments if attachments else None,
+                )
+                status = result.get('status', '')
+                if status == 'success':
+                    success_count += 1
+                elif status not in ('skipped',):
+                    error_messages.append(f"{email}: {result.get('message', '发送失败')}")
+
+        if send_type in ('inapp', 'both') and recipient_user_ids:
+            run_key = now_with_timezone().strftime('%Y%m%d%H%M%S')
+            sent = self._send_site_messages(
+                receiver_ids=recipient_user_ids,
+                project_id=project_id,
+                project_name=project_name,
+                frequency=frequency,
+                period_start=period_start,
+                period_end=period_end,
+                metrics=metrics,
+                run_key=run_key,
+                popup_enabled=False,
+                party_b=party_b,
+            )
+            success_count += sent
+
+        if error_messages:
+            return {
+                'status': 'partial',
+                'message': f'部分发送失败: {"; ".join(error_messages)}',
+                'success_count': success_count,
+            }
+        total = len(set(external_emails or [])) + len(recipient_user_ids or [])
+        return {'status': 'success', 'message': f'报告已发送（共 {total} 位收件人）', 'success_count': success_count}
+
     def _run_project_report(
         self,
         project_id: str,
@@ -1294,16 +1375,8 @@ class ScheduledReportService:
         if note:
             result['备注'] = note
 
-        # 从 attributes 中提取已启用的标志
-        attrs = req.get('attributes')
-        if isinstance(attrs, dict):
-            enabled_flags = []
-            for k, v in attrs.items():
-                if v is True or v == 'true' or v == 1:
-                    label = ATTR_LABEL_MAP.get(k, k)
-                    enabled_flags.append(label)
-            if enabled_flags:
-                result['要求'] = '、'.join(enabled_flags)
+        # 从 attributes 中提取已启用的标志（不再写入 result，避免与"要求"列重复）
+        # 该信息已通过 requirement 字段在文档清单的"要求"列中体现。
 
         # 其他简单字符串属性
         for key, value in req.items():

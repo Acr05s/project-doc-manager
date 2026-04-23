@@ -26,6 +26,7 @@ from .scheduled_reports import (
     toggle_project_report_task,
     run_project_report_task_now,
     skip_next_project_report_task,
+    send_project_report,
     list_all_report_tasks,
     get_report_send_history,
     get_holiday_status,
@@ -132,6 +133,7 @@ project_bp.route('/<project_id>/report-schedules/<task_id>', methods=['DELETE'])
 project_bp.route('/<project_id>/report-schedules/<task_id>/toggle', methods=['POST'])(project_access_required(toggle_project_report_task))
 project_bp.route('/<project_id>/report-schedules/<task_id>/run', methods=['POST'])(project_access_required(run_project_report_task_now))
 project_bp.route('/<project_id>/report-schedules/<task_id>/skip-next', methods=['POST'])(project_access_required(skip_next_project_report_task))
+project_bp.route('/<project_id>/report/send', methods=['POST'])(project_access_required(send_project_report))
 
 # 文档目录映射相关路由
 project_bp.route('/<project_id>/document-directories', methods=['GET'])(project_access_required(get_document_directories))

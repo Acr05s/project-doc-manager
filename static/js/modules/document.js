@@ -5147,7 +5147,9 @@ export async function generateReport() {
                     ...doc,
                     _originalIndex: doc.index !== undefined && doc.index !== null ? doc.index : (idx + 1)
                 })).sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
-                cycleData.statistics.totalDocs = cycleData.requiredDocs.length;
+                cycleData.statistics.totalDocs = cycleData.requiredDocs.filter(doc =>
+                    !appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name]
+                ).length;
                 
                 // 获取已上传的文档
                 const uploadedDocs = await getCycleDocuments(cycle);
@@ -5178,10 +5180,12 @@ export async function generateReport() {
                 const uploadedDocNames = new Set(docsWithStatus.map(doc => doc.doc_name));
                 cycleData.statistics.uploadedDocs = uploadedDocNames.size;
                 
-                // 识别缺失的文档
-                cycleData.missingDocs = cycleData.requiredDocs.filter(doc => 
-                    !uploadedDocNames.has(doc.name)
-                );
+                // 识别缺失的文档（排除"不涉及"的文档，不涉及不算未上传）
+                cycleData.missingDocs = cycleData.requiredDocs.filter(doc => {
+                    if (uploadedDocNames.has(doc.name)) return false;
+                    const isNotInvolved = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+                    return !isNotInvolved;
+                });
                 cycleData.statistics.missingDocs = cycleData.missingDocs.length;
                 
                 // 计算统计数据（基于文档类型）
@@ -5606,7 +5610,8 @@ function showReportModal(reportData) {
             
             <div class="report-actions" style="margin-top: 30px; text-align: center;">
                 <button class="btn btn-primary" onclick="downloadReportAsPDF()">下载PDF报告</button>
-                <button class="btn btn-secondary" onclick="closeReportModal()">关闭</button>
+                <button class="btn btn-success" onclick="showSendReportDialog()" style="margin-left: 10px; background: #17a2b8; border-color: #17a2b8;">📤 发送报告</button>
+                <button class="btn btn-secondary" onclick="closeReportModal()" style="margin-left: 10px;">关闭</button>
             </div>
         </div>
     `;
@@ -5821,6 +5826,136 @@ function showReportModal(reportData) {
 }
 
 /**
+ * 显示发送报告对话框
+ */
+async function showSendReportDialog() {
+    const projectId = appState.currentProjectId;
+    if (!projectId) {
+        showNotification('请先选择项目', 'error');
+        return;
+    }
+
+    // 获取项目的收件人候选列表
+    let recipientOptions = [];
+    try {
+        const resp = await fetch(`/api/projects/${projectId}/report-schedule`);
+        if (resp.ok) {
+            const data = await resp.json();
+            recipientOptions = data.recipient_options || [];
+        }
+    } catch (e) {
+        // ignore, dialog will show empty list
+    }
+
+    const userListHtml = recipientOptions.length > 0 ? recipientOptions.map(u => {
+        const label = u.display_name || u.username || '';
+        const org = u.organization ? ` (${u.organization})` : '';
+        const badge = u.recommended ? ' <span style="font-size:11px;color:#fff;background:#1890ff;padding:1px 5px;border-radius:3px;">推荐</span>' : '';
+        return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;">
+            <input type="checkbox" class="send-report-user-cb" value="${u.id}" ${u.recommended ? 'checked' : ''}>
+            <span>${label}${org}${badge}</span>
+        </label>`;
+    }).join('') : '<p style="color:#888;font-size:13px;">暂无候选收件人</p>';
+
+    let dialog = document.getElementById('sendReportDialog');
+    if (!dialog) {
+        dialog = document.createElement('div');
+        dialog.id = 'sendReportDialog';
+        dialog.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+        document.body.appendChild(dialog);
+    }
+
+    dialog.innerHTML = `
+        <div style="background:#fff;border-radius:8px;padding:28px 32px;max-width:520px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:85vh;overflow-y:auto;">
+            <h3 style="margin:0 0 18px;font-size:17px;color:#222;">📤 发送报告</h3>
+            <p style="margin:0 0 14px;font-size:13px;color:#666;">报告将包含项目概要和统计数据，PDF文件将作为邮件附件发送。</p>
+
+            <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">发送方式</div>
+                <label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;cursor:pointer;">
+                    <input type="checkbox" id="sendTypeEmail" checked> 邮件
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="sendTypeInapp" checked> 站内信
+                </label>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">站内收件人（同时用于邮件发送，如有邮箱）</div>
+                <div style="max-height:160px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;padding:8px 12px;">
+                    ${userListHtml}
+                </div>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">外部收件人邮箱 <span style="font-weight:400;color:#888;font-size:12px;">（仅邮件，每行一个）</span></div>
+                <textarea id="sendReportExternalEmails" rows="3" placeholder="example@domain.com" style="width:100%;box-sizing:border-box;border:1px solid #d9d9d9;border-radius:4px;padding:6px 10px;font-size:13px;resize:vertical;"></textarea>
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                    <input type="checkbox" id="sendReportIncludePdf" checked> 附带PDF文件
+                </label>
+            </div>
+
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+                <button onclick="document.getElementById('sendReportDialog').style.display='none'" style="padding:7px 18px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:14px;">取消</button>
+                <button onclick="submitSendReport()" style="padding:7px 18px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">发送</button>
+            </div>
+        </div>
+    `;
+    dialog.style.display = 'flex';
+}
+
+/**
+ * 提交发送报告请求
+ */
+async function submitSendReport() {
+    const projectId = appState.currentProjectId;
+    if (!projectId) return;
+
+    const emailEnabled = document.getElementById('sendTypeEmail')?.checked;
+    const inappEnabled = document.getElementById('sendTypeInapp')?.checked;
+    if (!emailEnabled && !inappEnabled) {
+        showNotification('请至少选择一种发送方式', 'error');
+        return;
+    }
+    const sendType = emailEnabled && inappEnabled ? 'both' : (emailEnabled ? 'email' : 'inapp');
+
+    const recipientUserIds = Array.from(document.querySelectorAll('.send-report-user-cb:checked')).map(cb => parseInt(cb.value));
+    const externalEmailsRaw = document.getElementById('sendReportExternalEmails')?.value || '';
+    const externalEmails = externalEmailsRaw.split(/[\n,;]/).map(e => e.trim()).filter(e => e && e.includes('@'));
+    const includePdf = document.getElementById('sendReportIncludePdf')?.checked !== false;
+
+    if (recipientUserIds.length === 0 && externalEmails.length === 0) {
+        showNotification('请至少选择一位收件人', 'error');
+        return;
+    }
+
+    const btn = document.querySelector('#sendReportDialog button[onclick="submitSendReport()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '发送中...'; }
+
+    try {
+        const resp = await fetch(`/api/projects/${projectId}/report/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ send_type: sendType, recipient_user_ids: recipientUserIds, external_emails: externalEmails, include_pdf: includePdf }),
+        });
+        const result = await resp.json();
+        document.getElementById('sendReportDialog').style.display = 'none';
+        if (result.status === 'success' || result.status === 'partial') {
+            showNotification(result.message || '报告已发送', result.status === 'partial' ? 'warning' : 'success');
+        } else {
+            showNotification('发送失败: ' + (result.message || ''), 'error');
+        }
+    } catch (e) {
+        showNotification('发送出错: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '发送'; }
+    }
+}
+
+/**
  * 关闭报告模态框
  */
 function closeReportModal() {
@@ -5915,6 +6050,8 @@ function downloadReportAsPDF() {
 // 暴露给全局作用域
 window.closeReportModal = closeReportModal;
 window.downloadReportAsPDF = downloadReportAsPDF;
+window.showSendReportDialog = showSendReportDialog;
+window.submitSendReport = submitSendReport;
 window.markDocumentNotInvolved = markDocumentNotInvolved;
 // 确保generateReport函数被添加到全局作用域
 if (typeof window !== 'undefined') {

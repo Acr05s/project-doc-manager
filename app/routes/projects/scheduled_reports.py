@@ -171,6 +171,31 @@ def skip_next_project_report_task(project_id, task_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def send_project_report(project_id):
+    """手动发送项目报告到指定收件人（站内信/邮件）。"""
+    try:
+        data = request.get_json() or {}
+        send_type = str(data.get('send_type', 'both')).strip()
+        if send_type not in ('email', 'inapp', 'both'):
+            send_type = 'both'
+        recipient_user_ids = [int(x) for x in (data.get('recipient_user_ids') or []) if x]
+        external_emails = [str(e).strip() for e in (data.get('external_emails') or []) if str(e).strip()]
+        include_pdf = bool(data.get('include_pdf', True))
+        requester_user_id = int(getattr(current_user, 'id', 0) or 0)
+        result = scheduled_report_service.send_manual_report(
+            project_id=project_id,
+            send_type=send_type,
+            recipient_user_ids=recipient_user_ids if recipient_user_ids else None,
+            external_emails=external_emails if external_emails else None,
+            include_pdf=include_pdf,
+            requester_user_id=requester_user_id,
+        )
+        code = 200 if result.get('status') in ('success', 'partial') else 400
+        return jsonify(result), code
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def list_all_report_tasks():
     """获取全平台所有定时报告任务（平台级功能）。"""
     try:
