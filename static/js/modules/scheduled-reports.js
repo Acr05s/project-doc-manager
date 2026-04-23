@@ -25,6 +25,20 @@ function _restoreModalSize(storageKey, modalId) {
         }
     } catch (e) { /* ignore */ }
 }
+function _setupModalResizeListener(modalId, storageKey) {
+    var modal = document.getElementById(modalId);
+    if (!modal) return;
+    var inner = modal.querySelector('.modal-content');
+    if (!inner) return;
+    
+    let resizeTimer = null;
+    inner.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            _saveModalSize(storageKey, modalId);
+        }, 200);
+    });
+}
 
 let _modalProjects = [];
 let _recipientOptions = [];
@@ -744,7 +758,7 @@ export async function openScheduledTaskEditorModal(taskId, projectId) {
     var form = document.getElementById('scheduledTaskEditorForm');
     if (form) form.onsubmit = saveScheduledReportConfig;
     var modal = document.getElementById('scheduledTaskEditorModal');
-    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; _restoreModalSize('scheduledTaskEditorModalSize', 'scheduledTaskEditorModal'); }
+    if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; _restoreModalSize('scheduledTaskEditorModalSize', 'scheduledTaskEditorModal'); _setupModalResizeListener('scheduledTaskEditorModal', 'scheduledTaskEditorModalSize'); }
 }
 
 export function closeScheduledTaskEditorModal() {
