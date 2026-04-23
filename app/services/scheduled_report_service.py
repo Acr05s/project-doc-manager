@@ -1025,7 +1025,15 @@ class ScheduledReportService:
             if d.get('status') == 'not_involved' or d.get('not_involved'):
                 return True
 
-        if not requirement:
+        # 检查是否有自定义属性需要验证
+        attributes = req_doc.get('attributes', {})
+        _predefined_keys = {'party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal',
+                            'need_doc_date', 'need_sign_date', 'need_doc_number',
+                            'need_seal', 'need_sign', 'custom_attrs'}
+        has_custom_attrs = isinstance(attributes, dict) and any(
+            v is True for k, v in attributes.items() if k not in _predefined_keys)
+
+        if not requirement and not has_custom_attrs:
             return True
 
         # 与前端 checkMissingRequirements 保持一致
@@ -1066,6 +1074,21 @@ class ScheduledReportService:
                 if not (get_val(d, 'has_seal_marked') or get_val(d, 'has_seal') or
                         get_val(d, 'party_a_seal') or get_val(d, 'party_b_seal') or no_seal):
                     continue
+            # 检查自定义属性
+            attributes = req_doc.get('attributes', {})
+            custom_attr_ok = True
+            if isinstance(attributes, dict):
+                predefined = {'party_a_sign', 'party_b_sign', 'party_a_seal', 'party_b_seal',
+                              'need_doc_date', 'need_sign_date', 'need_doc_number',
+                              'need_seal', 'need_sign', 'custom_attrs'}
+                for key, val in attributes.items():
+                    if key in predefined:
+                        continue
+                    if val is True and not get_val(d, key):
+                        custom_attr_ok = False
+                        break
+            if not custom_attr_ok:
+                continue
             # 该文档满足所有要求
             return True
         return False
@@ -1117,6 +1140,7 @@ class ScheduledReportService:
 
         docs = project.get('documents', {}) if isinstance(project.get('documents', {}), dict) else {}
         cycle_order = self._get_ordered_cycles(project, docs)
+        custom_attr_defs = project.get('custom_attribute_definitions', [])
 
         # 先按系统周期顺序初始化统计和文档清单
         for cycle in cycle_order:
@@ -1137,7 +1161,7 @@ class ScheduledReportService:
                 status = '已完成' if is_completed else ('待完善' if same_name_uploaded else '未上传')
 
                 # 收集自定义文档属性（只保留有意义的简单值）
-                custom_properties = self._extract_display_properties(req)
+                custom_properties = self._extract_display_properties(req, custom_attr_defs)
 
                 checklist.append({
                     'cycle': cycle,
@@ -1375,20 +1399,14 @@ class ScheduledReportService:
         }
 
     @staticmethod
-    def _extract_display_properties(req: Dict[str, Any]) -> Dict[str, str]:
+    def _extract_display_properties(req: Dict[str, Any], custom_attr_defs: List[Dict[str, Any]] = None) -> Dict[str, str]:
         """从文档需求中提取可展示的自定义属性（过滤空值和复杂对象）"""
         SKIP_KEYS = {'name', 'requirement', 'type', 'id', 'attributes',
                      'exclude_keywords', 'match_keywords', 'filename_template'}
-        ATTR_LABEL_MAP = {
-            'need_doc_date': '需注明文件日期',
-            'need_doc_number': '需注明文件编号',
-            'need_sign_date': '需注明签字日期',
-            'party_a_seal': '甲方盖章',
-            'party_a_sign': '甲方签字',
-            'party_b_seal': '乙方盖章',
-            'party_b_sign': '乙方签字',
-            'need_seal': '需盖章',
-            'need_sign': '需签字',
+        PREDEFINED_ATTR_KEYS = {
+            'need_doc_date', 'need_doc_number', 'need_sign_date',
+            'party_a_seal', 'party_a_sign', 'party_b_seal', 'party_b_sign',
+            'need_seal', 'need_sign', 'custom_attrs',
         }
         result: Dict[str, str] = {}
 
@@ -1397,8 +1415,19 @@ class ScheduledReportService:
         if note:
             result['备注'] = note
 
-        # 从 attributes 中提取已启用的标志（不再写入 result，避免与"要求"列重复）
-        # 该信息已通过 requirement 字段在文档清单的"要求"列中体现。
+        # 从 attributes 中提取自定义属性（预定义属性已通过 requirement 字段体现）
+        attributes = req.get('attributes', {})
+        if isinstance(attributes, dict):
+            def_map = {}
+            if custom_attr_defs:
+                def_map = {d['id']: d.get('name', d['id']) for d in custom_attr_defs
+                           if isinstance(d, dict) and 'id' in d}
+            for key, value in attributes.items():
+                if key in PREDEFINED_ATTR_KEYS:
+                    continue
+                if value is True:
+                    label = def_map.get(key, key)
+                    result[label] = '需要'
 
         # 其他简单字符串属性
         for key, value in req.items():
