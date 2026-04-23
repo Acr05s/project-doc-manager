@@ -558,7 +558,7 @@ class ReportService:
                         'time': ut.strftime('%Y-%m-%d %H:%M:%S'),
                         'type': change_type,
                         'doc_id': doc.get('doc_id', ''),
-                        'filename': doc.get('filename', ''),
+                        'filename': doc.get('original_filename') or doc.get('filename') or '',
                     })
 
                     # 检查文档属性是否有更新（与上传时间不同才算属性更新）
@@ -578,7 +578,7 @@ class ReportService:
                                     'time': updated_at.strftime('%Y-%m-%d %H:%M:%S'),
                                     'type': 'updated',
                                     'doc_id': doc.get('doc_id', ''),
-                                    'filename': doc.get('filename', ''),
+                                    'filename': doc.get('original_filename') or doc.get('filename') or '',
                                 })
 
         # 归档记录 (从 archive_approvals 查询)

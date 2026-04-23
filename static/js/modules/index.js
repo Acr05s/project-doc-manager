@@ -1626,7 +1626,7 @@ function renderDocChangesPage() {
                 <span class="doc-change-type" style="padding: 2px 8px; border-radius: 12px; font-size: 12px; background-color: ${getChangeTypeColor(item.type)}; color: white; align-self: center;">
                     ${item.type === 'added' ? '新增' : item.type === 'updated' ? '更新' : item.type === 'archived' ? '归档' : '删除'}
                 </span>
-                <button class="btn btn-sm btn-primary" onclick="previewDocument('${item.doc_id}')" style="padding: 4px 8px; font-size: 12px; align-self: center;">预览</button>
+                <button class="btn btn-sm btn-primary" onclick="previewDocument('${item.doc_id}')" style="padding: 4px 8px; font-size: 12px; align-self: center;" ${!item.doc_id ? 'disabled title="暂无文件信息"' : ''}>预览</button>
                 <button class="btn btn-sm btn-secondary" onclick="jumpToDocument('${item.project_id}', '${item.cycle}', '${item.doc_name}')" style="padding: 4px 8px; font-size: 12px; align-self: center;">管理</button>
             </div>
         </div>

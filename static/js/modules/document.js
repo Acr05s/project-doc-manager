@@ -1189,6 +1189,10 @@ function getFileIcon(fileExt) {
  * 预览文档（渐进式预览）- 带进度条
  */
 export async function previewDocument(docId) {
+    if (!docId) {
+        showNotification('该文档暂无预览信息', 'warning');
+        return;
+    }
     if (!hasDocOpPermission('doc_op_preview')) {
         showNotification('您没有预览文档的权限', 'error');
         return;
