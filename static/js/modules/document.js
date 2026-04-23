@@ -5861,7 +5861,7 @@ async function showSendReportDialog() {
     if (!dialog) {
         dialog = document.createElement('div');
         dialog.id = 'sendReportDialog';
-        dialog.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+        dialog.style.cssText = 'position:fixed;inset:0;z-index:10200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
         document.body.appendChild(dialog);
     }
 

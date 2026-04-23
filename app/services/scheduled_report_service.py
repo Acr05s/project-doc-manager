@@ -781,20 +781,29 @@ class ScheduledReportService:
             return {'status': 'error', 'message': '项目加载失败'}
         project_name = project.get('name', project_id)
         party_b = project.get('party_b', '')
-        frequency = 'monthly'
-        period_start, period_end = self._calc_period(now_with_timezone(), frequency)
+        # 实时报告：统计区间覆盖完整项目历史（10年窗口），截止到当前时刻
+        frequency = 'manual'
+        period_end = now_with_timezone().replace(tzinfo=None)
+        period_start = period_end - timedelta(days=3650)
         metrics = self._build_metrics(project_id, project, period_start, period_end)
 
-        subject = f"【项目报告】{project_name}"
+        report_label = '实时报告'
+        end_stamp = period_end.strftime('%Y-%m-%d %H:%M')
+        subject = f"【{project_name}】实时报告 - {end_stamp}"
         text_content, html_content = self._build_email_content(
-            project_name, frequency, period_start, period_end, metrics, party_b=party_b
+            project_name, frequency, period_start, period_end, metrics,
+            party_b=party_b, report_label=report_label
         )
 
         attachments: List[Dict[str, str]] = []
         if include_pdf:
-            pdf_path = self._build_pdf_report(project_name, frequency, period_start, period_end, metrics)
+            pdf_path = self._build_pdf_report(
+                project_name, frequency, period_start, period_end, metrics,
+                report_label=report_label
+            )
             if pdf_path:
-                attachments.append({'path': str(pdf_path), 'name': f'{project_name}_报告.pdf'})
+                safe_name = project_name.replace('/', '_').replace('\\', '_')
+                attachments.append({'path': str(pdf_path.resolve()), 'name': f'{safe_name}_实时报告_{period_end.strftime("%Y%m%d%H%M")}.pdf'})
 
         success_count = 0
         error_messages: List[str] = []
@@ -833,6 +842,7 @@ class ScheduledReportService:
                 run_key=run_key,
                 popup_enabled=False,
                 party_b=party_b,
+                report_label=report_label,
             )
             success_count += sent
 
@@ -1518,10 +1528,12 @@ class ScheduledReportService:
         run_key: str,
         popup_enabled: bool,
         party_b: str = '',
+        report_label: Optional[str] = None,
     ) -> int:
         if not receiver_ids:
             return 0
-        title = f"【{project_name}】{self._frequency_label(frequency)}已生成"
+        _label = report_label if report_label is not None else self._frequency_label(frequency)
+        title = f"【{project_name}】{_label}已生成"
         party_b_line = f"承建单位：{party_b}<br>" if party_b else ''
         # 站内信内容使用HTML表格格式便于渲染
         total_uploads_val = metrics.get('total_uploads', 0)
@@ -1566,7 +1578,7 @@ class ScheduledReportService:
         content = (
             f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;font-size:13px;color:#222;'>"
             f"<p style='margin:0 0 6px;'><b>\u9879\u76ee\uff1a</b>{project_name}</p>"
-            f"<p style='margin:0 0 6px;'>{party_b_line}<b>\u7c7b\u578b\uff1a</b>{self._frequency_label(frequency)}</p>"
+            f"<p style='margin:0 0 6px;'>{party_b_line}<b>\u7c7b\u578b\uff1a</b>{_label}</p>"
             f"<p style='margin:0 0 6px;color:#888;'>\u7edf\u8ba1\u533a\u95f4\uff1a{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}</p>"
             f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'>"
             f"<span style='background:#eef6ff;padding:4px 10px;border-radius:6px;'><b style='color:#2563eb;'>{total_uploads_val}</b> \u7d2f\u8ba1\u4e0a\u4f20\u6b21\u6570</span>"
@@ -1599,9 +1611,9 @@ class ScheduledReportService:
 
     def _build_email_content(
         self, project_name: str, frequency: str, start: datetime, end: datetime,
-        metrics: Dict[str, Any], party_b: str = ''
+        metrics: Dict[str, Any], party_b: str = '', report_label: Optional[str] = None
     ) -> Tuple[str, str]:
-        title = self._frequency_label(frequency)
+        title = report_label if report_label is not None else self._frequency_label(frequency)
         total_uploads = metrics.get('total_uploads', 0)
         total_updated_docs = metrics.get('total_updated_docs', 0)
         archived = metrics.get('archived', 0)
@@ -1690,7 +1702,7 @@ class ScheduledReportService:
             f"</div>"
         )
         return text, html
-    def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any]) -> Optional[Path]:
+    def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any], report_label: Optional[str] = None) -> Optional[Path]:
         try:
             from reportlab.lib import colors as rl_colors
             from reportlab.lib.pagesizes import A4
@@ -1701,7 +1713,8 @@ class ScheduledReportService:
             from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
             from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
-            out_dir = Path('uploads/tasks/reports')
+            _root = Path(__file__).parent.parent.parent
+            out_dir = _root / 'uploads' / 'tasks' / 'reports'
             out_dir.mkdir(parents=True, exist_ok=True)
             suffix = now_with_timezone().strftime('%Y%m%d_%H%M%S')
             pdf_path = out_dir / f"scheduled_report_{suffix}.pdf"
@@ -1716,7 +1729,7 @@ class ScheduledReportService:
             cell_style = ParagraphStyle('cell', fontName=font_name, fontSize=8, leading=12, wordWrap='CJK')
             cell_center = ParagraphStyle('cell_c', fontName=font_name, fontSize=8, leading=12, wordWrap='CJK', alignment=TA_CENTER)
 
-            title_label = self._frequency_label(frequency)
+            title_label = report_label if report_label is not None else self._frequency_label(frequency)
             party_b = metrics.get('party_b', '')
 
             elems = []
