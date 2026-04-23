@@ -1750,6 +1750,21 @@ class UserManager:
         except Exception:
             return False
 
+    def update_external_contact(self, contact_id: int, name: str, email: str, organization: str = '', remark: str = '') -> Dict[str, Any]:
+        """更新外部联系人"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute(
+                    'UPDATE external_contacts SET name=?, email=?, organization=?, remark=? WHERE id=?',
+                    (name.strip(), email.strip().lower(), organization.strip(), remark.strip(), contact_id)
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'status': 'error', 'message': '联系人不存在'}
+            return {'status': 'success', 'message': '更新成功', 'id': contact_id}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}
+
 
 # 创建全局用户管理器实例
 user_manager = UserManager()

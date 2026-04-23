@@ -1343,8 +1343,45 @@ class ScheduledReportService:
         else:
             archive_rate = 0.0
 
-        # 按上传时间倒序排列文档明细
-        doc_details.sort(key=lambda x: str(x.get('upload_time', '')), reverse=True)
+        # 按周期顺序排列文档明细，同周期内按上传时间正序
+        _cycle_pos = {c: i for i, c in enumerate(cycle_order)}
+        doc_details.sort(key=lambda x: (_cycle_pos.get(x.get('cycle', ''), 9999), str(x.get('upload_time', ''))))
+
+        # ── 时间线异常检查 ──
+        # 若某周期的文档上传时间早于前面周期的最晚上传时间，则标记为日期异常
+        _cycle_max_date: Dict[str, Any] = {}
+        for _d in doc_details:
+            _c = _d.get('cycle', '')
+            _t = self._parse_time(_d.get('upload_time'))
+            if _t and _c:
+                if _c not in _cycle_max_date or _t > _cycle_max_date[_c]:
+                    _cycle_max_date[_c] = _t
+
+        timeline_anomalies: List[Dict[str, Any]] = []
+        _cumulative_max: Optional[datetime] = None
+        for _cycle in cycle_order:
+            if _cumulative_max is not None:
+                for _d in doc_details:
+                    if _d.get('cycle') == _cycle:
+                        _t = self._parse_time(_d.get('upload_time'))
+                        if _t and _t < _cumulative_max:
+                            _d['date_anomaly'] = True
+                            timeline_anomalies.append({
+                                'cycle': _cycle,
+                                'doc_name': _d.get('doc_name', ''),
+                                'upload_time': str(_d.get('upload_time', '')),
+                                'filename': str(_d.get('filename', '')),
+                                'anomaly_ref': _cumulative_max.strftime('%Y-%m-%d %H:%M'),
+                            })
+            if _cycle in _cycle_max_date:
+                if _cumulative_max is None or _cycle_max_date[_cycle] > _cumulative_max:
+                    _cumulative_max = _cycle_max_date[_cycle]
+
+        # 将日期异常标记同步到 checklist
+        _anomaly_keys = {(_d.get('cycle', ''), _d.get('doc_name', '')) for _d in doc_details if _d.get('date_anomaly')}
+        for _item in checklist:
+            if (_item.get('cycle', ''), _item.get('doc_name', '')) in _anomaly_keys:
+                _item['date_anomaly'] = True
 
         # ── 统计本期删除文档 ──
         period_deleted = 0
@@ -1396,6 +1433,7 @@ class ScheduledReportService:
             'doc_details': doc_details,
             'cycle_order': cycle_order,
             'checklist': checklist,
+            'timeline_anomalies': timeline_anomalies,
         }
 
     @staticmethod
@@ -1858,64 +1896,55 @@ class ScheduledReportService:
                 elems.append(PageBreak())
                 elems.append(Paragraph('项目文档清单（按系统周期顺序）', h1))
 
-                # 检查是否有自定义属性
-                has_custom_properties = any(item.get('custom_properties') for item in checklist)
-
-                if has_custom_properties:
-                    cl_data = [[
-                        Paragraph('序号', cell_center),
-                        Paragraph('周期', cell_style),
-                        Paragraph('文档名称', cell_style),
-                        Paragraph('要求', cell_style),
-                        Paragraph('自定义属性', cell_style),
-                        Paragraph('上传数', cell_center),
-                        Paragraph('状态', cell_center),
-                    ]]
-                else:
-                    cl_data = [[
-                        Paragraph('序号', cell_center),
-                        Paragraph('周期', cell_style),
-                        Paragraph('文档名称', cell_style),
-                        Paragraph('要求', cell_style),
-                        Paragraph('上传数', cell_center),
-                        Paragraph('状态', cell_center),
-                    ]]
+                # 统一使用不含"自定义属性"独立列的布局，将自定义属性合并进"要求"列
+                cl_data = [[
+                    Paragraph('序号', cell_center),
+                    Paragraph('周期', cell_style),
+                    Paragraph('文档名称', cell_style),
+                    Paragraph('要求', cell_style),
+                    Paragraph('上传数', cell_center),
+                    Paragraph('状态', cell_center),
+                ]]
 
                 prev_cycle = None
                 for i, item in enumerate(checklist, 1):
                     cur_cycle = str(item.get('cycle', ''))
                     cycle_cell = cur_cycle if cur_cycle != prev_cycle else ''
                     prev_cycle = cur_cycle
-                    status = str(item.get('status', ''))
+
+                    # 决定状态文字：日期异常时覆盖
+                    is_anomaly = item.get('date_anomaly', False)
+                    status = '日期异常' if is_anomaly else str(item.get('status', ''))
+
                     doc_name = str(item.get('doc_name', ''))
                     requirement = str(item.get('requirement', '') or '-')
 
-                    # 处理自定义属性（已过滤为可展示内容）
+                    # 将自定义属性合并进要求列，仅显示属性名（不显示": 需要"）
                     custom_props = item.get('custom_properties', {})
-                    custom_props_str = ''
                     if custom_props:
-                        props = [f"{k}: {v}" for k, v in custom_props.items()]
-                        custom_props_str = '\n'.join(props)
+                        extra_labels = []
+                        extra_notes = []
+                        for k, v in custom_props.items():
+                            if v == '需要' or v is True:
+                                extra_labels.append(k)
+                            elif k == '备注' and v:
+                                extra_notes.append(f'备注: {v}')
+                            elif v:
+                                extra_notes.append(f'{k}: {v}')
+                        if extra_labels:
+                            sep = '、' if requirement and requirement != '-' else ''
+                            requirement = requirement.rstrip('、') + sep + '、'.join(extra_labels)
+                        if extra_notes:
+                            requirement += '\n' + '；'.join(extra_notes)
 
-                    if has_custom_properties:
-                        cl_data.append([
-                            Paragraph(str(i), cell_center),
-                            Paragraph(cycle_cell, cell_style),
-                            Paragraph(doc_name, cell_style),
-                            Paragraph(requirement, cell_style),
-                            Paragraph(custom_props_str or '-', cell_style),
-                            Paragraph(str(item.get('uploaded_count', 0)), cell_center),
-                            Paragraph(status, cell_center),
-                        ])
-                    else:
-                        cl_data.append([
-                            Paragraph(str(i), cell_center),
-                            Paragraph(cycle_cell, cell_style),
-                            Paragraph(doc_name, cell_style),
-                            Paragraph(requirement, cell_style),
-                            Paragraph(str(item.get('uploaded_count', 0)), cell_center),
-                            Paragraph(status, cell_center),
-                        ])
+                    cl_data.append([
+                        Paragraph(str(i), cell_center),
+                        Paragraph(cycle_cell, cell_style),
+                        Paragraph(doc_name, cell_style),
+                        Paragraph(requirement, cell_style),
+                        Paragraph(str(item.get('uploaded_count', 0)), cell_center),
+                        Paragraph(status, cell_center),
+                    ])
 
                 # 为不同状态上色
                 cl_style_cmds = [
@@ -1932,22 +1961,22 @@ class ScheduledReportService:
                     ('LEFTPADDING', (0, 0), (-1, -1), 4),
                     ('RIGHTPADDING', (0, 0), (-1, -1), 4),
                 ]
-                status_col = 6 if has_custom_properties else 5
+                status_col = 5
                 for row_idx, item in enumerate(checklist, 1):
+                    is_anomaly = item.get('date_anomaly', False)
                     status = str(item.get('status', ''))
-                    if status == '已完成':
+                    if is_anomaly:
+                        cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#b45309')))
+                        cl_style_cmds.append(('BACKGROUND', (0, row_idx), (-1, row_idx), rl_colors.HexColor('#fffbeb')))
+                    elif status == '已完成':
                         cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#16a34a')))
                     elif status == '待完善':
                         cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#d97706')))
                     elif status == '未上传':
                         cl_style_cmds.append(('TEXTCOLOR', (status_col, row_idx), (status_col, row_idx), rl_colors.HexColor('#dc2626')))
                 cl_style = TableStyle(cl_style_cmds)
-                if has_custom_properties:
-                    cw = pw / 7
-                    elems.append(Table(cl_data, colWidths=[cw*0.4, cw*1.0, cw*1.5, cw*1.0, cw*1.5, cw*0.5, cw*0.6], style=cl_style, repeatRows=1))
-                else:
-                    cw = pw / 6
-                    elems.append(Table(cl_data, colWidths=[cw*0.4, cw*1.0, cw*1.8, cw*1.5, cw*0.5, cw*0.8], style=cl_style, repeatRows=1))
+                cw = pw / 6
+                elems.append(Table(cl_data, colWidths=[cw*0.4, cw*1.0, cw*1.8, cw*1.5, cw*0.5, cw*0.8], style=cl_style, repeatRows=1))
 
             # 本期文档变化明细（上传 + 更新）
             doc_details = metrics.get('doc_details', [])
@@ -1970,6 +1999,8 @@ class ScheduledReportService:
                     doc_name = str(d.get('doc_name', ''))
                     if d.get('is_update'):
                         doc_name += '（更新）'
+                    if d.get('date_anomaly'):
+                        doc_name += '⚠'
                     filename = str(d.get('filename', '') or '')
                     upload_time = str(d.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
                     dd_data.append([
@@ -1980,7 +2011,7 @@ class ScheduledReportService:
                         Paragraph(str(d.get('uploader', '-') or '-'), cell_style),
                         Paragraph(upload_time, cell_center),
                     ])
-                dd_style = TableStyle([
+                dd_style_cmds = [
                     ('FONTNAME', (0, 0), (-1, -1), font_name),
                     ('FONTSIZE', (0, 0), (-1, -1), 8),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -1993,9 +2024,55 @@ class ScheduledReportService:
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                     ('LEFTPADDING', (0, 0), (-1, -1), 4),
                     ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                ])
+                ]
+                for row_idx, d in enumerate(doc_details, 1):
+                    if d.get('date_anomaly'):
+                        dd_style_cmds.append(('BACKGROUND', (0, row_idx), (-1, row_idx), rl_colors.HexColor('#fffbeb')))
+                        dd_style_cmds.append(('TEXTCOLOR', (2, row_idx), (2, row_idx), rl_colors.HexColor('#b45309')))
                 dw = pw / 6
-                elems.append(Table(dd_data, colWidths=[dw*0.3, dw*0.8, dw*1.3, dw*1.5, dw*0.8, dw*0.9], style=dd_style, repeatRows=1))
+                elems.append(Table(dd_data, colWidths=[dw*0.3, dw*0.8, dw*1.3, dw*1.5, dw*0.8, dw*0.9], style=TableStyle(dd_style_cmds), repeatRows=1))
+
+            # 时间线异常汇总
+            timeline_anomalies = metrics.get('timeline_anomalies', [])
+            if timeline_anomalies:
+                elems.append(PageBreak())
+                elems.append(Paragraph('时间线异常文档', h1))
+                elems.append(Paragraph('以下文档的上传时间早于所在周期之前的某个周期中最晚上传的文档，可能存在日期错误。', body_gray))
+                elems.append(Spacer(1, 6))
+                ta_data = [[
+                    Paragraph('序号', cell_center),
+                    Paragraph('周期', cell_style),
+                    Paragraph('文档名称', cell_style),
+                    Paragraph('文件名', cell_style),
+                    Paragraph('上传时间', cell_center),
+                    Paragraph('应晚于', cell_center),
+                ]]
+                for ta_idx, ta in enumerate(timeline_anomalies, 1):
+                    ta_data.append([
+                        Paragraph(str(ta_idx), cell_center),
+                        Paragraph(str(ta.get('cycle', '')), cell_style),
+                        Paragraph(str(ta.get('doc_name', '')), cell_style),
+                        Paragraph(str(ta.get('filename', ''))[:40], cell_style),
+                        Paragraph(str(ta.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-', cell_center),
+                        Paragraph(str(ta.get('anomaly_ref', '')).split(' ')[0], cell_center),
+                    ])
+                ta_style = TableStyle([
+                    ('FONTNAME', (0, 0), (-1, -1), font_name),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#fef3c7')),
+                    ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#d97706')),
+                    ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#fde68a')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#fffbeb')]),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), rl_colors.HexColor('#92400e')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ])
+                tw = pw / 6
+                elems.append(Table(ta_data, colWidths=[tw*0.3, tw*0.8, tw*1.3, tw*1.5, tw*1.0, tw*1.1], style=ta_style, repeatRows=1))
 
             doc = SimpleDocTemplate(
                 str(pdf_path), pagesize=A4,

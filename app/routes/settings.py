@@ -557,3 +557,25 @@ def delete_external_contact(contact_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@settings_bp.route('/api/external-contacts/<int:contact_id>', methods=['PUT'])
+def update_external_contact(contact_id):
+    """修改外部联系人"""
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return jsonify({'status': 'error', 'message': '未登录'}), 401
+        data = request.get_json() or {}
+        name = str(data.get('name', '')).strip()
+        email = str(data.get('email', '')).strip()
+        if not name or not email:
+            return jsonify({'status': 'error', 'message': '姓名和邮箱不能为空'}), 400
+        from app.models.user import user_manager
+        result = user_manager.update_external_contact(
+            contact_id, name, email,
+            data.get('organization', ''), data.get('remark', '')
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+

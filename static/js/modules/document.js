@@ -5854,11 +5854,15 @@ async function showSendReportDialog() {
         <div style="margin-top:6px;">
             <div style="font-size:12px;color:#888;margin-bottom:4px;">📋 从地址簿选择：</div>
             <div id="contactPickerBtns" style="display:flex;flex-wrap:wrap;gap:6px;">
-                ${savedContacts.map(c => `<button type="button" data-email="${escapeAttr(c.email)}" onclick="window._toggleExternalContact('${escapeAttr(c.email)}','${escapeAttr(c.name||'')}','${escapeAttr(c.organization||'')}',event)"
-                    style="font-size:12px;padding:2px 8px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;cursor:pointer;color:#0969da;"
-                    title="${escapeAttr(c.email)}${c.organization ? ' · ' + escapeAttr(c.organization) : ''}">
-                    ${escapeHtml(c.name || c.email)}${c.organization ? ' <span style=color:#999>(' + escapeHtml(c.organization) + ')</span>' : ''}
-                </button>`).join('')}
+                ${savedContacts.map(c => `<span style="display:inline-flex;align-items:center;gap:2px;font-size:12px;padding:2px 4px 2px 8px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;">
+                    <button type="button" data-email="${escapeAttr(c.email)}" onclick="window._toggleExternalContact('${escapeAttr(c.email)}','${escapeAttr(c.name||'')}','${escapeAttr(c.organization||'')}',event)"
+                        style="font-size:12px;border:none;background:transparent;cursor:pointer;color:#0969da;padding:0;"
+                        title="${escapeAttr(c.email)}${c.organization ? ' · ' + escapeAttr(c.organization) : ''}">
+                        ${escapeHtml(c.name || c.email)}${c.organization ? ' <span style=color:#999>(' + escapeHtml(c.organization) + ')</span>' : ''}
+                    </button>
+                    <button type="button" onclick="window._editExternalContact(${c.id},'${escapeAttr(c.name||'')}','${escapeAttr(c.email)}','${escapeAttr(c.organization||'')}','${escapeAttr(c.remark||'')}',event)" style="border:none;background:transparent;cursor:pointer;color:#888;font-size:11px;padding:0 2px;" title="编辑">✏️</button>
+                    <button type="button" onclick="window._deleteExternalContact(${c.id},event)" style="border:none;background:transparent;cursor:pointer;color:#dc3545;font-size:11px;padding:0 2px;" title="删除">🗑️</button>
+                </span>`).join('')}
             </div>
             <div id="selectedContactTags" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;"></div>
         </div>` : '';
@@ -5905,7 +5909,8 @@ async function showSendReportDialog() {
             </div>
 
             <div id="addContactForm" style="display:none;margin-bottom:16px;padding:12px;background:#f6f8fa;border-radius:6px;border:1px solid #e0e0e0;">
-                <div style="font-weight:600;font-size:13px;margin-bottom:8px;">保存外部联系人到地址簿</div>
+                <div id="addContactFormTitle" style="font-weight:600;font-size:13px;margin-bottom:8px;">保存外部联系人到地址簿</div>
+                <input type="hidden" id="editContactId" value="">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
                     <input id="newContactName" type="text" placeholder="姓名*" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
                     <input id="newContactEmail" type="email" placeholder="邮箱*" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
@@ -5913,8 +5918,8 @@ async function showSendReportDialog() {
                     <input id="newContactRemark" type="text" placeholder="备注" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
                 </div>
                 <div style="display:flex;gap:8px;">
-                    <button type="button" onclick="window._saveExternalContact()" style="padding:4px 14px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:13px;">保存</button>
-                    <button type="button" onclick="document.getElementById('addContactForm').style.display='none'" style="padding:4px 14px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;">取消</button>
+                    <button type="button" id="saveContactBtn" onclick="window._saveExternalContact()" style="padding:4px 14px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:13px;">保存</button>
+                    <button type="button" onclick="document.getElementById('addContactForm').style.display='none';document.getElementById('editContactId').value=''" style="padding:4px 14px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;">取消</button>
                 </div>
             </div>
 
@@ -6023,30 +6028,86 @@ window._showAddExternalContactForm = function() {
     }
 };
 
-// 辅助：保存新联系人
+// 辅助：保存新联系人（新建或更新）
 window._saveExternalContact = async function() {
+    const editId = document.getElementById('editContactId')?.value.trim();
     const name = document.getElementById('newContactName')?.value.trim();
     const email = document.getElementById('newContactEmail')?.value.trim();
     const org = document.getElementById('newContactOrg')?.value.trim() || '';
     const remark = document.getElementById('newContactRemark')?.value.trim() || '';
     if (!name || !email) { showNotification('姓名和邮箱不能为空', 'error'); return; }
     try {
-        const resp = await fetch('/api/external-contacts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, organization: org, remark }),
-        });
-        const result = await resp.json();
-        if (result.status === 'created' || result.status === 'updated') {
-            showNotification('联系人已保存到地址簿', 'success');
-            document.getElementById('addContactForm').style.display = 'none';
-            // 自动插入邮箱到外部收件人文本框
-            window._addExternalEmail(email, name, org, remark, null);
+        let resp, result;
+        if (editId) {
+            // 修改模式
+            resp = await fetch(`/api/external-contacts/${editId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, organization: org, remark }),
+            });
+            result = await resp.json();
+            if (result.status === 'success') {
+                showNotification('联系人已更新', 'success');
+                document.getElementById('addContactForm').style.display = 'none';
+                document.getElementById('editContactId').value = '';
+                // 刷新对话框
+                showSendReportDialog();
+            } else {
+                showNotification('更新失败: ' + (result.message || ''), 'error');
+            }
         } else {
-            showNotification('保存失败: ' + (result.message || ''), 'error');
+            // 新建模式
+            resp = await fetch('/api/external-contacts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, organization: org, remark }),
+            });
+            result = await resp.json();
+            if (result.status === 'created' || result.status === 'updated') {
+                showNotification('联系人已保存到地址簿', 'success');
+                document.getElementById('addContactForm').style.display = 'none';
+                // 自动插入邮箱到外部收件人文本框
+                window._addExternalEmail(email, name, org, remark, null);
+            } else {
+                showNotification('保存失败: ' + (result.message || ''), 'error');
+            }
         }
     } catch (e) {
         showNotification('保存出错: ' + e.message, 'error');
+    }
+};
+
+// 辅助：编辑联系人（填充表单进入编辑模式）
+window._editExternalContact = function(id, name, email, org, remark, event) {
+    if (event) event.stopPropagation();
+    const form = document.getElementById('addContactForm');
+    if (!form) return;
+    document.getElementById('editContactId').value = id;
+    document.getElementById('newContactName').value = name || '';
+    document.getElementById('newContactEmail').value = email || '';
+    document.getElementById('newContactOrg').value = org || '';
+    document.getElementById('newContactRemark').value = remark || '';
+    const title = document.getElementById('addContactFormTitle');
+    if (title) title.textContent = '修改外部联系人';
+    form.style.display = 'block';
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+// 辅助：删除联系人
+window._deleteExternalContact = async function(id, event) {
+    if (event) event.stopPropagation();
+    if (!confirm('确认删除该联系人？')) return;
+    try {
+        const resp = await fetch(`/api/external-contacts/${id}`, { method: 'DELETE' });
+        const result = await resp.json();
+        if (result.status === 'success') {
+            showNotification('联系人已删除', 'success');
+            showSendReportDialog();
+        } else {
+            showNotification('删除失败: ' + (result.message || ''), 'error');
+        }
+    } catch (e) {
+        showNotification('删除出错: ' + e.message, 'error');
     }
 };
 

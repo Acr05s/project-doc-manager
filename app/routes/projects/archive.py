@@ -730,13 +730,13 @@ def _do_stage_approval(approval_id, project_id, approver, action='approve', reje
             return err_msg
 
         # 禁止审批人审批自己提交的请求
-        if approver.id == approval.get('requester_id'):
+        if str(approver.id) == str(approval.get('requester_id')):
             return '不能审批自己提交的请求'
 
         # 禁止同一用户连续审批多个阶段（admin 除外）
         if approver.role != 'admin' and current_stage_idx > 0:
             prev_stage = approval_stages[current_stage_idx - 1]
-            if prev_stage.get('approved_by_id') == approver.id:
+            if str(prev_stage.get('approved_by_id')) == str(approver.id):
                 return '同一审批人不能连续审批多个阶段，请由其他审批人处理'
 
         doc_names = approval.get('doc_names') or []
