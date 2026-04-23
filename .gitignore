@@ -92,3 +92,4 @@ tmp_tools/
 emp_tools/
 # BitFun snapshot data - auto managed
 .bitfun/
+.claude/
