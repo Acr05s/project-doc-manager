@@ -10,6 +10,124 @@ import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 import { buildDisplayRequirementText, buildUploadAttributeSchema, getCustomAttributeDefinitions, getPredefinedAttributeLabelMap } from './attribute-definitions.js';
 
 let isUploadingDocument = false;
+let pendingFocusDocId = null;
+let pendingFocusDocName = null;
+
+function setDocumentFocusTarget(docId = null, docName = null) {
+    pendingFocusDocId = docId || null;
+    pendingFocusDocName = docName || null;
+}
+
+function restoreDocumentFocusTarget() {
+    let focusEl = null;
+
+    if (pendingFocusDocId) {
+        focusEl = document.querySelector(`[data-review-doc-id="${pendingFocusDocId}"]`);
+    }
+
+    if (!focusEl && pendingFocusDocName) {
+        focusEl = document.querySelector(`[data-doc-name="${pendingFocusDocName}"]`);
+    }
+
+    if (focusEl) {
+        focusEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    pendingFocusDocId = null;
+    pendingFocusDocName = null;
+}
+
+function normalizeReviewEntry(rawEntry) {
+    if (!rawEntry || typeof rawEntry !== 'object') return null;
+
+    const remark = String(rawEntry.remark || rawEntry.review_result || rawEntry.content || '').trim();
+    if (!remark) return null;
+
+    const userId = rawEntry.user_id || rawEntry.userId || '';
+    const username = rawEntry.username || rawEntry.user_name || '';
+    const displayName = rawEntry.display_name || rawEntry.nickname || '';
+    const time = rawEntry.time || rawEntry.created_at || rawEntry.updated_at || '';
+    const id = rawEntry.id || `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+    return {
+        id,
+        user_id: userId,
+        username,
+        display_name: displayName,
+        time,
+        remark
+    };
+}
+
+function parseReviewEntries(raw) {
+    if (!raw) return [];
+
+    if (Array.isArray(raw)) {
+        return raw.map(normalizeReviewEntry).filter(Boolean);
+    }
+
+    if (typeof raw === 'object') {
+        const normalized = normalizeReviewEntry(raw);
+        return normalized ? [normalized] : [];
+    }
+
+    const text = String(raw).trim();
+    if (!text) return [];
+
+    try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+            return parsed.map(normalizeReviewEntry).filter(Boolean);
+        }
+        const normalized = normalizeReviewEntry(parsed);
+        if (normalized) return [normalized];
+    } catch (e) {
+        // 兼容历史纯文本 review_result
+    }
+
+    return [{
+        id: `legacy_${Date.now()}`,
+        user_id: '',
+        username: '',
+        display_name: '',
+        time: '',
+        remark: text
+    }];
+}
+
+function formatReviewEntryUser(entry) {
+    return entry.display_name || entry.username || '未知用户';
+}
+
+function formatReviewEntryTime(timeStr) {
+    if (!timeStr) return '时间未知';
+    const dt = new Date(timeStr);
+    return Number.isNaN(dt.getTime()) ? String(timeStr) : dt.toLocaleString();
+}
+
+function getCurrentReviewIdentity() {
+    const user = authState.user || {};
+    return {
+        user_id: String(user.id || user.user_id || ''),
+        username: String(user.username || ''),
+        display_name: String(user.display_name || user.nickname || user.real_name || user.username || '')
+    };
+}
+
+function findMyReviewEntryIndex(entries) {
+    const me = getCurrentReviewIdentity();
+    for (let i = entries.length - 1; i >= 0; i--) {
+        const entry = entries[i] || {};
+        const sameUserId = me.user_id && entry.user_id && String(entry.user_id) === me.user_id;
+        const sameUsername = me.username && entry.username && String(entry.username) === me.username;
+        if (sameUserId || sameUsername) return i;
+    }
+    return -1;
+}
+
+function serializeReviewEntries(entries) {
+    return JSON.stringify((entries || []).map(normalizeReviewEntry).filter(Boolean));
+}
 
 /**
  * 重新从服务器加载项目配置后刷新文档视图
@@ -81,6 +199,7 @@ export async function handleUploadDocument(e) {
     try {
         let successCount = 0;
         let errorCount = 0;
+        let firstErrorMessage = '';
         
         // 逐个上传文件
         for (const file of files) {
@@ -119,10 +238,19 @@ export async function handleUploadDocument(e) {
                     successCount++;
                 } else {
                     errorCount++;
+                    if (!firstErrorMessage) {
+                        firstErrorMessage = result.message || '服务器未返回具体失败原因';
+                    }
                     console.error(`上传文件失败 ${file.name}:`, result.message);
                 }
             } catch (error) {
                 errorCount++;
+                if (!firstErrorMessage) {
+                    const isNetworkErr = /fetch|network|ERR_CONNECTION/i.test(String(error && error.message ? error.message : error));
+                    firstErrorMessage = isNetworkErr
+                        ? '网络连接异常，无法连接后端服务，请检查服务是否在线'
+                        : (error && error.message ? error.message : '未知异常');
+                }
                 console.error(`上传文件失败 ${file.name}:`, error);
             }
         }
@@ -143,12 +271,13 @@ export async function handleUploadDocument(e) {
                 uploadedFilesList.innerHTML = '<p class="placeholder">暂无上传文件</p>';
             }
             // 刷新文档列表
+            setDocumentFocusTarget(null, appState.currentDocument || null);
             await reloadProjectAndRender(appState.currentCycle);
             // 关闭上传弹窗，让用户通过正常审批流程归档
             const uploadModal = document.getElementById('uploadModal');
             if (uploadModal) uploadModal.classList.remove('show');
         } else {
-            showNotification('上传失败: 所有文件上传失败', 'error');
+            showNotification(`上传失败: 所有文件上传失败${firstErrorMessage ? `（${firstErrorMessage}）` : ''}`, 'error');
         }
     } catch (error) {
         console.error('上传文档失败:', error);
@@ -799,7 +928,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         <th style="text-align: center; width: 80px; min-width: 80px;">序号</th>
                         <th class="col-org" style="text-align: center;">文档类型</th>
                         <th class="col-files" style="text-align: center;">文件列表</th>
-                        <th class="col-review" style="text-align: center; min-width: 130px;">审查结果</th>
+                        <th class="col-review" style="text-align: center; min-width: 180px;">核查结果</th>
                         <th class="col-action" style="text-align: center;">操作</th>
                     </tr>
                 </thead>
@@ -884,7 +1013,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         }
                         
                         return `
-                        <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}">
+                        <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}" data-doc-name="${escapeAttr(doc.name)}">
                             <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
@@ -902,11 +1031,21 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             </td>
                             <td class="col-review" style="vertical-align:top; padding:8px; min-width:130px;">
                                 ${docsList.length > 0 ? docsList.map(d => {
-                                    const rv = escapeHtml(d.review_result || '');
+                                    const reviewEntries = parseReviewEntries(d.review_result || '');
+                                    const myReviewIdx = findMyReviewEntryIndex(reviewEntries);
                                     const did = d.doc_id || '';
-                                    return did ? `<div style="margin-bottom:6px;">
-                                        ${rv ? `<div style="font-size:12px;color:#333;margin-bottom:3px;word-break:break-all;">${rv}</div>` : ''}
-                                        <button onclick="editReviewResult('${did}','${escapeAttr(d.review_result||'')}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">${rv ? '修改' : '填写'}</button>
+                                    if (window.__docReviewCache && did) {
+                                        window.__docReviewCache[did] = d.review_result || '';
+                                    }
+                                    return did ? `<div style="margin-bottom:8px;" data-review-doc-id="${escapeAttr(did)}">
+                                        ${reviewEntries.length > 0 ? reviewEntries.map(entry => `<div style="margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:320px;">
+                                            <div style="font-size:11px;color:#5a6b7b;margin-bottom:2px;">${escapeHtml(formatReviewEntryUser(entry))} · ${escapeHtml(formatReviewEntryTime(entry.time))}</div>
+                                            <div style="font-size:12px;color:#2f3a44;white-space:pre-wrap;word-break:break-word;line-height:1.4;">${escapeHtml(entry.remark || '')}</div>
+                                        </div>`).join('') : '<div style="font-size:12px;color:#bbb;margin-bottom:4px;">暂无核查标注</div>'}
+                                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                                            <button onclick="openReviewResultModal('${did}','add','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">核验标注</button>
+                                            ${myReviewIdx >= 0 ? `<button onclick="openReviewResultModal('${did}','edit','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#eaf9ee;color:#1f8e3d;cursor:pointer;">修改我的标注</button>` : ''}
+                                        </div>
                                     </div>` : '';
                                 }).join('') : '<span style="font-size:12px;color:#ccc;">—</span>'}
                             </td>
@@ -959,65 +1098,65 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                     const canForwardToPM = nextStage && nextStage.required_role === 'project_admin' && nextStage.status === 'pending';
                                                     if (canForwardToPM) {
                                                         return `
-                                                        <button class="btn btn-warning btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
+                                                        <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                             ➡️ 流转项目经理复核
                                                         </button>
-                                                        <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                        <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
                                                             ✅ 直接归档
                                                         </button>
-                                                        <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                        <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                             ❌ 驳回
                                                         </button>`;
                                                     } else {
                                                         return `
-                                                        <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                        <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
                                                             ✅ 批准归档
                                                         </button>
-                                                        <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                        <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                             ❌ 驳回
                                                         </button>`;
                                                     }
                                                 }
                                                 return `
-                                                <button class="btn btn-success btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
+                                                <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                     ✅ 审批通过
                                                 </button>
-                                                <button class="btn btn-danger btn-sm" onclick="handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                     ❌ 驳回
                                                 </button>`;
                                             })()}
                                             ${pendingRequest.requester_username === authState.user?.username ? `
-                                                <button class="btn btn-secondary btn-sm" style="margin-top:4px;" onclick="handleWithdrawArchive('${appState.currentProjectId}', '${pendingRequest.id}', '${cycle}')">
+                                                <button class="btn btn-secondary btn-sm" style="margin-top:4px;" onclick="setDocumentRowFocusByName('${doc.name}');handleWithdrawArchive('${appState.currentProjectId}', '${pendingRequest.id}', '${cycle}')">
                                                     ↩️ 撤回审批
                                                 </button>
-                                                <button class="btn btn-info btn-sm" style="margin-top:4px;" onclick="handleContractorQuickApprove('${pendingRequest.id}', '${cycle}')">
+                                                <button class="btn btn-info btn-sm" style="margin-top:4px;" onclick="setDocumentRowFocusByName('${doc.name}');handleContractorQuickApprove('${pendingRequest.id}', '${cycle}')">
                                                     ⚡ 快速审批
                                                 </button>
                                             ` : ''}
                                         ` : `
                                             ${!isNotInvolved && hasDocOpPermission('doc_op_upload') ? `
-                                                <button class="btn btn-primary btn-sm" onclick="openUploadModal('${cycle}', '${doc.name}')">
+                                                <button class="btn btn-primary btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');openUploadModal('${cycle}', '${doc.name}')">
                                                     📁 上传/选择文档
                                                 </button>
                                                 ${docsList.length > 0 && hasDocOpPermission('doc_op_edit') ? `
-                                                    <button class="btn btn-success btn-sm" onclick="openMaintainModal('${cycle}', '${doc.name}')">
+                                                    <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');openMaintainModal('${cycle}', '${doc.name}')">
                                                         ✏️ 编辑
                                                     </button>
                                                 ` : ''}
                                             ` : ''}
                                             ${hasDocOpPermission('doc_op_not_involved') ? `
-                                                <button class="btn btn-warning btn-sm" onclick="markDocumentNotInvolved('${cycle}', '${doc.name}')">
+                                                <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');markDocumentNotInvolved('${cycle}', '${doc.name}')">
                                                     ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
                                                 </button>
                                             ` : ''}
                                             ${!isNotInvolved && hasDocOpPermission('doc_op_archive') ? `
-                                                <button class="btn btn-info btn-sm" onclick="archiveDocument('${cycle}', '${doc.name}')">
+                                                <button class="btn btn-info btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');archiveDocument('${cycle}', '${doc.name}')">
                                                     📦 确认归档
                                                 </button>
                                             ` : ''}
                                         `}
                                     ` : `
-                                        <button class="btn btn-warning btn-sm" onclick="unarchiveDocument('${cycle}', '${doc.name}')">
+                                        <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');unarchiveDocument('${cycle}', '${doc.name}')">
                                             📤 撤销归档
                                         </button>
                                         ${approvedArchiveMap[doc.name] ? `
@@ -1044,6 +1183,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     if (docTable) {
         initResizableColumns(docTable, 'docs_table_col_widths');
     }
+
+    restoreDocumentFocusTarget();
 
     // 绑定主页面文档树形目录的折叠/展开事件
     // 注意：使用 Array.from + find 代替 querySelector，避免路径含中文/括号等特殊字符时选择器失效
@@ -5184,6 +5325,7 @@ export async function generateReport() {
                 const docsWithStatus = uploadedDocs.map(doc => {
                     const docName = doc.doc_name || doc.name;
                     const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[docName] || false;
+                    const reviewEntries = parseReviewEntries(doc.review_result || '');
                     
                     // 检查文档是否合规
                     const docConfig = cycleData.requiredDocs.find(d => d.name === docName);
@@ -5196,7 +5338,10 @@ export async function generateReport() {
                         ...doc,
                         archived: isArchived,
                         compliant: isCompliant,
-                        missingRequirements: missing
+                        missingRequirements: missing,
+                        reviewEntries,
+                        reviewCount: reviewEntries.length,
+                        hasReview: reviewEntries.length > 0
                     };
                 });
                 
@@ -5590,6 +5735,19 @@ function showReportModal(reportData) {
                                                                     return (hasSignRequirement ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #fff; font-size: 12px; font-weight: 600; background: #f5222d; padding: 3px 8px; border-radius: 4px; display: inline-block;">✗ 无盖章</span>';
                                                                 })()}
                                                                 ${doc.archived ? ((hasSignRequirement || hasSealRequirement) ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #1890ff; font-size: 12px; font-weight: 500;">✓ 已归档</span>' : ''}
+                                                                ${(() => {
+                                                                    const entries = Array.isArray(doc.reviewEntries) ? doc.reviewEntries : parseReviewEntries(doc.review_result || '');
+                                                                    if (!entries.length) return '<div style="margin-top:4px;color:#aaa;font-size:11px;">核查结果：无</div>';
+                                                                    const lines = entries.slice(0, 2).map((entry) => {
+                                                                        const user = formatReviewEntryUser(entry);
+                                                                        const time = formatReviewEntryTime(entry.time);
+                                                                        const remark = String(entry.remark || '').replace(/\s+/g, ' ').trim();
+                                                                        const shortRemark = remark.length > 26 ? (remark.slice(0, 26) + '...') : remark;
+                                                                        return `${escapeHtml(user)} ${escapeHtml(time)}: ${escapeHtml(shortRemark)}`;
+                                                                    }).join('<br>');
+                                                                    const more = entries.length > 2 ? `<div style="color:#888;font-size:11px;">...共${entries.length}条</div>` : '';
+                                                                    return `<div style="margin-top:4px;padding-top:4px;border-top:1px dashed #e5e7eb;color:#334155;font-size:11px;line-height:1.35;">核查结果：<br>${lines}${more}</div>`;
+                                                                })()}
                                                             </td>
                                                         </tr>
                                                     `).join('')}
@@ -5906,6 +6064,8 @@ async function showSendReportDialog() {
                     <input type="checkbox" class="send-report-ext-cb" data-group-member="${groupId}" data-email="${escapeAttr(u.email)}" checked>
                     <span style="font-size:13px;">${escapeHtml(u.name || u.email)}</span>
                     <span style="font-size:11px;color:#888;">${escapeHtml(u.email)}</span>
+                    <button type="button" onclick="window._editExternalContact('${escapeAttr(String(u.id || ''))}','${escapeAttr(u.name || '')}','${escapeAttr(u.email || '')}','${escapeAttr(u.organization || '')}','${escapeAttr(u.remark || '')}',event)" style="margin-left:auto;font-size:11px;padding:1px 6px;border:1px solid #4dabf7;border-radius:3px;background:#edf7ff;color:#1c7ed6;cursor:pointer;">编辑</button>
+                    <button type="button" onclick="window._deleteExternalContact('${escapeAttr(String(u.id || ''))}',event)" style="font-size:11px;padding:1px 6px;border:1px solid #fa5252;border-radius:3px;background:#fff5f5;color:#e03131;cursor:pointer;">删除</button>
                 </label>`;
             }
             const roleLabel = {pmo:'PMO',pmo_leader:'PMO负责人',project_admin:'项目经理',contractor:'一般员工',admin:'管理员'}[u.role] || u.role || '';
@@ -6083,6 +6243,11 @@ window._updateContactBtnStyles = function() {
 window._showAddExternalContactForm = function() {
     const form = document.getElementById('addContactForm');
     if (!form) return;
+    const title = document.getElementById('addContactFormTitle');
+    const editIdEl = document.getElementById('editContactId');
+    if (editIdEl && !editIdEl.value && title) {
+        title.textContent = '保存外部联系人到地址簿';
+    }
     form.style.display = form.style.display === 'none' ? '' : 'none';
     // 自动填入文本框里已有的第一个邮箱
     const ta = document.getElementById('sendReportExternalEmails');
@@ -6133,8 +6298,12 @@ window._saveExternalContact = async function() {
             if (result.status === 'created' || result.status === 'updated') {
                 showNotification('联系人已保存到地址簿', 'success');
                 document.getElementById('addContactForm').style.display = 'none';
-                // 自动插入邮箱到外部收件人文本框
-                window._addExternalEmail(email, name, org, remark, null);
+                document.getElementById('editContactId').value = '';
+                // 新建后立即刷新联系人树，确保新联系人立刻可见
+                showSendReportDialog();
+                setTimeout(() => {
+                    window._addExternalEmail(email, name, org, remark, null);
+                }, 0);
             } else {
                 showNotification('保存失败: ' + (result.message || ''), 'error');
             }
@@ -6330,27 +6499,78 @@ function downloadReportAsPDF() {
 }
 
 async function editReviewResult(docId, current) {
+    await openReviewResultModal(docId, 'add');
+}
+
+async function openReviewResultModal(docId, mode = 'add', docName = '') {
+    if (!docId) return;
+
+    if (!window.__docReviewCache) window.__docReviewCache = {};
+    const cachedRaw = window.__docReviewCache[docId] || '';
+    const entries = parseReviewEntries(cachedRaw);
+    const myIndex = findMyReviewEntryIndex(entries);
+    const isEdit = mode === 'edit';
+
+    if (isEdit && myIndex < 0) {
+        showNotification('仅可修改本人核验标注', 'warning');
+        return;
+    }
+
+    const defaultValue = isEdit && myIndex >= 0 ? (entries[myIndex].remark || '') : '';
+    const modalTitle = isEdit ? '修改我的核验标注' : '新增核验标注';
+
     const input = await new Promise((resolve) => {
-        showInputModal('填写审查备注', [
+        showInputModal(modalTitle, [
             {
-                label: '审查备注',
+                label: '核验标注',
                 key: 'review_result',
                 type: 'textarea',
                 rows: 5,
-                value: current || '',
-                placeholder: '请输入审查备注记录'
+                value: defaultValue,
+                placeholder: '请输入核验备注记录'
             }
         ], resolve);
     });
-    if (input === null) return;
-    if (!input) return;
 
-    const val = input.review_result ?? '';
+    if (input === null || !input) return;
+
+    const val = String(input.review_result ?? '').trim();
+    if (!val) {
+        showNotification('核验标注不能为空', 'warning');
+        return;
+    }
+
+    const identity = getCurrentReviewIdentity();
+    const now = new Date().toISOString();
+    const nextEntries = [...entries];
+
+    if (isEdit && myIndex >= 0) {
+        nextEntries[myIndex] = {
+            ...nextEntries[myIndex],
+            user_id: identity.user_id,
+            username: identity.username,
+            display_name: identity.display_name,
+            time: now,
+            remark: val
+        };
+    } else {
+        nextEntries.push({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            user_id: identity.user_id,
+            username: identity.username,
+            display_name: identity.display_name,
+            time: now,
+            remark: val
+        });
+    }
+
     try {
+        setDocumentFocusTarget(docId, docName || null);
+
         const resp = await fetch(`/api/documents/${encodeURIComponent(docId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ review_result: val })
+            body: JSON.stringify({ review_result: serializeReviewEntries(nextEntries) })
         });
 
         const contentType = resp.headers.get('content-type') || '';
@@ -6359,7 +6579,8 @@ async function editReviewResult(docId, current) {
             : { status: 'error', message: `服务器返回异常响应（${resp.status}）` };
 
         if (resp.ok && result.status === 'success') {
-            showNotification('审查结果已保存', 'success');
+            showNotification('核查结果已保存', 'success');
+            window.__docReviewCache[docId] = serializeReviewEntries(nextEntries);
             if (appState.currentCycle) await renderCycleDocuments(appState.currentCycle);
         } else {
             showNotification(result.message || '保存失败', 'error');
@@ -6376,9 +6597,14 @@ window.showSendReportDialog = showSendReportDialog;
 window.submitSendReport = submitSendReport;
 window.markDocumentNotInvolved = markDocumentNotInvolved;
 window.editReviewResult = editReviewResult;
+window.openReviewResultModal = openReviewResultModal;
+window.setDocumentRowFocusByName = function(docName) {
+    setDocumentFocusTarget(null, docName || null);
+};
 // 确保generateReport函数被添加到全局作用域
 if (typeof window !== 'undefined') {
     window.generateReport = generateReport;
+    if (!window.__docReviewCache) window.__docReviewCache = {};
 }
 
 /**

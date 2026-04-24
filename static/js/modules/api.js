@@ -792,9 +792,21 @@ export async function uploadDocument(formData) {
             method: 'POST',
             body: formData
         });
-        
-        const result = await response.json();
-        return result;
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            const result = await response.json();
+            if (!response.ok && result.status !== 'error') {
+                return { status: 'error', message: result.message || `上传失败（HTTP ${response.status}）` };
+            }
+            return result;
+        }
+
+        const text = await response.text();
+        return {
+            status: 'error',
+            message: text ? `上传失败（HTTP ${response.status}）：${text.slice(0, 180)}` : `上传失败（HTTP ${response.status}）`
+        };
     } catch (error) {
         console.error('上传文档失败:', error);
         throw error;

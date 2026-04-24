@@ -834,15 +834,30 @@ class ScheduledReportService:
             run_key = now_with_timezone().strftime('%Y%m%d%H%M%S')
             # 为前端报告数据提供默认metrics
             if 'metrics' not in locals():
-                metrics = {
-                    'total_uploads': 0,
-                    'total_updated_docs': 0,
-                    'archived': 0,
-                    'archive_rate': 0.0,
-                    'by_cycle': {},
-                    'cycle_order': [],
-                    'project_cycles': []
-                }
+                if report_data and isinstance(report_data, dict):
+                    try:
+                        metrics = self._build_metrics_from_frontend_report(report_data)
+                    except Exception as e:
+                        logger.warning(f"构建前端报告指标失败: {e}")
+                        metrics = {
+                            'total_uploads': 0,
+                            'total_updated_docs': 0,
+                            'archived': 0,
+                            'archive_rate': 0.0,
+                            'by_cycle': {},
+                            'cycle_order': [],
+                            'project_cycles': []
+                        }
+                else:
+                    metrics = {
+                        'total_uploads': 0,
+                        'total_updated_docs': 0,
+                        'archived': 0,
+                        'archive_rate': 0.0,
+                        'by_cycle': {},
+                        'cycle_order': [],
+                        'project_cycles': []
+                    }
             self._send_site_messages(
                 receiver_ids=recipient_user_ids,
                 project_id=project_id,
@@ -1824,6 +1839,66 @@ class ScheduledReportService:
         )
         return text, html
 
+    def _build_metrics_from_frontend_report(self, report_data: Dict[str, Any]) -> Dict[str, Any]:
+        """将前端 report_data 转为站内信摘要所需 metrics。"""
+        stats = report_data.get('statistics', {}) if isinstance(report_data, dict) else {}
+        cycles = report_data.get('cycles', []) if isinstance(report_data, dict) else []
+
+        def _to_int(v: Any) -> int:
+            try:
+                return int(float(v))
+            except Exception:
+                return 0
+
+        total_uploads = _to_int(stats.get('uploadedDocs', 0))
+        archived = _to_int(stats.get('archivedDocs', 0))
+        archive_rate = round(min(100.0, (archived / total_uploads) * 100), 2) if total_uploads > 0 else 0.0
+
+        by_cycle: Dict[str, Dict[str, Any]] = {}
+        cycle_order: List[str] = []
+        total_updated_docs = 0
+
+        for cycle in cycles if isinstance(cycles, list) else []:
+            cycle_name = str(cycle.get('name') or '').strip()
+            if not cycle_name:
+                continue
+            cycle_order.append(cycle_name)
+
+            c_stats = cycle.get('statistics', {}) if isinstance(cycle, dict) else {}
+            c_uploads = _to_int(c_stats.get('uploadedDocs', 0))
+            c_archived = _to_int(c_stats.get('archivedDocs', 0))
+
+            c_updated = 0
+            doc_name_count: Dict[str, int] = {}
+            for doc in cycle.get('uploadedDocs', []) if isinstance(cycle, dict) else []:
+                doc_name = str((doc or {}).get('doc_name') or (doc or {}).get('name') or '').strip()
+                if not doc_name:
+                    continue
+                doc_name_count[doc_name] = doc_name_count.get(doc_name, 0) + 1
+            for cnt in doc_name_count.values():
+                if cnt > 1:
+                    c_updated += (cnt - 1)
+
+            total_updated_docs += c_updated
+            by_cycle[cycle_name] = {
+                'uploads': c_uploads,
+                'updated': c_updated,
+                'archived': c_archived,
+                'total_archived': c_archived,
+                'uploaded_unique': c_uploads,
+                'all_uploaded_unique': c_uploads,
+            }
+
+        return {
+            'total_uploads': total_uploads,
+            'total_updated_docs': total_updated_docs,
+            'archived': archived,
+            'archive_rate': archive_rate,
+            'by_cycle': by_cycle,
+            'cycle_order': cycle_order,
+            'project_cycles': cycle_order,
+        }
+
     def _build_email_from_frontend_report(
         self, project_name: str, report_data: Dict[str, Any]
     ) -> Tuple[str, str]:
@@ -1883,21 +1958,24 @@ class ScheduledReportService:
                 f"</tr>"
             )
         no_data = "<tr><td colspan='6' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
+        summary_cells = (
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>总文档数</div><div style='font-size:20px;font-weight:bold;color:#111827'>{total_docs}</div></td>"
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>已上传</div><div style='font-size:20px;font-weight:bold;color:#16a34a'>{uploaded_docs}</div></td>"
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>缺失</div><div style='font-size:20px;font-weight:bold;color:#dc2626'>{missing_docs}</div></td>"
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>已归档</div><div style='font-size:20px;font-weight:bold;color:#2563eb'>{archived_docs}</div></td>"
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>签字率</div><div style='font-size:20px;font-weight:bold;color:#d97706'>{signature_rate}%</div></td>"
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>盖章率</div><div style='font-size:20px;font-weight:bold;color:#d97706'>{seal_rate}%</div></td>"
+            f"<td style='padding:8px 10px;border:1px solid #dbe6f3;text-align:center;'><div style='font-size:12px;color:#64748b;'>合格率</div><div style='font-size:20px;font-weight:bold;color:#16a34a'>{compliance_rate}%</div></td>"
+        )
         html = (
-            f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
+            f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:900px;'>"
             f"<h2 style='margin:0 0 4px;font-size:18px'>📋 项目文档审核报告 — {project_name}</h2>"
             f"<p style='margin:4px 0;color:#888;font-size:13px'>生成时间：{generated_at}</p>"
             f"<div style='margin:16px 0;padding:14px 18px;background:#e7f3ff;border-radius:6px;'>"
             f"<b style='font-size:14px;color:#2c3e50'>项目总体统计</b>"
-            f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;'>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>总文档数</div><div style='font-size:20px;font-weight:bold'>{total_docs}</div></div>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>已上传</div><div style='font-size:20px;font-weight:bold;color:#28a745'>{uploaded_docs}</div></div>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>缺失</div><div style='font-size:20px;font-weight:bold;color:#dc3545'>{missing_docs}</div></div>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>已归档</div><div style='font-size:20px;font-weight:bold;color:#1890ff'>{archived_docs}</div></div>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>签字率</div><div style='font-size:20px;font-weight:bold;color:#ffc107'>{signature_rate}%</div></div>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>盖章率</div><div style='font-size:20px;font-weight:bold;color:#ffc107'>{seal_rate}%</div></div>"
-            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>合格率</div><div style='font-size:20px;font-weight:bold;color:#28a745'>{compliance_rate}%</div></div>"
-            f"</div></div>"
+            f"<table role='presentation' style='border-collapse:collapse;width:100%;margin-top:10px;background:#fff;'>"
+            f"<tr>{summary_cells}</tr>"
+            f"</table></div>"
             f"<h3 style='font-size:14px;margin:18px 0 8px;color:#374151'>按周期文档统计</h3>"
             f"<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
             f"<thead><tr style='background:#f8fafc;'>"
@@ -2085,7 +2163,7 @@ class ScheduledReportService:
                         except ValueError:
                             return (len(_ro), str(d.get('upload_time', '')))
                     sorted_uploads = sorted(uploaded_list, key=_sort_key)
-                    file_data = [['序号', '文档类型', '文件名', '上传时间', '状态']]
+                    file_data = [['序号', '文档类型', '文件名', '上传时间', '状态', '核查结果']]
                     file_cmds = [
                         ('FONTNAME', (0, 0), (-1, -1), fn), ('FONTSIZE', (0, 0), (-1, -1), 8),
                         ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -2102,12 +2180,39 @@ class ScheduledReportService:
                         is_archived = ud.get('archived', False)
                         is_compliant = ud.get('compliant', True)
                         file_status = '已归档' if is_archived else ('待完善' if not is_compliant else '已上传')
+                        review_text = '-'
+                        raw_review = ud.get('review_result', '')
+                        if isinstance(raw_review, str) and raw_review.strip():
+                            try:
+                                parsed = json.loads(raw_review)
+                                if isinstance(parsed, list):
+                                    parts: List[str] = []
+                                    for item in parsed:
+                                        if not isinstance(item, dict):
+                                            continue
+                                        remark = str(item.get('remark') or item.get('review_result') or item.get('content') or '').strip()
+                                        if not remark:
+                                            continue
+                                        user_name = str(item.get('display_name') or item.get('username') or '用户').strip()
+                                        parts.append(f"{user_name}: {remark}")
+                                    if parts:
+                                        review_text = '；'.join(parts)
+                                elif isinstance(parsed, dict):
+                                    remark = str(parsed.get('remark') or parsed.get('review_result') or parsed.get('content') or '').strip()
+                                    if remark:
+                                        user_name = str(parsed.get('display_name') or parsed.get('username') or '用户').strip()
+                                        review_text = f"{user_name}: {remark}"
+                            except Exception:
+                                review_text = raw_review.strip()
+                        elif raw_review:
+                            review_text = str(raw_review).strip()
                         file_data.append([
                             Paragraph(str(f_i), cell_c),
                             Paragraph(str(ud.get('doc_name', '')), cell),
                             Paragraph(filename[:45], cell),
                             Paragraph(ut, cell_c),
                             Paragraph(file_status, cell_c),
+                            Paragraph(review_text[:90] if review_text else '-', cell),
                         ])
                         sc = 4
                         if is_archived:
@@ -2116,8 +2221,8 @@ class ScheduledReportService:
                             file_cmds.append(('TEXTCOLOR', (sc, f_i), (sc, f_i), rl_colors.HexColor('#d97706')))
                         else:
                             file_cmds.append(('TEXTCOLOR', (sc, f_i), (sc, f_i), rl_colors.HexColor('#16a34a')))
-                    fw = pw / 5
-                    elems.append(Table(file_data, colWidths=[fw*0.3, fw*1.2, fw*1.8, fw*0.8, fw*0.9], style=TableStyle(file_cmds), repeatRows=1))
+                    fw = pw / 6
+                    elems.append(Table(file_data, colWidths=[fw*0.3, fw*1.0, fw*1.45, fw*0.75, fw*0.8, fw*1.7], style=TableStyle(file_cmds), repeatRows=1))
 
             doc = SimpleDocTemplate(
                 str(pdf_path), pagesize=A4,
