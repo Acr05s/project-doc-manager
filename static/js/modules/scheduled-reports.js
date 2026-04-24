@@ -452,11 +452,183 @@ function collectSelectedRecipientUserIds() {
     return Array.from(ids);
 }
 
+// ---- 定时任务外部联系人地址簿 ----
+var _scheduledExtContactsLoaded = false;
+var _scheduledPreCheckedEmails = new Set();
+
+async function _loadScheduledExtContacts() {
+    var container = document.getElementById('scheduledExtContactsBook');
+    if (!container) return;
+    try {
+        var resp = await fetch('/api/external-contacts', { cache: 'no-store' });
+        var result = await resp.json();
+        var contacts = Array.isArray(result.contacts) ? result.contacts : (Array.isArray(result) ? result : []);
+        _scheduledExtContactsLoaded = true;
+        _renderScheduledExtContacts(contacts);
+    } catch (e) {
+        if (container) container.innerHTML = '<span style="color:#e03131;">加载失败</span>';
+    }
+}
+
+function _renderScheduledExtContacts(contacts) {
+    var container = document.getElementById('scheduledExtContactsBook');
+    if (!container) return;
+    if (!contacts || contacts.length === 0) {
+        container.innerHTML = '<span style="color:#aaa;font-size:12px;">暂无地址簿联系人</span>';
+        return;
+    }
+    // 按组织分组
+    var orgMap = new Map();
+    contacts.forEach(function(c) {
+        var org = String(c.organization || c.org || '其他').trim() || '其他';
+        if (!orgMap.has(org)) orgMap.set(org, []);
+        orgMap.get(org).push(c);
+    });
+    var html = '';
+    orgMap.forEach(function(users, org) {
+        html += '<div style="margin-bottom:4px;"><div style="font-size:11px;color:#888;font-weight:600;padding:2px 0;">' + escapeHtml(org) + '</div>';
+        users.forEach(function(u) {
+            var email = String(u.email || '');
+            var name = String(u.name || u.display_name || email);
+            var id = String(u.id || '');
+            var checked = _scheduledPreCheckedEmails.has(email) ? 'checked' : '';
+            var escId = id.replace(/'/g, "\\'");
+            var escEmail = email.replace(/'/g, "\\'");
+            var escName = name.replace(/'/g, "\\'");
+            var escOrg = org.replace(/'/g, "\\'");
+            var escRemark = String(u.remark || '').replace(/'/g, "\\'");
+            html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">' +
+                '<input type="checkbox" class="sched-ext-cb" data-email="' + escapeAttr(email) + '" ' + checked + ' onchange="window._scheduledToggleExtContact(this)">' +
+                '<span style="flex:1;font-size:12px;">' + escapeHtml(name) + ' <span style="color:#999;">' + escapeHtml(email) + '</span></span>' +
+                '<button type="button" onclick="window._scheduledEditContact(\'' + escId + '\',\'' + escName + '\',\'' + escEmail + '\',\'' + escOrg + '\',\'' + escRemark + '\',event)" style="font-size:11px;padding:1px 6px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">编辑</button>' +
+                '<button type="button" onclick="window._scheduledDeleteContact(\'' + escId + '\',event)" style="font-size:11px;padding:1px 6px;border:1px solid #fa5252;border-radius:3px;background:#fff5f5;color:#e03131;cursor:pointer;">删除</button>' +
+                '</div>';
+        });
+        html += '</div>';
+    });
+    container.innerHTML = html;
+}
+
+function escapeAttr(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function _syncScheduledExtContactsToTextarea() {
+    var textarea = document.getElementById('scheduledExternalEmails');
+    if (!textarea) return;
+    var checked = Array.from(document.querySelectorAll('.sched-ext-cb:checked')).map(function(cb) { return cb.getAttribute('data-email'); }).filter(Boolean);
+    // 合并手动输入的邮箱（textarea中不是地址簿中的邮箱保留）
+    var allBookEmails = new Set(Array.from(document.querySelectorAll('.sched-ext-cb')).map(function(cb) { return cb.getAttribute('data-email'); }));
+    var manualLines = textarea.value.split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(function(s) { return s && !allBookEmails.has(s); });
+    var merged = [...new Set([...checked, ...manualLines])];
+    textarea.value = merged.join(', ');
+}
+
+window._scheduledToggleExtContact = function(cb) {
+    _syncScheduledExtContactsToTextarea();
+};
+
+window._scheduledShowAddContactForm = function() {
+    var form = document.getElementById('scheduledAddContactForm');
+    if (!form) return;
+    var title = document.getElementById('scheduledAddContactFormTitle');
+    var editIdEl = document.getElementById('scheduledEditContactId');
+    if (editIdEl) editIdEl.value = '';
+    if (title) title.textContent = '新增外部联系人';
+    ['scheduledNewContactName','scheduledNewContactEmail','scheduledNewContactOrg','scheduledNewContactRemark'].forEach(function(id) {
+        var el = document.getElementById(id); if (el) el.value = '';
+    });
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+};
+
+window._scheduledEditContact = function(id, name, email, org, remark, event) {
+    if (event) event.stopPropagation();
+    var form = document.getElementById('scheduledAddContactForm');
+    if (!form) return;
+    var title = document.getElementById('scheduledAddContactFormTitle');
+    if (title) title.textContent = '修改外部联系人';
+    var editIdEl = document.getElementById('scheduledEditContactId');
+    if (editIdEl) editIdEl.value = id;
+    var nameEl = document.getElementById('scheduledNewContactName'); if (nameEl) nameEl.value = name || '';
+    var emailEl = document.getElementById('scheduledNewContactEmail'); if (emailEl) emailEl.value = email || '';
+    var orgEl = document.getElementById('scheduledNewContactOrg'); if (orgEl) orgEl.value = org || '';
+    var remarkEl = document.getElementById('scheduledNewContactRemark'); if (remarkEl) remarkEl.value = remark || '';
+    form.style.display = 'block';
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+window._scheduledDeleteContact = function(id, event) {
+    if (event) event.stopPropagation();
+    showConfirmModal('删除联系人', '确认删除该联系人？', async function() {
+        try {
+            var resp = await fetch('/api/external-contacts/' + encodeURIComponent(id), { method: 'DELETE' });
+            var result = await resp.json();
+            if (result.status === 'success') {
+                showNotification('联系人已删除', 'success');
+                _scheduledExtContactsLoaded = false;
+                await _loadScheduledExtContacts();
+                _syncScheduledExtContactsToTextarea();
+            } else {
+                showNotification('删除失败: ' + (result.message || ''), 'error');
+            }
+        } catch (e) {
+            showNotification('删除出错: ' + e.message, 'error');
+        }
+    });
+};
+
+window._scheduledSaveContact = async function() {
+    var editId = (document.getElementById('scheduledEditContactId') || {}).value || '';
+    var name = ((document.getElementById('scheduledNewContactName') || {}).value || '').trim();
+    var email = ((document.getElementById('scheduledNewContactEmail') || {}).value || '').trim();
+    var org = ((document.getElementById('scheduledNewContactOrg') || {}).value || '').trim();
+    var remark = ((document.getElementById('scheduledNewContactRemark') || {}).value || '').trim();
+    if (!name || !email) { showNotification('姓名和邮箱不能为空', 'error'); return; }
+    try {
+        var resp, result;
+        if (editId) {
+            resp = await fetch('/api/external-contacts/' + encodeURIComponent(editId), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, email: email, organization: org, remark: remark })
+            });
+        } else {
+            resp = await fetch('/api/external-contacts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, email: email, organization: org, remark: remark })
+            });
+        }
+        result = await resp.json();
+        var ok = result.status === 'success' || result.status === 'created' || result.status === 'updated';
+        if (ok) {
+            showNotification(editId ? '联系人已更新' : '联系人已保存', 'success');
+            var form = document.getElementById('scheduledAddContactForm');
+            if (form) form.style.display = 'none';
+            var editIdEl = document.getElementById('scheduledEditContactId');
+            if (editIdEl) editIdEl.value = '';
+            // 如果新建，自动勾选
+            if (!editId) _scheduledPreCheckedEmails.add(email);
+            _scheduledExtContactsLoaded = false;
+            await _loadScheduledExtContacts();
+            _syncScheduledExtContactsToTextarea();
+        } else {
+            showNotification((editId ? '更新' : '保存') + '失败: ' + (result.message || ''), 'error');
+        }
+    } catch (e) {
+        showNotification('操作出错: ' + e.message, 'error');
+    }
+};
+// ---- 定时任务外部联系人地址簿 END ----
+
 window.toggleExternalEmailsInput = function() {
     var cb = document.getElementById('scheduledEnableExternalEmails');
     var wrapper = document.getElementById('scheduledExternalEmailsWrapper');
     if (!wrapper) return;
     wrapper.style.display = (cb && cb.checked) ? 'block' : 'none';
+    if (cb && cb.checked && !_scheduledExtContactsLoaded) {
+        _loadScheduledExtContacts();
+    }
 };
 
 window.toggleValidUntilInput = function() {
@@ -518,6 +690,9 @@ function fillEditorByTask(task) {
     var ext = document.getElementById('scheduledExternalEmails');
     var extVal = Array.isArray(task.external_emails) ? task.external_emails.join(', ') : '';
     if (ext) ext.value = extVal;
+    // 记录需要预选的邮箱，供地址簿渲染时使用
+    _scheduledPreCheckedEmails = new Set(Array.isArray(task.external_emails) ? task.external_emails.map(function(e) { return String(e).trim(); }) : []);
+    _scheduledExtContactsLoaded = false;
     var enableExtCb = document.getElementById('scheduledEnableExternalEmails');
     if (enableExtCb) {
         // Use explicit external_emails_enabled flag if present; fall back to whether emails are non-empty
@@ -584,6 +759,8 @@ function clearEditorToNewTask() {
     if (skipWeekends) skipWeekends.checked = false;
     var ext = document.getElementById('scheduledExternalEmails');
     if (ext) ext.value = '';
+    _scheduledPreCheckedEmails = new Set();
+    _scheduledExtContactsLoaded = false;
     var enableExtCb = document.getElementById('scheduledEnableExternalEmails');
     if (enableExtCb) { enableExtCb.checked = false; window.toggleExternalEmailsInput && window.toggleExternalEmailsInput(); }
     var validUntilCb = document.getElementById('scheduledEnableValidUntil');

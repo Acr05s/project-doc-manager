@@ -1629,7 +1629,32 @@
                         <label for="scheduledEnableExternalEmails" style="display:inline; margin:0; font-size:13px; cursor:pointer;">外部收件人（逗号分隔，可选）</label>
                     </div>
                     <div id="scheduledExternalEmailsWrapper" style="display:none; margin-top:8px; border:1px solid #e5d8b6; border-radius:8px; background:#fffdf9; padding:10px;">
-                        <textarea id="scheduledExternalEmails" rows="3" placeholder="多个邮箱用逗号或换行分隔，如：a@example.com, b@example.com" style="width:100%; box-sizing:border-box; font-size:13px; border:1px solid #ddd; border-radius:4px; padding:6px; resize:vertical;"></textarea>
+                        <!-- 地址簿 -->
+                        <div style="margin-bottom:8px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                                <span style="font-size:13px;font-weight:600;color:#555;">地址簿</span>
+                                <button type="button" onclick="window._scheduledShowAddContactForm()" style="font-size:12px;padding:2px 8px;border:1px solid #17a2b8;border-radius:4px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">+ 新增联系人</button>
+                            </div>
+                            <div id="scheduledExtContactsBook" style="max-height:150px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;padding:4px 8px;background:#fff;font-size:13px;color:#aaa;">加载中...</div>
+                        </div>
+                        <!-- 新增/编辑联系人表单 -->
+                        <div id="scheduledAddContactForm" style="display:none;margin-bottom:8px;padding:10px;background:#f6f8fa;border-radius:6px;border:1px solid #e0e0e0;">
+                            <div id="scheduledAddContactFormTitle" style="font-weight:600;font-size:13px;margin-bottom:8px;">新增外部联系人</div>
+                            <input type="hidden" id="scheduledEditContactId" value="">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                                <input id="scheduledNewContactName" type="text" placeholder="姓名*" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                                <input id="scheduledNewContactEmail" type="email" placeholder="邮箱*" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                                <input id="scheduledNewContactOrg" type="text" placeholder="单位/组织" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                                <input id="scheduledNewContactRemark" type="text" placeholder="备注" style="border:1px solid #d9d9d9;border-radius:4px;padding:5px 8px;font-size:13px;">
+                            </div>
+                            <div style="display:flex;gap:8px;">
+                                <button type="button" onclick="window._scheduledSaveContact()" style="padding:4px 14px;border:none;border-radius:4px;background:#17a2b8;color:#fff;cursor:pointer;font-size:13px;">保存</button>
+                                <button type="button" onclick="document.getElementById('scheduledAddContactForm').style.display='none';document.getElementById('scheduledEditContactId').value=''" style="padding:4px 14px;border:1px solid #d9d9d9;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;">取消</button>
+                            </div>
+                        </div>
+                        <!-- 手动输入 -->
+                        <div style="margin-bottom:4px;font-size:12px;color:#888;">手动添加邮箱（逗号或换行分隔）</div>
+                        <textarea id="scheduledExternalEmails" rows="2" placeholder="a@example.com, b@example.com" style="width:100%; box-sizing:border-box; font-size:13px; border:1px solid #ddd; border-radius:4px; padding:6px; resize:vertical;"></textarea>
                     </div>
                 </div>
 

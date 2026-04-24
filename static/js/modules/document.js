@@ -5737,7 +5737,7 @@ function showReportModal(reportData) {
                                                                 ${doc.archived ? ((hasSignRequirement || hasSealRequirement) ? '<span style="margin: 0 4px; color: #d9d9d9;">|</span>' : '') + '<span style="color: #1890ff; font-size: 12px; font-weight: 500;">✓ 已归档</span>' : ''}
                                                                 ${(() => {
                                                                     const entries = Array.isArray(doc.reviewEntries) ? doc.reviewEntries : parseReviewEntries(doc.review_result || '');
-                                                                    if (!entries.length) return '<div style="margin-top:4px;color:#aaa;font-size:11px;">核查结果：无</div>';
+                                                                    if (!entries.length) return '';
                                                                     const lines = entries.slice(0, 2).map((entry) => {
                                                                         const user = formatReviewEntryUser(entry);
                                                                         const time = formatReviewEntryTime(entry.time);
@@ -6121,7 +6121,10 @@ async function showSendReportDialog() {
             </div>
 
             <div style="margin-bottom:16px;">
-                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">收件人 <span style="font-weight:400;color:#888;font-size:12px;">（站内信 + 邮件，📧站外仅邮件）</span></div>
+                <div style="font-weight:600;margin-bottom:8px;font-size:14px;display:flex;align-items:center;justify-content:space-between;">
+                    <span>收件人 <span style="font-weight:400;color:#888;font-size:12px;">（站内信 + 邮件，📧站外仅邮件）</span></span>
+                    <span id="recipientCountBadge" style="display:none;font-size:12px;font-weight:500;padding:2px 10px;border:1.5px solid #f0a500;border-radius:12px;background:#fffbe6;color:#b8640c;white-space:nowrap;"></span>
+                </div>
                 <div style="max-height:220px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;padding:8px 12px;">
                     ${userListHtml}
                 </div>
@@ -6163,6 +6166,26 @@ async function showSendReportDialog() {
         </div>
     `;
     dialog.style.display = 'flex';
+    // 收件人计数徽章
+    function _updateRecipientCountBadge() {
+        const badge = document.getElementById('recipientCountBadge');
+        if (!badge) return;
+        const internalCount = document.querySelectorAll('.send-report-user-cb:checked').length;
+        const extCbCount = document.querySelectorAll('.send-report-ext-cb:checked').length;
+        const taVal = document.getElementById('sendReportExternalEmails')?.value || '';
+        const manualCount = taVal.split(/[\n,;]/).map(e => e.trim()).filter(e => e && e.includes('@')).length;
+        const externalCount = extCbCount + manualCount;
+        if (internalCount === 0 && externalCount === 0) { badge.style.display = 'none'; return; }
+        badge.style.display = 'inline-block';
+        const parts = [];
+        if (internalCount > 0) parts.push(`内部 ${internalCount} 位`);
+        if (externalCount > 0) parts.push(`外部 ${externalCount} 位`);
+        badge.textContent = `已选 ${internalCount + externalCount} 位：${parts.join('，')}`;
+    }
+    document.querySelectorAll('.send-report-user-cb,.send-report-ext-cb').forEach(cb => cb.addEventListener('change', _updateRecipientCountBadge));
+    const _extTa = document.getElementById('sendReportExternalEmails');
+    if (_extTa) _extTa.addEventListener('input', _updateRecipientCountBadge);
+    _updateRecipientCountBadge();
 }
 
 // 辅助：将邮箱插入外部收件人文本框（用于保存联系人后自动填入）
@@ -6330,21 +6353,22 @@ window._editExternalContact = function(id, name, email, org, remark, event) {
 };
 
 // 辅助：删除联系人
-window._deleteExternalContact = async function(id, event) {
+window._deleteExternalContact = function(id, event) {
     if (event) event.stopPropagation();
-    if (!confirm('确认删除该联系人？')) return;
-    try {
-        const resp = await fetch(`/api/external-contacts/${id}`, { method: 'DELETE' });
-        const result = await resp.json();
-        if (result.status === 'success') {
-            showNotification('联系人已删除', 'success');
-            showSendReportDialog();
-        } else {
-            showNotification('删除失败: ' + (result.message || ''), 'error');
+    showConfirmModal('删除联系人', '确认删除该联系人？', async () => {
+        try {
+            const resp = await fetch(`/api/external-contacts/${id}`, { method: 'DELETE' });
+            const result = await resp.json();
+            if (result.status === 'success') {
+                showNotification('联系人已删除', 'success');
+                showSendReportDialog();
+            } else {
+                showNotification('删除失败: ' + (result.message || ''), 'error');
+            }
+        } catch (e) {
+            showNotification('删除出错: ' + e.message, 'error');
         }
-    } catch (e) {
-        showNotification('删除出错: ' + e.message, 'error');
-    }
+    });
 };
 
 /**
