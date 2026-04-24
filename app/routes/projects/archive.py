@@ -696,6 +696,43 @@ def _validate_approver_role(approver, project_config, approval_stages, current_s
     return None, required_role
 
 
+def _is_eligible_current_stage_approver(project_id, approval, approval_stages, current_stage_idx, project_config, approver_internal_id):
+    """校验审批人是否属于当前阶段可处理人列表。"""
+    try:
+        candidates = get_next_stage_approvers(project_id, current_stage_idx, approval_stages, project_config)
+        if not candidates:
+            return False
+
+        # 排除上一阶段审批人与申请人（与 get_archive_approvers 逻辑一致）
+        if current_stage_idx > 0 and approval_stages:
+            prev_stage = approval_stages[current_stage_idx - 1]
+            prev_approver_id = prev_stage.get('approved_by_id')
+            if prev_approver_id is not None:
+                candidates = [a for a in candidates if str(a.get('internal_id', a.get('id'))) != str(prev_approver_id)]
+
+        requester_id = approval.get('requester_id')
+        if requester_id is not None:
+            candidates = [a for a in candidates if str(a.get('internal_id', a.get('id'))) != str(requester_id)]
+
+        allowed_ids = {str(a.get('internal_id')) for a in candidates if a.get('internal_id') is not None}
+        return str(approver_internal_id) in allowed_ids
+    except Exception:
+        return False
+
+
+def _build_approver_audit_context(client_approver_id, approver):
+    """构建审批人审计上下文，便于排查前后端身份映射问题。"""
+    client_approver_id_str = str(client_approver_id or '')
+    if not approver:
+        return {'client_approver_id': client_approver_id_str}
+    return {
+        'client_approver_id': client_approver_id_str,
+        'resolved_approver_internal_id': getattr(approver, 'id', None),
+        'resolved_approver_uuid': getattr(approver, 'uuid', None),
+        'resolved_approver_username': getattr(approver, 'username', None),
+    }
+
+
 def _do_stage_approval(approval_id, project_id, approver, action='approve', reject_reason='', complete_now=False):
     """
     执行单阶段审批逻辑（供批量审批调用）。
@@ -844,15 +881,20 @@ def approve_archive_request(project_id):
         approval_code = data.get('approval_code', '')
         new_approval_code = data.get('new_approval_code', '')
         complete_now = bool(data.get('complete_now', False))
+        force_require_code = bool(data.get('force_require_code', False))
 
         if not approval_id:
             return jsonify({'status': 'error', 'message': '缺少审批ID'}), 400
+        if not approver_id:
+            return jsonify({'status': 'error', 'message': '缺少审批人身份，请重新选择审批人'}), 400
 
         # 检查系统设置是否要求审批安全码
         from app.routes.settings import load_settings
         settings = load_settings()
         # 默认要求审批安全码，避免配置缺失时被绕过
         require_code = settings.get('require_approval_code', True)
+        if force_require_code:
+            require_code = True
         code_diff_pwd = settings.get('approval_code_must_differ_from_password', True)
         min_len = int(settings.get('password_min_length', 8) or 8)
         require_mix = bool(settings.get('password_require_letter_digit', True))
@@ -861,10 +903,7 @@ def approve_archive_request(project_id):
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
 
         # 确定实际审批人
-        if approver_id:
-            approver = user_manager.get_user_by_uuid(str(approver_id))
-        else:
-            approver = user_manager.get_user_by_id(int(current_user.id))
+        approver = user_manager.get_user_by_uuid(str(approver_id))
         actual_approver_id = approver.id if approver else None
 
         # 验证审批人权限
@@ -872,6 +911,8 @@ def approve_archive_request(project_id):
             return jsonify({'status': 'error', 'message': '审批人不存在'}), 404
         if not _can_user_handle_archive_approval(approver):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
+
+        approver_audit = _build_approver_audit_context(approver_id, approver)
 
         # 验证审批安全码（仅在系统要求时）
         if require_code:
@@ -920,6 +961,12 @@ def approve_archive_request(project_id):
 
         if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
             return jsonify({'status': 'error', 'message': '审批阶段异常'}), 400
+
+        # 审批人必须属于当前阶段可审批人，防止冒用其他身份安全码
+        if approver.role != 'admin' and not _is_eligible_current_stage_approver(
+            project_id, approval, approval_stages, current_stage_idx, project_config, actual_approver_id
+        ):
+            return jsonify({'status': 'error', 'message': '当前审批人不在本阶段可处理人列表中'}), 403
 
         # 强制按当前阶段角色/组织审批（admin 可越级）
         err_msg, required_role = _validate_approver_role(approver, project_config, approval_stages, current_stage_idx, complete_now)
@@ -1028,7 +1075,7 @@ def approve_archive_request(project_id):
                 user_manager.add_operation_log(
                     actual_approver_id, approver.username,
                     approve_op_type, project_id, f'{_approve_pname}-{cycle}-{_approve_doc_label}',
-                    json.dumps(doc_names, ensure_ascii=False),
+                    json.dumps({'doc_names': doc_names, 'approver_audit': approver_audit}, ensure_ascii=False),
                     request.remote_addr
                 )
 
@@ -1110,7 +1157,7 @@ def approve_archive_request(project_id):
             user_manager.add_operation_log(
                 actual_approver_id, approver.username,
                 'archive_stage_approve', project_id, f'{_stage_pname}-{cycle}-{_stage_doc_label}',
-                json.dumps({'stage': current_stage_idx + 1, 'doc_names': doc_names}, ensure_ascii=False),
+                json.dumps({'stage': current_stage_idx + 1, 'doc_names': doc_names, 'approver_audit': approver_audit}, ensure_ascii=False),
                 request.remote_addr
             )
 
@@ -1140,29 +1187,33 @@ def reject_archive_request(project_id):
         approval_code = data.get('approval_code', '')
         new_approval_code = data.get('new_approval_code', '')
         reject_reason = data.get('reject_reason', '')
+        force_require_code = bool(data.get('force_require_code', False))
 
         if not approval_id:
             return jsonify({'status': 'error', 'message': '缺少审批ID'}), 400
+        if not approver_id:
+            return jsonify({'status': 'error', 'message': '缺少审批人身份，请重新选择审批人'}), 400
 
         # 检查系统设置是否要求审批安全码
         from app.routes.settings import load_settings
         settings = load_settings()
         require_code = settings.get('require_approval_code', True)
+        if force_require_code:
+            require_code = True
 
         if require_code and not approval_code:
             return jsonify({'status': 'error', 'message': '请输入审批安全码'}), 400
 
         # 通过UUID解析审批人
-        if approver_id:
-            approver = user_manager.get_user_by_uuid(str(approver_id))
-        else:
-            approver = user_manager.get_user_by_id(int(current_user.id))
+        approver = user_manager.get_user_by_uuid(str(approver_id))
         actual_approver_id = approver.id if approver else None
 
         if not approver:
             return jsonify({'status': 'error', 'message': '审批人不存在'}), 404
         if not _can_user_handle_archive_approval(approver):
             return jsonify({'status': 'error', 'message': '该用户无审批权限'}), 403
+
+        approver_audit = _build_approver_audit_context(approver_id, approver)
 
         # 验证审批安全码（仅在系统要求时）
         if require_code:
@@ -1199,6 +1250,15 @@ def reject_archive_request(project_id):
             except Exception:
                 approval_stages = []
         current_stage_idx = approval.get('current_stage', 1) - 1
+        if current_stage_idx < 0 or current_stage_idx >= len(approval_stages):
+            return jsonify({'status': 'error', 'message': '审批阶段异常'}), 400
+
+        # 审批人必须属于当前阶段可审批人，防止冒用其他身份安全码
+        if approver.role != 'admin' and not _is_eligible_current_stage_approver(
+            project_id, approval, approval_stages, current_stage_idx, project_config, actual_approver_id
+        ):
+            return jsonify({'status': 'error', 'message': '当前审批人不在本阶段可处理人列表中'}), 403
+
         if approval_stages and 0 <= current_stage_idx < len(approval_stages):
             current_stage = approval_stages[current_stage_idx]
             required_role = (current_stage.get('required_role') or '').strip()
@@ -1267,7 +1327,7 @@ def reject_archive_request(project_id):
         user_manager.add_operation_log(
             actual_approver_id, approver.username,
             'archive_reject', project_id, f'{project_name}-{approval["cycle"]}-{_reject_doc_label}',
-            json.dumps({'doc_names': approval['doc_names'], 'reason': reject_reason}, ensure_ascii=False),
+            json.dumps({'doc_names': approval['doc_names'], 'reason': reject_reason, 'approver_audit': approver_audit}, ensure_ascii=False),
             request.remote_addr
         )
 

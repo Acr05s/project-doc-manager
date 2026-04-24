@@ -405,7 +405,7 @@ export async function getApprovalHistory(projectId, approvalId) {
     }
 }
 
-export async function approveArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '', completeNow = false) {
+export async function approveArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '', completeNow = false, forceRequireCode = false) {
     try {
         const response = await fetch(`/api/projects/${projectId}/archive-approve`, {
             method: 'POST',
@@ -415,7 +415,8 @@ export async function approveArchiveRequest(projectId, approvalId, approverId, a
                 approver_id: approverId,
                 approval_code: approvalCode,
                 new_approval_code: newApprovalCode,
-                complete_now: completeNow
+                complete_now: completeNow,
+                force_require_code: forceRequireCode
             })
         });
         return await response.json();
@@ -425,7 +426,7 @@ export async function approveArchiveRequest(projectId, approvalId, approverId, a
     }
 }
 
-export async function rejectArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '', rejectReason = '') {
+export async function rejectArchiveRequest(projectId, approvalId, approverId, approvalCode, newApprovalCode = '', rejectReason = '', forceRequireCode = false) {
     try {
         const response = await fetch(`/api/projects/${projectId}/archive-reject`, {
             method: 'POST',
@@ -435,7 +436,8 @@ export async function rejectArchiveRequest(projectId, approvalId, approverId, ap
                 approver_id: approverId,
                 approval_code: approvalCode,
                 new_approval_code: newApprovalCode,
-                reject_reason: rejectReason
+                reject_reason: rejectReason,
+                force_require_code: forceRequireCode
             })
         });
         return await response.json();

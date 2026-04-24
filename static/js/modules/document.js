@@ -799,6 +799,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         <th style="text-align: center; width: 80px; min-width: 80px;">序号</th>
                         <th class="col-org" style="text-align: center;">文档类型</th>
                         <th class="col-files" style="text-align: center;">文件列表</th>
+                        <th class="col-review" style="text-align: center; min-width: 130px;">审查结果</th>
                         <th class="col-action" style="text-align: center;">操作</th>
                     </tr>
                 </thead>
@@ -898,6 +899,16 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             </td>
                             <td class="col-files">
                                 ${isNotInvolved ? '<span style="color: #28a745; font-style: italic; display: block; text-align: center; padding: 10px; font-weight: 500;">✓ 本次项目不涉及该文档</span>' : fileListHtml}
+                            </td>
+                            <td class="col-review" style="vertical-align:top; padding:8px; min-width:130px;">
+                                ${docsList.length > 0 ? docsList.map(d => {
+                                    const rv = escapeHtml(d.review_result || '');
+                                    const did = d.doc_id || '';
+                                    return did ? `<div style="margin-bottom:6px;">
+                                        ${rv ? `<div style="font-size:12px;color:#333;margin-bottom:3px;word-break:break-all;">${rv}</div>` : ''}
+                                        <button onclick="editReviewResult('${did}','${escapeAttr(d.review_result||'')}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">${rv ? '修改' : '填写'}</button>
+                                    </div>` : '';
+                                }).join('') : '<span style="font-size:12px;color:#ccc;">—</span>'}
                             </td>
                             <td class="col-action">
                                 <div class="action-buttons">
@@ -3409,7 +3420,7 @@ async function quickApproveArchive(approvalId, action = 'approve', options = {})
     const title = action === 'approve' ? '审批通过 - 请验证身份' : action === 'approve_finalize' ? '直接归档 - 请验证身份' : '驳回归档 - 请验证身份';
     let approvalInput;
 
-    // 快速审批始终要求安全码（核心安全机制）
+    // 快速审批安全码要求（遵循系统配置）
     const requireCode = options.forceRequireCode || appState.systemSettings?.require_approval_code !== false;
 
     // 自动匹配当前登录用户
@@ -3465,9 +3476,9 @@ async function quickApproveArchive(approvalId, action = 'approve', options = {})
     let result;
     if (action === 'approve' || action === 'approve_finalize') {
         const completeNow = action === 'approve_finalize';
-        result = await approveArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', completeNow);
+        result = await approveArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', completeNow, true);
     } else {
-        result = await rejectArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', rejectReason);
+        result = await rejectArchiveRequest(appState.currentProjectId, approvalId, approverId, approvalCode, '', rejectReason, true);
     }
 
     // 处理 needs_change（仅在需要安全码时触发）
@@ -3482,13 +3493,13 @@ async function quickApproveArchive(approvalId, action = 'approve', options = {})
         if (action === 'approve' || action === 'approve_finalize') {
             result = await approveArchiveRequest(
                 appState.currentProjectId, approvalId,
-                updatedInput.approver_id, updatedInput.approval_code, updatedInput.new_approval_code,
-                action === 'approve_finalize'
+                updatedInput.approver_id || approverId, updatedInput.approval_code, updatedInput.new_approval_code,
+                action === 'approve_finalize', true
             );
         } else {
             result = await rejectArchiveRequest(
                 appState.currentProjectId, approvalId,
-                updatedInput.approver_id, updatedInput.approval_code, updatedInput.new_approval_code, rejectReason
+                updatedInput.approver_id || approverId, updatedInput.approval_code, updatedInput.new_approval_code, rejectReason, true
             );
         }
     }
@@ -5303,6 +5314,9 @@ export async function generateReport() {
  * 显示报告模态框
  */
 function showReportModal(reportData) {
+    // 保存当前报告数据供发送时使用
+    window._currentReportData = reportData;
+
     // 检查模态框是否存在，如果不存在则创建
     let modal = document.getElementById('reportModal');
     if (!modal) {
@@ -5844,32 +5858,56 @@ async function showSendReportDialog() {
         // ignore
     }
 
-    const userListHtml = recipientOptions.length > 0 ? recipientOptions.map(u => {
-        const label = u.display_name || u.username || '';
-        const org = u.organization ? ` (${u.organization})` : '';
-        const badge = u.recommended ? ' <span style="font-size:11px;color:#fff;background:#1890ff;padding:1px 5px;border-radius:3px;">推荐</span>' : '';
-        return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;">
-            <input type="checkbox" class="send-report-user-cb" value="${u.id}" ${u.recommended ? 'checked' : ''}>
-            <span>${label}${org}${badge}</span>
-        </label>`;
-    }).join('') : '<p style="color:#888;font-size:13px;">暂无候选收件人</p>';
-
-    const contactPickerHtml = savedContacts.length > 0 ? `
-        <div style="margin-top:6px;">
-            <div style="font-size:12px;color:#888;margin-bottom:4px;">📋 从地址簿选择：</div>
-            <div id="contactPickerBtns" style="display:flex;flex-wrap:wrap;gap:6px;">
-                ${savedContacts.map(c => `<span style="display:inline-flex;align-items:center;gap:2px;font-size:12px;padding:2px 4px 2px 8px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;">
-                    <button type="button" data-email="${escapeAttr(c.email)}" onclick="window._toggleExternalContact('${escapeAttr(c.email)}','${escapeAttr(c.name||'')}','${escapeAttr(c.organization||'')}',event)"
-                        style="font-size:12px;border:none;background:transparent;cursor:pointer;color:#0969da;padding:0;"
-                        title="${escapeAttr(c.email)}${c.organization ? ' · ' + escapeAttr(c.organization) : ''}">
-                        ${escapeHtml(c.name || c.email)}${c.organization ? ' <span style=color:#999>(' + escapeHtml(c.organization) + ')</span>' : ''}
-                    </button>
-                    <button type="button" onclick="window._editExternalContact(${c.id},'${escapeAttr(c.name||'')}','${escapeAttr(c.email)}','${escapeAttr(c.organization||'')}','${escapeAttr(c.remark||'')}',event)" style="border:none;background:transparent;cursor:pointer;color:#888;font-size:11px;padding:0 2px;" title="编辑">✏️</button>
-                    <button type="button" onclick="window._deleteExternalContact(${c.id},event)" style="border:none;background:transparent;cursor:pointer;color:#dc3545;font-size:11px;padding:0 2px;" title="删除">🗑️</button>
-                </span>`).join('')}
-            </div>
-            <div id="selectedContactTags" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;"></div>
-        </div>` : '';
+    // 按组织分组内部用户
+    const orgMap = new Map();
+    for (const u of recipientOptions) {
+        const orgKey = u.organization || '（未分配组织）';
+        if (!orgMap.has(orgKey)) orgMap.set(orgKey, []);
+        orgMap.get(orgKey).push(u);
+    }
+    // 按组织分组站外联系人
+    const extOrgMap = new Map();
+    for (const c of savedContacts) {
+        const orgKey = c.organization || '其他';
+        if (!extOrgMap.has(orgKey)) extOrgMap.set(orgKey, []);
+        extOrgMap.get(orgKey).push(c);
+    }
+    function buildOrgGroupHtml(orgName, users, isExternal) {
+        const groupId = 'rg_' + orgName.replace(/\W/g,'_') + '_' + (isExternal?'ext':'int');
+        const rows = users.map(u => {
+            if (isExternal) {
+                return `<label style="display:flex;align-items:center;gap:6px;padding:3px 0 3px 20px;cursor:pointer;">
+                    <input type="checkbox" class="send-report-ext-cb" data-group-member="${groupId}" data-email="${escapeAttr(u.email)}" checked>
+                    <span style="font-size:13px;">${escapeHtml(u.name || u.email)}</span>
+                    <span style="font-size:11px;color:#888;">${escapeHtml(u.email)}</span>
+                </label>`;
+            }
+            const roleLabel = {pmo:'PMO',pmo_leader:'PMO负责人',project_admin:'项目经理',contractor:'一般员工',admin:'管理员'}[u.role] || u.role || '';
+            const badge = u.recommended ? '<span style="font-size:10px;color:#fff;background:#1890ff;padding:1px 4px;border-radius:3px;margin-left:4px;">推荐</span>' : '';
+            return `<label style="display:flex;align-items:center;gap:6px;padding:3px 0 3px 20px;cursor:pointer;">
+                <input type="checkbox" class="send-report-user-cb" data-group-member="${groupId}" value="${u.id}" ${u.recommended ? 'checked' : ''}>
+                <span style="font-size:13px;">${escapeHtml(u.display_name || u.username || '')}${badge}</span>
+                <span style="font-size:11px;color:#888;">${escapeHtml(roleLabel)}${u.email ? ' · ' + escapeHtml(u.email) : ''}</span>
+            </label>`;
+        }).join('');
+        const count = users.length;
+        const prefix = isExternal ? '📧 站外 · ' : '';
+        return `<div style="margin-bottom:6px;border:1px solid #e8edf3;border-radius:6px;padding:6px 8px;background:#fafbfc;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:13px;color:#334;">
+                <input type="checkbox" class="send-report-org-cb" data-group="${groupId}" checked
+                    onchange="document.querySelectorAll('[data-group-member=\\'${groupId}\\']').forEach(function(c){c.checked=this.checked;}.bind(this))">
+                <span>${prefix}${escapeHtml(orgName)} <span style="font-weight:400;color:#888;font-size:12px;">(${count}人)</span></span>
+            </label>
+            ${rows}
+        </div>`;
+    }
+    let userListHtml = '';
+    if (orgMap.size === 0 && extOrgMap.size === 0) {
+        userListHtml = '<p style="color:#888;font-size:13px;">暂无候选收件人</p>';
+    } else {
+        for (const [org, users] of orgMap) userListHtml += buildOrgGroupHtml(org, users, false);
+        for (const [org, users] of extOrgMap) userListHtml += buildOrgGroupHtml(org, users, true);
+    }
 
     window._selectedAddressBookEmails = new Map();
 
@@ -5882,7 +5920,7 @@ async function showSendReportDialog() {
     }
 
     dialog.innerHTML = `
-        <div style="background:#fff;border-radius:8px;padding:28px 32px;max-width:520px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:85vh;overflow-y:auto;">
+        <div style="background:#fff;border-radius:8px;padding:28px 32px;max-width:560px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:85vh;overflow-y:auto;">
             <h3 style="margin:0 0 18px;font-size:17px;color:#222;">📤 发送报告</h3>
             <p style="margin:0 0 14px;font-size:13px;color:#666;">报告将包含项目概要和统计数据，PDF文件将作为邮件附件发送。</p>
 
@@ -5897,19 +5935,18 @@ async function showSendReportDialog() {
             </div>
 
             <div style="margin-bottom:16px;">
-                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">站内收件人（同时用于邮件发送，如有邮箱）</div>
-                <div style="max-height:160px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;padding:8px 12px;">
+                <div style="font-weight:600;margin-bottom:8px;font-size:14px;">收件人 <span style="font-weight:400;color:#888;font-size:12px;">（站内信 + 邮件，📧站外仅邮件）</span></div>
+                <div style="max-height:220px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;padding:8px 12px;">
                     ${userListHtml}
                 </div>
             </div>
 
             <div style="margin-bottom:16px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                    <div style="font-weight:600;font-size:14px;">外部收件人邮箱 <span style="font-weight:400;color:#888;font-size:12px;">（仅邮件，每行一个）</span></div>
+                    <div style="font-weight:600;font-size:14px;">其他外部邮箱 <span style="font-weight:400;color:#888;font-size:12px;">（每行一个）</span></div>
                     <button type="button" onclick="window._showAddExternalContactForm()" style="font-size:12px;padding:2px 8px;border:1px solid #17a2b8;border-radius:4px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">+ 保存到地址簿</button>
                 </div>
-                <textarea id="sendReportExternalEmails" rows="3" placeholder="example@domain.com" style="width:100%;box-sizing:border-box;border:1px solid #d9d9d9;border-radius:4px;padding:6px 10px;font-size:13px;resize:vertical;"></textarea>
-                ${contactPickerHtml}
+                <textarea id="sendReportExternalEmails" rows="2" placeholder="example@domain.com" style="width:100%;box-sizing:border-box;border:1px solid #d9d9d9;border-radius:4px;padding:6px 10px;font-size:13px;resize:vertical;"></textarea>
             </div>
 
             <div id="addContactForm" style="display:none;margin-bottom:16px;padding:12px;background:#f6f8fa;border-radius:6px;border:1px solid #e0e0e0;">
@@ -6132,7 +6169,10 @@ async function submitSendReport() {
 
     const recipientUserIds = Array.from(document.querySelectorAll('.send-report-user-cb:checked')).map(cb => parseInt(cb.value));
     const externalEmailsRaw = document.getElementById('sendReportExternalEmails')?.value || '';
-    const externalEmails = externalEmailsRaw.split(/[\n,;]/).map(e => e.trim()).filter(e => e && e.includes('@'));
+    const externalEmailsManual = externalEmailsRaw.split(/[\n,;]/).map(e => e.trim()).filter(e => e && e.includes('@'));
+    // 收集树形中勾选的站外联系人邮箱
+    const externalEmailsFromTree = Array.from(document.querySelectorAll('.send-report-ext-cb:checked')).map(cb => cb.getAttribute('data-email')).filter(Boolean);
+    const externalEmails = [...new Set([...externalEmailsManual, ...externalEmailsFromTree])];
     const includePdf = document.getElementById('sendReportIncludePdf')?.checked !== false;
 
     if (recipientUserIds.length === 0 && externalEmails.length === 0) {
@@ -6147,7 +6187,13 @@ async function submitSendReport() {
         const resp = await fetch(`/api/projects/${projectId}/report/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ send_type: sendType, recipient_user_ids: recipientUserIds, external_emails: externalEmails, include_pdf: includePdf }),
+            body: JSON.stringify({
+                send_type: sendType,
+                recipient_user_ids: recipientUserIds,
+                external_emails: externalEmails,
+                include_pdf: includePdf,
+                report_data: window._currentReportData || null,
+            }),
         });
         const result = await resp.json();
         document.getElementById('sendReportDialog').style.display = 'none';
@@ -6257,12 +6303,34 @@ function downloadReportAsPDF() {
     printWindow.print();
 }
 
+async function editReviewResult(docId, current) {
+    const val = prompt('请输入审查结果：', current || '');
+    if (val === null) return;
+    try {
+        const resp = await fetch(`/api/documents/${encodeURIComponent(docId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ review_result: val })
+        });
+        const result = await resp.json();
+        if (result.status === 'success') {
+            showNotification('审查结果已保存', 'success');
+            if (appState.currentCycle) await renderCycleDocuments(appState.currentCycle);
+        } else {
+            showNotification(result.message || '保存失败', 'error');
+        }
+    } catch (e) {
+        showNotification('保存失败: ' + e.message, 'error');
+    }
+}
+
 // 暴露给全局作用域
 window.closeReportModal = closeReportModal;
 window.downloadReportAsPDF = downloadReportAsPDF;
 window.showSendReportDialog = showSendReportDialog;
 window.submitSendReport = submitSendReport;
 window.markDocumentNotInvolved = markDocumentNotInvolved;
+window.editReviewResult = editReviewResult;
 // 确保generateReport函数被添加到全局作用域
 if (typeof window !== 'undefined') {
     window.generateReport = generateReport;

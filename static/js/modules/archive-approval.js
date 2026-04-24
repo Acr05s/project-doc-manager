@@ -351,6 +351,9 @@ async function submitArchiveApproval(projectId, approvalId, selectPMOId = null, 
         if (newApprovalCode) {
             body.new_approval_code = newApprovalCode;
         }
+        if (approvalCode) {
+            body.force_require_code = true;
+        }
 
         const response = await fetch(`/api/projects/${projectId}/archive-approve`, {
             method: 'POST',

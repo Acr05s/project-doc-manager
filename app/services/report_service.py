@@ -334,34 +334,42 @@ class ReportService:
     def _documents_report(self):
         """文档分析报表"""
         projects = self._load_all_project_details()
-        
+
         doc_type_stats = {}
         missing_docs = []
         completion_by_cycle = {}
-        
+        review_total = 0
+        review_filled = 0
+
         for p in projects:
             cfg = p['config']
             documents = cfg.get('documents', {})
-            
+
             for cycle in cfg.get('cycles', []):
                 cycle_info = documents.get(cycle, {})
                 if not isinstance(cycle_info, dict):
                     continue
                 required = cycle_info.get('required_docs', [])
                 uploaded = cycle_info.get('uploaded_docs', [])
-                
+
+                # 统计审查结果填写情况
+                for doc in uploaded:
+                    review_total += 1
+                    if doc.get('review_result', '').strip():
+                        review_filled += 1
+
                 if cycle not in completion_by_cycle:
                     completion_by_cycle[cycle] = {'total': 0, 'completed': 0}
-                
+
                 for req in required:
                     doc_name = req.get('name', '未命名')
                     doc_type = req.get('type', '其他')
                     if doc_type not in doc_type_stats:
                         doc_type_stats[doc_type] = {'total': 0, 'completed': 0}
-                    
+
                     doc_type_stats[doc_type]['total'] += 1
                     completion_by_cycle[cycle]['total'] += 1
-                    
+
                     if _check_doc_completed(req, uploaded):
                         doc_type_stats[doc_type]['completed'] += 1
                         completion_by_cycle[cycle]['completed'] += 1
@@ -372,22 +380,27 @@ class ReportService:
                             'cycle': cycle,
                             'doc_name': doc_name
                         })
-        
+
         for k in doc_type_stats:
             total = doc_type_stats[k]['total']
             completed = doc_type_stats[k]['completed']
             doc_type_stats[k]['rate'] = round(completed / total * 100, 1) if total > 0 else 0
-        
+
         for k in completion_by_cycle:
             total = completion_by_cycle[k]['total']
             completed = completion_by_cycle[k]['completed']
             completion_by_cycle[k]['rate'] = round(completed / total * 100, 1) if total > 0 else 0
-        
+
         return {
             'doc_type_stats': doc_type_stats,
             'completion_by_cycle': completion_by_cycle,
             'missing_docs_top': missing_docs[:20],
-            'total_missing': len(missing_docs)
+            'total_missing': len(missing_docs),
+            'review_stats': {
+                'total': review_total,
+                'filled': review_filled,
+                'rate': round(review_filled / review_total * 100, 1) if review_total > 0 else 0,
+            }
         }
     
     def _acceptance_report(self):
@@ -559,6 +572,7 @@ class ReportService:
                         'type': change_type,
                         'doc_id': doc.get('doc_id', ''),
                         'filename': doc.get('original_filename') or doc.get('filename') or '',
+                        'review_result': doc.get('review_result', ''),
                     })
 
                     # 检查文档属性是否有更新（与上传时间不同才算属性更新）
@@ -579,6 +593,7 @@ class ReportService:
                                     'type': 'updated',
                                     'doc_id': doc.get('doc_id', ''),
                                     'filename': doc.get('original_filename') or doc.get('filename') or '',
+                                    'review_result': doc.get('review_result', ''),
                                 })
 
         # 归档记录 (从 archive_approvals 查询)

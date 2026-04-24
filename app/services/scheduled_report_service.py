@@ -772,8 +772,12 @@ class ScheduledReportService:
         external_emails: Optional[List[str]] = None,
         include_pdf: bool = True,
         requester_user_id: Optional[int] = None,
+        report_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """手动发送项目报告到指定收件人。"""
+        """手动发送项目报告到指定收件人。
+        
+        当提供 report_data（前端已生成的报告数据）时，邮件和PDF将使用与前端报告弹窗一致的格式。
+        """
         if not self.doc_manager:
             return {'status': 'error', 'message': '文档管理器未初始化'}
         project = self._load_project(project_id)
@@ -781,36 +785,77 @@ class ScheduledReportService:
             return {'status': 'error', 'message': '项目加载失败'}
         project_name = project.get('name', project_id)
         party_b = project.get('party_b', '')
-        # 实时报告：统计区间覆盖完整项目历史（10年窗口），截止到当前时刻
         frequency = 'manual'
         period_end = now_with_timezone().replace(tzinfo=None)
         period_start = period_end - timedelta(days=3650)
-        metrics = self._build_metrics(project_id, project, period_start, period_end)
 
         report_label = '实时报告'
         end_stamp = period_end.strftime('%Y-%m-%d %H:%M')
         subject = f"【{project_name}】实时报告 - {end_stamp}"
-        text_content, html_content = self._build_email_content(
-            project_name, frequency, period_start, period_end, metrics,
-            party_b=party_b, report_label=report_label
-        )
 
-        attachments: List[Dict[str, str]] = []
-        pdf_error: Optional[str] = None
-        if include_pdf:
-            pdf_path, pdf_err = self._build_pdf_report(
+        # 使用前端报告数据（若有），内容与报告弹窗一致；否则回退到后端统计格式
+        if report_data and isinstance(report_data, dict) and report_data.get('cycles'):
+            text_content, html_content = self._build_email_from_frontend_report(project_name, report_data)
+            attachments: List[Dict[str, str]] = []
+            pdf_error: Optional[str] = None
+            if include_pdf:
+                pdf_path, pdf_err = self._build_pdf_from_frontend_report(project_name, report_data)
+                if pdf_err:
+                    pdf_error = pdf_err
+                    logger.error(f'[send_manual_report] 前端报告PDF生成失败: {pdf_err}')
+                if pdf_path:
+                    abs_path = str(Path(pdf_path).resolve())
+                    safe_name = project_name.replace('/', '_').replace('\\', '_')
+                    attachments.append({'path': abs_path, 'name': f'{safe_name}_审核报告_{period_end.strftime("%Y%m%d%H%M")}.pdf'})
+        else:
+            metrics = self._build_metrics(project_id, project, period_start, period_end)
+            text_content, html_content = self._build_email_content(
                 project_name, frequency, period_start, period_end, metrics,
-                report_label=report_label
+                party_b=party_b, report_label=report_label
             )
-            if pdf_err:
-                pdf_error = pdf_err
-                logger.error(f'[send_manual_report] PDF生成失败: {pdf_err}')
-            if pdf_path:
-                abs_path = str(Path(pdf_path).resolve())
-                safe_name = project_name.replace('/', '_').replace('\\', '_')
-                attachments.append({'path': abs_path, 'name': f'{safe_name}_实时报告_{period_end.strftime("%Y%m%d%H%M")}.pdf'})
-                logger.info(f'[send_manual_report] PDF已生成: {abs_path}')
-
+            attachments = []
+            pdf_error = None
+            if include_pdf:
+                pdf_path, pdf_err = self._build_pdf_report(
+                    project_name, frequency, period_start, period_end, metrics,
+                    report_label=report_label
+                )
+                if pdf_err:
+                    pdf_error = pdf_err
+                    logger.error(f'[send_manual_report] PDF生成失败: {pdf_err}')
+                if pdf_path:
+                    abs_path = str(Path(pdf_path).resolve())
+                    safe_name = project_name.replace('/', '_').replace('\\', '_')
+                    attachments.append({'path': abs_path, 'name': f'{safe_name}_实时报告_{period_end.strftime("%Y%m%d%H%M")}.pdf'})
+                    logger.info(f'[send_manual_report] PDF已生成: {abs_path}')
+        
+        # 发送站内信（同时支持前端报告数据和后端统计格式）
+        if send_type in ('inapp', 'both') and recipient_user_ids:
+            run_key = now_with_timezone().strftime('%Y%m%d%H%M%S')
+            # 为前端报告数据提供默认metrics
+            if 'metrics' not in locals():
+                metrics = {
+                    'total_uploads': 0,
+                    'total_updated_docs': 0,
+                    'archived': 0,
+                    'archive_rate': 0.0,
+                    'by_cycle': {},
+                    'cycle_order': [],
+                    'project_cycles': []
+                }
+            self._send_site_messages(
+                receiver_ids=recipient_user_ids,
+                project_id=project_id,
+                project_name=project_name,
+                frequency=frequency,
+                period_start=period_start,
+                period_end=period_end,
+                metrics=metrics,
+                run_key=run_key,
+                popup_enabled=False,
+                party_b=party_b,
+                report_label=report_label,
+            )
         success_count = 0
         error_messages: List[str] = []
 
@@ -834,23 +879,6 @@ class ScheduledReportService:
                     success_count += 1
                 elif status not in ('skipped',):
                     error_messages.append(f"{email}: {result.get('message', '发送失败')}")
-
-        if send_type in ('inapp', 'both') and recipient_user_ids:
-            run_key = now_with_timezone().strftime('%Y%m%d%H%M%S')
-            sent = self._send_site_messages(
-                receiver_ids=recipient_user_ids,
-                project_id=project_id,
-                project_name=project_name,
-                frequency=frequency,
-                period_start=period_start,
-                period_end=period_end,
-                metrics=metrics,
-                run_key=run_key,
-                popup_enabled=False,
-                party_b=party_b,
-                report_label=report_label,
-            )
-            success_count += sent
 
         if error_messages:
             return {
@@ -1434,6 +1462,8 @@ class ScheduledReportService:
             'cycle_order': cycle_order,
             'checklist': checklist,
             'timeline_anomalies': timeline_anomalies,
+            # 仅包含项目正式定义周期（project['cycles']），用于按序显示统计表格
+            'project_cycles': [str(c).strip() for c in (project.get('cycles', []) or []) if str(c).strip()],
         }
 
     @staticmethod
@@ -1622,7 +1652,9 @@ class ScheduledReportService:
         rate_val = metrics.get('archive_rate', 0.0)
         by_cycle = metrics.get('by_cycle', {})
         cycle_order = metrics.get('cycle_order', [])
-        ordered_cycles = [c for c in cycle_order if c in by_cycle] + [c for c in by_cycle.keys() if c not in set(cycle_order)]
+        project_cycles = metrics.get('project_cycles', [])
+        _display_cycles = project_cycles if project_cycles else cycle_order
+        ordered_cycles = [c for c in _display_cycles if c in by_cycle]
 
         cycle_rows = ''
         for cycle in ordered_cycles:
@@ -1703,6 +1735,7 @@ class ScheduledReportService:
         period_deleted = metrics.get('deleted', 0)
         by_cycle = metrics.get('by_cycle', {})
         cycle_order = metrics.get('cycle_order', [])
+        project_cycles = metrics.get('project_cycles', [])
         checklist = metrics.get('checklist', [])
 
         is_manual = report_label is not None
@@ -1723,7 +1756,8 @@ class ScheduledReportService:
         )
 
         rows = ''
-        ordered_cycles = [c for c in cycle_order if c in by_cycle] + [c for c in by_cycle.keys() if c not in set(cycle_order)]
+        _display_cycles = project_cycles if project_cycles else cycle_order
+        ordered_cycles = [c for c in _display_cycles if c in by_cycle]
         for cycle in ordered_cycles:
             val = by_cycle.get(cycle, {})
             c_uploads = val.get('uploads', 0)
@@ -1789,6 +1823,313 @@ class ScheduledReportService:
             f"</div>"
         )
         return text, html
+
+    def _build_email_from_frontend_report(
+        self, project_name: str, report_data: Dict[str, Any]
+    ) -> Tuple[str, str]:
+        """从前端报告数据生成邮件内容，样式与生成报告弹窗一致。"""
+        generated_at = report_data.get('generatedAt', '')
+        stats = report_data.get('statistics', {})
+        cycles_data = report_data.get('cycles', [])
+
+        total_docs = stats.get('totalDocs', 0)
+        uploaded_docs = stats.get('uploadedDocs', 0)
+        missing_docs = stats.get('missingDocs', 0)
+        archived_docs = stats.get('archivedDocs', 0)
+        signature_rate = stats.get('signatureRate', '0.0')
+        seal_rate = stats.get('sealRate', '0.0')
+        compliance_rate = stats.get('complianceRate', '0.0')
+
+        text = (
+            f"项目文档审核报告 — {project_name}\n"
+            f"生成时间：{generated_at}\n\n"
+            f"项目总体统计：\n"
+            f"  总文档数: {total_docs}  已上传: {uploaded_docs}  缺失: {missing_docs}  已归档: {archived_docs}\n"
+            f"  签字率: {signature_rate}%  盖章率: {seal_rate}%  合格率: {compliance_rate}%\n\n"
+        )
+        for cd in cycles_data:
+            c_s = cd.get('statistics', {})
+            text += (
+                f"[{cd.get('name','')}] 要求:{c_s.get('totalDocs',0)} 已上传:{c_s.get('uploadedDocs',0)} "
+                f"缺失:{c_s.get('missingDocs',0)} 归档:{c_s.get('archivedDocs',0)}\n"
+            )
+            for m in cd.get('missingDocs', []):
+                text += f"  缺失: {m.get('name', '')}\n"
+
+        cycle_rows_html = ''
+        for cd in cycles_data:
+            c_s = cd.get('statistics', {})
+            c_total = c_s.get('totalDocs', 0)
+            c_uploaded = c_s.get('uploadedDocs', 0)
+            c_missing = c_s.get('missingDocs', 0)
+            c_archived = c_s.get('archivedDocs', 0)
+            c_compliance = c_s.get('complianceRate', '0.0')
+            miss_items = ''.join(
+                f"<li style='color:#dc3545;margin:2px 0'>{m.get('name','')}</li>"
+                for m in cd.get('missingDocs', [])
+            )
+            miss_html = f"<ul style='margin:4px 0 0;padding-left:16px;font-size:11px'>{miss_items}</ul>" if miss_items else ''
+            status_color = '#dc3545' if c_missing > 0 else '#16a34a'
+            status_icon = '⚠' if c_missing > 0 else '✓'
+            cycle_rows_html += (
+                f"<tr>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd'>{cd.get('name','')}{miss_html}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center'>{c_total}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center;color:#28a745'>{c_uploaded}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center;color:{status_color}'><b>{c_missing}</b></td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center;color:#1890ff'>{c_archived}</td>"
+                f"<td style='padding:6px 8px;border:1px solid #ddd;text-align:center;color:{status_color}'>"
+                f"{status_icon} {c_compliance}%</td>"
+                f"</tr>"
+            )
+        no_data = "<tr><td colspan='6' style='padding:10px;border:1px solid #ddd;text-align:center;color:#666'>暂无数据</td></tr>"
+        html = (
+            f"<div style='font-family:Arial,\"Microsoft YaHei\",sans-serif;line-height:1.6;color:#222;max-width:860px;'>"
+            f"<h2 style='margin:0 0 4px;font-size:18px'>📋 项目文档审核报告 — {project_name}</h2>"
+            f"<p style='margin:4px 0;color:#888;font-size:13px'>生成时间：{generated_at}</p>"
+            f"<div style='margin:16px 0;padding:14px 18px;background:#e7f3ff;border-radius:6px;'>"
+            f"<b style='font-size:14px;color:#2c3e50'>项目总体统计</b>"
+            f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;'>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>总文档数</div><div style='font-size:20px;font-weight:bold'>{total_docs}</div></div>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>已上传</div><div style='font-size:20px;font-weight:bold;color:#28a745'>{uploaded_docs}</div></div>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>缺失</div><div style='font-size:20px;font-weight:bold;color:#dc3545'>{missing_docs}</div></div>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>已归档</div><div style='font-size:20px;font-weight:bold;color:#1890ff'>{archived_docs}</div></div>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>签字率</div><div style='font-size:20px;font-weight:bold;color:#ffc107'>{signature_rate}%</div></div>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>盖章率</div><div style='font-size:20px;font-weight:bold;color:#ffc107'>{seal_rate}%</div></div>"
+            f"<div style='text-align:center'><div style='color:#666;font-size:12px'>合格率</div><div style='font-size:20px;font-weight:bold;color:#28a745'>{compliance_rate}%</div></div>"
+            f"</div></div>"
+            f"<h3 style='font-size:14px;margin:18px 0 8px;color:#374151'>按周期文档统计</h3>"
+            f"<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+            f"<thead><tr style='background:#f8fafc;'>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>周期</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>要求数</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>已上传</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>缺失</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:center'>已归档</th>"
+            f"<th style='padding:8px;border:1px solid #ddd;text-align:left'>合规率</th>"
+            f"</tr></thead>"
+            f"<tbody>{cycle_rows_html or no_data}</tbody></table>"
+            f"<p style='margin:18px 0 4px;color:#888;font-size:12px'>详细文档清单及文件列表请查看PDF附件。</p>"
+            f"</div>"
+        )
+        return text, html
+
+    def _build_pdf_from_frontend_report(
+        self, project_name: str, report_data: Dict[str, Any]
+    ) -> Tuple[Optional[Path], Optional[str]]:
+        """从前端报告数据生成PDF，内容结构与生成报告弹窗一致。"""
+        try:
+            from reportlab.lib import colors as rl_colors
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import ParagraphStyle
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+            from reportlab.lib.enums import TA_CENTER
+
+            _root = Path(__file__).parent.parent.parent
+            out_dir = _root / 'uploads' / 'tasks' / 'reports'
+            out_dir.mkdir(parents=True, exist_ok=True)
+            suffix = now_with_timezone().strftime('%Y%m%d_%H%M%S')
+            pdf_path = out_dir / f"report_{suffix}.pdf"
+
+            pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+            fn = 'STSong-Light'
+            h1 = ParagraphStyle('h1', fontName=fn, fontSize=14, spaceAfter=4, spaceBefore=6)
+            h2 = ParagraphStyle('h2', fontName=fn, fontSize=11, spaceAfter=3, spaceBefore=8)
+            body_g = ParagraphStyle('body_g', fontName=fn, fontSize=9, spaceAfter=2, textColor=rl_colors.HexColor('#888888'))
+            cell = ParagraphStyle('cell', fontName=fn, fontSize=8, leading=12, wordWrap='CJK')
+            cell_c = ParagraphStyle('cell_c', fontName=fn, fontSize=8, leading=12, wordWrap='CJK', alignment=TA_CENTER)
+
+            pw = A4[0] - 80
+            generated_at = report_data.get('generatedAt', '')
+            stats = report_data.get('statistics', {})
+            cycles_data = report_data.get('cycles', [])
+
+            elems = []
+            elems.append(Paragraph(f'项目文档审核报告：{project_name}', h1))
+            elems.append(Paragraph(f'生成时间：{generated_at}', body_g))
+            elems.append(Spacer(1, 6))
+
+            # 总体统计
+            total_docs = stats.get('totalDocs', 0)
+            uploaded_docs = stats.get('uploadedDocs', 0)
+            missing_docs = stats.get('missingDocs', 0)
+            archived_docs = stats.get('archivedDocs', 0)
+            sig_rate = stats.get('signatureRate', '0.0')
+            seal_rate = stats.get('sealRate', '0.0')
+            comp_rate = stats.get('complianceRate', '0.0')
+            sum_data = [
+                [Paragraph('项目总体统计', ParagraphStyle('hd', fontName=fn, fontSize=9, textColor=rl_colors.HexColor('#1e40af'))), '', '', ''],
+                [f'总文档数: {total_docs}', f'已上传: {uploaded_docs}', f'缺失: {missing_docs}', f'已归档: {archived_docs}'],
+                [f'签字率: {sig_rate}%', f'盖章率: {seal_rate}%', f'合格率: {comp_rate}%', ''],
+            ]
+            sum_style = TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), fn), ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('SPAN', (0, 0), (3, 0)),
+                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#dbeafe')),
+                ('BACKGROUND', (0, 1), (-1, 2), rl_colors.HexColor('#f8fafc')),
+                ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#93c5fd')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#bfdbfe')),
+                ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ])
+            w4 = pw / 4
+            elems.append(Table(sum_data, colWidths=[w4, w4, w4, w4], style=sum_style))
+            elems.append(Spacer(1, 8))
+
+            # 周期总览表
+            elems.append(Paragraph('按周期文档统计', h2))
+            co_data = [['周期', '要求数', '已上传', '缺失', '已归档', '合规率']]
+            for cd in cycles_data:
+                c_s = cd.get('statistics', {})
+                co_data.append([
+                    Paragraph(cd.get('name', ''), cell),
+                    str(c_s.get('totalDocs', 0)), str(c_s.get('uploadedDocs', 0)),
+                    str(c_s.get('missingDocs', 0)), str(c_s.get('archivedDocs', 0)),
+                    f"{c_s.get('complianceRate', '0.0')}%",
+                ])
+            co_cmds = [
+                ('FONTNAME', (0, 0), (-1, -1), fn), ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
+                ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ]
+            for r_i, cd in enumerate(cycles_data, 1):
+                if cd.get('statistics', {}).get('missingDocs', 0) > 0:
+                    co_cmds.append(('TEXTCOLOR', (3, r_i), (3, r_i), rl_colors.HexColor('#dc2626')))
+            cw6 = pw / 6
+            elems.append(Table(co_data, colWidths=[cw6*1.5, cw6*0.6, cw6*0.7, cw6*0.6, cw6*0.7, cw6*0.9], style=TableStyle(co_cmds), repeatRows=1))
+
+            # 各周期详情
+            for cd in cycles_data:
+                elems.append(PageBreak())
+                cycle_name = cd.get('name', '')
+                c_s = cd.get('statistics', {})
+                elems.append(Paragraph(f'周期：{cycle_name}', h1))
+                elems.append(Paragraph(
+                    f"要求:{c_s.get('totalDocs',0)}　已上传:{c_s.get('uploadedDocs',0)}　"
+                    f"缺失:{c_s.get('missingDocs',0)}　已归档:{c_s.get('archivedDocs',0)}　"
+                    f"合规率:{c_s.get('complianceRate','0.0')}%", body_g
+                ))
+                elems.append(Spacer(1, 4))
+
+                missing = cd.get('missingDocs', [])
+                if missing:
+                    elems.append(Paragraph('缺失文档', h2))
+                    miss_data = [['序号', '文档名称']]
+                    for m in missing:
+                        miss_data.append([str(m.get('_originalIndex', '')), m.get('name', '')])
+                    miss_s = TableStyle([
+                        ('FONTNAME', (0, 0), (-1, -1), fn), ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#fce4e4')),
+                        ('TEXTCOLOR', (0, 1), (-1, -1), rl_colors.HexColor('#dc2626')),
+                        ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#fca5a5')),
+                        ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#fecaca')),
+                        ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 4), ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                    ])
+                    mw = pw / 6
+                    elems.append(Table(miss_data, colWidths=[mw * 0.5, mw * 5.5], style=miss_s))
+                    elems.append(Spacer(1, 4))
+
+                # 文档清单
+                required_docs = sorted(cd.get('requiredDocs', []), key=lambda d: d.get('_originalIndex', 0))
+                uploaded_list = cd.get('uploadedDocs', [])
+                uploaded_by_name: Dict[str, List] = {}
+                for ud in uploaded_list:
+                    uploaded_by_name.setdefault(ud.get('doc_name', ''), []).append(ud)
+
+                if required_docs:
+                    elems.append(Paragraph('文档清单', h2))
+                    req_data = [['序号', '文档名称', '要求', '上传数', '状态']]
+                    req_cmds = [
+                        ('FONTNAME', (0, 0), (-1, -1), fn), ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                        ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                        ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
+                        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
+                        ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ]
+                    miss_names = {m.get('name', '') for m in missing}
+                    for r_i, req in enumerate(required_docs, 1):
+                        req_name = req.get('name', '')
+                        count = len(uploaded_by_name.get(req_name, []))
+                        status = '未上传' if req_name in miss_names or count == 0 else '已完成'
+                        req_data.append([
+                            Paragraph(str(req.get('_originalIndex', r_i)), cell_c),
+                            Paragraph(req_name, cell),
+                            Paragraph(str(req.get('requirement', '') or '-'), cell),
+                            Paragraph(str(count), cell_c),
+                            Paragraph(status, cell_c),
+                        ])
+                        color = rl_colors.HexColor('#16a34a') if status == '已完成' else rl_colors.HexColor('#dc2626')
+                        req_cmds.append(('TEXTCOLOR', (4, r_i), (4, r_i), color))
+                    rw = pw / 5
+                    elems.append(Table(req_data, colWidths=[rw*0.4, rw*1.5, rw*1.5, rw*0.5, rw*0.6], style=TableStyle(req_cmds), repeatRows=1))
+                    elems.append(Spacer(1, 4))
+
+                # 已上传文件列表
+                if uploaded_list:
+                    elems.append(Paragraph('已上传文件', h2))
+                    req_order = [r.get('name', '') for r in required_docs]
+                    def _sort_key(d, _ro=req_order):
+                        try:
+                            return (_ro.index(d.get('doc_name', '')), str(d.get('upload_time', '')))
+                        except ValueError:
+                            return (len(_ro), str(d.get('upload_time', '')))
+                    sorted_uploads = sorted(uploaded_list, key=_sort_key)
+                    file_data = [['序号', '文档类型', '文件名', '上传时间', '状态']]
+                    file_cmds = [
+                        ('FONTNAME', (0, 0), (-1, -1), fn), ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#e8f0fb')),
+                        ('BOX', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#b0c4d8')),
+                        ('INNERGRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#c9d7e8')),
+                        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor('#f5f8fd')]),
+                        ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ]
+                    for f_i, ud in enumerate(sorted_uploads, 1):
+                        filename = str(ud.get('original_filename', '') or ud.get('filename', ''))
+                        ut = str(ud.get('upload_time', '') or '').split('T')[0].split(' ')[0] or '-'
+                        is_archived = ud.get('archived', False)
+                        is_compliant = ud.get('compliant', True)
+                        file_status = '已归档' if is_archived else ('待完善' if not is_compliant else '已上传')
+                        file_data.append([
+                            Paragraph(str(f_i), cell_c),
+                            Paragraph(str(ud.get('doc_name', '')), cell),
+                            Paragraph(filename[:45], cell),
+                            Paragraph(ut, cell_c),
+                            Paragraph(file_status, cell_c),
+                        ])
+                        sc = 4
+                        if is_archived:
+                            file_cmds.append(('TEXTCOLOR', (sc, f_i), (sc, f_i), rl_colors.HexColor('#1890ff')))
+                        elif not is_compliant:
+                            file_cmds.append(('TEXTCOLOR', (sc, f_i), (sc, f_i), rl_colors.HexColor('#d97706')))
+                        else:
+                            file_cmds.append(('TEXTCOLOR', (sc, f_i), (sc, f_i), rl_colors.HexColor('#16a34a')))
+                    fw = pw / 5
+                    elems.append(Table(file_data, colWidths=[fw*0.3, fw*1.2, fw*1.8, fw*0.8, fw*0.9], style=TableStyle(file_cmds), repeatRows=1))
+
+            doc = SimpleDocTemplate(
+                str(pdf_path), pagesize=A4,
+                leftMargin=40, rightMargin=40, topMargin=40, bottomMargin=40
+            )
+            doc.build(elems)
+            return pdf_path, None
+        except Exception as e:
+            import traceback
+            logger.error(f'[ScheduledReportService] build frontend pdf failed: {e}\n{traceback.format_exc()}')
+            return None, str(e)
+
     def _build_pdf_report(self, project_name: str, frequency: str, start: datetime, end: datetime, metrics: Dict[str, Any], report_label: Optional[str] = None) -> Tuple[Optional[Path], Optional[str]]:
         try:
             from reportlab.lib import colors as rl_colors
@@ -1861,7 +2202,9 @@ class ScheduledReportService:
             elems.append(Paragraph('按周期统计（本期）', h2))
             by_cycle = metrics.get('by_cycle', {})
             cycle_order = metrics.get('cycle_order', [])
-            ordered_cycles = [x for x in cycle_order if x in by_cycle] + [x for x in by_cycle.keys() if x not in set(cycle_order)]
+            project_cycles = metrics.get('project_cycles', [])
+            _display_cycles = project_cycles if project_cycles else cycle_order
+            ordered_cycles = [x for x in _display_cycles if x in by_cycle]
             cycle_data = [['周期', '上传数', '更新数', '归档数', '当周期归档通过率']]
             for cycle in ordered_cycles:
                 val = by_cycle.get(cycle, {})

@@ -182,6 +182,7 @@ def send_project_report(project_id):
         external_emails = [str(e).strip() for e in (data.get('external_emails') or []) if str(e).strip()]
         include_pdf = bool(data.get('include_pdf', True))
         requester_user_id = int(getattr(current_user, 'id', 0) or 0)
+        report_data = data.get('report_data') or None
         result = scheduled_report_service.send_manual_report(
             project_id=project_id,
             send_type=send_type,
@@ -189,6 +190,7 @@ def send_project_report(project_id):
             external_emails=external_emails if external_emails else None,
             include_pdf=include_pdf,
             requester_user_id=requester_user_id,
+            report_data=report_data,
         )
         code = 200 if result.get('status') in ('success', 'partial') else 400
         return jsonify(result), code
