@@ -553,10 +553,17 @@ cmd_upgrade() {
     echo -e "${YELLOW}Updating dependencies...${NC}"
     cmd_install
 
-    # 执行数据库迁移（升级后自动执行）
+    # 升级后检测是否需要数据库迁移
     echo ""
-    echo -e "${YELLOW}Running database migration...${NC}"
-    run_db_migrate
+    echo -e "${YELLOW}Checking if migration is needed...${NC}"
+    MIGRATE_CHECK_OUTPUT=$("$VENV_DIR/bin/python" "$APP_DIR/tools/migrate_branch.py" --check 2>&1)
+    echo "$MIGRATE_CHECK_OUTPUT" | grep -q "无需迁移" && NEED_MIGRATE=0 || NEED_MIGRATE=1
+    if [ $NEED_MIGRATE -eq 1 ]; then
+        echo -e "${YELLOW}Running database migration...${NC}"
+        run_db_migrate
+    else
+        echo -e "${GREEN}No migration needed. Skipping migration steps.${NC}"
+    fi
     
     # 启动服务器
     echo ""
