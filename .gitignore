@@ -93,3 +93,4 @@ emp_tools/
 # BitFun snapshot data - auto managed
 .bitfun/
 .claude/
+.trae/

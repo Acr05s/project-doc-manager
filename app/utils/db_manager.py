@@ -1193,7 +1193,8 @@ class ProjectDocumentsDB(DatabaseManager):
             'directory': 'TEXT DEFAULT "/"',
             'source': 'TEXT',
             'custom_attrs': 'TEXT',  # JSON格式存储自定义属性
-            'root_directory': 'TEXT'  # ZIP归档时选择的根目录，用于显示截断
+            'root_directory': 'TEXT',  # ZIP归档时选择的根目录，用于显示截断
+            'review_result': 'TEXT DEFAULT ""'  # 文档审查结果
         }
         for col_name, col_type in new_columns.items():
             if col_name not in existing_columns:
@@ -1210,20 +1211,63 @@ class ProjectDocumentsDB(DatabaseManager):
 
     # ==================== 文档 CRUD ====================
 
-    def add_document(self, doc_id: str, project_id: str, project_name: str,
-                      cycle: str, doc_name: str, file_path: str,
-                      file_size: int = 0, file_type: str = None,
-                      original_filename: str = None, status: str = 'uploaded',
-                      # 新增字段：盖章和签字
-                      has_seal: int = 0, party_a_seal: int = 0, party_b_seal: int = 0,
-                      no_seal: int = 0, no_signature: int = 0,
-                      party_a_signer: str = None, party_b_signer: str = None,
-                      doc_date: str = None, sign_date: str = None,
-                      directory: str = '/', source: str = None,
-                      custom_attrs: Dict = None, root_directory: str = '') -> bool:
-        """添加文档"""
-        import json
+    def add_document(self, **kwargs) -> bool:
+        """添加文档
         
+        Args:
+            doc_id: 文档ID
+            project_id: 项目ID
+            project_name: 项目名称
+            cycle: 周期
+            doc_name: 文档名称
+            file_path: 文件路径
+            file_size: 文件大小，默认为0
+            file_type: 文件类型，默认为None
+            original_filename: 原始文件名，默认为None
+            status: 状态，默认为'uploaded'
+            has_seal: 是否有盖章，默认为0
+            party_a_seal: 甲方盖章，默认为0
+            party_b_seal: 乙方盖章，默认为0
+            no_seal: 无盖章，默认为0
+            no_signature: 无签字，默认为0
+            party_a_signer: 甲方签字人，默认为None
+            party_b_signer: 乙方签字人，默认为None
+            doc_date: 文档日期，默认为None
+            sign_date: 签字日期，默认为None
+            directory: 目录，默认为'/'
+            source: 来源，默认为None
+            custom_attrs: 自定义属性，默认为None
+            root_directory: 根目录，默认为''
+            review_result: 评审结果，默认为''
+        """
+        import json
+
+        # 提取参数，设置默认值
+        doc_id = kwargs.get('doc_id')
+        project_id = kwargs.get('project_id')
+        project_name = kwargs.get('project_name')
+        cycle = kwargs.get('cycle')
+        doc_name = kwargs.get('doc_name')
+        file_path = kwargs.get('file_path')
+        file_size = kwargs.get('file_size', 0)
+        file_type = kwargs.get('file_type')
+        original_filename = kwargs.get('original_filename')
+        status = kwargs.get('status', 'uploaded')
+        has_seal = kwargs.get('has_seal', 0)
+        party_a_seal = kwargs.get('party_a_seal', 0)
+        party_b_seal = kwargs.get('party_b_seal', 0)
+        no_seal = kwargs.get('no_seal', 0)
+        no_signature = kwargs.get('no_signature', 0)
+        party_a_signer = kwargs.get('party_a_signer')
+        party_b_signer = kwargs.get('party_b_signer')
+        doc_date = kwargs.get('doc_date')
+        sign_date = kwargs.get('sign_date')
+        directory = kwargs.get('directory', '/')
+        source = kwargs.get('source')
+        custom_attrs = kwargs.get('custom_attrs', {})
+        root_directory = kwargs.get('root_directory', '')
+        review_result = kwargs.get('review_result', '')
+
         upload_time = datetime.now().isoformat()
         if original_filename is None:
             original_filename = os.path.basename(file_path)
@@ -1239,8 +1283,8 @@ class ProjectDocumentsDB(DatabaseManager):
                                    has_seal, party_a_seal, party_b_seal, no_seal,
                                    no_signature, party_a_signer, party_b_signer,
                                    doc_date, sign_date, directory, source, custom_attrs,
-                                   root_directory)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   root_directory, review_result)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         try:
             self.execute_insert(sql, (doc_id, project_id, project_name, cycle, doc_name,
@@ -1250,7 +1294,7 @@ class ProjectDocumentsDB(DatabaseManager):
                                        no_signature, party_a_signer or '', party_b_signer or '',
                                        doc_date or '', sign_date or '',
                                        directory or '/', source or '', json.dumps(custom_attrs, ensure_ascii=False),
-                                       root_directory or ''))
+                                       root_directory or '', review_result or ''))
             return True
         except sqlite3.IntegrityError:
             # 文档已存在，更新
@@ -1264,7 +1308,8 @@ class ProjectDocumentsDB(DatabaseManager):
                                        party_b_signer=party_b_signer,
                                        doc_date=doc_date, sign_date=sign_date,
                                        directory=directory, source=source,
-                                       custom_attrs=custom_attrs)
+                                       custom_attrs=custom_attrs,
+                                       review_result=review_result)
         except Exception as e:
             print(f"添加文档失败: {e}")
             return False
@@ -1345,7 +1390,7 @@ class ProjectDocumentsDB(DatabaseManager):
             'has_seal', 'party_a_seal', 'party_b_seal', 'no_seal',
             'no_signature', 'party_a_signer', 'party_b_signer',
             'doc_date', 'sign_date', 'directory', 'source',
-            'root_directory'
+            'root_directory', 'review_result'
         ]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         
