@@ -20,6 +20,7 @@
 
 import logging
 import urllib.parse
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 # 导入各模块
@@ -1187,7 +1188,9 @@ class DocumentManager:
         """
         try:
             updated = False
-            
+
+            data['last_modified'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
             # 确保has_seal和has_seal_marked字段同步
             if 'has_seal' in data:
                 data['has_seal_marked'] = data['has_seal']

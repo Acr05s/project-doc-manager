@@ -891,6 +891,9 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${statusTag}
                                         <div class="doc-type" style="text-align: center;" ${docDescription ? `title="说明: ${escapedDocDescription}"` : ''}>${doc.name}${docDescription ? ' <span style="font-size:12px;color:#7a8798;cursor:help;" title="说明: ' + escapedDocDescription + '">ⓘ</span>' : ''}</div>
+                                        <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">
+                                            ${requirementHtml}
+                                        </div>
                                                     </div>
                                 </div>
                             </td>
@@ -4465,6 +4468,14 @@ function formatDateToMonth(dateString) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+function formatDateTime(dateString) {
+    if (!dateString) return '';
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * 主页面文档树形目录渲染（与ZIP列表风格一致，支持折叠展开）
  */
@@ -4599,7 +4610,7 @@ function renderMainFileRow(d, cycle, docInfo, depth = 0) {
     if (getDocValue('not_involved')) attrParts.push('🚫本次不涉及');
     
     // 自定义属性
-    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
+    const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'last_modified', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
     const cycleDocs = appState.projectConfig?.documents?.[cycle];
     const currentDocInfo = cycleDocs?.required_docs?.find(rd => rd.name === docInfo.name);
     const requiredCustomAttrs = currentDocInfo?.attributes || {};
@@ -4641,12 +4652,19 @@ function renderMainFileRow(d, cycle, docInfo, depth = 0) {
     const missingHtml = missingRequirements.length > 0
         ? `<span title="缺失要求：${missingRequirements.join('、')}">⚠️${missingRequirements.join('、')}</span>` : '';
     
+    const uploadTimeStr = formatDateTime(d.upload_time);
+    const lastModifiedStr = formatDateTime(d.last_modified);
+    const timeHtml = (uploadTimeStr || lastModifiedStr)
+        ? `<span style="font-size:11px;color:#999;margin-left:4px;white-space:nowrap;">${uploadTimeStr ? '上传:' + uploadTimeStr : ''}${uploadTimeStr && lastModifiedStr ? ' | ' : ''}${lastModifiedStr ? '修改:' + lastModifiedStr : ''}</span>`
+        : '';
+
     return `<div class="doc-file-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:${indent}px;padding:3px 0;">
-        <span class="doc-file-name" onclick="previewDocument('${d.id}')" 
+        <span class="doc-file-name" onclick="previewDocument('${d.id}')"
               title="${escapeAttr(d.original_filename || d.filename || '')}"
               style="cursor:pointer;text-decoration:underline;color:#1890ff;font-size:13px;">
             📄 ${escapeHtml(d.original_filename || d.filename || '未知文件名')}
         </span>
+        ${timeHtml}
         ${attrParts.length > 0 ? `<span class="doc-attrs" style="margin-left:6px;font-size:12px;">${attrParts.join(' ')}</span>` : ''}
         ${missingHtml}
     </div>`;
@@ -5029,15 +5047,23 @@ function renderDocItem(doc, cycle, docName, indent) {
         }
     });
     const attrStr = attrParts.join(' ');
+    const mUploadTime = formatDateTime(doc.upload_time);
+    const mLastModified = formatDateTime(doc.last_modified);
+    const mTimeHtml = (mUploadTime || mLastModified)
+        ? `<span style="font-size:11px;color:#999;">${mUploadTime ? '上传:' + mUploadTime : ''}${mUploadTime && mLastModified ? ' | ' : ''}${mLastModified ? '修改:' + mLastModified : ''}</span>`
+        : '';
 
     return `
         <div class="document-item" style="margin-left:${indent + 16}px;padding:4px 8px;margin-bottom:2px;border-radius:4px;
                 display:flex;align-items:center;gap:8px;background:#fafafa;">
             <input type="checkbox" class="document-checkbox" data-doc-id="${docId}" style="flex-shrink:0;" />
             <div style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;">
-                <span class="document-name" onclick="previewDocument('${docId}')"
-                      style="cursor:pointer;color:#1890ff;font-size:13px;line-height:1.4;word-break:break-all;"
-                      title="${escapeAttr(doc.original_filename || doc.filename || '')}">📄 ${escapeHtml(doc.original_filename || doc.filename || '未知文件名')}</span>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <span class="document-name" onclick="previewDocument('${docId}')"
+                          style="cursor:pointer;color:#1890ff;font-size:13px;line-height:1.4;word-break:break-all;"
+                          title="${escapeAttr(doc.original_filename || doc.filename || '')}">📄 ${escapeHtml(doc.original_filename || doc.filename || '未知文件名')}</span>
+                    ${mTimeHtml}
+                </div>
                 ${attrStr ? `<div style="font-size:11px;display:flex;gap:6px;flex-wrap:wrap;line-height:1.5;color:#555;">${attrStr}</div>` : ''}
                 ${zipInfo ? `<span style="font-size:11px;color:#888;" title="来源: ${zipInfo}${zipPath ? ' - ' + zipPath : ''}">📦 ${zipInfo}${zipPath ? '(' + zipPath + ')' : ''}</span>` : ''}
             </div>
@@ -7054,7 +7080,7 @@ function getSelectedDocsAttributeStatus(docIds) {
     
     // 如果配置中没有，从文档中收集所有自定义属性字段
     if (customDefs.length === 0) {
-        const predefinedKeys = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id']);
+        const predefinedKeys = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'last_modified', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id']);
         const foundCustomKeys = new Set();
         
         docs.forEach(doc => {

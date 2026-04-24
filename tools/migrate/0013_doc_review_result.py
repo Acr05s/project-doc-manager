@@ -1,39 +1,39 @@
-"""文档审查结果字段迁移
+"""文档审查结果及最后修改时间字段迁移
 
-为 documents 表添加 review_result 列（TEXT DEFAULT ""）。
-review_result 同时存储在项目 JSON 文件的 uploaded_docs[] 中，
-SQLite 作为索引缓存，两者通过 save_documents_index 保持同步。
+为 documents 表添加 review_result 列（TEXT DEFAULT ""）和 last_modified 列（TEXT）。
 """
 import sqlite3
 from pathlib import Path
 
 
 def description():
-    return "为 documents 表添加 review_result 列（文档审查结果）"
+    return "为 documents 表添加 review_result 和 last_modified 列"
 
 
 def upgrade(db_path: str):
-    """为 users.db 中的 documents 表添加 review_result 列（如已存在则跳过）。
-    同时扫描所有项目的 per-project documents.db 并添加同一列。
-    """
-    _add_column_if_missing(db_path)
+    _add_columns_if_missing(db_path)
 
-    # 扫描 projects/ 目录下所有 per-project documents.db
     projects_dir = Path(db_path).parent.parent / 'projects'
     if projects_dir.exists():
         for db_file in projects_dir.rglob('documents.db'):
             try:
-                _add_column_if_missing(str(db_file))
+                _add_columns_if_missing(str(db_file))
             except Exception as e:
                 print(f"  [WARN] 处理 {db_file} 失败: {e}")
 
 
-def _add_column_if_missing(db_path: str):
+def _add_columns_if_missing(db_path: str):
     with sqlite3.connect(db_path) as conn:
         existing = {row[1] for row in conn.execute("PRAGMA table_info(documents)")}
+        added = []
         if 'review_result' not in existing:
             conn.execute('ALTER TABLE documents ADD COLUMN review_result TEXT DEFAULT ""')
+            added.append('review_result')
+        if 'last_modified' not in existing:
+            conn.execute('ALTER TABLE documents ADD COLUMN last_modified TEXT')
+            added.append('last_modified')
+        if added:
             conn.commit()
-            print(f"  [OK] 已为 {db_path} 的 documents 表添加 review_result 列")
+            print(f"  [OK] 已为 {db_path} 的 documents 表添加列: {', '.join(added)}")
         else:
-            print(f"  [SKIP] {db_path} 的 documents 表已有 review_result 列")
+            print(f"  [SKIP] {db_path} 的 documents 表已有 review_result 和 last_modified 列")

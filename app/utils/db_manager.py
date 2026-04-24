@@ -1194,7 +1194,8 @@ class ProjectDocumentsDB(DatabaseManager):
             'source': 'TEXT',
             'custom_attrs': 'TEXT',  # JSON格式存储自定义属性
             'root_directory': 'TEXT',  # ZIP归档时选择的根目录，用于显示截断
-            'review_result': 'TEXT DEFAULT ""'  # 文档审查结果
+            'review_result': 'TEXT DEFAULT ""',  # 文档审查结果
+            'last_modified': 'TEXT DEFAULT CURRENT_TIMESTAMP'  # 最后修改时间
         }
         for col_name, col_type in new_columns.items():
             if col_name not in existing_columns:
@@ -1267,6 +1268,7 @@ class ProjectDocumentsDB(DatabaseManager):
         custom_attrs = kwargs.get('custom_attrs', {})
         root_directory = kwargs.get('root_directory', '')
         review_result = kwargs.get('review_result', '')
+        last_modified = kwargs.get('last_modified', datetime.now().isoformat())
 
         upload_time = datetime.now().isoformat()
         if original_filename is None:
@@ -1283,8 +1285,8 @@ class ProjectDocumentsDB(DatabaseManager):
                                    has_seal, party_a_seal, party_b_seal, no_seal,
                                    no_signature, party_a_signer, party_b_signer,
                                    doc_date, sign_date, directory, source, custom_attrs,
-                                   root_directory, review_result)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   root_directory, review_result, last_modified)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         try:
             self.execute_insert(sql, (doc_id, project_id, project_name, cycle, doc_name,
@@ -1294,7 +1296,7 @@ class ProjectDocumentsDB(DatabaseManager):
                                        no_signature, party_a_signer or '', party_b_signer or '',
                                        doc_date or '', sign_date or '',
                                        directory or '/', source or '', json.dumps(custom_attrs, ensure_ascii=False),
-                                       root_directory or '', review_result or ''))
+                                       root_directory or '', review_result or '', last_modified or ''))
             return True
         except sqlite3.IntegrityError:
             # 文档已存在，更新
@@ -1309,7 +1311,8 @@ class ProjectDocumentsDB(DatabaseManager):
                                        doc_date=doc_date, sign_date=sign_date,
                                        directory=directory, source=source,
                                        custom_attrs=custom_attrs,
-                                       review_result=review_result)
+                                       review_result=review_result,
+                                       last_modified=last_modified)
         except Exception as e:
             print(f"添加文档失败: {e}")
             return False
@@ -1390,9 +1393,14 @@ class ProjectDocumentsDB(DatabaseManager):
             'has_seal', 'party_a_seal', 'party_b_seal', 'no_seal',
             'no_signature', 'party_a_signer', 'party_b_signer',
             'doc_date', 'sign_date', 'directory', 'source',
-            'root_directory', 'review_result'
+            'root_directory', 'review_result', 'last_modified'
         ]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
+        
+        # 自动更新 last_modified 为当前时间（仅在未显式设置时）
+        from datetime import datetime
+        if 'last_modified' not in updates:
+            updates['last_modified'] = datetime.now().isoformat()
         
         # 特殊处理 custom_attrs（需要序列化为JSON）
         if 'custom_attrs' in kwargs:

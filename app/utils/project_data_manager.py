@@ -255,6 +255,7 @@ class ProjectDataManager:
                         source = doc_info.get('source', '')
                         custom_attrs = doc_info.get('custom_attrs', {})  # 自定义属性
                         review_result = doc_info.get('review_result', '')  # 审查结果
+                        last_modified = doc_info.get('last_modified', '')  # 最后修改时间
 
                         db.add_document(
                             doc_id=doc_id,
@@ -279,7 +280,8 @@ class ProjectDataManager:
                             directory=directory,
                             source=source,
                             custom_attrs=custom_attrs,
-                            review_result=review_result
+                            review_result=review_result,
+                            last_modified=last_modified
                         )
                     logger.info(f"文档索引已保存到数据库: {project_name}, {len(docs_list)} 个文档")
                 except Exception as db_err:

@@ -344,13 +344,11 @@ function initCycleSearch() {
             if (!grouped[cycle]) return;
             html += `<div class="cycle-search-group-header">📁 ${cycle}（${grouped[cycle].length}）</div>`;
             grouped[cycle].forEach(item => {
-                const requirementText = highlight(item.requirement, keyword);
-                const docNameText = item.docName ? ` <span class="search-path-sep">›</span> ${highlight(item.docName, keyword)}` : '';
                 html += `<div class="cycle-search-item${globalIdx === activeIndex ? ' active' : ''}" data-index="${globalIdx}" data-cycle="${item.cycle}" data-doc="${item.docName}">
                     <div class="search-path">
                         <span class="search-cycle-tag">${item.cycle}</span>
                         <span class="search-path-sep">›</span>
-                        <span class="search-doc-name">${requirementText}${docNameText}</span>
+                        <span class="search-doc-name">${highlight(item.docName, keyword)}</span>
                     </div>
                 </div>`;
                 globalIdx++;
@@ -376,7 +374,6 @@ function initCycleSearch() {
 
         filteredResults = searchIndex.filter(item =>
             item.cycle.toLowerCase().includes(keyword) ||
-            item.requirement.toLowerCase().includes(keyword) ||
             item.docName.toLowerCase().includes(keyword)
         );
         activeIndex = -1;
