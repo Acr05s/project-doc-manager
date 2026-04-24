@@ -2188,8 +2188,20 @@ export function showInputModal(title, fields, onConfirm) {
 
     titleEl.textContent = title;
 
+    // HTML转义函数
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#x27;');
+    }
+
     // 渲染字段
     fieldsEl.innerHTML = fields.map(f => {
+        const escapedValue = escapeHtml(f.value);
+        const escapedPlaceholder = escapeHtml(f.placeholder);
         if (f.type === 'info') {
             return `<div class="input-modal-field" style="color:#c0392b;font-size:13px;padding:4px 0 2px;">${f.label}</div>`;
         }
@@ -2204,12 +2216,22 @@ export function showInputModal(title, fields, onConfirm) {
                 </div>
             `;
         }
+        if (f.type === 'textarea') {
+            return `
+                <div class="input-modal-field">
+                    <label class="input-modal-label">${f.label}</label>
+                    <textarea class="input-modal-input" data-key="${f.key}" rows="${f.rows || 4}"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;resize:vertical;min-height:96px;"
+                        placeholder="${escapedPlaceholder}">${escapedValue}</textarea>
+                </div>
+            `;
+        }
         return `
             <div class="input-modal-field">
                 <label class="input-modal-label">${f.label}</label>
                 <input type="${f.type || 'text'}" class="input-modal-input" data-key="${f.key}"
-                    value="${(f.value || '').replace(/"/g, '&quot;')}"
-                    placeholder="${(f.placeholder || '').replace(/"/g, '&quot;')}" />
+                    value="${escapedValue}"
+                    placeholder="${escapedPlaceholder}" />
             </div>
         `;
     }).join('');
@@ -2242,6 +2264,10 @@ export function showInputModal(title, fields, onConfirm) {
     // 回车确认
     fieldsEl.addEventListener('keydown', function handler(e) {
         if (e.key === 'Enter') {
+            if (e.target instanceof HTMLTextAreaElement && !e.ctrlKey && !e.metaKey) {
+                return;
+            }
+            e.preventDefault();
             fieldsEl.removeEventListener('keydown', handler);
             doConfirm();
         }

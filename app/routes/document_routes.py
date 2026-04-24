@@ -1541,14 +1541,7 @@ def search_files():
                 continue
             
             # 检查是否已被其他文档使用，并记录被哪些文档使用
-            used_by = []
-            for meta in doc_manager.documents_db.values():
-                if meta.get('file_path') == str(file_path) or meta.get('original_filename') == file_path.name:
-                    # 获取文档类型和名称
-                    cycle = meta.get('cycle', '')
-                    doc_name = meta.get('doc_name', '')
-                    if cycle or doc_name:
-                        used_by.append(f"{cycle} - {doc_name}" if cycle else doc_name)
+            used_by = _collect_zip_used_by(file_path, doc_manager.documents_db.values())
             
             is_archived = len(used_by) > 0
             
@@ -1735,6 +1728,28 @@ def add_zip_record():
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def _normalize_zip_source_path(path_value):
+    if not path_value:
+        return ''
+    return str(path_value).replace('\\', '/').rstrip('/')
+
+
+def _collect_zip_used_by(file_path, metas):
+    """按 ZIP 源路径精确匹配，避免同名文件被误标记为已使用。"""
+    normalized_file_path = _normalize_zip_source_path(file_path)
+    used_by = []
+    for meta in metas or []:
+        meta_source_path = _normalize_zip_source_path(meta.get('source_path') or meta.get('original_path'))
+        if not meta_source_path or meta_source_path != normalized_file_path:
+            continue
+        cycle = meta.get('cycle', '')
+        doc_name = meta.get('doc_name', '')
+        display_name = f"{cycle} - {doc_name}" if cycle else doc_name
+        if display_name and display_name not in used_by:
+            used_by.append(display_name)
+    return used_by
 
 
 # ========== ZIP 大文件断点续传上传 ==========
@@ -2144,18 +2159,28 @@ def search_zip_files():
         keyword = request.args.get('keyword', '').strip().lower()
         package_path = request.args.get('package_path', '').strip()  # 指定ZIP包路径
         project_id = request.args.get('project_id', '').strip()
+        project_config = {}
+        project_uploaded_docs = []
+        project_name = ''
         
         # 如果有 project_id，先加载项目的文档数据到 documents_db
         if project_id:
             project_result = doc_manager.load_project(project_id)
             if project_result and project_result.get('status') == 'success':
-                project_name = project_result.get('project', {}).get('name', '')
+                project_config = project_result.get('project', {})
+                project_name = project_config.get('name', '')
                 if project_name and hasattr(doc_manager, 'data_manager'):
                     # 从索引文件加载文档数据
                     doc_index = doc_manager.data_manager.load_documents_index(project_name)
                     # 将文档数据加载到 documents_db
                     for doc_id, doc_data in doc_index.items():
                         doc_manager.documents_db[doc_id] = doc_data
+                for cycle_name, cycle_info in (project_config.get('documents', {}) or {}).items():
+                    for uploaded_doc in (cycle_info.get('uploaded_docs', []) or []):
+                        project_uploaded_docs.append({
+                            **uploaded_doc,
+                            'cycle': uploaded_doc.get('cycle') or cycle_name
+                        })
 
         # 支持的文档格式
         ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
@@ -2169,11 +2194,10 @@ def search_zip_files():
             # 计算相对路径基准
             rel_base = search_root.parent
         elif project_id:
-            project_result = doc_manager.load_project(project_id)
-            if not project_result or project_result.get('status') != 'success':
+            if not project_config:
                 return jsonify({'status': 'success', 'files': [], 'message': '项目不存在'})
-            project_config = project_result.get('project', {})
-            project_name = project_config.get('name', '')
+            if not project_name:
+                project_name = project_config.get('name', '')
             project_uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
             if not project_uploads_dir.exists():
                 return jsonify({'status': 'success', 'files': [], 'message': '暂无已上传的ZIP文件，请先导入ZIP'})
@@ -2211,14 +2235,7 @@ def search_zip_files():
                     continue
 
             # 检查该文件是否已被归档，并记录被哪些文档使用
-            used_by = []
-            for meta in doc_manager.documents_db.values():
-                if meta.get('original_filename') == file_path.name or meta.get('source_path') == str(file_path):
-                    # 获取文档类型和名称
-                    cycle = meta.get('cycle', '')
-                    doc_name = meta.get('doc_name', '')
-                    if cycle or doc_name:
-                        used_by.append(f"{cycle} - {doc_name}" if cycle else doc_name)
+            used_by = _collect_zip_used_by(file_path, list(doc_manager.documents_db.values()) + project_uploaded_docs)
             
             is_archived = len(used_by) > 0
 
@@ -2384,12 +2401,8 @@ def search_imported_files():
             except ValueError:
                 rel_path = file_path.name
             
-            # 检查该文件是否已被归档（通过 original_filename 匹配）
-            is_archived = any(
-                meta.get('original_filename') == file_path.name or
-                meta.get('source_path') == str(file_path)
-                for meta in doc_manager.documents_db.values()
-            )
+            # 检查该文件是否已被归档（按 ZIP 源路径精确匹配）
+            is_archived = len(_collect_zip_used_by(file_path, doc_manager.documents_db.values())) > 0
             
             results.append({
                 'id': str(file_path),
@@ -2535,12 +2548,8 @@ def list_imported_documents():
             except ValueError:
                 rel_path = file_path.name
 
-            # 检查该文件是否已被归档（通过 original_filename 匹配）
-            is_archived = any(
-                meta.get('original_filename') == file_path.name or
-                meta.get('source_path') == str(file_path)
-                for meta in doc_manager.documents_db.values()
-            )
+            # 检查该文件是否已被归档（按 ZIP 源路径精确匹配）
+            is_archived = len(_collect_zip_used_by(file_path, doc_manager.documents_db.values())) > 0
 
             results.append({
                 'name': file_path.name,
@@ -2590,12 +2599,8 @@ def search_imported_documents():
             except ValueError:
                 rel_path = file_path.name
 
-            # 检查该文件是否已被归档（通过 original_filename 匹配）
-            is_archived = any(
-                meta.get('original_filename') == file_path.name or
-                meta.get('source_path') == str(file_path)
-                for meta in doc_manager.documents_db.values()
-            )
+            # 检查该文件是否已被归档（按 ZIP 源路径精确匹配）
+            is_archived = len(_collect_zip_used_by(file_path, doc_manager.documents_db.values())) > 0
 
             results.append({
                 'name': file_path.name,
@@ -2682,6 +2687,7 @@ def archive_from_zip():
             'doc_name': doc_name,
             'filename': new_filename,
             'original_filename': source_file.name,
+            'source_path': str(source_file),
             'file_path': _norm_path,
             'doc_date': doc_date,
             'sign_date': sign_date,
@@ -2726,6 +2732,7 @@ def archive_from_zip():
                     'doc_name': doc_name,
                     'filename': new_filename,
                     'original_filename': source_file.name,
+                    'source_path': str(source_file),
                     'file_path': normalize_file_path(str(dest_path), project_name, doc_manager.config.projects_base_folder),
                     'doc_date': doc_date,
                     'sign_date': sign_date,

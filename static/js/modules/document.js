@@ -749,11 +749,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
             // 关键字筛选
             if (filterOptions.keyword) {
                 const keyword = filterOptions.keyword.toLowerCase();
-                const docName = doc.name.toLowerCase();
-                const requirement = (doc.requirement || '').toLowerCase();
-                
-                // 检查文档名称或要求中是否包含关键字
-                if (!docName.includes(keyword) && !requirement.includes(keyword)) {
+                const matchesDocType = doc.name.toLowerCase().includes(keyword);
+                const matchesCycle = cycle.toLowerCase().includes(keyword);
+                const matchesFileName = (docsByName[doc.name] || [])
+                    .some(d => (d.original_filename || d.filename || '').toLowerCase().includes(keyword));
+                if (!matchesDocType && !matchesCycle && !matchesFileName) {
                     return false;
                 }
             }
@@ -891,10 +891,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${statusTag}
                                         <div class="doc-type" style="text-align: center;" ${docDescription ? `title="说明: ${escapedDocDescription}"` : ''}>${doc.name}${docDescription ? ' <span style="font-size:12px;color:#7a8798;cursor:help;" title="说明: ' + escapedDocDescription + '">ⓘ</span>' : ''}</div>
-                                        <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">
-                                            ${requirementHtml}
-                                        </div>
-                                    </div>
+                                                    </div>
                                 </div>
                             </td>
                             <td class="col-files">
@@ -2451,6 +2448,9 @@ export function displaySelectedFiles(files, noMatchHint = '') {
     // 注意：此处 files 已经有 rel_dir 字段（来自后端返回），可直接使用
     // 如果没有 rel_dir，从 rel_path 推断
     const normalizedFiles = files.map(f => {
+        if (typeof f.used === 'undefined' && typeof f.archived !== 'undefined') {
+            f = { ...f, used: !!f.archived };
+        }
         if (!f.rel_dir && (f.rel_path || f.path)) {
             const relPath = (f.rel_path || f.path || '').replace(/\\/g, '/');
             const lastSlash = relPath.lastIndexOf('/');
@@ -6304,16 +6304,35 @@ function downloadReportAsPDF() {
 }
 
 async function editReviewResult(docId, current) {
-    const val = prompt('请输入审查结果：', current || '');
-    if (val === null) return;
+    const input = await new Promise((resolve) => {
+        showInputModal('填写审查备注', [
+            {
+                label: '审查备注',
+                key: 'review_result',
+                type: 'textarea',
+                rows: 5,
+                value: current || '',
+                placeholder: '请输入审查备注记录'
+            }
+        ], resolve);
+    });
+    if (input === null) return;
+    if (!input) return;
+
+    const val = input.review_result ?? '';
     try {
         const resp = await fetch(`/api/documents/${encodeURIComponent(docId)}`, {
-            method: 'POST',
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ review_result: val })
         });
-        const result = await resp.json();
-        if (result.status === 'success') {
+
+        const contentType = resp.headers.get('content-type') || '';
+        const result = contentType.includes('application/json')
+            ? await resp.json()
+            : { status: 'error', message: `服务器返回异常响应（${resp.status}）` };
+
+        if (resp.ok && result.status === 'success') {
             showNotification('审查结果已保存', 'success');
             if (appState.currentCycle) await renderCycleDocuments(appState.currentCycle);
         } else {
