@@ -25,6 +25,11 @@ import json
 import shutil
 from pathlib import Path
 from datetime import datetime
+# 自动迁移 runner 支持
+try:
+    from tools.migrate.runner import run_migrations
+except ImportError:
+    run_migrations = None
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -772,6 +777,23 @@ def run_full_migration(db_path=None, check_only=False):
     print('【Step 7/7】迁移运行时数据文件...')
     migrate_runtime_data_files()
     print()
+
+
+    # Step 8: 自动发现并执行 tools/migrate/ 下的增量迁移脚本
+    print('【Step 8/8】自动发现并执行增量迁移脚本...')
+    if run_migrations:
+        try:
+            result = run_migrations(db_path=db_path, check_only=check_only)
+            for detail in result['details']:
+                print(detail)
+            if result['failed'] > 0:
+                print('[ERROR] 存在迁移失败，请检查日志')
+                return False
+        except Exception as e:
+            print(f'[ERROR] 自动迁移脚本执行异常: {e}')
+            return False
+    else:
+        print('[WARN] 未找到自动迁移 runner，跳过增量迁移脚本执行')
 
     print('=' * 60)
     print('  迁移完成！')
