@@ -23,6 +23,7 @@
 import sys
 import os
 import re
+import types
 import sqlite3
 import importlib.util
 from pathlib import Path
@@ -85,11 +86,39 @@ def record_migration(db_path, version):
 
 
 def load_module(script_path):
-    """动态加载迁移脚本模块"""
+    """动态加载迁移脚本模块（支持相对导入）"""
+    package_name = 'tools.migrate'
+
+    if package_name not in sys.modules:
+        parent_name = 'tools'
+        if parent_name not in sys.modules:
+            import types
+            tools_pkg = types.ModuleType(parent_name)
+            tools_pkg.__path__ = [str(MIGRATE_DIR.parent)]
+            tools_pkg.__package__ = parent_name
+            sys.modules[parent_name] = tools_pkg
+
+        pkg_init = MIGRATE_DIR / '__init__.py'
+        pkg_spec = importlib.util.spec_from_file_location(
+            package_name, str(pkg_init),
+            submodule_search_locations=[str(MIGRATE_DIR)]
+        )
+        pkg_module = importlib.util.module_from_spec(pkg_spec)
+        pkg_module.__package__ = package_name
+        sys.modules[package_name] = pkg_module
+        try:
+            pkg_spec.loader.exec_module(pkg_module)
+        except Exception:
+            pass
+
+    module_name = f'{package_name}.{script_path.stem}'
     spec = importlib.util.spec_from_file_location(
-        f'migration_{script_path.stem}', str(script_path)
+        module_name, str(script_path),
+        submodule_search_locations=[]
     )
     module = importlib.util.module_from_spec(spec)
+    module.__package__ = package_name
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
