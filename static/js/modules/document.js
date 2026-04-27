@@ -1,3 +1,24 @@
+// 标注完成按钮处理函数（后续可接入审批流）
+window.handleAnnotationComplete = function(docId, docName) {
+    showConfirmModal('标注完成', `确定将「${docName}」的标注标记为已完成？\n提交后将进入审批流程。`, async () => {
+        showLoading(true);
+        try {
+            // TODO: 调用后端API发起标注完成审批流，当前本地模拟
+            // 这里只做本地状态变更，实际应提交后端并刷新
+            const docDiv = document.querySelector(`[data-review-doc-id="${docId}"]`);
+            if (docDiv) {
+                docDiv.setAttribute('data-annotation-completed', '1');
+                // 简单刷新页面（实际应更细致刷新单条数据）
+                showNotification('标注完成，已提交审批', 'success');
+                setTimeout(() => window.location.reload(), 800);
+            }
+        } catch (e) {
+            showNotification('操作失败: ' + (e.message || e), 'error');
+        } finally {
+            showLoading(false);
+        }
+    });
+};
 /**
  * 文档模块 - 处理文档相关功能
  */
@@ -1037,7 +1058,16 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                     if (window.__docReviewCache && did) {
                                         window.__docReviewCache[did] = d.review_result || '';
                                     }
-                                    return did ? `<div style="margin-bottom:8px;" data-review-doc-id="${escapeAttr(did)}">
+                                    // 标注完成状态判断（后续可由后端/审批流控制，这里先用本地模拟）
+                                    const annotationCompleted = d.annotation_completed;
+                                    let annotationStatusLabel = '';
+                                    let annotationBoxStyle = '';
+                                    if (annotationCompleted) {
+                                        annotationStatusLabel = '<span style="position:absolute;top:0;right:0;background:#28a745;color:#fff;padding:2px 8px;border-radius:0 4px 0 8px;font-size:12px;z-index:2;">已完成</span>';
+                                        annotationBoxStyle = 'border:2px solid #28a745;background:#eaf9ee;position:relative;';
+                                    }
+                                    return did ? `<div style="margin-bottom:8px;position:relative;${annotationBoxStyle}" data-review-doc-id="${escapeAttr(did)}">
+                                        ${annotationStatusLabel}
                                         ${reviewEntries.length > 0 ? reviewEntries.map(entry => `<div style="margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:320px;">
                                             <div style="font-size:11px;color:#5a6b7b;margin-bottom:2px;">${escapeHtml(formatReviewEntryUser(entry))} · ${escapeHtml(formatReviewEntryTime(entry.time))}</div>
                                             <div style="font-size:12px;color:#2f3a44;white-space:pre-wrap;word-break:break-word;line-height:1.4;">${escapeHtml(entry.remark || '')}</div>
@@ -1045,6 +1075,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         <div style="display:flex;flex-wrap:wrap;gap:4px;">
                                             <button onclick="openReviewResultModal('${did}','add','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">核验标注</button>
                                             ${myReviewIdx >= 0 ? `<button onclick="openReviewResultModal('${did}','edit','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#eaf9ee;color:#1f8e3d;cursor:pointer;">修改我的标注</button>` : ''}
+                                            ${!annotationCompleted ? `<button onclick="handleAnnotationComplete('${did}','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#fff;color:#28a745;cursor:pointer;">完成</button>` : ''}
                                         </div>
                                     </div>` : '';
                                 }).join('') : '<span style="font-size:12px;color:#ccc;">—</span>'}

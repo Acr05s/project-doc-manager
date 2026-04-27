@@ -878,9 +878,36 @@ async function refreshHeaderMarquee() {
         if (result.status === 'success' && result.messages && result.messages.length > 0) {
             const texts = result.messages.slice(0, 5).map(m => {
                 const prefix = '🔴 ';
-                return prefix + m.title + '：' + (m.content || '').substring(0, 40);
+                // 去除HTML标签
+                let content = String(m.content || '').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+                    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s+/g, ' ').trim();
+                // 检查进度（如“80%”或“进度：80%”）
+                let progress = null;
+                let progressMatch = content.match(/([1-9]?\d|100)%/);
+                if (!progressMatch) {
+                    // 兼容“进度：80”
+                    progressMatch = content.match(/进度[:：\s]*([1-9]?\d|100)/);
+                }
+                if (progressMatch) {
+                    progress = parseInt(progressMatch[1], 10);
+                    if (isNaN(progress) || progress < 0 || progress > 100) progress = null;
+                }
+                let progressBarHtml = '';
+                if (progress !== null) {
+                    progressBarHtml = `<span style="display:inline-block;vertical-align:middle;width:60px;height:8px;background:#eee;border-radius:4px;margin:0 6px 0 2px;overflow:hidden;position:relative;top:1px;">
+                        <span style="display:block;height:100%;width:${progress}%;background:#28a745;border-radius:4px;"></span>
+                    </span><span style="font-size:11px;color:#28a745;">${progress}%</span>`;
+                }
+                // 拼接内容
+                let displayText = prefix + m.title + '：' + content.slice(0, 40);
+                if (progressBarHtml) {
+                    displayText += ' ' + progressBarHtml;
+                }
+                return displayText;
             });
-            marqueeText.textContent = texts.join('　　｜　　');
+            marqueeText.innerHTML = texts.join('　　｜　　');
             marqueeText.classList.remove('no-scroll');
             if (marqueeWrap) marqueeWrap.style.visibility = 'visible';
         } else {
