@@ -770,6 +770,23 @@ export async function getCycleDocuments(cycle) {
 }
 
 /**
+ * 根据文档ID获取单个文档信息
+ */
+export async function getDocumentById(docId) {
+    try {
+        const response = await fetch(`/api/documents/${encodeURIComponent(docId)}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+        const result = await response.json();
+        return result.data || null;
+    } catch (e) {
+        console.error('获取文档信息失败:', e);
+        return null;
+    }
+}
+
+/**
  * 计算周期进度
  */
 export async function calculateCycleProgress(cycle) {

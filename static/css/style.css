@@ -5080,3 +5080,49 @@ select.input-modal-input {
     color: white;
 }
 
+/* 审批流程工具提示 */
+.approval-flow-tooltip {
+    position: fixed;
+    background: #fff;
+    border: 1px solid #28a745;
+    color: #222;
+    padding: 8px 16px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    z-index: 9999;
+}
+
+/* 标注完成信息块 */
+.annotation-completed-block {
+    margin: 4px 0 0 0;
+    padding: 4px 8px;
+    background: #eaf9ee;
+    border: 1px solid #28a745;
+    border-radius: 3px;
+    font-size: 12px;
+    position: relative;
+}
+
+/* 标注完成标签 */
+.annotation-completed-label {
+    background: #28a745;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 0 4px 0 8px;
+    font-size: 12px;
+    z-index: 2;
+    cursor: pointer;
+}
+
+/* 标注完成按钮 */
+.annotation-complete-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid #28a745;
+    border-radius: 3px;
+    background: #fff;
+    color: #28a745;
+    cursor: pointer;
+    margin-top: 4px;
+}
+

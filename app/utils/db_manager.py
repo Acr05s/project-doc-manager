@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import threading
 import tempfile
+import logging
 from typing import Dict, Any, Optional, List, Callable, Union
 from pathlib import Path
 from contextlib import contextmanager
@@ -1162,7 +1163,7 @@ class ProjectDocumentsDB(DatabaseManager):
                 matched_file TEXT,
                 matched_time TEXT,
                 archived INTEGER DEFAULT 0,
-                -- 盖章和签字字段
+                -- Seal and signature fields
                 has_seal INTEGER DEFAULT 0,
                 party_a_seal INTEGER DEFAULT 0,
                 party_b_seal INTEGER DEFAULT 0,
@@ -1172,9 +1173,13 @@ class ProjectDocumentsDB(DatabaseManager):
                 party_b_signer TEXT,
                 doc_date TEXT,
                 sign_date TEXT,
-                directory TEXT,
+                directory TEXT DEFAULT '/',
                 source TEXT,
-                root_directory TEXT
+                root_directory TEXT,
+                -- Extended fields
+                custom_attrs TEXT DEFAULT '{}',
+                review_result TEXT DEFAULT '',
+                last_modified TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -1393,7 +1398,7 @@ class ProjectDocumentsDB(DatabaseManager):
             'has_seal', 'party_a_seal', 'party_b_seal', 'no_seal',
             'no_signature', 'party_a_signer', 'party_b_signer',
             'doc_date', 'sign_date', 'directory', 'source',
-            'root_directory', 'review_result', 'last_modified'
+            'root_directory', 'review_result', 'last_modified', 'custom_attrs'
         ]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         
@@ -1403,9 +1408,23 @@ class ProjectDocumentsDB(DatabaseManager):
             updates['last_modified'] = datetime.now().isoformat()
         
         # 特殊处理 custom_attrs（需要序列化为JSON）
-        if 'custom_attrs' in kwargs:
+        if 'custom_attrs' in updates:
             import json
-            updates['custom_attrs'] = json.dumps(kwargs['custom_attrs'] or {}, ensure_ascii=False)
+            # 直接从 kwargs 中获取原始值，避免受 updates 影响
+            original_value = kwargs.get('custom_attrs')
+            
+            # 输入验证：确保 custom_attrs 为字典类型
+            if original_value is None:
+                updates['custom_attrs'] = '{}'
+            elif not isinstance(original_value, dict):
+                logging.error(f"custom_attrs 类型错误: 期望 dict，实际为 {type(original_value).__name__}")
+                updates['custom_attrs'] = '{}'
+            else:
+                try:
+                    updates['custom_attrs'] = json.dumps(original_value, ensure_ascii=False)
+                except Exception as e:
+                    logging.error(f"custom_attrs 序列化失败: {e}, 原始值: {original_value}")
+                    updates['custom_attrs'] = '{}'
 
         if not updates:
             return True

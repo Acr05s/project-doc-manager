@@ -1,5 +1,151 @@
-// 标注完成按钮处理函数（后续可接入审批流）
+import { getDocumentById } from './api.js';
+import { authState } from './auth.js';
+
+// 每条标注独立完成按钮处理
+window.handleAnnotationCompletePerEntry = async function(docId, docName, entryId) {
+    // 参数验证
+    if (!docId || !docName || !entryId) {
+        showNotification('参数错误', 'error');
+        return;
+    }
+    
+    // 检查用户登录状态
+    if (!authState.user) {
+        showNotification('请先登录后再操作', 'error');
+        return;
+    }
+    
+    showInputModal('标注完成', '请输入完成情况说明', async (content) => {
+        if (!content || !content.trim()) {
+            showNotification('请输入完成说明', 'warning');
+            return false;
+        }
+        
+        try {
+            const cycle = appState.currentCycle;
+            
+            // 检查周期是否存在
+            if (!cycle) {
+                showNotification('请先选择周期', 'error');
+                return false;
+            }
+            
+            // 直接根据文档ID查询单个文档，提高性能
+            const docObj = await getDocumentById(docId);
+            
+            if (!docObj) {
+                showNotification('文档不存在', 'error');
+                return false;
+            }
+            
+            // 获取现有的 custom_attrs 或初始化
+            let customAttrs = {};
+            if (docObj.custom_attrs) {
+                try {
+                    customAttrs = JSON.parse(docObj.custom_attrs);
+                } catch (e) {
+                    console.warn('解析custom_attrs失败:', e);
+                    showNotification('数据格式错误，请重新操作', 'error');
+                    return false;
+                }
+            }
+            // 获取现有的标注完成信息或初始化
+            const annotationComplete = customAttrs._annotationComplete || {};
+            // 添加新的标注完成记录
+            annotationComplete[entryId] = {
+                user: authState.user?.display_name || authState.user?.username || '当前用户',
+                time: new Date().toISOString(),
+                content: content.trim()
+            };
+            
+            // 更新 custom_attrs
+            customAttrs._annotationComplete = annotationComplete;
+            
+            // 调用后端API保存（带超时机制）
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            let resp;
+            try {
+                resp = await fetch(`/api/documents/${encodeURIComponent(docId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ custom_attrs: customAttrs }),
+                    signal: controller.signal
+                });
+            } catch (fetchError) {
+                if (fetchError.name === 'AbortError') {
+                    showNotification('请求超时，请重试', 'error');
+                } else {
+                    showNotification('网络错误：' + fetchError.message, 'error');
+                }
+                return false;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+            
+            const contentType = resp.headers.get('content-type') || '';
+            let result;
+            try {
+                if (contentType.includes('application/json')) {
+                    result = await resp.json();
+                } else {
+                    // 处理非JSON响应
+                    const text = await resp.text();
+                    result = { 
+                        status: 'error', 
+                        message: `服务器返回非JSON响应（${resp.status}）: ${text.slice(0, 100)}...` 
+                    };
+                }
+            } catch (jsonError) {
+                // 处理JSON解析错误
+                showNotification('服务器响应格式错误，请重试', 'error');
+                return false;
+            }
+            
+            if (resp.ok && result.status === 'success') {
+                // 更新内存对象
+                docObj.custom_attrs = JSON.stringify(customAttrs);
+                docObj._annotationComplete = annotationComplete;
+                
+                // 重新渲染当前周期文档
+                if (typeof renderCycleDocuments === 'function') {
+                    renderCycleDocuments(cycle);
+                }
+                showNotification('标注完成，已提交审批', 'success');
+            } else {
+                showNotification(result.message || '保存失败', 'error');
+            }
+        } catch (e) {
+            showNotification('保存失败: ' + e.message, 'error');
+        }
+    });
+};
+
+// 鼠标悬停显示审批流程提示（可后续接入真实数据）
+window.showApprovalFlowTooltip = function(event, docId, entryId) {
+    let tooltip = document.getElementById('approvalFlowTooltip');
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'approvalFlowTooltip';
+        tooltip.className = 'approval-flow-tooltip';
+        document.body.appendChild(tooltip);
+    }
+    tooltip.innerHTML = '审批流程：<br>（此处可展示审批流详情）';
+    tooltip.style.display = 'block';
+    tooltip.style.left = (event.clientX + 12) + 'px';
+    tooltip.style.top = (event.clientY + 8) + 'px';
+};
+window.hideApprovalFlowTooltip = function() {
+    const tooltip = document.getElementById('approvalFlowTooltip');
+    if (tooltip) tooltip.style.display = 'none';
+};
+// 旧版标注完成按钮处理函数（已废弃，请使用 handleAnnotationCompletePerEntry）
 window.handleAnnotationComplete = function(docId, docName) {
+    showNotification('此功能已废弃，请使用每条标注的独立完成按钮', 'warning');
+    return;
+    
+    // 以下是旧的本地模拟实现，已废弃
+    /*
     showConfirmModal('标注完成', `确定将「${docName}」的标注标记为已完成？\n提交后将进入审批流程。`, async () => {
         showLoading(true);
         try {
@@ -8,9 +154,22 @@ window.handleAnnotationComplete = function(docId, docName) {
             const docDiv = document.querySelector(`[data-review-doc-id="${docId}"]`);
             if (docDiv) {
                 docDiv.setAttribute('data-annotation-completed', '1');
-                // 简单刷新页面（实际应更细致刷新单条数据）
+                docDiv.style.border = '2px solid #28a745';
+                docDiv.style.background = '#eaf9ee';
+                // 若无已完成标签则添加
+                if (!docDiv.querySelector('.annotation-completed-label')) {
+                    const label = document.createElement('span');
+                    label.className = 'annotation-completed-label';
+                    label.style.cssText = 'position:absolute;top:0;right:0;background:#28a745;color:#fff;padding:2px 8px;border-radius:0 4px 0 8px;font-size:12px;z-index:2;';
+                    label.innerText = '已完成';
+                    docDiv.appendChild(label);
+                }
+                // 隐藏完成按钮
+                const btns = docDiv.querySelectorAll('button');
+                btns.forEach(btn => {
+                    if (btn.innerText === '完成') btn.style.display = 'none';
+                });
                 showNotification('标注完成，已提交审批', 'success');
-                setTimeout(() => window.location.reload(), 800);
             }
         } catch (e) {
             showNotification('操作失败: ' + (e.message || e), 'error');
@@ -18,6 +177,7 @@ window.handleAnnotationComplete = function(docId, docName) {
             showLoading(false);
         }
     });
+    */
 };
 /**
  * 文档模块 - 处理文档相关功能
@@ -1066,18 +1226,49 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         annotationStatusLabel = '<span style="position:absolute;top:0;right:0;background:#28a745;color:#fff;padding:2px 8px;border-radius:0 4px 0 8px;font-size:12px;z-index:2;">已完成</span>';
                                         annotationBoxStyle = 'border:2px solid #28a745;background:#eaf9ee;position:relative;';
                                     }
-                                    return did ? `<div style="margin-bottom:8px;position:relative;${annotationBoxStyle}" data-review-doc-id="${escapeAttr(did)}">
-                                        ${annotationStatusLabel}
-                                        ${reviewEntries.length > 0 ? reviewEntries.map(entry => `<div style="margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:320px;">
-                                            <div style="font-size:11px;color:#5a6b7b;margin-bottom:2px;">${escapeHtml(formatReviewEntryUser(entry))} · ${escapeHtml(formatReviewEntryTime(entry.time))}</div>
-                                            <div style="font-size:12px;color:#2f3a44;white-space:pre-wrap;word-break:break-word;line-height:1.4;">${escapeHtml(entry.remark || '')}</div>
-                                        </div>`).join('') : '<div style="font-size:12px;color:#bbb;margin-bottom:4px;">暂无核查标注</div>'}
+                                    // 没有文档ID时显示提示信息
+                                    if (!did) {
+                                        return '<span style="font-size:12px;color:#999;">暂无标注</span>';
+                                    }
+                                    // 从 custom_attrs 中读取标注完成信息
+                                    if (d.custom_attrs) {
+                                        try {
+                                            const customAttrs = typeof d.custom_attrs === 'string' 
+                                                ? JSON.parse(d.custom_attrs) 
+                                                : d.custom_attrs;
+                                            if (customAttrs._annotationComplete) {
+                                                d._annotationComplete = customAttrs._annotationComplete;
+                                            }
+                                        } catch (e) {
+                                            // 解析失败时忽略
+                                        }
+                                    }
+                                    d._annotationComplete = d._annotationComplete || {};
+                                    return `<div style="margin-bottom:8px;position:relative;${annotationBoxStyle}" data-review-doc-id="${escapeAttr(did)}">
+                                        ${reviewEntries.map((entry, idx) => {
+                                            const completeInfo = d._annotationComplete[entry.id];
+                                            let completeBlock = '';
+                                            if (completeInfo) {
+                                                completeBlock = `<div class="annotation-completed-block">
+                                                    <span class="annotation-completed-label" title="点击查看审批流程" onmouseover="window.showApprovalFlowTooltip && window.showApprovalFlowTooltip(event, '${did}', '${entry.id}')" onmouseout="window.hideApprovalFlowTooltip && window.hideApprovalFlowTooltip()">已完成</span>
+                                                    <span style="margin-left:8px;color:#1f8e3d;">${escapeHtml(completeInfo.user)}</span>
+                                                    <span style="margin-left:8px;color:#888;">${escapeHtml(completeInfo.time)}</span>
+                                                    <div style="margin-top:2px;color:#333;">${escapeHtml(completeInfo.content)}</div>
+                                                </div>`;
+                                            } else {
+                                                completeBlock = `<button class="annotation-complete-btn" onclick="handleAnnotationCompletePerEntry('${did}','${doc.name}','${entry.id}')">完成</button>`;
+                                            }
+                                            return `<div style=\"margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:320px;\">\n\
+                                                <div style=\"font-size:11px;color:#5a6b7b;margin-bottom:2px;\">${escapeHtml(formatReviewEntryUser(entry))} · ${escapeHtml(formatReviewEntryTime(entry.time))}</div>\n\
+                                                <div style=\"font-size:12px;color:#2f3a44;white-space:pre-wrap;word-break:break-word;line-height:1.4;\">${escapeHtml(entry.remark || '')}</div>\n\
+                                                ${completeBlock}\n\
+                                            </div>`;
+                                        }).join('')}
                                         <div style="display:flex;flex-wrap:wrap;gap:4px;">
                                             <button onclick="openReviewResultModal('${did}','add','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">核验标注</button>
                                             ${myReviewIdx >= 0 ? `<button onclick="openReviewResultModal('${did}','edit','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#eaf9ee;color:#1f8e3d;cursor:pointer;">修改我的标注</button>` : ''}
-                                            ${!annotationCompleted ? `<button onclick="handleAnnotationComplete('${did}','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#fff;color:#28a745;cursor:pointer;">完成</button>` : ''}
                                         </div>
-                                    </div>` : '';
+                                    </div>`;
                                 }).join('') : '<span style="font-size:12px;color:#ccc;">—</span>'}
                             </td>
                             <td class="col-action">
