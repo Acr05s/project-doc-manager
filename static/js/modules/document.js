@@ -1,5 +1,3 @@
-import { getDocumentById } from './api.js';
-import { authState } from './auth.js';
 
 // 每条标注独立完成按钮处理
 window.handleAnnotationCompletePerEntry = async function(docId, docName, entryId) {
@@ -186,7 +184,7 @@ window.handleAnnotationComplete = function(docId, docName) {
 import { appState, elements } from './app-state.js';
 import { authState, hasDocOpPermission, fetchMenuPermissions } from './auth.js';
 import { showNotification, showLoading, showOperationProgress, showConfirmModal, showInputModal, openModal, closeModal, showDirectorySelectModal, initResizableColumns } from './ui.js';
-import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers, getApprovalHistory } from './api.js';
+import { uploadDocument, editDocument, deleteDocument, getCycleDocuments, loadImportedDocuments, searchImportedDocuments, loadProject, archiveProjectDocuments, submitArchiveRequest, getArchiveRequests, approveArchiveRequest, rejectArchiveRequest, getArchiveApprovers, getApprovalHistory, getDocumentById } from './api.js';
 import { handleZipArchive, fixZipSelectionIssue } from './zip.js';
 import { buildDisplayRequirementText, buildUploadAttributeSchema, getCustomAttributeDefinitions, getPredefinedAttributeLabelMap } from './attribute-definitions.js';
 

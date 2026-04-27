@@ -522,12 +522,7 @@ cmd_upgrade() {
                 fi
             else
                 echo -e "${RED}[ERROR] Git pull failed! Please check your network or resolve conflicts.${NC}"
-                # 如果之前正在运行，尝试重新启动
-                if [ "$WAS_RUNNING" = true ]; then
-                    echo -e "${YELLOW}Attempting to restart server...${NC}"
-                    cmd_start
-                fi
-                exit 1
+                echo -e "${YELLOW}Will still attempt to run migrations on existing code...${NC}"
             fi
         fi
     fi
@@ -562,7 +557,18 @@ cmd_upgrade() {
         echo -e "${YELLOW}Running database migration...${NC}"
         run_db_migrate
     else
-        echo -e "${GREEN}No migration needed. Skipping migration steps.${NC}"
+        echo -e "${GREEN}No branch migration needed.${NC}"
+        # 仍然执行增量迁移脚本（tools/migrate/ 目录）
+        if [ -f "$APP_DIR/tools/migrate/runner.py" ]; then
+            echo -e "${BLUE}Running incremental migrations (tools/migrate/) ...${NC}"
+            "$PYTHON_BIN" "$APP_DIR/tools/migrate/runner.py"
+            local INCR_RET=$?
+            if [ $INCR_RET -eq 0 ]; then
+                echo -e "${GREEN}[OK] Incremental migrations complete${NC}"
+            else
+                echo -e "${RED}[ERROR] Incremental migration failed (exit code $INCR_RET)${NC}"
+            fi
+        fi
     fi
     
     # 启动服务器
