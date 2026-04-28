@@ -439,6 +439,11 @@ export async function openArchiveApprovalConfigModal(projectId) {
             if (section) section.style.display = requireApproval ? 'block' : 'none';
         }
 
+        const requireAnnotationApproval = document.getElementById('requireAnnotationApproval');
+        if (requireAnnotationApproval) {
+            requireAnnotationApproval.checked = project.require_annotation_approval !== false;
+        }
+
         const modal = document.getElementById('archiveApprovalConfigModal');
         if (modal) {
             modal.classList.add('show');
@@ -473,6 +478,7 @@ export async function handleArchiveApprovalConfigSave(e) {
 
     const projectId = document.getElementById('archiveConfigProjectId').value;
     const requireArchiveApproval = !!document.getElementById('requireArchiveApproval')?.checked;
+    const requireAnnotationApproval = !!document.getElementById('requireAnnotationApproval')?.checked;
     const approvalModeEl = document.querySelector('input[name="archiveApprovalMode"]:checked');
     const approvalMode = approvalModeEl ? approvalModeEl.value : 'two_level';
     const unarchiveRequiresApproval = !!document.getElementById('unarchiveRequiresApproval')?.checked;
@@ -490,7 +496,8 @@ export async function handleArchiveApprovalConfigSave(e) {
             body: JSON.stringify({
                 archive_approval_mode: approvalMode,
                 unarchive_requires_approval: unarchiveRequiresApproval,
-                require_archive_approval: requireArchiveApproval
+                require_archive_approval: requireArchiveApproval,
+                require_annotation_approval: requireAnnotationApproval
             })
         });
 
@@ -504,6 +511,7 @@ export async function handleArchiveApprovalConfigSave(e) {
                 appState.projectConfig.archive_approval_mode = approvalMode;
                 appState.projectConfig.unarchive_requires_approval = unarchiveRequiresApproval;
                 appState.projectConfig.require_archive_approval = requireArchiveApproval;
+                appState.projectConfig.require_annotation_approval = requireAnnotationApproval;
             }
         } else {
             showNotification('保存失败: ' + result.message, 'error');

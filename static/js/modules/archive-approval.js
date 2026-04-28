@@ -63,7 +63,11 @@ async function loadPendingArchiveApprovals() {
 
         const approvals = result.approvals || [];
         if (approvals.length === 0) {
-            container.innerHTML = '<div class="empty-tip">暂无待审批的文档归档请求</div>';
+            container.innerHTML = '';
+            await loadPendingAnnotationApprovals(container);
+            if (!container.innerHTML.trim()) {
+                container.innerHTML = '<div class="empty-tip">暂无待审批请求</div>';
+            }
             return;
         }
 
@@ -125,9 +129,74 @@ async function loadPendingArchiveApprovals() {
 
         html += '</tbody></table>';
         container.innerHTML = html;
+
+        // 加载标注完成待审批
+        await loadPendingAnnotationApprovals(container);
     } catch (error) {
         console.error('加载待审批列表失败:', error);
         container.innerHTML = '<div class="empty-tip">加载失败</div>';
+    }
+}
+
+/**
+ * 加载待审批的标注完成请求（追加到容器）
+ */
+async function loadPendingAnnotationApprovals(container) {
+    try {
+        const response = await fetch('/api/projects/annotation/pending');
+        if (!response.ok) return;
+        const result = await response.json();
+        if (result.status !== 'success') return;
+
+        const approvals = result.approvals || [];
+        if (approvals.length === 0) return;
+
+        let html = '<h4 style="margin:16px 0 8px;font-size:14px;color:#333;">标注完成审批</h4>';
+        html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+        html += '<thead><tr style="background:#e8f5e9; font-weight:bold;">';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">项目</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">周期</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">文档</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">标注内容</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">完成说明</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">申请人</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:left;">审批进度</th>';
+        html += '<th style="padding:8px; border:1px solid #ddd; text-align:center;">操作</th>';
+        html += '</tr></thead><tbody>';
+
+        approvals.forEach(a => {
+            const stages = a.approval_stages || [];
+            let stageDisplay = '';
+            if (stages.length > 0) {
+                stageDisplay = stages.map((s, i) => {
+                    const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : `Level${i+1}`;
+                    if (s.status === 'approved') return `✓ ${roleName}`;
+                    if (s.status === 'rejected') return `✗ ${roleName}`;
+                    return `⏳ ${roleName}`;
+                }).join(' → ');
+            }
+
+            const annDataBase64 = btoa(encodeURIComponent(JSON.stringify(a)));
+
+            html += '<tr>';
+            html += `<td style="padding:8px; border:1px solid #ddd;">${escapeHtml(a.project_name || a.project_id || '-')}</td>`;
+            html += `<td style="padding:8px; border:1px solid #ddd;">${escapeHtml(a.cycle || '-')}</td>`;
+            html += `<td style="padding:8px; border:1px solid #ddd; font-size:12px;">${escapeHtml(a.doc_name || '-')}</td>`;
+            html += `<td style="padding:8px; border:1px solid #ddd; font-size:12px; max-width:150px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.entry_remark || '-')}</td>`;
+            html += `<td style="padding:8px; border:1px solid #ddd; font-size:12px; max-width:150px;">${escapeHtml(a.complete_content || '-')}</td>`;
+            html += `<td style="padding:8px; border:1px solid #ddd;">${escapeHtml(a.requester_username || '-')}</td>`;
+            html += `<td style="padding:8px; border:1px solid #ddd; font-size:12px;">${stageDisplay}</td>`;
+            html += '<td style="padding:8px; border:1px solid #ddd; text-align:center;">';
+            html += `<button class="btn btn-sm btn-success" onclick="handleAnnotationApproval('${escapeHtml(a.id)}', 'approve', '${annDataBase64}')" style="margin-right:4px;">批准</button>`;
+            html += `<button class="btn btn-sm btn-warning" onclick="handleAnnotationApproval('${escapeHtml(a.id)}', 'reject', '${annDataBase64}')">驳回</button>`;
+            html += '</td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML += html;
+    } catch (e) {
+        console.warn('加载标注完成审批失败:', e);
     }
 }
 
@@ -648,6 +717,209 @@ export async function handleWithdrawArchiveRequest(projectId, approvalId) {
     }
 }
 
+/**
+ * 处理标注完成审批（批准/驳回）
+ */
+async function handleAnnotationApproval(approvalId, action, approvalDataBase64) {
+    let approval;
+    try {
+        approval = JSON.parse(decodeURIComponent(atob(approvalDataBase64)));
+    } catch (e) {
+        showNotification('数据解析失败', 'error');
+        return;
+    }
+
+    const projectId = approval.project_id;
+    if (!projectId) {
+        showNotification('项目信息缺失', 'error');
+        return;
+    }
+
+    if (action === 'reject') {
+        // 驳回：先输入原因
+        const reasonResult = await new Promise(resolve => {
+            showInputModal('驳回标注完成', [
+                { key: 'reject_reason', label: '驳回原因', type: 'textarea', placeholder: '请输入驳回原因' }
+            ], resolve);
+        });
+        if (!reasonResult || !reasonResult.reject_reason) {
+            showNotification('已取消', 'info');
+            return;
+        }
+
+        // 获取审批安全码
+        const codeResult = await promptAnnotationApprovalCode(projectId, approvalId);
+        if (!codeResult) return;
+
+        try {
+            const resp = await fetch(`/api/projects/${projectId}/annotation-reject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    approval_id: approvalId,
+                    reject_reason: reasonResult.reject_reason,
+                    approver_id: codeResult.approver_id,
+                    approval_code: codeResult.approval_code,
+                    new_approval_code: codeResult.new_approval_code || ''
+                })
+            });
+            const result = await resp.json();
+            if (result.status === 'success') {
+                showNotification('已驳回', 'success');
+            } else if (result.status === 'needs_change') {
+                const newCodeResult = await new Promise(resolve => {
+                    showInputModal('首次使用审批安全码，请设置', [
+                        { label: '当前登录密码', key: 'approval_code', type: 'password', placeholder: '输入当前登录密码' },
+                        { label: '新审批安全码', key: 'new_approval_code', type: 'password', placeholder: '至少8位，包含字母和数字' }
+                    ], resolve);
+                });
+                if (newCodeResult && newCodeResult.approval_code && newCodeResult.new_approval_code) {
+                    const retryResp = await fetch(`/api/projects/${projectId}/annotation-reject`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            approval_id: approvalId,
+                            reject_reason: reasonResult.reject_reason,
+                            approver_id: codeResult.approver_id,
+                            approval_code: newCodeResult.approval_code,
+                            new_approval_code: newCodeResult.new_approval_code
+                        })
+                    });
+                    const retryResult = await retryResp.json();
+                    if (retryResult.status === 'success') {
+                        showNotification('已驳回', 'success');
+                    } else {
+                        showNotification('驳回失败: ' + (retryResult.message || ''), 'error');
+                    }
+                }
+            } else {
+                showNotification('驳回失败: ' + (result.message || ''), 'error');
+            }
+        } catch (e) {
+            showNotification('驳回失败: ' + e.message, 'error');
+        }
+    } else {
+        // 批准
+        const codeResult = await promptAnnotationApprovalCode(projectId, approvalId);
+        if (!codeResult) return;
+
+        try {
+            const resp = await fetch(`/api/projects/${projectId}/annotation-approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    approval_id: approvalId,
+                    approver_id: codeResult.approver_id,
+                    approval_code: codeResult.approval_code,
+                    new_approval_code: codeResult.new_approval_code || '',
+                    force_require_code: true
+                })
+            });
+            const result = await resp.json();
+            if (result.status === 'success') {
+                showNotification(result.message || '审批通过', 'success');
+            } else if (result.status === 'needs_change') {
+                const newCodeResult = await new Promise(resolve => {
+                    showInputModal('首次使用审批安全码，请设置', [
+                        { label: '当前登录密码', key: 'approval_code', type: 'password', placeholder: '输入当前登录密码' },
+                        { label: '新审批安全码', key: 'new_approval_code', type: 'password', placeholder: '至少8位，包含字母和数字' }
+                    ], resolve);
+                });
+                if (newCodeResult && newCodeResult.approval_code && newCodeResult.new_approval_code) {
+                    const retryResp = await fetch(`/api/projects/${projectId}/annotation-approve`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            approval_id: approvalId,
+                            approver_id: codeResult.approver_id,
+                            approval_code: newCodeResult.approval_code,
+                            new_approval_code: newCodeResult.new_approval_code,
+                            force_require_code: true
+                        })
+                    });
+                    const retryResult = await retryResp.json();
+                    if (retryResult.status === 'success') {
+                        showNotification(retryResult.message || '审批通过', 'success');
+                    } else {
+                        showNotification('审批失败: ' + (retryResult.message || ''), 'error');
+                    }
+                }
+            } else {
+                showNotification('审批失败: ' + (result.message || ''), 'error');
+            }
+        } catch (e) {
+            showNotification('审批失败: ' + e.message, 'error');
+        }
+    }
+
+    await loadPendingArchiveApprovals();
+    // 刷新文档列表
+    try {
+        if (appState.currentCycle) {
+            const { renderCycleDocuments } = await import('./document.js');
+            await renderCycleDocuments(appState.currentCycle);
+        }
+    } catch (e) { /* ignore */ }
+}
+
+/**
+ * 标注完成审批安全码输入
+ */
+async function promptAnnotationApprovalCode(projectId, approvalId) {
+    let approvers = [];
+    try {
+        const resp = await fetch(`/api/projects/${projectId}/annotation-approvers?approval_id=${encodeURIComponent(approvalId)}`);
+        const data = await resp.json();
+        if (data.status === 'success' && data.approvers) {
+            approvers = data.approvers;
+        }
+    } catch (e) { /* ignore */ }
+
+    const currentUserId = authState.user?.id;
+    const currentUsername = authState.user?.username;
+    let matchedApprover = null;
+    if (currentUserId) {
+        matchedApprover = approvers.find(a => String(a.id) === String(currentUserId));
+    }
+    if (!matchedApprover && currentUsername) {
+        matchedApprover = approvers.find(a => a.username === currentUsername);
+    }
+
+    return new Promise((resolve) => {
+        const fields = [];
+        if (!matchedApprover && approvers.length > 1) {
+            fields.push({
+                label: '选择审批人身份',
+                key: 'approver_id',
+                type: 'select',
+                options: approvers.map(a => ({
+                    value: String(a.id),
+                    label: `${a.display_name ? a.username + '（' + a.display_name + '）' : a.username}（${a.role === 'pmo' ? 'PMO' : a.role === 'pmo_leader' ? 'PMO负责人' : a.role === 'project_admin' ? '项目经理' : a.role}）`
+                })),
+                placeholder: '请选择你的身份'
+            });
+        }
+        fields.push({
+            label: '审批安全码',
+            key: 'approval_code',
+            type: 'password',
+            placeholder: '输入审批安全码'
+        });
+        showInputModal('标注完成审批 - 请输入审批安全码', fields, (result) => {
+            if (!result || !result.approval_code) {
+                resolve(null);
+                return;
+            }
+            if (matchedApprover) {
+                result.approver_id = String(matchedApprover.id);
+            } else if (approvers.length === 1) {
+                result.approver_id = String(approvers[0].id);
+            }
+            resolve(result);
+        });
+    });
+}
+
 // 导出全局可访问的函数
 window.openArchiveApprovalModal = openArchiveApprovalModal;
 window.closeArchiveApprovalModal = closeArchiveApprovalModal;
@@ -659,3 +931,4 @@ window.handleSelectPMOApproverConfirm = handleSelectPMOApproverConfirm;
 window.handleArchiveApprovalReject = handleArchiveApprovalReject;
 window.handleWithdrawArchiveRequest = handleWithdrawArchiveRequest;
 window.handleArchiveApprovalReject = handleArchiveApprovalReject;
+window.handleAnnotationApproval = handleAnnotationApproval;

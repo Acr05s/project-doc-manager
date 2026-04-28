@@ -1617,6 +1617,133 @@ class UserManager:
                     return True
             return False
 
+    # ===== 标注完成审批 (annotation_approvals) =====
+
+    def create_annotation_approval(self, project_id, cycle, doc_id, doc_name, entry_id, entry_remark, complete_content, requester_id, requester_username):
+        """创建标注完成审批请求"""
+        try:
+            new_uuid = str(uuid_module.uuid4())
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''INSERT INTO annotation_approvals
+                       (uuid, project_id, cycle, doc_id, doc_name, entry_id, entry_remark, complete_content,
+                        requester_id, requester_username, status, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
+                    (new_uuid, project_id, cycle, doc_id, doc_name, entry_id, entry_remark, complete_content,
+                     requester_id, requester_username, now_with_timezone().isoformat())
+                )
+                conn.commit()
+                return {'status': 'success', 'id': cursor.lastrowid, 'uuid': new_uuid}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def get_annotation_approvals(self, project_id, status=None):
+        """查询项目的标注完成审批列表"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            sql = 'SELECT * FROM annotation_approvals WHERE project_id = ?'
+            params = [project_id]
+            if status:
+                sql += ' AND status = ?'
+                params.append(status)
+            sql += ' ORDER BY created_at DESC'
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                if isinstance(item.get('approval_stages'), str):
+                    try:
+                        item['approval_stages'] = json.loads(item['approval_stages'])
+                    except:
+                        item['approval_stages'] = []
+                if isinstance(item.get('stage_history'), str):
+                    try:
+                        item['stage_history'] = json.loads(item['stage_history'])
+                    except:
+                        item['stage_history'] = []
+                result.append(item)
+            return result
+
+    def get_annotation_approval_by_uuid(self, approval_uuid):
+        """根据 UUID 获取标注完成审批"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM annotation_approvals WHERE uuid = ?', (approval_uuid,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            if isinstance(item.get('approval_stages'), str):
+                try:
+                    item['approval_stages'] = json.loads(item['approval_stages'])
+                except:
+                    item['approval_stages'] = []
+            if isinstance(item.get('stage_history'), str):
+                try:
+                    item['stage_history'] = json.loads(item['stage_history'])
+                except:
+                    item['stage_history'] = []
+            return item
+
+    def get_pending_annotation_approvals_for_user(self, user_id, user_role):
+        """获取用户待审批的标注完成请求"""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''SELECT * FROM annotation_approvals
+                       WHERE status IN ('pending', 'stage_approved')
+                       ORDER BY created_at DESC'''
+                )
+                approvals = []
+                for row in cursor.fetchall():
+                    item = dict(row)
+                    try:
+                        approval_stages = json.loads(item.get('approval_stages', '[]'))
+                    except:
+                        approval_stages = []
+
+                    current_stage = item.get('current_stage', 1)
+                    if not approval_stages or current_stage < 1 or current_stage > len(approval_stages):
+                        continue
+
+                    stage = approval_stages[current_stage - 1]
+                    required_role = stage.get('required_role')
+
+                    role_matched = (required_role == user_role)
+                    if required_role == 'pmo' and user_role in ('pmo', 'pmo_leader'):
+                        role_matched = True
+
+                    if role_matched:
+                        item['approval_stages'] = approval_stages
+                        if isinstance(item.get('stage_history'), str):
+                            try:
+                                item['stage_history'] = json.loads(item['stage_history'])
+                            except:
+                                item['stage_history'] = []
+                        approvals.append(item)
+
+                return approvals
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def has_pending_annotation_approval(self, project_id, doc_id, entry_id):
+        """检查是否已存在相同的待审批标注完成请求"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM annotation_approvals WHERE project_id = ? AND doc_id = ? AND entry_id = ? AND status IN ('pending', 'stage_approved')",
+                (project_id, doc_id, entry_id)
+            )
+            return bool(cursor.fetchone())
+
     def create_document_directory(self, project_id, cycle, doc_category, directory_path, created_by, document_patterns=None):
         """创建文档目录映射"""
         try:

@@ -15,6 +15,11 @@ from .templates import list_templates, save_template, load_template, delete_temp
 from .new_project import create_new_project, load_new_project, archive_new_document, export_new_project_package, list_new_projects, delete_new_project
 from .draft import save_draft, load_draft, clear_draft
 from .archive import submit_archive_request, get_archive_requests, approve_archive_request, reject_archive_request, get_archive_approvers, archive_project_document, get_pending_archive_approvals, withdraw_archive_request, get_approval_history, get_all_approval_history
+from .annotation import (
+    submit_annotation_complete, approve_annotation_complete, reject_annotation_complete,
+    get_pending_annotation_approvals, get_annotation_approvers, withdraw_annotation_complete,
+    get_annotation_approval_history, get_annotation_requests, log_annotation_operation,
+)
 from .scheduled_reports import (
     get_project_report_schedule,
     update_project_report_schedule,
@@ -115,6 +120,17 @@ project_bp.route('/<project_id>/archive-approvers', methods=['GET'])(project_acc
 project_bp.route('/<project_id>/archive-history', methods=['GET'])(project_access_required(get_approval_history))
 project_bp.route('/archive/pending', methods=['GET'])(login_required(get_pending_archive_approvals))
 project_bp.route('/archive/history', methods=['GET'])(login_required(get_all_approval_history))
+
+# 标注完成审批相关路由
+project_bp.route('/<project_id>/annotation-complete', methods=['POST'])(project_access_required(submit_annotation_complete))
+project_bp.route('/<project_id>/annotation-requests', methods=['GET'])(project_access_required(get_annotation_requests))
+project_bp.route('/<project_id>/annotation-approve', methods=['POST'])(project_access_required(approve_annotation_complete))
+project_bp.route('/<project_id>/annotation-reject', methods=['POST'])(project_access_required(reject_annotation_complete))
+project_bp.route('/<project_id>/annotation-withdraw', methods=['POST'])(project_access_required(withdraw_annotation_complete))
+project_bp.route('/<project_id>/annotation-approvers', methods=['GET'])(project_access_required(get_annotation_approvers))
+project_bp.route('/<project_id>/annotation-history', methods=['GET'])(project_access_required(get_annotation_approval_history))
+project_bp.route('/annotation/pending', methods=['GET'])(login_required(get_pending_annotation_approvals))
+project_bp.route('/<project_id>/annotation-log', methods=['POST'])(project_access_required(log_annotation_operation))
 
 # 项目定时报告路由
 project_bp.route('/<project_id>/report-schedule', methods=['GET'])(project_access_required(get_project_report_schedule))

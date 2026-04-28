@@ -1,120 +1,64 @@
 
-// 每条标注独立完成按钮处理
-window.handleAnnotationCompletePerEntry = async function(docId, docName, entryId) {
-    // 参数验证
+// 每条标注独立完成按钮处理 — 提交审批请求
+window.handleAnnotationCompletePerEntry = async function(docId, docName, entryId, entryRemark) {
     if (!docId || !docName || !entryId) {
         showNotification('参数错误', 'error');
         return;
     }
-    
-    // 检查用户登录状态
     if (!authState.user) {
         showNotification('请先登录后再操作', 'error');
         return;
     }
-    
-    showInputModal('标注完成', '请输入完成情况说明', async (content) => {
+
+    showInputModal('标注完成', [
+        { key: 'content', label: '完成情况说明', type: 'textarea', placeholder: '请输入完成情况说明', value: '' }
+    ], async (result) => {
+        if (!result) return;
+        const content = result.content;
         if (!content || !content.trim()) {
             showNotification('请输入完成说明', 'warning');
             return false;
         }
-        
+
         try {
             const cycle = appState.currentCycle;
-            
-            // 检查周期是否存在
             if (!cycle) {
                 showNotification('请先选择周期', 'error');
                 return false;
             }
-            
-            // 直接根据文档ID查询单个文档，提高性能
-            const docObj = await getDocumentById(docId);
-            
-            if (!docObj) {
-                showNotification('文档不存在', 'error');
+
+            const projectId = appState.currentProjectId;
+            if (!projectId) {
+                showNotification('项目信息缺失', 'error');
                 return false;
             }
-            
-            // 获取现有的 custom_attrs 或初始化
-            let customAttrs = {};
-            if (docObj.custom_attrs) {
-                try {
-                    customAttrs = JSON.parse(docObj.custom_attrs);
-                } catch (e) {
-                    console.warn('解析custom_attrs失败:', e);
-                    showNotification('数据格式错误，请重新操作', 'error');
-                    return false;
-                }
-            }
-            // 获取现有的标注完成信息或初始化
-            const annotationComplete = customAttrs._annotationComplete || {};
-            // 添加新的标注完成记录
-            annotationComplete[entryId] = {
-                user: authState.user?.display_name || authState.user?.username || '当前用户',
-                time: new Date().toISOString(),
-                content: content.trim()
-            };
-            
-            // 更新 custom_attrs
-            customAttrs._annotationComplete = annotationComplete;
-            
-            // 调用后端API保存（带超时机制）
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
-            let resp;
-            try {
-                resp = await fetch(`/api/documents/${encodeURIComponent(docId)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ custom_attrs: customAttrs }),
-                    signal: controller.signal
-                });
-            } catch (fetchError) {
-                if (fetchError.name === 'AbortError') {
-                    showNotification('请求超时，请重试', 'error');
-                } else {
-                    showNotification('网络错误：' + fetchError.message, 'error');
-                }
-                return false;
-            } finally {
-                clearTimeout(timeoutId);
-            }
-            
-            const contentType = resp.headers.get('content-type') || '';
-            let result;
-            try {
-                if (contentType.includes('application/json')) {
-                    result = await resp.json();
-                } else {
-                    // 处理非JSON响应
-                    const text = await resp.text();
-                    result = { 
-                        status: 'error', 
-                        message: `服务器返回非JSON响应（${resp.status}）: ${text.slice(0, 100)}...` 
-                    };
-                }
-            } catch (jsonError) {
-                // 处理JSON解析错误
-                showNotification('服务器响应格式错误，请重试', 'error');
-                return false;
-            }
-            
-            if (resp.ok && result.status === 'success') {
-                // 更新内存对象
-                docObj.custom_attrs = JSON.stringify(customAttrs);
-                docObj._annotationComplete = annotationComplete;
-                
-                // 重新渲染当前周期文档
+
+            // 提交标注完成审批请求
+            const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/annotation-complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cycle,
+                    doc_id: docId,
+                    doc_name: docName,
+                    entry_id: entryId,
+                    entry_remark: entryRemark || '',
+                    content: content.trim()
+                })
+            });
+
+            const respData = await resp.json();
+            if (respData.status === 'success') {
+                showNotification(respData.message || '标注完成审批已提交', 'success');
+                // 刷新文档列表
                 if (typeof renderCycleDocuments === 'function') {
                     renderCycleDocuments(cycle);
                 }
-                showNotification('标注完成，已提交审批', 'success');
             } else {
-                showNotification(result.message || '保存失败', 'error');
+                showNotification(respData.message || '提交失败', 'error');
             }
         } catch (e) {
-            showNotification('保存失败: ' + e.message, 'error');
+            showNotification('提交失败: ' + e.message, 'error');
         }
     });
 };
@@ -136,6 +80,55 @@ window.showApprovalFlowTooltip = function(event, docId, entryId) {
 window.hideApprovalFlowTooltip = function() {
     const tooltip = document.getElementById('approvalFlowTooltip');
     if (tooltip) tooltip.style.display = 'none';
+};
+
+// 删除批注
+window.handleDeleteAnnotation = async function(docId, docName, entryId) {
+    if (!docId || !entryId) return;
+
+    const confirmed = await new Promise(resolve => {
+        showConfirmModal('删除批注', '确定要删除此条批注吗？删除后不可恢复。', () => resolve(true), () => resolve(false));
+    });
+    if (!confirmed) return;
+
+    try {
+        const cachedRaw = window.__docReviewCache?.[docId] || '';
+        const entries = parseReviewEntries(cachedRaw);
+        const nextEntries = entries.filter(e => e.id !== entryId);
+
+        if (nextEntries.length === entries.length) {
+            showNotification('未找到该批注', 'warning');
+            return;
+        }
+
+        const resp = await fetch(`/api/documents/${encodeURIComponent(docId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ review_result: serializeReviewEntries(nextEntries) })
+        });
+        const result = await resp.json();
+        if (resp.ok && result.status === 'success') {
+            window.__docReviewCache[docId] = serializeReviewEntries(nextEntries);
+            showNotification('批注已删除', 'success');
+            // 记录操作日志
+            const projectId = appState.currentProjectId;
+            if (projectId) {
+                fetch(`/api/projects/${encodeURIComponent(projectId)}/annotation-log`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'delete_annotation', doc_id: docId, doc_name: docName, entry_id: entryId })
+                }).catch(() => {});
+            }
+            const cycle = appState.currentCycle;
+            if (cycle && typeof renderCycleDocuments === 'function') {
+                renderCycleDocuments(cycle);
+            }
+        } else {
+            showNotification(result.message || '删除失败', 'error');
+        }
+    } catch (e) {
+        showNotification('删除失败: ' + e.message, 'error');
+    }
 };
 // 旧版标注完成按钮处理函数（已废弃，请使用 handleAnnotationCompletePerEntry）
 window.handleAnnotationComplete = function(docId, docName) {
@@ -1007,7 +1000,24 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     } catch (e) {
         console.warn('获取已完成归档请求失败:', e);
     }
-    
+
+    // 获取当前周期的待审核标注完成请求
+    let pendingAnnotationMap = {};
+    try {
+        const annResult = await fetch(`/api/projects/${encodeURIComponent(appState.currentProjectId)}/annotation-requests?status=pending`);
+        const annData = await annResult.json();
+        if (annData.status === 'success' && annData.approvals) {
+            for (const req of annData.approvals) {
+                if (req.cycle === cycle && req.status === 'pending') {
+                    const key = `${req.doc_id}__${req.entry_id}`;
+                    pendingAnnotationMap[key] = req;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('获取标注完成审批状态失败:', e);
+    }
+
     // 按文档类型分组
     const docsByName = {};
     for (const doc of uploadedDocs) {
@@ -1121,7 +1131,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         
                         // 构建文档树形目录结构
                         const fileListHtml = docsList.length > 0
-                            ? renderMainDocTree(docsList, cycle, doc)
+                            ? renderMainDocTree(docsList, cycle, doc, isArchived)
                             : '<span class="doc-no-files">暂无文件</span>';
                         
 
@@ -1242,30 +1252,38 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                         }
                                     }
                                     d._annotationComplete = d._annotationComplete || {};
+                                    // 检查该文档是否有任何待审批的标注完成请求
+                                    const docHasPendingAnnotation = reviewEntries.some(e => pendingAnnotationMap[`${did}__${e.id}`]);
                                     return `<div style="margin-bottom:8px;position:relative;${annotationBoxStyle}" data-review-doc-id="${escapeAttr(did)}">
                                         ${reviewEntries.map((entry, idx) => {
                                             const completeInfo = d._annotationComplete[entry.id];
+                                            const pendingAnnKey = `${did}__${entry.id}`;
+                                            const pendingAnn = pendingAnnotationMap[pendingAnnKey];
                                             let completeBlock = '';
+                                            let deleteBlock = '';
                                             if (completeInfo) {
                                                 completeBlock = `<div class="annotation-completed-block">
-                                                    <span class="annotation-completed-label" title="点击查看审批流程" onmouseover="window.showApprovalFlowTooltip && window.showApprovalFlowTooltip(event, '${did}', '${entry.id}')" onmouseout="window.hideApprovalFlowTooltip && window.hideApprovalFlowTooltip()">已完成</span>
+                                                    <span class="annotation-completed-label" title="审批已通过">已完成</span>
                                                     <span style="margin-left:8px;color:#1f8e3d;">${escapeHtml(completeInfo.user)}</span>
                                                     <span style="margin-left:8px;color:#888;">${escapeHtml(completeInfo.time)}</span>
                                                     <div style="margin-top:2px;color:#333;">${escapeHtml(completeInfo.content)}</div>
                                                 </div>`;
-                                            } else {
-                                                completeBlock = `<button class="annotation-complete-btn" onclick="handleAnnotationCompletePerEntry('${did}','${doc.name}','${entry.id}')">完成</button>`;
+                                            } else if (pendingAnn) {
+                                                completeBlock = `<span style="font-size:11px;color:#856404;background:#fff3cd;padding:1px 6px;border-radius:3px;" title="申请人: ${escapeAttr(pendingAnn.requester_username || '')}">⏳ 审批中</span>`;
+                                            } else if (!isArchived) {
+                                                completeBlock = `<button class="annotation-complete-btn" onclick="handleAnnotationCompletePerEntry('${did}','${escapeAttr(doc.name)}','${entry.id}','${escapeAttr(entry.remark || '')}')">完成</button>`;
                                             }
-                                            return `<div style=\"margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:320px;\">\n\
+                                            // 删除按钮：仅自己的批注、未归档、该文档无任何待审批/已完成的标注
+                                            const isMyEntry = entry.user_id && String(entry.user_id) === String(authState.user?.id || '');
+                                            const isMyEntryByName = !isMyEntry && entry.username && entry.username === (authState.user?.username || '');
+                                            if ((isMyEntry || isMyEntryByName) && !isArchived && !docHasPendingAnnotation && !completeInfo) {
+                                                deleteBlock = `<button class="annotation-delete-btn" onclick="handleDeleteAnnotation('${did}','${escapeAttr(doc.name)}','${entry.id}')" title="删除此批注">删除</button>`;
+                                            }
+                                            return `<div style=\"margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:420px;\">\n\
                                                 <div style=\"font-size:11px;color:#5a6b7b;margin-bottom:2px;\">${escapeHtml(formatReviewEntryUser(entry))} · ${escapeHtml(formatReviewEntryTime(entry.time))}</div>\n\
-                                                <div style=\"font-size:12px;color:#2f3a44;white-space:pre-wrap;word-break:break-word;line-height:1.4;\">${escapeHtml(entry.remark || '')}</div>\n\
-                                                ${completeBlock}\n\
+                                                <div style=\"font-size:12px;color:#2f3a44;white-space:pre-wrap;word-break:break-word;line-height:1.4;\">${escapeHtml(entry.remark || '')} <span style=\"display:inline;white-space:nowrap;margin-left:6px;\">${completeBlock}${deleteBlock}</span></div>\n\
                                             </div>`;
                                         }).join('')}
-                                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                                            <button onclick="openReviewResultModal('${did}','add','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">核验标注</button>
-                                            ${myReviewIdx >= 0 ? `<button onclick="openReviewResultModal('${did}','edit','${doc.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#eaf9ee;color:#1f8e3d;cursor:pointer;">修改我的标注</button>` : ''}
-                                        </div>
                                     </div>`;
                                 }).join('') : '<span style="font-size:12px;color:#ccc;">—</span>'}
                             </td>
@@ -4766,6 +4784,144 @@ export async function showGlobalApprovalHistory() {
 }
 
 /**
+ * 全局标注审批历史
+ */
+export async function showGlobalAnnotationHistory() {
+    showNotification('加载标注审批历史...', 'info');
+
+    try {
+        const projects = await fetch('/api/projects/all').then(r => r.json());
+        if (projects.status !== 'success') {
+            showNotification('获取项目列表失败', 'error');
+            return;
+        }
+
+        const allApprovals = [];
+        for (const p of (projects.projects || [])) {
+            try {
+                const resp = await fetch(`/api/projects/${encodeURIComponent(p.id)}/annotation-history`);
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    (data.approvals || []).forEach(a => {
+                        a.project_name = p.name || p.id;
+                        allApprovals.push(a);
+                    });
+                }
+            } catch {}
+        }
+
+        allApprovals.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
+        const existingModal = document.getElementById('globalAnnotationHistoryModal');
+        if (existingModal) existingModal.remove();
+
+        const statusLabels = {
+            'pending': { label: '审批中', color: '#ffc107', bg: '#fff8e1' },
+            'approved': { label: '已通过', color: '#28a745', bg: '#e8f5e9' },
+            'rejected': { label: '已驳回', color: '#dc3545', bg: '#ffebee' },
+            'withdrawn': { label: '已撤回', color: '#6c757d', bg: '#f5f5f5' },
+            'stage_approved': { label: '阶段审批', color: '#17a2b8', bg: '#e0f7fa' }
+        };
+
+        const filterHtml = `
+            <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+                <button class="btn btn-sm btn-outline-secondary ann-history-filter active" data-filter="all">全部</button>
+                <button class="btn btn-sm btn-outline-warning ann-history-filter" data-filter="pending">审批中</button>
+                <button class="btn btn-sm btn-outline-success ann-history-filter" data-filter="approved">已通过</button>
+                <button class="btn btn-sm btn-outline-danger ann-history-filter" data-filter="rejected">已驳回</button>
+                <button class="btn btn-sm btn-outline-secondary ann-history-filter" data-filter="withdrawn">已撤回</button>
+            </div>`;
+
+        let listHtml = '';
+        if (allApprovals.length === 0) {
+            listHtml = '<div style="text-align:center;color:#999;padding:40px;">暂无标注审批记录</div>';
+        } else {
+            listHtml = '<div class="ann-history-list" style="display:flex;flex-direction:column;gap:10px;">';
+            allApprovals.forEach(req => {
+                const s = statusLabels[req.status] || { label: req.status, color: '#6c757d', bg: '#f5f5f5' };
+                const createdAt = req.created_at ? new Date(req.created_at).toLocaleString('zh-CN') : '-';
+                const resolvedAt = req.resolved_at ? new Date(req.resolved_at).toLocaleString('zh-CN') : '';
+
+                const stages = req.approval_stages || [];
+                let stageHtml = '';
+                if (stages.length > 0) {
+                    stageHtml = '<div style="display:flex;gap:4px;align-items:center;margin-top:6px;flex-wrap:wrap;">';
+                    stages.forEach((st, i) => {
+                        const roleName = st.required_role === 'project_admin' ? '项目经理' : st.required_role === 'pmo' ? 'PMO' : st.required_role === 'pmo_leader' ? 'PMO负责人' : `Level${i+1}`;
+                        let stageColor = '#e9ecef'; let icon = '⏳'; let textColor = '#666';
+                        if (st.status === 'approved') { stageColor = '#d4edda'; icon = '✓'; textColor = '#155724'; }
+                        else if (st.status === 'rejected') { stageColor = '#f8d7da'; icon = '✗'; textColor = '#721c24'; }
+                        const arrow = i < stages.length - 1 ? '<span style="color:#ccc;">→</span>' : '';
+                        stageHtml += `<span style="background:${stageColor};color:${textColor};padding:2px 8px;border-radius:10px;font-size:11px;">${icon} ${roleName}</span>${arrow}`;
+                    });
+                    stageHtml += '</div>';
+                }
+
+                const stageHistory = req.stage_history || [];
+                let timelineHtml = '';
+                if (stageHistory.length > 0) {
+                    timelineHtml = '<div style="margin-top:8px;padding-top:6px;border-top:1px dashed #ddd;font-size:11px;color:#666;">';
+                    stageHistory.forEach(h => {
+                        const actionLabel = {'submit':'提交','approve':'通过','stage_approve':'阶段通过','reject':'驳回','withdraw':'撤回'}[h.action] || h.action;
+                        timelineHtml += `<div style="margin-bottom:2px;">${h.timestamp || ''} | ${h.display_name || h.username || ''} | ${actionLabel}${h.detail ? ': ' + escapeHtml(h.detail) : ''}</div>`;
+                    });
+                    timelineHtml += '</div>';
+                }
+
+                listHtml += `
+                <div style="padding:14px;background:${s.bg};border-radius:8px;border:1px solid ${s.color}22;" class="ann-history-item" data-status="${req.status}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span style="font-weight:600;font-size:14px;">📁 ${escapeHtml(req.project_name || '')}</span>
+                        <span style="padding:3px 10px;border-radius:12px;font-size:12px;color:white;background:${s.color};">${s.label}</span>
+                    </div>
+                    <div style="font-size:12px;color:#666;margin-bottom:4px;">周期: ${escapeHtml(req.cycle || '-')} | 文档: ${escapeHtml(req.doc_name || '-')}</div>
+                    <div style="font-size:12px;color:#666;margin-bottom:4px;">标注: ${escapeHtml(req.entry_remark || '-')}</div>
+                    <div style="font-size:12px;color:#666;">申请人: ${escapeHtml(req.requester_username || '-')} | 提交: ${createdAt}${resolvedAt ? ' | 处理: ' + resolvedAt : ''}</div>
+                    ${req.reject_reason ? `<div style="font-size:12px;color:#dc3545;margin-top:4px;">驳回原因: ${escapeHtml(req.reject_reason)}</div>` : ''}
+                    ${stageHtml}
+                    ${timelineHtml}
+                </div>`;
+            });
+            listHtml += '</div>';
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'globalAnnotationHistoryModal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:700px;max-height:85vh;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;">📝 标注审批历史</h3>
+                    <button class="modal-close-btn" id="closeAnnotationHistoryModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:#666;">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y:auto;max-height:calc(85vh - 80px);padding:15px 20px;">
+                    ${filterHtml}
+                    ${listHtml}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('closeAnnotationHistoryModal').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+        modal.querySelectorAll('.ann-history-filter').forEach(btn => {
+            btn.addEventListener('click', () => {
+                modal.querySelectorAll('.ann-history-filter').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const filter = btn.dataset.filter;
+                modal.querySelectorAll('.ann-history-item').forEach(item => {
+                    item.style.display = (filter === 'all' || item.dataset.status === filter) ? '' : 'none';
+                });
+            });
+        });
+    } catch (error) {
+        console.error('加载标注审批历史失败:', error);
+        showNotification('加载标注审批历史失败', 'error');
+    }
+}
+
+/**
  * 承建方快速审批（申请人发起，由各阶段审批人依次输入安全码完成审批）
  * 链式推进：每个阶段通过后自动提示下一阶段审批人继续
  */
@@ -4840,7 +4996,7 @@ function formatDateTime(dateString) {
 /**
  * 主页面文档树形目录渲染（与ZIP列表风格一致，支持折叠展开）
  */
-function renderMainDocTree(docsList, cycle, docInfo) {
+function renderMainDocTree(docsList, cycle, docInfo, isArchived = false) {
     // 构建树
     const treeRoot = { name: '', path: '', children: {}, files: [] };
     
@@ -4905,12 +5061,12 @@ function renderMainDocTree(docsList, cycle, docInfo) {
         });
         
         for (const d of sortedFiles) {
-            html += renderMainFileRow(d, cycle, docInfo, depth);
+            html += renderMainFileRow(d, cycle, docInfo, depth, isArchived);
         }
-        
+
         return html;
     }
-    
+
     return `<div class="main-doc-tree">${renderNode(treeRoot, 0)}</div>`;
 }
 
@@ -4930,7 +5086,7 @@ function escapeAttr(str) {
 }
 
 // 渲染主页面单个文档行（保留原有的属性显示和缺失要求检查）
-function renderMainFileRow(d, cycle, docInfo, depth = 0) {
+function renderMainFileRow(d, cycle, docInfo, depth = 0, isArchived = false) {
     const getField = (name) => d[name] !== undefined ? d[name] : d[`_${name}`];
     const getDocValue = (fieldName) => {
         if (d[fieldName] !== undefined) return d[fieldName];
@@ -5019,6 +5175,10 @@ function renderMainFileRow(d, cycle, docInfo, depth = 0) {
         ? `<span style="font-size:11px;color:#999;margin-left:4px;white-space:nowrap;">${uploadTimeStr ? '上传:' + uploadTimeStr : ''}${uploadTimeStr && lastModifiedStr ? ' | ' : ''}${lastModifiedStr ? '修改:' + lastModifiedStr : ''}</span>`
         : '';
 
+    const did = d.doc_id || '';
+    const reviewEntries = parseReviewEntries(d.review_result || '');
+    const myReviewIdx = findMyReviewEntryIndex(reviewEntries);
+    
     return `<div class="doc-file-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:${indent}px;padding:3px 0;">
         <span class="doc-file-name" onclick="previewDocument('${d.id}')"
               title="${escapeAttr(d.original_filename || d.filename || '')}"
@@ -5028,6 +5188,10 @@ function renderMainFileRow(d, cycle, docInfo, depth = 0) {
         ${timeHtml}
         ${attrParts.length > 0 ? `<span class="doc-attrs" style="margin-left:6px;font-size:12px;">${attrParts.join(' ')}</span>` : ''}
         ${missingHtml}
+        ${did && !isArchived ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-left:8px;">
+            <button onclick="openReviewResultModal('${did}','add','${docInfo.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #17a2b8;border-radius:3px;background:#e8f9fc;color:#17a2b8;cursor:pointer;">核验标注</button>
+            ${myReviewIdx >= 0 ? `<button onclick="openReviewResultModal('${did}','edit','${docInfo.name}')" style="font-size:11px;padding:2px 8px;border:1px solid #28a745;border-radius:3px;background:#eaf9ee;color:#1f8e3d;cursor:pointer;">修改我的标注</button>` : ''}
+        </div>` : ''}
     </div>`;
 }
 
@@ -6825,6 +6989,15 @@ async function openReviewResultModal(docId, mode = 'add', docName = '') {
         if (resp.ok && result.status === 'success') {
             showNotification('核查结果已保存', 'success');
             window.__docReviewCache[docId] = serializeReviewEntries(nextEntries);
+            // 记录操作日志
+            const projectId = appState.currentProjectId;
+            if (projectId) {
+                fetch(`/api/projects/${encodeURIComponent(projectId)}/annotation-log`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: isEdit ? 'edit_annotation' : 'add_annotation', doc_name: docName, entry_id: isEdit ? entries[myIndex]?.id : nextEntries[nextEntries.length-1]?.id, remark: val.slice(0, 100) })
+                }).catch(() => {});
+            }
             if (appState.currentCycle) await renderCycleDocuments(appState.currentCycle);
         } else {
             showNotification(result.message || '保存失败', 'error');

@@ -232,6 +232,7 @@ const SAFE_FALLBACK_PERMISSIONS = {
     userApprovalHistoryMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '👥 用户审批历史' },
     archiveApprovalBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📋 文档归档审批' },
     approvalHistoryBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📊 审批历史' },
+    annotationHistoryBtn: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin'], group: 'sidebar', label: '📝 标注审批历史' },
     logManagementMenuItem: { roles: ['admin', 'pmo', 'pmo_leader', 'project_admin', 'contractor'], group: 'sidebar', label: '📝 操作日志' }
 };
 
@@ -420,6 +421,9 @@ export async function updateRoleBasedUI() {
                         break;
                     case 'approvalHistoryBtn':
                         import('./document.js').then(m => m.showGlobalApprovalHistory());
+                        break;
+                    case 'annotationHistoryBtn':
+                        import('./document.js').then(m => m.showGlobalAnnotationHistory());
                         break;
                     case 'scheduledReportTaskMenuItem':
                         import('./scheduled-reports.js').then(m => m.openScheduledReportModal());
