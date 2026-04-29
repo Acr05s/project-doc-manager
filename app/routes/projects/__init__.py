@@ -19,6 +19,7 @@ from .annotation import (
     submit_annotation_complete, approve_annotation_complete, reject_annotation_complete,
     get_pending_annotation_approvals, get_annotation_approvers, withdraw_annotation_complete,
     get_annotation_approval_history, get_annotation_requests, log_annotation_operation,
+    mark_auto_archive_annotations,
 )
 from .scheduled_reports import (
     get_project_report_schedule,
@@ -131,6 +132,7 @@ project_bp.route('/<project_id>/annotation-approvers', methods=['GET'])(project_
 project_bp.route('/<project_id>/annotation-history', methods=['GET'])(project_access_required(get_annotation_approval_history))
 project_bp.route('/annotation/pending', methods=['GET'])(login_required(get_pending_annotation_approvals))
 project_bp.route('/<project_id>/annotation-log', methods=['POST'])(project_access_required(log_annotation_operation))
+project_bp.route('/<project_id>/annotation-mark-auto-archive', methods=['POST'])(project_access_required(mark_auto_archive_annotations))
 
 # 项目定时报告路由
 project_bp.route('/<project_id>/report-schedule', methods=['GET'])(project_access_required(get_project_report_schedule))

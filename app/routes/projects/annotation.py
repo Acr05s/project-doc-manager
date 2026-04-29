@@ -131,6 +131,71 @@ def _complete_annotation(approval_id, approval_record, doc_manager):
         return False
 
 
+def _try_auto_archive_after_annotation(approval, project_id, project_config, doc_manager, db_path):
+    """标注审批通过后，检查该文档类型下所有标注是否都已完成，如果是则自动发起归档"""
+    auto_archive_doc_name = approval.get('auto_archive_doc_name', '')
+    if not auto_archive_doc_name:
+        return False
+
+    cycle = approval.get('cycle', '')
+    if not cycle:
+        return False
+
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT id, status, auto_archive_doc_name FROM annotation_approvals '
+                'WHERE project_id = ? AND cycle = ? AND auto_archive_doc_name = ? AND status = ?',
+                (project_id, cycle, auto_archive_doc_name, 'pending')
+            )
+            pending_rows = cursor.fetchall()
+
+        if len(pending_rows) > 0:
+            logger.info(f'自动归档：文档 {auto_archive_doc_name} 还有 {len(pending_rows)} 条标注审批未完成，暂不归档')
+            return False
+
+        # 所有标注审批都已完成，检查是否已归档
+        archived_map = project_config.get('documents_archived', {})
+        cycle_archived = archived_map.get(cycle, {}) if isinstance(archived_map, dict) else {}
+        if cycle_archived.get(auto_archive_doc_name):
+            logger.info(f'自动归档：文档 {auto_archive_doc_name} 已归档，跳过')
+            return False
+
+        # 自动发起归档审核请求
+        requester_id = approval.get('requester_id')
+        requester_username = approval.get('requester_username', '')
+
+        from .archive import submit_archive_request_internal
+        result = submit_archive_request_internal(
+            project_id, cycle, [auto_archive_doc_name],
+            requester_id, requester_username, project_config, doc_manager,
+            request_type='archive'
+        )
+
+        if result.get('status') == 'success':
+            logger.info(f'自动归档：文档 {auto_archive_doc_name} 归档请求已自动提交')
+            message_manager.send_message(
+                receiver_id=requester_id,
+                title='标注全部完成，归档已自动发起',
+                content=f'文档类型 "{auto_archive_doc_name}" 的所有标注审批已通过，系统已自动发起归档审核请求。',
+                sender_id=requester_id,
+                msg_type='archive_approval',
+                related_id=project_id,
+                related_type='archive_auto'
+            )
+            return True
+        else:
+            logger.warning(f'自动归档失败：{result.get("message", "")}')
+            return False
+    except Exception as e:
+        logger.error(f'_try_auto_archive_after_annotation failed: {e}')
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 # --- PLACEHOLDER_SUBMIT ---
 
 
@@ -144,6 +209,7 @@ def submit_annotation_complete(project_id):
         entry_id = (data.get('entry_id') or '').strip()
         entry_remark = (data.get('entry_remark') or '').strip()
         complete_content = (data.get('content') or '').strip()
+        auto_archive_doc_name = (data.get('auto_archive_doc_name') or '').strip()
 
         if not cycle or not doc_id or not entry_id:
             return jsonify({'status': 'error', 'message': '参数不完整'}), 400
@@ -224,10 +290,14 @@ def submit_annotation_complete(project_id):
         # 更新 approval_stages 到数据库
         db_path = Path(user_manager.db_path)
         with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                'UPDATE annotation_approvals SET approval_stages = ?, current_stage = 1, stage_completed = 0 WHERE id = ?',
-                (json.dumps(approval_stages, ensure_ascii=False), approval_id)
-            )
+            sql = 'UPDATE annotation_approvals SET approval_stages = ?, current_stage = 1, stage_completed = 0'
+            params = [json.dumps(approval_stages, ensure_ascii=False)]
+            if auto_archive_doc_name:
+                sql += ', auto_archive_doc_name = ?'
+                params.append(auto_archive_doc_name)
+            sql += ' WHERE id = ?'
+            params.append(approval_id)
+            conn.execute(sql, params)
             conn.commit()
 
         # 记录流程历史
@@ -422,9 +492,14 @@ def approve_annotation_complete(project_id):
                 related_type='annotation_approval'
             )
 
+            # 检查是否需要自动触发归档
+            auto_archive_triggered = _try_auto_archive_after_annotation(
+                approval, project_id, project_config, doc_manager, db_path
+            )
+
             return jsonify({
                 'status': 'success',
-                'message': '审批通过，标注已完成',
+                'message': '审批通过，标注已完成' + ('，归档流程已自动发起' if auto_archive_triggered else ''),
                 'completed': True
             })
         else:
@@ -861,5 +936,29 @@ def log_annotation_operation(project_id):
                 logger.warning(f'发送标注通知失败: {e}')
 
         return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def mark_auto_archive_annotations(project_id):
+    """将已有的 pending 标注审批标记为自动归档（当所有标注都已在审批中时使用）"""
+    try:
+        data = request.get_json() or {}
+        cycle = (data.get('cycle') or '').strip()
+        doc_name = (data.get('doc_name') or '').strip()
+
+        if not cycle or not doc_name:
+            return jsonify({'status': 'error', 'message': '参数不完整'}), 400
+
+        db_path = Path(user_manager.db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                'UPDATE annotation_approvals SET auto_archive_doc_name = ? '
+                'WHERE project_id = ? AND cycle = ? AND status = ? AND (auto_archive_doc_name IS NULL OR auto_archive_doc_name = ?)',
+                (doc_name, project_id, cycle, 'pending', '')
+            )
+            conn.commit()
+
+        return jsonify({'status': 'success', 'message': '已标记自动归档'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

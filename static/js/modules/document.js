@@ -3935,6 +3935,112 @@ async function ensureArchiveApproval(cycle, docNames) {
 }
 
 /**
+ * 检查文档类型下是否有未完成的标注，返回未完成的标注列表
+ * @returns {Array} [{docId, docName, entryId, entryRemark, status:'incomplete'|'pending'}]
+ */
+async function getIncompleteAnnotations(cycle, docName) {
+    const projectId = appState.currentProjectId;
+    if (!projectId) return [];
+
+    const uploadedDocs = await getCycleDocuments(cycle);
+    const docTypeFiles = uploadedDocs.filter(d => d.doc_name === docName);
+    if (docTypeFiles.length === 0) return [];
+
+    let pendingAnnotationMap = {};
+    try {
+        const annResult = await fetch(`/api/projects/${encodeURIComponent(projectId)}/annotation-requests?status=pending`);
+        const annData = await annResult.json();
+        if (annData.status === 'success' && annData.approvals) {
+            for (const req of annData.approvals) {
+                if (req.cycle === cycle && req.status === 'pending') {
+                    pendingAnnotationMap[`${req.doc_id}__${req.entry_id}`] = req;
+                }
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    const incomplete = [];
+    for (const doc of docTypeFiles) {
+        const did = doc.doc_id || '';
+        if (!did) continue;
+        const reviewEntries = parseReviewEntries(doc.review_result || '');
+        if (reviewEntries.length === 0) continue;
+
+        let customAttrs = doc.custom_attrs || {};
+        if (typeof customAttrs === 'string') {
+            try { customAttrs = JSON.parse(customAttrs); } catch (e) { customAttrs = {}; }
+        }
+        const annotationComplete = customAttrs._annotationComplete || {};
+
+        for (const entry of reviewEntries) {
+            const completeInfo = annotationComplete[entry.id];
+            const pendingKey = `${did}__${entry.id}`;
+            const pendingAnn = pendingAnnotationMap[pendingKey];
+            if (!completeInfo && !pendingAnn) {
+                incomplete.push({
+                    docId: did,
+                    docName: doc.doc_name,
+                    entryId: entry.id,
+                    entryRemark: entry.remark || '',
+                    entryUser: formatReviewEntryUser(entry),
+                    status: 'incomplete'
+                });
+            } else if (pendingAnn && !completeInfo) {
+                incomplete.push({
+                    docId: did,
+                    docName: doc.doc_name,
+                    entryId: entry.id,
+                    entryRemark: entry.remark || '',
+                    entryUser: formatReviewEntryUser(entry),
+                    status: 'pending'
+                });
+            }
+        }
+    }
+    return incomplete;
+}
+
+/**
+ * 自动提交未完成标注的完成审批请求（带 auto_archive 标记）
+ * @returns {Object} {submitted: number, alreadyPending: number, failed: number}
+ */
+async function autoSubmitAnnotationCompletions(cycle, docName, incompleteList, autoArchiveContent) {
+    const projectId = appState.currentProjectId;
+    let submitted = 0, alreadyPending = 0, failed = 0;
+
+    for (const item of incompleteList) {
+        if (item.status === 'pending') {
+            alreadyPending++;
+            continue;
+        }
+        try {
+            const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/annotation-complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cycle,
+                    doc_id: item.docId,
+                    doc_name: item.docName,
+                    entry_id: item.entryId,
+                    entry_remark: item.entryRemark,
+                    content: autoArchiveContent || '归档时自动提交完成',
+                    auto_archive_doc_name: docName
+                })
+            });
+            const data = await resp.json();
+            if (data.status === 'success') {
+                submitted++;
+            } else {
+                failed++;
+            }
+        } catch (e) {
+            failed++;
+        }
+    }
+    return { submitted, alreadyPending, failed };
+}
+
+/**
  * 归档文档
  */
 export async function archiveDocument(cycle, docName) {
@@ -3987,6 +4093,67 @@ export async function archiveDocument(cycle, docName) {
             if (!confirmed) {
                 return { status: 'cancelled', message: '用户取消归档' };
             }
+        }
+
+        // 检查是否有未完成的标注
+        const incompleteAnnotations = await getIncompleteAnnotations(cycle, docName);
+        if (incompleteAnnotations.length > 0) {
+            const realIncomplete = incompleteAnnotations.filter(a => a.status === 'incomplete');
+            const pendingOnes = incompleteAnnotations.filter(a => a.status === 'pending');
+
+            let msg = `该文档类型下有 ${incompleteAnnotations.length} 条标注尚未完成：<br><br>`;
+            msg += '<div style="max-height:200px;overflow-y:auto;font-size:12px;">';
+            for (const a of incompleteAnnotations) {
+                const statusLabel = a.status === 'pending'
+                    ? '<span style="color:#856404;">⏳ 审批中</span>'
+                    : '<span style="color:#dc3545;">未提交</span>';
+                msg += `<div style="padding:3px 0;border-bottom:1px solid #eee;">${statusLabel} ${escapeHtml(a.entryUser)}: ${escapeHtml(a.entryRemark.substring(0, 50))}${a.entryRemark.length > 50 ? '...' : ''}</div>`;
+            }
+            msg += '</div><br>';
+
+            if (realIncomplete.length > 0) {
+                msg += `系统将自动为 ${realIncomplete.length} 条未提交的标注发起完成审批流程。`;
+                if (pendingOnes.length > 0) {
+                    msg += `<br>另有 ${pendingOnes.length} 条已在审批中。`;
+                }
+                msg += '<br><b>所有标注审批通过后，将自动发起归档流程。</b><br><br>是否继续？';
+            } else {
+                msg += `所有 ${pendingOnes.length} 条标注已在审批中。<br><b>全部审批通过后将自动发起归档流程。</b><br><br>是否继续？`;
+            }
+
+            const proceed = await new Promise((resolve) => {
+                showConfirmModal('标注未完成', msg, () => resolve(true), () => resolve(false), { allowHtml: true });
+            });
+            if (!proceed) {
+                return { status: 'cancelled', message: '用户取消归档' };
+            }
+
+            // 自动提交未完成标注的完成审批
+            if (realIncomplete.length > 0) {
+                showLoading(true);
+                const submitResult = await autoSubmitAnnotationCompletions(cycle, docName, incompleteAnnotations, '归档时自动提交完成');
+                showLoading(false);
+                showNotification(
+                    `已自动提交 ${submitResult.submitted} 条标注完成审批` +
+                    (submitResult.alreadyPending > 0 ? `，${submitResult.alreadyPending} 条已在审批中` : '') +
+                    (submitResult.failed > 0 ? `，${submitResult.failed} 条提交失败` : '') +
+                    '。全部审批通过后将自动归档。',
+                    submitResult.failed > 0 ? 'warning' : 'success'
+                );
+            } else {
+                // 所有标注都已在审批中，标记它们为 auto_archive
+                try {
+                    await fetch(`/api/projects/${encodeURIComponent(appState.currentProjectId)}/annotation-mark-auto-archive`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cycle, doc_name: docName })
+                    });
+                } catch (e) { /* ignore */ }
+                showNotification('标注审批通过后将自动归档', 'info');
+            }
+
+            await reloadProjectAndRender(cycle);
+            return { status: 'pending_annotations', message: '等待标注审批完成后自动归档' };
         }
 
         // 判断用户角色决定归档方式
@@ -4180,7 +4347,85 @@ export async function batchArchiveCycle(cycle) {
         if (!confirmed) {
             return;
         }
-        
+
+        // 检查所有待归档文档是否有未完成的标注
+        const docsWithIncompleteAnnotations = [];
+        const docsReadyToArchive = [];
+        for (const dn of docsToArchive) {
+            const incomplete = await getIncompleteAnnotations(cycle, dn);
+            if (incomplete.length > 0) {
+                docsWithIncompleteAnnotations.push({ docName: dn, incomplete });
+            } else {
+                docsReadyToArchive.push(dn);
+            }
+        }
+
+        if (docsWithIncompleteAnnotations.length > 0) {
+            let totalIncomplete = 0;
+            let totalPending = 0;
+            for (const item of docsWithIncompleteAnnotations) {
+                totalIncomplete += item.incomplete.filter(a => a.status === 'incomplete').length;
+                totalPending += item.incomplete.filter(a => a.status === 'pending').length;
+            }
+
+            let msg = `<div style="margin-bottom:10px;">以下 <b>${docsWithIncompleteAnnotations.length}</b> 个文档类型有未完成的标注：</div>`;
+            msg += '<div style="max-height:200px;overflow-y:auto;font-size:12px;margin-bottom:10px;">';
+            for (const item of docsWithIncompleteAnnotations) {
+                const incCount = item.incomplete.filter(a => a.status === 'incomplete').length;
+                const pendCount = item.incomplete.filter(a => a.status === 'pending').length;
+                msg += `<div style="padding:4px 0;border-bottom:1px solid #eee;"><b>${escapeHtml(item.docName)}</b>：`;
+                if (incCount > 0) msg += `${incCount} 条未提交`;
+                if (incCount > 0 && pendCount > 0) msg += '，';
+                if (pendCount > 0) msg += `${pendCount} 条审批中`;
+                msg += '</div>';
+            }
+            msg += '</div>';
+
+            if (totalIncomplete > 0) {
+                msg += `系统将自动为 ${totalIncomplete} 条未提交的标注发起完成审批。`;
+            }
+            msg += '<br><b>标注审批全部通过后，对应文档将自动归档。</b>';
+            if (docsReadyToArchive.length > 0) {
+                msg += `<br><br>另有 ${docsReadyToArchive.length} 个文档类型无标注问题，将正常归档。`;
+            }
+            msg += '<br><br>是否继续？';
+
+            const proceed = await new Promise((resolve) => {
+                showConfirmModal('部分文档有未完成标注', msg, () => resolve(true), () => resolve(false), { allowHtml: true });
+            });
+            if (!proceed) return;
+
+            // 自动提交未完成标注
+            showLoading(true);
+            let totalSubmitted = 0, totalFailed = 0;
+            for (const item of docsWithIncompleteAnnotations) {
+                const result = await autoSubmitAnnotationCompletions(cycle, item.docName, item.incomplete, '归档时自动提交完成');
+                totalSubmitted += result.submitted;
+                totalFailed += result.failed;
+            }
+            showLoading(false);
+
+            if (totalSubmitted > 0 || totalPending > 0) {
+                showNotification(
+                    `已自动提交 ${totalSubmitted} 条标注完成审批` +
+                    (totalPending > 0 ? `，${totalPending} 条已在审批中` : '') +
+                    (totalFailed > 0 ? `，${totalFailed} 条提交失败` : '') +
+                    '。审批通过后将自动归档。',
+                    totalFailed > 0 ? 'warning' : 'success'
+                );
+            }
+
+            // 如果没有可以直接归档的文档，直接返回
+            if (docsReadyToArchive.length === 0) {
+                await reloadProjectAndRender(cycle);
+                return;
+            }
+
+            // 继续归档没有标注问题的文档
+            docsToArchive.length = 0;
+            docsToArchive.push(...docsReadyToArchive);
+        }
+
         // 判断用户角色决定归档方式
         const userRole = authState.user?.role;
 

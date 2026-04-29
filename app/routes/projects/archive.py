@@ -343,6 +343,111 @@ def get_archive_approvers(project_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def submit_archive_request_internal(project_id, cycle, doc_names, requester_id, requester_username,
+                                     project_config, doc_manager, request_type='archive'):
+    """内部调用的归档提交函数（不依赖 Flask request 上下文），供标注自动归档等场景使用"""
+    import sys
+    from pathlib import Path
+
+    try:
+        project_name = project_config.get('name', project_id)
+        approval_chain = project_config.get('archive_approval_chain', [])
+
+        if user_manager.has_pending_archive_approval(project_id, cycle, doc_names):
+            return {'status': 'error', 'message': '已存在相同的待审批请求'}
+
+        # 无需审批时直接归档
+        if not bool(project_config.get('require_archive_approval', True)):
+            if 'documents_archived' not in project_config:
+                project_config['documents_archived'] = {}
+            if cycle not in project_config['documents_archived']:
+                project_config['documents_archived'][cycle] = {}
+            for dn in doc_names:
+                if isinstance(dn, str) and dn:
+                    project_config['documents_archived'][cycle][dn] = True
+            save_result = doc_manager.save_project(project_config)
+            if save_result.get('status') != 'success':
+                return {'status': 'error', 'message': '归档保存失败'}
+            return {'status': 'success', 'message': '归档成功（无需审批）', 'direct': True}
+
+        # 获取申请人角色以构建审批链
+        requester_user = user_manager.get_user_by_id(requester_id)
+        requester_role = getattr(requester_user, 'role', '') if requester_user else ''
+        requester_org = (getattr(requester_user, 'organization', '') or '').strip() if requester_user else ''
+
+        if requester_role == 'pmo' and requester_org == 'PMO':
+            approval_chain = [
+                {'level': 1, 'required_role': 'pmo_leader', 'org_match': 'pmo'},
+                {'level': 2, 'required_role': 'project_admin', 'org_match': 'party_b'},
+                {'level': 3, 'required_role': 'pmo_leader', 'org_match': 'pmo'},
+            ]
+        elif not approval_chain:
+            approval_mode = project_config.get('archive_approval_mode', 'two_level')
+            approval_chain = _build_default_approval_chain(approval_mode)
+
+        approval_stages = initialize_approval_stages(project_config, approval_chain)
+        if not approval_stages:
+            return {'status': 'error', 'message': '审批链配置错误'}
+
+        level_1_approvers = get_next_stage_approvers(project_id, 0, approval_chain, project_config)
+        if not level_1_approvers:
+            return {'status': 'error', 'message': '未找到审批人'}
+
+        result = user_manager.create_archive_approval(
+            project_id, cycle, doc_names,
+            requester_id, requester_username,
+            [], request_type=request_type
+        )
+        if result.get('status') != 'success':
+            return {'status': 'error', 'message': '创建审批记录失败'}
+
+        approval_id = result['id']
+        approval_uuid = result['uuid']
+
+        if approval_stages:
+            first_ids = [str(a.get('internal_id') or a.get('id')) for a in level_1_approvers]
+            first_names = [a.get('display_name') or a.get('username') or '' for a in level_1_approvers]
+            approval_stages[0]['assigned_to_id'] = ','.join([x for x in first_ids if x])
+            approval_stages[0]['assigned_to_username'] = '、'.join([x for x in first_names if x])
+
+        db_path = Path(user_manager.db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                'UPDATE archive_approvals SET approval_stages = ?, current_stage = 1, stage_completed = 0 WHERE id = ?',
+                (json.dumps(approval_stages, ensure_ascii=False), approval_id)
+            )
+            conn.commit()
+
+        requester_display = getattr(requester_user, 'display_name', None) or requester_username if requester_user else requester_username
+        doc_list_str = '、'.join(doc_names[:5])
+        append_stage_history(approval_id, 'submit', requester_id, requester_username,
+                             detail=f'提交归档申请（标注完成后自动发起）：{doc_list_str}',
+                             display_name=requester_display)
+
+        doc_list = '、'.join(doc_names[:5])
+        for approver in level_1_approvers:
+            approver_id = approver.get('internal_id') or approver['id']
+            if approver_id != requester_id:
+                message_manager.send_message(
+                    receiver_id=approver_id,
+                    title='待审批：文档归档申请（标注完成自动发起）',
+                    content=f'文档 "{doc_list}" 的所有标注已完成审批，系统自动发起归档审核请求，请审批。',
+                    sender_id=requester_id,
+                    msg_type='archive_approval',
+                    related_id=project_id,
+                    related_type='archive_approval'
+                )
+
+        logger.info(f'[AUTO-ARCHIVE] 自动归档请求已创建 - project: {project_id}, cycle: {cycle}, docs: {doc_names}')
+        return {'status': 'success', 'approval_id': approval_uuid}
+
+    except Exception as e:
+        logger.error(f'submit_archive_request_internal failed: {e}')
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'message': str(e)}
+
+
 def submit_archive_request(project_id):
     """提交归档审核请求（自动路由到第一阶段审批人）- 支持归档和不涉及两种类型"""
     try:
