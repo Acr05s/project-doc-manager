@@ -286,24 +286,43 @@ def download_task_package(task_id):
     try:
         from flask import send_file
         from pathlib import Path
-        
+
+        print(f'[下载] 请求下载任务: {task_id}', flush=True)
+
         task = task_service.get_task_status(task_id)
-        if not task or task.get('status') != 'completed':
-            return jsonify({'status': 'error', 'message': '任务不存在或未完成'}), 404
-        
+        if not task:
+            print(f'[下载] 任务不存在: {task_id}', flush=True)
+            return jsonify({'status': 'error', 'message': '任务不存在'}), 404
+
+        if task.get('status') != 'completed':
+            print(f'[下载] 任务未完成: {task_id}, status={task.get("status")}', flush=True)
+            return jsonify({'status': 'error', 'message': '任务未完成'}), 404
+
         result = task.get('result', {})
         package_path = result.get('package_path')
-        
-        if not package_path or not Path(package_path).exists():
+
+        if not package_path:
+            print(f'[下载] 缺少package_path: {task_id}', flush=True)
+            return jsonify({'status': 'error', 'message': '文件路径缺失'}), 404
+
+        path_obj = Path(package_path)
+        if not path_obj.is_absolute():
+            import os
+            path_obj = Path(os.path.dirname(os.path.abspath(__file__))).parent.parent / package_path
+
+        print(f'[下载] 文件路径: {path_obj}, 存在: {path_obj.exists()}', flush=True)
+
+        if not path_obj.exists():
             return jsonify({'status': 'error', 'message': '文件不存在'}), 404
-        
+
         return send_file(
-            package_path,
+            str(path_obj),
             mimetype='application/zip',
             as_attachment=True,
             download_name=result.get('package_filename', 'package.zip')
         )
     except Exception as e:
+        print(f'[下载] 异常: {e}', flush=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 

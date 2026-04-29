@@ -447,6 +447,12 @@ function buildTreeData(config) {
             const docData = typeof doc === 'object' && doc !== null ? doc : { name: doc };
             const docId = `doc_${index}_${docIndex}`;
 
+            // 周期下的目录节点：直接还原为 folder
+            if (docData.type === 'folder') {
+                cycleNode.children.push(buildFolderNode(docData, `${index}_${docIndex}`));
+                return;
+            }
+
             const docNode = {
             id: docId,
             name: docData.name || doc,
@@ -455,7 +461,6 @@ function buildTreeData(config) {
             children: [],
             attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docData.attributes || {}) },
             doc_note: docData.doc_note || '',
-            // 新增：文件名模板和匹配关键词
             filename_template: docData.filename_template || '',
             match_keywords: docData.match_keywords || [],
             exclude_keywords: docData.exclude_keywords || []

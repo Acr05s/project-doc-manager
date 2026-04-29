@@ -699,7 +699,7 @@ class TaskService:
                     raise Exception('没有可打包的文件')
                 
                 # 创建临时目录和ZIP文件
-                temp_dir = Path('uploads/temp/packages')
+                temp_dir = Path('uploads/temp/packages').resolve()
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 
                 # 优先使用后端获取的项目名称
