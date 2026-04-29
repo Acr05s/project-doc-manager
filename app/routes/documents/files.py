@@ -1,7 +1,8 @@
 """文件搜索和选择相关路由"""
 
 import os
-from flask import request, jsonify
+import hashlib
+from flask import request, jsonify, send_file
 from pathlib import Path
 from datetime import datetime
 from .utils import get_doc_manager
@@ -482,6 +483,176 @@ def select_files():
             'status': 'success',
             'results': results
         })
-        
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def _normalize_zip_source_path(path_value):
+    if not path_value:
+        return ''
+    return str(path_value).replace('\\', '/').rstrip('/')
+
+
+def _collect_zip_used_by(file_path, metas):
+    """按 ZIP 源路径精确匹配，避免同名文件被误标记为已使用。"""
+    normalized_file_path = _normalize_zip_source_path(file_path)
+    used_by = []
+    for meta in metas or []:
+        meta_source_path = _normalize_zip_source_path(meta.get('source_path') or meta.get('original_path'))
+        if not meta_source_path or meta_source_path != normalized_file_path:
+            continue
+        cycle = meta.get('cycle', '')
+        doc_name = meta.get('doc_name', '')
+        display_name = f"{cycle} - {doc_name}" if cycle else doc_name
+        if display_name and display_name not in used_by:
+            used_by.append(display_name)
+    return used_by
+
+
+def _collect_match_details(file_path, metas):
+    """收集文件的详细匹配信息（周期、文档类型、匹配时间）"""
+    normalized_file_path = _normalize_zip_source_path(file_path)
+    details = []
+    for meta in metas or []:
+        meta_source_path = _normalize_zip_source_path(meta.get('source_path') or meta.get('original_path'))
+        if not meta_source_path or meta_source_path != normalized_file_path:
+            continue
+        details.append({
+            'cycle': meta.get('cycle', ''),
+            'doc_name': meta.get('doc_name', ''),
+            'doc_id': meta.get('doc_id', ''),
+            'upload_time': meta.get('upload_time', ''),
+            'original_filename': meta.get('original_filename', ''),
+        })
+    return details
+
+
+def browse_file_tree():
+    """浏览项目上传目录的完整文件树（含匹配信息）"""
+    try:
+        doc_manager = get_doc_manager()
+        project_id = request.args.get('project_id')
+        project_name = request.args.get('project_name')
+
+        if not project_id and not project_name:
+            return jsonify({'status': 'error', 'message': '缺少项目参数'}), 400
+
+        if not project_name and project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                project_name = project_result.get('project', {}).get('name', '')
+
+        if not project_name:
+            return jsonify({'status': 'success', 'tree': [], 'total': 0})
+
+        if project_id:
+            project_result = doc_manager.load_project(project_id)
+            if project_result and project_result.get('status') == 'success':
+                if project_name and hasattr(doc_manager, 'data_manager'):
+                    doc_index = doc_manager.data_manager.load_documents_index(project_name)
+                    for did, ddata in doc_index.items():
+                        doc_manager.documents_db[did] = ddata
+
+        uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
+        if not uploads_dir.exists():
+            return jsonify({'status': 'success', 'tree': [], 'total': 0})
+
+        ALLOWED_EXTS = {'.pdf', '.doc', '.docx', '.xlsx', '.xls',
+                        '.png', '.jpg', '.jpeg', '.tiff', '.txt', '.ppt', '.pptx'}
+
+        def build_tree(dir_path, rel_prefix=''):
+            entries = []
+            try:
+                items = sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+            except PermissionError:
+                return entries
+
+            for item in items:
+                if item.name.startswith('.'):
+                    continue
+                rel_path = f"{rel_prefix}/{item.name}" if rel_prefix else item.name
+
+                if item.is_dir():
+                    children = build_tree(item, rel_path)
+                    file_count = sum(1 for c in children if c['type'] == 'file') + sum(
+                        c.get('file_count', 0) for c in children if c['type'] == 'dir')
+                    if file_count > 0:
+                        entries.append({
+                            'type': 'dir',
+                            'name': item.name,
+                            'path': str(item),
+                            'rel_path': rel_path,
+                            'children': children,
+                            'file_count': file_count
+                        })
+                elif item.is_file() and item.suffix.lower() in ALLOWED_EXTS:
+                    used_by = _collect_zip_used_by(item, doc_manager.documents_db.values())
+                    match_details = _collect_match_details(item, doc_manager.documents_db.values())
+                    stat = item.stat()
+                    entries.append({
+                        'type': 'file',
+                        'name': item.name,
+                        'path': str(item),
+                        'rel_path': rel_path,
+                        'size': stat.st_size,
+                        'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        'ext': item.suffix.lower(),
+                        'matched': len(used_by) > 0,
+                        'used_by': used_by,
+                        'match_details': match_details
+                    })
+            return entries
+
+        tree = build_tree(uploads_dir)
+        total = sum(1 for _ in uploads_dir.rglob('*')
+                    if _.is_file() and not _.name.startswith('.') and _.suffix.lower() in ALLOWED_EXTS)
+
+        return jsonify({'status': 'success', 'tree': tree, 'total': total})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def preview_file_by_path():
+    """通过文件路径预览文件（用于文档浏览器中未匹配的文件）"""
+    try:
+        doc_manager = get_doc_manager()
+        file_path = request.args.get('path', '').strip()
+        if not file_path:
+            return jsonify({'status': 'error', 'message': '缺少文件路径'}), 400
+
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists() or not file_path_obj.is_file():
+            return jsonify({'status': 'error', 'message': '文件不存在'}), 404
+
+        projects_base = str(doc_manager.config.projects_base_folder).replace('\\', '/')
+        file_abs = str(file_path_obj.resolve()).replace('\\', '/')
+        if not file_abs.startswith(projects_base.rstrip('/') + '/'):
+            return jsonify({'status': 'error', 'message': '无权访问该文件'}), 403
+
+        file_ext = file_path_obj.suffix.lower()
+
+        if file_ext == '.pdf':
+            return send_file(str(file_path_obj), mimetype='application/pdf', as_attachment=False)
+
+        image_exts = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                      '.gif': 'image/gif', '.bmp': 'image/bmp', '.tiff': 'image/tiff'}
+        if file_ext in image_exts:
+            return send_file(str(file_path_obj), mimetype=image_exts[file_ext])
+
+        office_exts = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        if file_ext in office_exts:
+            from app.routes.documents.preview import _convert_and_view_office
+            doc_id = hashlib.md5(file_abs.encode()).hexdigest()
+            return _convert_and_view_office(str(file_path_obj), doc_id, file_path_obj)
+
+        if file_ext == '.txt':
+            return send_file(str(file_path_obj), mimetype='text/plain; charset=utf-8')
+
+        return send_file(str(file_path_obj), as_attachment=True)
+
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

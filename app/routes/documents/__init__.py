@@ -10,7 +10,7 @@ from .delete import delete_document, batch_delete_documents
 from .update import batch_update_documents, update_doc, replace_doc
 from .recognize import smart_recognize
 from .category import get_categories, create_category, delete_category
-from .files import get_directories, search_files, select_files
+from .files import get_directories, search_files, select_files, browse_file_tree, preview_file_by_path
 from .zip import get_zip_records, add_zip_record, delete_zip_record, start_zip_match, get_zip_match_status, check_zip_chunk
 from .cleanup import cleanup_duplicates
 from .utils import init_doc_manager
@@ -46,6 +46,8 @@ document_bp.route('/<doc_id>/replace', methods=['POST'])(replace_doc)
 document_bp.route('/directories', methods=['GET'])(get_directories)
 document_bp.route('/files/search', methods=['GET'])(search_files)
 document_bp.route('/files/select', methods=['POST'])(select_files)
+document_bp.route('/files/browse-tree', methods=['GET'])(browse_file_tree)
+document_bp.route('/files/preview-by-path', methods=['GET'])(preview_file_by_path)
 document_bp.route('/zip-records', methods=['GET'])(get_zip_records)
 document_bp.route('/zip-records', methods=['POST'])(add_zip_record)
 document_bp.route('/zip-records/<zip_id>', methods=['DELETE'])(delete_zip_record)
