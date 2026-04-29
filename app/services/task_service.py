@@ -19,7 +19,8 @@ class TaskService:
         """初始化任务服务"""
         self.tasks_store: Dict[str, Dict[str, Any]] = {}
         self.doc_manager = None
-        self._tasks_file = Path('uploads/tasks/package_tasks.json')
+        _base = Path(__file__).resolve().parent.parent.parent
+        self._tasks_file = _base / 'uploads' / 'tasks' / 'package_tasks.json'
         self._tasks_file.parent.mkdir(parents=True, exist_ok=True)
         self._load_tasks()
     
@@ -45,10 +46,18 @@ class TaskService:
                 print(f'[TaskService] 加载任务失败: {e}', flush=True)
     
     def _save_tasks(self):
-        """保存任务到文件"""
+        """保存任务到文件（合并模式，支持多 worker 进程）"""
         try:
+            existing = {}
+            if self._tasks_file.exists():
+                try:
+                    with open(self._tasks_file, 'r', encoding='utf-8') as f:
+                        existing = json.load(f)
+                except Exception:
+                    pass
+            existing.update(self.tasks_store)
             with open(self._tasks_file, 'w', encoding='utf-8') as f:
-                json.dump(self.tasks_store, f, ensure_ascii=False, indent=2)
+                json.dump(existing, f, ensure_ascii=False, indent=2)
             print(f'[TaskService] 任务已保存到文件: {self._tasks_file}', flush=True)
         except Exception as e:
             print(f'[TaskService] 保存任务失败: {e}', flush=True)
@@ -699,7 +708,7 @@ class TaskService:
                     raise Exception('没有可打包的文件')
                 
                 # 创建临时目录和ZIP文件
-                temp_dir = Path('uploads/temp/packages').resolve()
+                temp_dir = Path(__file__).resolve().parent.parent.parent / 'uploads' / 'temp' / 'packages'
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 
                 # 优先使用后端获取的项目名称
