@@ -494,6 +494,19 @@ export function setupEventListeners() {
             window.openAttributePanel(window._treeSelectedNode);
         });
     }
+
+    const toolbarBatchMove = document.getElementById('toolbarBatchMove');
+    if (toolbarBatchMove) {
+        toolbarBatchMove.addEventListener('click', () => {
+            if (window._treeSelectedNodes && window._treeSelectedNodes.length > 0) {
+                window.batchMoveNodes();
+            } else if (window._treeSelectedNode) {
+                window.moveNodeToCycle(window._treeSelectedNode);
+            } else {
+                showNotification('请先选择要移动的节点', 'info');
+            }
+        });
+    }
     
     const toolbarDelete = document.getElementById('toolbarDelete');
     if (toolbarDelete) {
@@ -1022,6 +1035,23 @@ export function setupEventListeners() {
             if (docManageDropdown) docManageDropdown.classList.remove('show');
             if (appState.currentProjectId) {
                 handleRematchFileManagement();
+            } else {
+                showNotification('请先选择一个项目', 'warning');
+            }
+        });
+    }
+
+    // 文档浏览按钮
+    const browseDocumentsBtn = document.getElementById('browseDocumentsBtn');
+    if (browseDocumentsBtn) {
+        browseDocumentsBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const docManageDropdown = document.getElementById('documentManagementDropdown');
+            if (docManageDropdown) docManageDropdown.classList.remove('show');
+            if (appState.currentProjectId) {
+                const { openDocumentBrowser } = await import('./doc-browser.js');
+                openDocumentBrowser();
             } else {
                 showNotification('请先选择一个项目', 'warning');
             }

@@ -1154,6 +1154,11 @@ body {
     z-index: 10100;
 }
 
+/* 移动节点模态框显示在最上层 */
+#moveNodeModal {
+    z-index: 10100;
+}
+
 /* 输入框模态框显示在最上层 */
 #inputModal {
     z-index: 10100;

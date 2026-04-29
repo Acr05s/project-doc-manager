@@ -363,6 +363,41 @@ export function closeTreeEditor() {
 
 // ==================== 初始化与数据构建 ====================
 
+function buildFolderNode(child, idPrefix) {
+    const folderNode = {
+        id: `folder_${idPrefix}`,
+        name: child.name || '新目录',
+        type: 'folder',
+        expanded: false,
+        children: [],
+        attributes: child.attributes || {},
+        filename_template: child.filename_template || '',
+        match_keywords: child.match_keywords || [],
+        exclude_keywords: child.exclude_keywords || []
+    };
+    if (child.files && Array.isArray(child.files)) {
+        child.files.forEach((file, fileIdx) => {
+            const fileData = typeof file === 'object' ? file : { name: file };
+            folderNode.children.push({
+                id: `file_${idPrefix}_${fileIdx}`,
+                name: fileData.name || file,
+                type: 'file',
+                children: [],
+                match_keywords: fileData.match_keywords || [],
+                exclude_keywords: fileData.exclude_keywords || []
+            });
+        });
+    }
+    if (child.children && Array.isArray(child.children)) {
+        child.children.forEach((subChild, subIdx) => {
+            if (subChild.type === 'folder') {
+                folderNode.children.push(buildFolderNode(subChild, `${idPrefix}_${subIdx}`));
+            }
+        });
+    }
+    return folderNode;
+}
+
 /**
  * 从项目配置构建树形数据
  * 兼容旧格式（required_docs 为字符串数组）和新格式（对象数组）
@@ -426,36 +461,11 @@ function buildTreeData(config) {
             exclude_keywords: docData.exclude_keywords || []
         };
 
-            // 支持目录子节点（从 children 中读取）
+            // 支持目录子节点（从 children 中读取，递归支持子目录）
             if (docData.children && Array.isArray(docData.children)) {
                 docData.children.forEach((child, childIdx) => {
                     if (child.type === 'folder') {
-                        const folderNode = {
-                            id: `folder_${index}_${docIndex}_${childIdx}`,
-                            name: child.name || '新目录',
-                            type: 'folder',
-                            expanded: false,
-                            children: [],
-                            attributes: child.attributes || {},
-                            filename_template: child.filename_template || '',
-                            match_keywords: child.match_keywords || [],
-                            exclude_keywords: child.exclude_keywords || []
-                        };
-                        // 文件夹的子文件
-                        if (child.files && Array.isArray(child.files)) {
-                            child.files.forEach((file, fileIdx) => {
-                                const fileData = typeof file === 'object' ? file : { name: file };
-                                folderNode.children.push({
-                                    id: `file_${index}_${docIndex}_${childIdx}_${fileIdx}`,
-                                    name: fileData.name || file,
-                                    type: 'file',
-                                    children: [],
-                                    match_keywords: fileData.match_keywords || [],
-                                    exclude_keywords: fileData.exclude_keywords || []
-                                });
-                            });
-                        }
-                        docNode.children.push(folderNode);
+                        docNode.children.push(buildFolderNode(child, `${index}_${docIndex}_${childIdx}`));
                     }
                 });
             }
@@ -641,14 +651,15 @@ function getNodeActions(node) {
     let actions = '';
 
     if (node.type === 'root') {
-        actions += `<button class="tree-action-btn" onclick="addTreeNode('cycle')" title="添加周期">➕ 周期</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('cycle','${node.id}')" title="添加周期">➕ 周期</button>`;
     } else if (node.type === 'cycle') {
-        actions += `<button class="tree-action-btn" onclick="addTreeNode('document')" title="添加文档">➕ 文档</button>`;
-        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加目录">➕ 目录</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('document','${node.id}')" title="添加文档">➕ 文档</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder','${node.id}')" title="添加目录">➕ 目录</button>`;
     } else if (node.type === 'document') {
-        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder')" title="添加子目录">➕ 目录</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder','${node.id}')" title="添加子目录">➕ 目录</button>`;
     } else if (node.type === 'folder') {
-        actions += `<button class="tree-action-btn" onclick="addTreeNode('file')" title="添加文件">➕ 文件</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('folder','${node.id}')" title="添加子目录">➕ 目录</button>`;
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('file','${node.id}')" title="添加文件">➕ 文件</button>`;
     }
 
     if (node.type !== 'root') {
@@ -898,35 +909,60 @@ function finishEditNodeName(nodeId, newName, originalName) {
 
 // ==================== 添加/编辑/删除 ====================
 
-window.addTreeNode = function(type) {
-    // 确定父节点
+window.addTreeNode = function(type, explicitParentId) {
+    // 确定父节点：优先使用显式传入的 parentId，否则用当前选中节点
     let parentId = 'root';
     if (type === 'document' || type === 'folder' || type === 'file') {
-        if (selectedNode) parentId = selectedNode;
+        if (explicitParentId) {
+            parentId = explicitParentId;
+        } else if (selectedNode) {
+            parentId = selectedNode;
+        }
     }
 
-    const parent = findNode(currentTreeData, parentId);
+    let parent = findNode(currentTreeData, parentId);
     if (!parent) {
         showNotification('请先选择父节点', 'error');
         return;
     }
 
-    // 类型兼容性检查
-    if (type === 'cycle' && parent.type !== 'root') {
-        showNotification('周期只能添加到根节点下', 'error');
-        return;
-    }
-    if (type === 'document' && parent.type !== 'cycle') {
-        showNotification('文档只能添加到周期下', 'error');
-        return;
-    }
-    if (type === 'folder' && parent.type !== 'cycle' && parent.type !== 'document') {
-        showNotification('目录只能添加到周期或文档下', 'error');
-        return;
-    }
-    if (type === 'file' && parent.type !== 'folder') {
-        showNotification('文件只能添加到目录下', 'error');
-        return;
+    // 智能查找合适的父节点：如果当前选中节点类型不兼容，向上查找
+    const typeParentRules = {
+        cycle: ['root'],
+        document: ['cycle'],
+        folder: ['cycle', 'document', 'folder'],
+        file: ['folder']
+    };
+    const allowedParents = typeParentRules[type];
+    if (allowedParents && !allowedParents.includes(parent.type)) {
+        const originalParent = parent;
+        let found = false;
+        let currentId = parentId;
+        while (currentId && currentId !== 'root') {
+            const result = getParentAndSiblings(currentId);
+            if (result && result.parent) {
+                if (allowedParents.includes(result.parent.type)) {
+                    parent = result.parent;
+                    parentId = result.parent.id;
+                    found = true;
+                    break;
+                }
+                currentId = result.parent.id;
+            } else {
+                break;
+            }
+        }
+        if (!found && allowedParents.includes('root')) {
+            parent = currentTreeData;
+            parentId = 'root';
+            found = true;
+        }
+        if (!found) {
+            const typeNames = { cycle: '周期', document: '文档', folder: '目录', file: '文件' };
+            const parentNames = { root: '根节点', cycle: '周期', document: '文档', folder: '目录' };
+            showNotification(`${typeNames[type]}只能添加到${allowedParents.map(t => parentNames[t]).join('或')}下`, 'error');
+            return;
+        }
     }
 
     const now = new Date();
@@ -1474,7 +1510,7 @@ function handleDrop(e) {
     const rules = {
         cycle: ['root'],
         document: ['cycle'],
-        folder: ['cycle', 'document'],
+        folder: ['cycle', 'document', 'folder'],
         file: ['folder']
     };
     const allowed = rules[draggedData.type];
@@ -1655,89 +1691,142 @@ function indentNode(nodeId) {
 }
 
 /**
- * 移动节点到其它周期
+ * 移动节点到其它周期或目录
+ * 支持单个节点或批量移动（传入数组）
  */
-function moveNodeToCycle(nodeId) {
-    const node = findNode(currentTreeData, nodeId);
-    if (!node) return;
-    
+function moveNodeToCycle(nodeIdOrIds) {
+    const nodeIds = Array.isArray(nodeIdOrIds) ? nodeIdOrIds : [nodeIdOrIds];
+    const nodes = nodeIds.map(id => findNode(currentTreeData, id)).filter(Boolean);
+    if (nodes.length === 0) return;
+
     // 获取所有周期
     const cycles = currentTreeData.children.filter(n => n.type === 'cycle');
-    if (cycles.length <= 1) {
-        showNotification('只有一个周期，无法移动', 'warning');
+    if (cycles.length === 0) {
+        showNotification('没有可用的周期', 'warning');
         return;
     }
-    
-    // 排除当前节点所在的周期
-    const currentResult = getParentAndSiblings(nodeId);
-    if (!currentResult || !currentResult.parent) {
-        showNotification('无法移动根节点', 'warning');
+
+    // 构建目标树（周期 > 文档 > 目录层级）
+    function buildTargetOptions(parentNode, prefix, excludeIds) {
+        let options = '';
+        if (!parentNode.children) return options;
+        for (const child of parentNode.children) {
+            if (excludeIds.includes(child.id)) continue;
+            if (['cycle', 'document', 'folder'].includes(child.type)) {
+                const typeIcon = child.type === 'cycle' ? '📂' : child.type === 'document' ? '📄' : '📁';
+                options += `<option value="${child.id}">${prefix}${typeIcon} ${escapeHtml(child.name)}</option>`;
+                if (child.children && child.children.length > 0) {
+                    options += buildTargetOptions(child, prefix + '　　', excludeIds);
+                }
+            }
+        }
+        return options;
+    }
+
+    const excludeIds = nodeIds.slice();
+    nodes.forEach(n => {
+        if (n.children) collectDescendantIds(n, excludeIds);
+    });
+
+    const targetOptions = buildTargetOptions(currentTreeData, '', excludeIds);
+    if (!targetOptions) {
+        showNotification('没有可用的目标位置', 'warning');
         return;
     }
-    
-    // 找到当前周期
-    let currentCycle = currentResult.parent;
-    while (currentCycle && currentCycle.type !== 'cycle' && currentCycle.type !== 'root') {
-        const r = getParentAndSiblings(currentCycle.id);
-        currentCycle = r ? r.parent : null;
-    }
-    
-    // 生成周期选择对话框
-    const cycleOptions = cycles
-        .filter(c => c.id !== currentCycle?.id)
-        .map(c => `<option value="${c.id}">${c.name}</option>`)
-        .join('');
-    
-    if (!cycleOptions) {
-        showNotification('没有其他周期可选', 'warning');
-        return;
-    }
-    
-    // 显示选择对话框
+
+    const nodeLabel = nodes.length === 1
+        ? `"${nodes[0].name}"`
+        : `${nodes.length} 个节点`;
+
+    // 创建模态框
+    const existingModal = document.getElementById('moveNodeModal');
+    if (existingModal) existingModal.remove();
+
     const dialog = document.createElement('div');
+    dialog.id = 'moveNodeModal';
     dialog.className = 'modal';
-    dialog.style.display = 'block';
     dialog.innerHTML = `
-        <div class="modal-content" style="max-width: 400px;">
-            <div class="modal-header">
-                <h3>移动到其它周期</h3>
-                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;">移动到目标位置</h3>
+                <button class="close-btn" id="moveNodeCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
             </div>
-            <div class="modal-body">
-                <p>选择目标周期：</p>
-                <select id="targetCycleSelect" style="width: 100%; padding: 8px; margin: 10px 0;">
-                    ${cycleOptions}
+            <div class="modal-body" style="padding: 15px;">
+                <p style="margin-bottom:10px;">移动 ${nodeLabel} 到：</p>
+                <select id="moveNodeTargetSelect" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:14px;" size="10">
+                    ${targetOptions}
                 </select>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-primary" id="confirmMoveToCycle">确认移动</button>
-                <button class="btn" onclick="this.closest('.modal').remove()">取消</button>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;padding:10px 15px;">
+                <button class="btn btn-primary" id="moveNodeConfirmBtn">确认移动</button>
+                <button class="btn" id="moveNodeCancelBtn">取消</button>
             </div>
         </div>
     `;
     document.body.appendChild(dialog);
-    
-    // 绑定确认按钮事件
-    dialog.querySelector('#confirmMoveToCycle').addEventListener('click', () => {
-        const targetCycleId = document.getElementById('targetCycleSelect').value;
-        const targetCycle = cycles.find(c => c.id === targetCycleId);
-        
-        if (targetCycle) {
-            // 从原位置删除
-            deleteNode(currentTreeData, nodeId);
-            
-            // 添加到目标周期
-            if (!targetCycle.children) targetCycle.children = [];
-            targetCycle.children.push(node);
-            targetCycle.expanded = true;
-            
-            renderTree();
-            markDirty();
-            showNotification('移动成功', 'success');
-        }
-        
-        dialog.remove();
+    dialog.classList.add('show');
+
+    function closeDialog() {
+        dialog.classList.remove('show');
+        setTimeout(() => dialog.remove(), 200);
+    }
+
+    dialog.querySelector('#moveNodeCloseBtn').addEventListener('click', closeDialog);
+    dialog.querySelector('#moveNodeCancelBtn').addEventListener('click', closeDialog);
+    dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) closeDialog();
     });
+
+    dialog.querySelector('#moveNodeConfirmBtn').addEventListener('click', () => {
+        const targetId = document.getElementById('moveNodeTargetSelect').value;
+        if (!targetId) {
+            showNotification('请选择目标位置', 'warning');
+            return;
+        }
+        const target = findNode(currentTreeData, targetId);
+        if (!target) return;
+
+        // 类型兼容检查
+        const rules = {
+            cycle: ['root'],
+            document: ['cycle'],
+            folder: ['cycle', 'document', 'folder'],
+            file: ['folder']
+        };
+
+        let hasError = false;
+        for (const node of nodes) {
+            const allowed = rules[node.type];
+            if (allowed && !allowed.includes(target.type)) {
+                const typeNames = { cycle: '周期', document: '文档', folder: '目录', file: '文件' };
+                showNotification(`${typeNames[node.type]}"${node.name}"不能移动到此位置`, 'error');
+                hasError = true;
+                break;
+            }
+        }
+        if (hasError) return;
+
+        // 执行移动
+        for (const node of nodes) {
+            deleteNode(currentTreeData, node.id);
+            if (!target.children) target.children = [];
+            target.children.push(node);
+        }
+        target.expanded = true;
+
+        renderTree();
+        markDirty();
+        showNotification(`已移动 ${nodes.length} 个节点`, 'success');
+        closeDialog();
+    });
+}
+
+function collectDescendantIds(node, ids) {
+    if (!node.children) return;
+    for (const child of node.children) {
+        ids.push(child.id);
+        collectDescendantIds(child, ids);
+    }
 }
 
 // 导出到全局，供HTML调用
@@ -1747,6 +1836,14 @@ window.outdentNode = outdentNode;
 window.indentNode = indentNode;
 window.moveNodeToCycle = moveNodeToCycle;
 
+window.batchMoveNodes = function() {
+    if (selectedNodes.length === 0) {
+        showNotification('请先选择要移动的节点', 'warning');
+        return;
+    }
+    moveNodeToCycle(selectedNodes.slice());
+};
+
 // ==================== 工具栏 ====================
 
 function updateToolbarState() {
@@ -1755,6 +1852,7 @@ function updateToolbarState() {
     const editBtn = document.getElementById('toolbarEdit');
     const deleteBtn = document.getElementById('toolbarDelete');
     const attrBtn = document.getElementById('toolbarAttr');
+    const batchMoveBtn = document.getElementById('toolbarBatchMove');
 
     if (!selectedNode || selectedNodes.length === 0) {
         if (addDocBtn) addDocBtn.disabled = true;
@@ -1762,19 +1860,19 @@ function updateToolbarState() {
         if (editBtn) editBtn.disabled = true;
         if (deleteBtn) deleteBtn.disabled = true;
         if (attrBtn) attrBtn.disabled = true;
+        if (batchMoveBtn) batchMoveBtn.disabled = true;
         hideAttributePanelIfNoSelection();
         return;
     }
 
     // 多选模式
     if (selectedNodes.length > 1) {
-        // 批量操作模式
         if (addDocBtn) addDocBtn.disabled = true;
         if (addFolderBtn) addFolderBtn.disabled = true;
-        if (editBtn) editBtn.disabled = true;  // 批量时不允许编辑名称
-        if (deleteBtn) deleteBtn.disabled = false;  // 允许批量删除
-        
-        // 只有选中的全是文档时才允许批量编辑属性
+        if (editBtn) editBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = false;
+        if (batchMoveBtn) batchMoveBtn.disabled = false;
+
         const allDocs = selectedNodes.every(id => {
             const node = findNode(currentTreeData, id);
             return node && node.type === 'document';
@@ -1787,16 +1885,12 @@ function updateToolbarState() {
     const node = findNode(currentTreeData, selectedNode);
     if (!node) return;
 
-    // 添加文档：只有选中周期时可用
     if (addDocBtn) addDocBtn.disabled = (node.type !== 'cycle');
-    // 添加目录：选中周期或文档时可用
-    if (addFolderBtn) addFolderBtn.disabled = (node.type !== 'cycle' && node.type !== 'document');
-    // 编辑：非根节点可用
+    if (addFolderBtn) addFolderBtn.disabled = (node.type !== 'cycle' && node.type !== 'document' && node.type !== 'folder');
     if (editBtn) editBtn.disabled = (node.type === 'root');
-    // 删除：非根节点可用
     if (deleteBtn) deleteBtn.disabled = (node.type === 'root');
-    // 属性：只有文档可用
     if (attrBtn) attrBtn.disabled = (node.type !== 'document');
+    if (batchMoveBtn) batchMoveBtn.disabled = (node.type === 'root');
 }
 
 /**
@@ -2030,6 +2124,33 @@ function treeToConfig() {
 
     if (!currentTreeData.children) return config;
 
+    function serializeFolder(folder) {
+        const result = {
+            type: 'folder',
+            name: folder.name,
+            attributes: folder.attributes || {},
+            filename_template: folder.filename_template || '',
+            match_keywords: folder.match_keywords || [],
+            exclude_keywords: folder.exclude_keywords || [],
+            files: [],
+            children: []
+        };
+        if (folder.children) {
+            for (const child of folder.children) {
+                if (child.type === 'file') {
+                    result.files.push({
+                        name: child.name,
+                        match_keywords: child.match_keywords || [],
+                        exclude_keywords: child.exclude_keywords || []
+                    });
+                } else if (child.type === 'folder') {
+                    result.children.push(serializeFolder(child));
+                }
+            }
+        }
+        return result;
+    }
+
     currentTreeData.children.forEach(cycleNode => {
         if (cycleNode.type === 'cycle') {
             config.cycles.push(cycleNode.name);
@@ -2048,57 +2169,26 @@ function treeToConfig() {
                             match_keywords: child.match_keywords || [],
                             exclude_keywords: child.exclude_keywords || []
                         };
-                        
-                        // 将 attributes 转换为 requirement 字符串，供主页显示
+
                         docObj.requirement = attributesToRequirement(child.attributes || {});
-                        
-                        // 收集该文档下的所有目录名称，保存到 categories
+
                         const docCategories = [];
                         if (child.children && child.children.length > 0) {
                             docObj.children = child.children
                                 .filter(c => c.type === 'folder')
                                 .map(folder => {
-                                    // 收集目录名称
                                     docCategories.push(folder.name);
-                                    return {
-                                        type: 'folder',
-                                        name: folder.name,
-                                        attributes: folder.attributes || {},
-                                        filename_template: folder.filename_template || '',
-                                        match_keywords: folder.match_keywords || [],
-                                        exclude_keywords: folder.exclude_keywords || [],
-                                        files: (folder.children || [])
-                                            .filter(f => f.type === 'file')
-                                            .map(f => ({
-                                                name: f.name,
-                                                match_keywords: f.match_keywords || [],
-                                                exclude_keywords: f.exclude_keywords || []
-                                            }))
-                                    };
+                                    return serializeFolder(folder);
                                 });
                         }
-                        
-                        // 将目录名称保存到 categories 中
+
                         if (docCategories.length > 0) {
                             categories[child.name] = docCategories;
                         }
-                        
+
                         requiredDocs.push(docObj);
                     } else if (child.type === 'folder') {
-                        // 周期下的顶级目录
-                        requiredDocs.push({
-                            type: 'folder',
-                            name: child.name,
-                            attributes: child.attributes || {},
-                            filename_template: child.filename_template || '',
-                            match_keywords: child.match_keywords || [],
-                            exclude_keywords: child.exclude_keywords || [],
-                            files: (child.children || []).map(f => ({
-                                name: typeof f === 'object' ? f.name : f,
-                                match_keywords: f.match_keywords || [],
-                                exclude_keywords: f.exclude_keywords || []
-                            }))
-                        });
+                        requiredDocs.push(serializeFolder(child));
                     }
                 });
             }
