@@ -168,11 +168,14 @@ async function loadPendingAnnotationApprovals(container) {
             const stages = a.approval_stages || [];
             let stageDisplay = '';
             if (stages.length > 0) {
+                const currentStage = a.current_stage || 1;
                 stageDisplay = stages.map((s, i) => {
                     const roleName = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : `Level${i+1}`;
-                    if (s.status === 'approved') return `✓ ${roleName}`;
-                    if (s.status === 'rejected') return `✗ ${roleName}`;
-                    return `⏳ ${roleName}`;
+                    const handlerName = s.approved_by_username || s.assigned_to_username || '待分配';
+                    if (s.status === 'approved') return `<span style="color:#28a745;" title="处理人: ${escapeHtml(handlerName)}">✓ ${roleName}</span>`;
+                    if (s.status === 'rejected') return `<span style="color:#dc3545;" title="处理人: ${escapeHtml(handlerName)}">✗ ${roleName}</span>`;
+                    const pendingHint = (i + 1) === currentStage ? handlerName : '待上一阶段完成';
+                    return `<span style="color:#e6a817;" title="处理人: ${escapeHtml(pendingHint)}">⏳ ${roleName}</span>`;
                 }).join(' → ');
             }
 

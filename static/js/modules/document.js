@@ -1269,7 +1269,30 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                     <div style="margin-top:2px;color:#333;">${escapeHtml(completeInfo.content)}</div>
                                                 </div>`;
                                             } else if (pendingAnn) {
-                                                completeBlock = `<span style="font-size:11px;color:#856404;background:#fff3cd;padding:1px 6px;border-radius:3px;" title="申请人: ${escapeAttr(pendingAnn.requester_username || '')}">⏳ 审批中</span>`;
+                                                const annStages = pendingAnn.approval_stages || [];
+                                                let annTooltip = '申请人: ' + (pendingAnn.requester_username || '');
+                                                let annFlowHtml = '';
+                                                if (annStages.length > 0) {
+                                                    const annCurrentStage = pendingAnn.current_stage || 1;
+                                                    const stageTexts = annStages.map((s, si) => {
+                                                        const rn = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : s.required_role === 'admin' ? '管理员' : s.required_role || ('Level'+(si+1));
+                                                        const hn = s.approved_by_username || s.assigned_to_username || '待分配';
+                                                        if (s.status === 'approved') return '✓ ' + rn + '(' + hn + ')';
+                                                        if (s.status === 'rejected') return '✗ ' + rn + '(' + hn + ')';
+                                                        const hint = (si + 1) === annCurrentStage ? hn : '待上一阶段完成';
+                                                        return '⏳ ' + rn + '(' + hint + ')';
+                                                    });
+                                                    annTooltip += '\n流程: ' + stageTexts.join(' → ');
+                                                    const flowLabels = annStages.map((s, si) => {
+                                                        const rn = s.required_role === 'project_admin' ? '项目经理' : s.required_role === 'pmo' ? 'PMO' : s.required_role === 'pmo_leader' ? 'PMO负责人' : s.required_role === 'admin' ? '管理员' : s.required_role || ('Level'+(si+1));
+                                                        const hn = s.approved_by_username || s.assigned_to_username || '待分配';
+                                                        if (s.status === 'approved') return '<span style="color:#28a745;">✓' + escapeHtml(rn) + '</span>';
+                                                        if (s.status === 'rejected') return '<span style="color:#dc3545;">✗' + escapeHtml(rn) + '</span>';
+                                                        return '<span style="color:#e6a817;">⏳' + escapeHtml(rn) + '</span>';
+                                                    });
+                                                    annFlowHtml = '<div style="font-size:10px;color:#555;margin-top:1px;">' + flowLabels.join('→') + '</div>';
+                                                }
+                                                completeBlock = `<span style="font-size:11px;color:#856404;background:#fff3cd;padding:1px 6px;border-radius:3px;cursor:default;" title="${escapeAttr(annTooltip)}">⏳ 审批中</span>${annFlowHtml}`;
                                             } else if (!isArchived) {
                                                 completeBlock = `<button class="annotation-complete-btn" onclick="handleAnnotationCompletePerEntry('${did}','${escapeAttr(doc.name)}','${entry.id}','${escapeAttr(entry.remark || '')}')">完成</button>`;
                                             }
