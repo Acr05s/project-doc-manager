@@ -792,15 +792,10 @@ class TaskService:
                                 # 检查是否标记为不涉及
                                 is_not_involved = documents_not_involved.get(cycle, {}).get(doc_name, False)
                                 if is_not_involved:
-                                    # 创建TXT占位文件
                                     clean_cycle = clean_name_prefix(cycle)
-                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}"
-                                    archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}"
-                                    placeholder_filename = f"{file_index_prefix} {doc_name}（本项目不涉及）.txt"
-                                    archive_path = f"{archive_dir}/{placeholder_filename}"
-                                    # TXT文件内容
-                                    txt_content = f"文档类型：{doc_name}\n状态：本项目不涉及该文档\n\n该文档类型在本项目中不需要提交。"
-                                    zipf.writestr(archive_path, txt_content.encode('utf-8'))
+                                    placeholder_filename = f"{cycle_idx}.{doc_type_seq} {doc_name}（本次项目不涉及）.txt"
+                                    archive_path = f"{project_name}/{cycle_idx}.{clean_cycle}/{placeholder_filename}"
+                                    zipf.writestr(archive_path, '')
                                     processed_files += 1
                                     # 更新进度
                                     if total_files > 0:
