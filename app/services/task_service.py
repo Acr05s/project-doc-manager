@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class TaskService:
     """任务服务类"""
-    
+
     def __init__(self):
         """初始化任务服务"""
         self.tasks_store: Dict[str, Dict[str, Any]] = {}
@@ -22,75 +22,64 @@ class TaskService:
         _base = Path(__file__).resolve().parent.parent.parent
         self._tasks_file = _base / 'uploads' / 'tasks' / 'package_tasks.json'
         self._tasks_file.parent.mkdir(parents=True, exist_ok=True)
+        self._tasks_file_str = str(self._tasks_file)
         self._load_tasks()
-    
+
+    @property
+    def _jfm(self):
+        from app.utils.json_file_manager import json_file_manager
+        return json_file_manager
+
     def _load_tasks(self):
-        """从文件加载任务"""
+        """从文件加载任务（使用文件锁安全读取）"""
         print(f'[TaskService] 尝试从文件加载任务: {self._tasks_file}', flush=True)
-        if self._tasks_file.exists():
-            try:
-                with open(self._tasks_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    print(f'[TaskService] 从文件加载了 {len(data)} 个任务', flush=True)
-                    # 合并到现有任务存储（不覆盖已有任务）
-                    for task_id, task in data.items():
-                        if task_id not in self.tasks_store:
-                            # 只加载已完成的任务
-                            if task.get('status') == 'completed':
-                                self.tasks_store[task_id] = task
-                            elif task.get('status') in ['running', 'pending']:
-                                task['status'] = 'failed'
-                                task['message'] = '服务重启，任务中断'
-                                self.tasks_store[task_id] = task
-            except Exception as e:
-                print(f'[TaskService] 加载任务失败: {e}', flush=True)
-    
+        data = self._jfm.read_json(self._tasks_file_str)
+        if data:
+            print(f'[TaskService] 从文件加载了 {len(data)} 个任务', flush=True)
+            for task_id, task in data.items():
+                if task_id not in self.tasks_store:
+                    if task.get('status') == 'completed':
+                        self.tasks_store[task_id] = task
+                    elif task.get('status') in ['running', 'pending']:
+                        task['status'] = 'failed'
+                        task['message'] = '服务重启，任务中断'
+                        self.tasks_store[task_id] = task
+
     def _save_tasks(self):
-        """保存任务到文件（合并模式，支持多 worker 进程）"""
-        try:
-            existing = {}
-            if self._tasks_file.exists():
-                try:
-                    with open(self._tasks_file, 'r', encoding='utf-8') as f:
-                        existing = json.load(f)
-                except Exception:
-                    pass
-            existing.update(self.tasks_store)
-            with open(self._tasks_file, 'w', encoding='utf-8') as f:
-                json.dump(existing, f, ensure_ascii=False, indent=2)
+        """保存任务到文件（原子合并，文件锁保护，支持多 worker）"""
+        local_tasks = dict(self.tasks_store)
+
+        def merge_func(existing):
+            if existing is None:
+                existing = {}
+            existing.update(local_tasks)
+            return existing
+
+        ok = self._jfm.update_json(self._tasks_file_str, merge_func)
+        if ok:
             print(f'[TaskService] 任务已保存到文件: {self._tasks_file}', flush=True)
-        except Exception as e:
-            print(f'[TaskService] 保存任务失败: {e}', flush=True)
-    
+        else:
+            print(f'[TaskService] 保存任务失败', flush=True)
+
     def set_doc_manager(self, manager):
         """设置文档管理器"""
         self.doc_manager = manager
-    
+
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """获取任务状态"""
-        # 先检查内存
+        """获取任务状态（多 worker 安全）"""
         task = self.tasks_store.get(task_id)
-        if task:
-            print(f'[TaskService] 从内存找到任务: {task_id}', flush=True)
+        if task and task.get('status') in ('completed', 'error', 'failed', 'cancelled'):
             return task
-        
-        # 如果内存中没有，直接从文件读取
-        print(f'[TaskService] 内存中没有任务，从文件读取: {task_id}', flush=True)
-        if self._tasks_file.exists():
-            try:
-                with open(self._tasks_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    task = data.get(task_id)
-                    if task:
-                        print(f'[TaskService] 从文件找到任务: {task_id}', flush=True)
-                        # 添加到内存缓存
-                        self.tasks_store[task_id] = task
-                        return task
-            except Exception as e:
-                print(f'[TaskService] 读取文件失败: {e}', flush=True)
-        
-        print(f'[TaskService] 任务未找到: {task_id}', flush=True)
-        return None
+
+        # 非终态或不在内存：从文件读取最新状态（带共享读锁）
+        data = self._jfm.read_json(self._tasks_file_str)
+        if data and task_id in data:
+            file_task = data[task_id]
+            self.tasks_store[task_id] = file_task
+            return file_task
+
+        # 文件中也没有，返回内存中的（可能是刚创建还没落盘的）
+        return task
     
     def list_tasks(self) -> list:
         """列出所有任务"""
