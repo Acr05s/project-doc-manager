@@ -1829,6 +1829,22 @@ body {
     background: #c8e6c9;
 }
 
+.documents-table tbody tr.folder-header-row {
+    background: #eef3f8;
+}
+
+.documents-table tbody tr.folder-header-row:hover {
+    background: #e3ebf3;
+}
+
+.documents-table tbody tr.folder-header-row td {
+    padding: 8px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    color: #3a5a8c;
+    border-left: 4px solid #4a90d9;
+}
+
 /* 列宽 */
 .documents-table .col-org {
     width: 25%;

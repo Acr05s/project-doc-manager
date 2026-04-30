@@ -1083,8 +1083,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
             return true;
         });
     
-    // 重新排序
-    allDocTypes.sort((a, b) => (a.index || 0) - (b.index || 0));
+    // 重新排序（使用 _originalIndex 保持目录内文档的原始顺序）
+    allDocTypes.sort((a, b) => (a._originalIndex || a.index || 0) - (b._originalIndex || b.index || 0));
 
     // 新布局：左侧组织机构人员，中间文件名+附加属性，右侧确认按钮
         const html = `
@@ -1126,7 +1126,18 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${allDocTypes.map((doc, index) => {
+                    ${(() => {
+                        let lastFolderPath = undefined;
+                        return allDocTypes.map((doc, index) => {
+                        let folderHeaderHtml = '';
+                        const currentFolderPath = doc._folderPath || null;
+                        if (currentFolderPath !== lastFolderPath) {
+                            lastFolderPath = currentFolderPath;
+                            if (currentFolderPath) {
+                                const folderDocsCount = allDocTypes.filter(d => d._folderPath === currentFolderPath).length;
+                                folderHeaderHtml = `<tr class="folder-header-row"><td colspan="5" style="background:#eef3f8;padding:8px 16px;font-weight:600;font-size:14px;color:#3a5a8c;border-left:4px solid #4a90d9;">📁 ${escapeHtml(currentFolderPath)} <span style="font-weight:400;font-size:12px;color:#7a8798;margin-left:8px;">(${folderDocsCount} 项)</span></td></tr>`;
+                            }
+                        }
                         const dk = doc._docKey || doc.name;
                         const docsList = docsByName[dk] || docsByName[doc.name] || [];
 
@@ -1174,10 +1185,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         const docDescription = String(doc.doc_description || '').trim();
                         const escapedDocDescription = escapeHtml(docDescription);
                         
-                        // 构建文档显示名称（含目录路径）
-                        const docDisplayName = doc._folderPath 
-                            ? `<span style="color:#7a8798;font-size:12px;">📁 ${escapeHtml(doc._folderPath)} /</span><br>${escapeHtml(doc.name)}`
-                            : escapeHtml(doc.name);
+                        // 构建文档显示名称（目录信息已由目录标题行显示）
+                        const docDisplayName = escapeHtml(doc.name);
 
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
                         const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
@@ -1211,7 +1220,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             }
                         }
                         
-                        return `
+                        return `${folderHeaderHtml}
                         <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}" data-doc-name="${escapeAttr(dk)}">
                             <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
                             <td class="col-org" style="text-align: center; width: 250px;">
@@ -1440,7 +1449,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             </td>
                         </tr>
                         `;
-                    }).join('')}
+                    }).join('');
+                    })()}
                 </tbody>
             </table>
             </div>
@@ -5363,27 +5373,26 @@ function escapeAttr(str) {
 /**
  * 递归展平 required_docs 树形结构，提取所有文档节点（模块级工具函数）
  */
-export function flattenRequiredDocs(items, folderPath = '') {
+export function flattenRequiredDocs(items, folderPath = '', _counter = null) {
     const result = [];
     if (!items || !Array.isArray(items)) return result;
-    let idx = 0;
+    const counter = _counter || { value: 0 };
     for (const item of items) {
         const itemData = typeof item === 'object' && item !== null ? item : { name: item };
         if (itemData.type === 'folder') {
             const newPath = folderPath ? `${folderPath}/${itemData.name}` : itemData.name;
-            const childDocs = flattenRequiredDocs(itemData.children || [], newPath);
+            const childDocs = flattenRequiredDocs(itemData.children || [], newPath, counter);
             result.push(...childDocs);
-            idx += childDocs.length;
         } else {
+            counter.value++;
             const fp = folderPath || null;
             const docKey = fp ? `${fp}/${itemData.name}` : itemData.name;
             result.push({
                 ...itemData,
-                _originalIndex: itemData.index !== undefined && itemData.index !== null ? itemData.index : (idx + 1),
+                _originalIndex: itemData.index !== undefined && itemData.index !== null ? itemData.index : counter.value,
                 _folderPath: fp,
                 _docKey: docKey
             });
-            idx++;
         }
     }
     return result;
