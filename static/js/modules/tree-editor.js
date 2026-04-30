@@ -392,6 +392,29 @@ function buildFolderNode(child, idPrefix) {
         child.children.forEach((subChild, subIdx) => {
             if (subChild.type === 'folder') {
                 folderNode.children.push(buildFolderNode(subChild, `${idPrefix}_${subIdx}`));
+            } else {
+                // 文档节点：还原为 document 节点
+                const docObj = typeof subChild === 'object' && subChild !== null ? subChild : { name: subChild };
+                const docNode = {
+                    id: `doc_infolder_${idPrefix}_${subIdx}`,
+                    name: docObj.name || subChild,
+                    type: 'document',
+                    expanded: false,
+                    children: [],
+                    attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(docObj.attributes || {}) },
+                    doc_note: docObj.doc_note || '',
+                    filename_template: docObj.filename_template || '',
+                    match_keywords: docObj.match_keywords || [],
+                    exclude_keywords: docObj.exclude_keywords || []
+                };
+                if (docObj.children && Array.isArray(docObj.children)) {
+                    docObj.children.forEach((fc, fci) => {
+                        if (fc.type === 'folder') {
+                            docNode.children.push(buildFolderNode(fc, `${idPrefix}_${subIdx}_${fci}`));
+                        }
+                    });
+                }
+                folderNode.children.push(docNode);
             }
         });
     }
@@ -2167,6 +2190,23 @@ function treeToConfig() {
                     });
                 } else if (child.type === 'folder') {
                     result.children.push(serializeFolder(child));
+                } else if (child.type === 'document') {
+                    // 目录下的文档节点：序列化为带 children 的文档对象
+                    const docObj = {
+                        name: child.name,
+                        attributes: child.attributes || {},
+                        doc_note: child.doc_note || '',
+                        filename_template: child.filename_template || '',
+                        match_keywords: child.match_keywords || [],
+                        exclude_keywords: child.exclude_keywords || []
+                    };
+                    docObj.requirement = attributesToRequirement(child.attributes || {});
+                    if (child.children && child.children.length > 0) {
+                        docObj.children = child.children
+                            .filter(c => c.type === 'folder')
+                            .map(f => serializeFolder(f));
+                    }
+                    result.children.push(docObj);
                 }
             }
         }

@@ -960,16 +960,44 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
 
     // 获取原始 required_docs 并保存原始序号（使用原始顺序的索引+1作为序号）
     // 兼容旧格式（字符串）、新格式（对象）和文件夹节点
+    // 将目录下的文档展平到文档列表，保留目录路径用于显示
     const requiredDocsRaw = docsInfo.required_docs || [];
-    const requiredDocs = requiredDocsRaw
-        .map((doc, idx) => {
-            const docData = typeof doc === 'object' && doc !== null ? doc : { name: doc };
-            return {
-                ...docData,
-                _originalIndex: docData.index !== undefined && docData.index !== null ? docData.index : (idx + 1)
-            };
-        })
-        .filter(doc => doc.type !== 'folder')  // 过滤掉目录节点，只显示文档
+    
+    /**
+     * 递归展平树形结构，提取所有文档节点
+     * @param {Array} items - 条目数组
+     * @param {string} folderPath - 当前目录路径（用于显示）
+     * @param {number} baseIdx - 基础序号
+     * @returns {Array} 展平的文档数组
+     */
+    function flattenDocTree(items, folderPath, baseIdx) {
+        const result = [];
+        let idx = baseIdx;
+        for (const item of items) {
+            const itemData = typeof item === 'object' && item !== null ? item : { name: item };
+            if (itemData.type === 'folder') {
+                // 目录：展平其子文档，附加目录路径
+                const childDocs = flattenDocTree(
+                    itemData.children || [],
+                    folderPath ? `${folderPath}/${itemData.name}` : itemData.name,
+                    idx
+                );
+                result.push(...childDocs);
+                idx += childDocs.length;
+            } else {
+                // 文档：添加到结果
+                result.push({
+                    ...itemData,
+                    _originalIndex: itemData.index !== undefined && itemData.index !== null ? itemData.index : (idx + 1),
+                    _folderPath: folderPath || null  // 记录所在目录路径
+                });
+                idx++;
+            }
+        }
+        return result;
+    }
+    
+    const requiredDocs = flattenDocTree(requiredDocsRaw, '', 0)
         .sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
 
     // 获取已上传的文档
@@ -1175,6 +1203,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         
                         const docDescription = String(doc.doc_description || '').trim();
                         const escapedDocDescription = escapeHtml(docDescription);
+                        
+                        // 构建文档显示名称（含目录路径）
+                        const docDisplayName = doc._folderPath 
+                            ? `<span style="color:#7a8798;font-size:12px;">📁 ${escapeHtml(doc._folderPath)} /</span><br>${escapeHtml(doc.name)}`
+                            : escapeHtml(doc.name);
 
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
                         const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
@@ -1215,7 +1248,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
                                         ${statusTag}
-                                        <div class="doc-type" style="text-align: center;" ${docDescription ? `title="说明: ${escapedDocDescription}"` : ''}>${doc.name}${docDescription ? ' <span style="font-size:12px;color:#7a8798;cursor:help;" title="说明: ' + escapedDocDescription + '">ⓘ</span>' : ''}</div>
+                                        <div class="doc-type" style="text-align: center;" ${docDescription ? `title="说明: ${escapedDocDescription}"` : ''}>${docDisplayName}${docDescription ? ' <span style="font-size:12px;color:#7a8798;cursor:help;" title="说明: ' + escapedDocDescription + '">ⓘ</span>' : ''}</div>
                                         <div class="doc-requirement" style="margin-top: 5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;">
                                             ${requirementHtml}
                                         </div>

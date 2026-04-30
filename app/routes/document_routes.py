@@ -85,13 +85,30 @@ def upload_document():
             other_seal=other_seal,
             project_name=project_name
         )
+
+        # 递归转换所有 numpy.bool_ 为标准 bool
+        def convert_bools(obj):
+            try:
+                import numpy as np
+            except ImportError:
+                np = None
+            if isinstance(obj, dict):
+                return {k: convert_bools(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_bools(i) for i in obj]
+            elif np and isinstance(obj, np.bool_):
+                return bool(obj)
+            else:
+                return obj
+
+        result = convert_bools(result)
         
         # 上传成功后，将文档添加到documents_db中
         if result.get('status') == 'success':
             # 多版本场景下同一秒可能连续上传多份同名文档，使用UUID避免 doc_id 冲突
             timestamp = now_with_timezone().strftime('%Y%m%d_%H%M%S_%f')
             doc_id = f"{cycle}_{doc_name}_{timestamp}_{uuid.uuid4().hex[:8]}"
-            
+
             # 构建文档元数据
             doc_metadata = {
                 'cycle': cycle,
@@ -114,16 +131,19 @@ def upload_document():
                 'file_size': result.get('size'),
                 'doc_id': doc_id
             }
-            
+
             # 合并自定义属性
             doc_metadata.update(custom_attributes)
-            
+
+            # 递归转换所有 numpy.bool_ 为标准 bool
+            doc_metadata = convert_bools(doc_metadata)
+
             # 添加到documents_db
             doc_manager.documents_db[doc_id] = doc_metadata
-            
+
             # 添加doc_id到结果中
             result['doc_id'] = doc_id
-            
+
             # 保存到项目配置中，记录文件路径
             if project_id:
                 project_result = doc_manager.load_project(project_id)
@@ -137,10 +157,10 @@ def upload_document():
                             project_config['documents'][cycle] = {'uploaded_docs': []}
                         if 'uploaded_docs' not in project_config['documents'][cycle]:
                             project_config['documents'][cycle]['uploaded_docs'] = []
-                        
+
                         # 添加文档到项目配置
                         project_config['documents'][cycle]['uploaded_docs'].append(doc_metadata)
-                        
+
                         # 保存更新后的项目配置
                         doc_manager.save_project(project_config)
         

@@ -25,32 +25,7 @@ class DocumentNamer:
         self.config = config or {}
     
     def remove_leading_number(self, filename: str) -> str:
-        """删除文件名中第一个中文字符前的内容
-        
-        例如: "4.1_技术方案.pdf" -> "技术方案.pdf"
-              "附件1_合同.docx" -> "合同.docx"
-        
-        Args:
-            filename: 原始文件名
-            
-        Returns:
-            str: 处理后的文件名
-        """
-        if not filename:
-            return filename
-        
-        # 匹配第一个中文字符的位置
-        match = re.search(r'[\u4e00-\u9fff]', filename)
-        
-        if match:
-            # 如果中文字符前面有内容（包括数字和下划线），保留中文字符及之后的部分
-            chinese_start = match.start()
-            if chinese_start > 0:
-                # 检查前面是否全是数字、点、连字符、下划线
-                prefix = filename[:chinese_start]
-                if re.match(r'^[\d._\-]+$', prefix):
-                    return filename[chinese_start:]
-        
+        """不再去除前缀，直接返回原始文件名，防止周期名被误处理"""
         return filename
     
     def generate_doc_number(self, project_name: str, cycle_index: int, doc_index: int,
