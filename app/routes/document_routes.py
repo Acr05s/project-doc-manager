@@ -1036,8 +1036,15 @@ def get_cycle_progress():
             
             # 检查每个需求文档的完成状态
             for req_doc in required_docs:
-                doc_name = req_doc.get('name', '')
-                requirement = req_doc.get('requirement', '').strip()
+                # 兼容旧格式（字符串）和新格式（对象），跳过目录节点
+                if isinstance(req_doc, str):
+                    doc_name = req_doc
+                    requirement = ''
+                else:
+                    if req_doc.get('type') == 'folder':
+                        continue  # 跳过目录节点
+                    doc_name = req_doc.get('name', '')
+                    requirement = req_doc.get('requirement', '').strip()
                 has_no_requirement = not requirement
                 
                 # 更详细的要求识别

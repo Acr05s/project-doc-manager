@@ -959,11 +959,18 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     }
 
     // 获取原始 required_docs 并保存原始序号（使用原始顺序的索引+1作为序号）
+    // 兼容旧格式（字符串）、新格式（对象）和文件夹节点
     const requiredDocsRaw = docsInfo.required_docs || [];
-    const requiredDocs = requiredDocsRaw.map((doc, idx) => ({
-        ...doc,
-        _originalIndex: doc.index !== undefined && doc.index !== null ? doc.index : (idx + 1)
-    })).sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
+    const requiredDocs = requiredDocsRaw
+        .map((doc, idx) => {
+            const docData = typeof doc === 'object' && doc !== null ? doc : { name: doc };
+            return {
+                ...docData,
+                _originalIndex: docData.index !== undefined && docData.index !== null ? docData.index : (idx + 1)
+            };
+        })
+        .filter(doc => doc.type !== 'folder')  // 过滤掉目录节点，只显示文档
+        .sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
 
     // 获取已上传的文档
     const uploadedDocs = await getCycleDocuments(cycle);

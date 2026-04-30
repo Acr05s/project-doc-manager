@@ -7,6 +7,16 @@ import { showNotification, showLoading, showConfirmModal, openModal, closeModal 
 import { renderCycles, renderInitialContent } from './cycle.js';
 
 /**
+ * HTML 转义，防止 XSS
+ */
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/**
  * 打开需求编辑器
  */
 export function openRequirementEditor() {
@@ -68,21 +78,45 @@ function renderCycleEditor(cycles, documents) {
         return;
     }
     
-    container.innerHTML = cycles.map((cycle, index) => `
+    container.innerHTML = cycles.map((cycle, index) => {
+        const cycleDocs = documents[cycle]?.required_docs || [];
+        let docCount = 0;
+        let folderCount = 0;
+        
+        function countItems(items) {
+            for (const item of items) {
+                const itemData = typeof item === 'object' && item !== null ? item : { name: item };
+                if (itemData.type === 'folder') {
+                    folderCount++;
+                    if (itemData.children) countItems(itemData.children);
+                } else {
+                    docCount++;
+                    if (itemData.children) countItems(itemData.children);
+                }
+            }
+        }
+        countItems(cycleDocs);
+        
+        let infoParts = [];
+        if (docCount > 0) infoParts.push(`文档: ${docCount} 项`);
+        if (folderCount > 0) infoParts.push(`目录: ${folderCount} 项`);
+        if (infoParts.length === 0) infoParts.push('文档需求: 0 项');
+        
+        return `
         <div class="cycle-edit-item" data-cycle="${cycle}">
             <div class="cycle-header">
-                <h4 class="cycle-name">${cycle}</h4>
+                <h4 class="cycle-name">📂 ${cycle}</h4>
                 <div class="cycle-actions">
                     <button class="btn btn-sm btn-primary" onclick="editCycle('${cycle}')">编辑周期</button>
-                    <button class="btn btn-sm btn-secondary" onclick="editCycleDocuments('${cycle}')">编辑文档需求</button>
+                    <button class="btn btn-sm btn-secondary" onclick="editCycleDocuments('${cycle}')">编辑内容</button>
                     <button class="btn btn-sm btn-danger" onclick="deleteCycle('${cycle}')">删除周期</button>
                 </div>
             </div>
             <div class="cycle-info">
-                <span>文档需求: ${documents[cycle]?.required_docs?.length || 0} 项</span>
+                <span>${infoParts.join(' | ')}</span>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 /**
@@ -191,72 +225,175 @@ window.deleteCycle = function(cycle) {
 };
 
 /**
- * 打开周期文档编辑器
+ * 打开周期文档编辑器（支持目录树结构）
  */
 function openCycleDocumentEditor(cycle) {
-    const modal = document.getElementById('cycleDocumentEditorModal');
-    if (!modal) return;
+    let modal = document.getElementById('cycleDocumentEditorModal');
+    
+    // 动态创建模态框（如果不存在）
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'cycleDocumentEditorModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 750px; max-height: 80vh; overflow-y: auto;">
+                <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="margin:0;">编辑周期内容</h3>
+                    <button class="close-btn" onclick="document.getElementById('cycleDocumentEditorModal').classList.remove('show')" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 15px;">
+                    <p style="margin-bottom:10px;color:#666;">当前周期: <strong id="cycleDocEditorCycleName"></strong></p>
+                    <div style="margin-bottom:10px;display:flex;gap:8px;">
+                        <button class="btn btn-sm btn-primary" onclick="addCycleDocument()" title="添加文档">➕ 添加文档</button>
+                        <button class="btn btn-sm btn-info" onclick="addCycleFolder()" title="添加目录">📁 添加目录</button>
+                    </div>
+                    <div id="documentListEditor" style="border:1px solid #eee;border-radius:4px;padding:10px;min-height:100px;">
+                    </div>
+                    <div class="tree-editor-help" style="background:#fff3cd;color:#856404;padding:6px 10px;border-radius:4px;margin-top:10px;">
+                        <small>💡 提示：📄 表示文档项，📁 表示目录，目录下可包含文档和子目录</small>
+                    </div>
+                </div>
+                <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;padding:10px 15px;">
+                    <button class="btn btn-success" onclick="saveCycleDocuments()">💾 保存</button>
+                    <button class="btn" onclick="document.getElementById('cycleDocumentEditorModal').classList.remove('show')">取消</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
     
     // 设置当前编辑的周期
     modal.dataset.currentCycle = cycle;
+    const cycleNameEl = document.getElementById('cycleDocEditorCycleName');
+    if (cycleNameEl) cycleNameEl.textContent = cycle;
     
     // 加载文档需求
     const config = appState.projectConfig;
     const docs = config.documents[cycle]?.required_docs || [];
     
+    // 渲染树形结构
     const container = document.getElementById('documentListEditor');
     if (container) {
-        container.innerHTML = docs.map((doc, index) => {
-            // 兼容字符串格式和对象格式
-            const docName = typeof doc === 'object' ? doc.name : doc;
-            return `
-            <div class="document-edit-item" data-index="${index}">
-                <input type="text" class="doc-name-input" value="${docName}" placeholder="文档名称">
-                <button class="btn btn-sm btn-danger" onclick="removeDocument(${index})">删除</button>
-            </div>
-        `}).join('');
+        container.innerHTML = renderDocTreeItems(docs, '', []);
     }
     
     openModal(modal);
 }
 
 /**
- * 添加文档需求
+ * 递归渲染文档树条目
+ * @param {Array} items - 条目数组
+ * @param {string} parentPath - 父路径（用 . 分隔的索引）
+ * @param {Array} pathStack - 路径栈
  */
-export function addDocument() {
-    const container = document.getElementById('documentListEditor');
-    if (!container) return;
+function renderDocTreeItems(items, parentPath, pathStack) {
+    if (!items || items.length === 0) return '';
     
-    const newIndex = container.children.length;
+    let html = '';
+    items.forEach((item, index) => {
+        const itemData = typeof item === 'object' && item !== null ? item : { name: item };
+        const isFolder = itemData.type === 'folder';
+        const itemName = itemData.name || item || '';
+        const currentPath = parentPath ? `${parentPath}.${index}` : `${index}`;
+        const indent = pathStack.length * 24;
+        const icon = isFolder ? '📁' : '📄';
+        const typeClass = isFolder ? 'doc-tree-folder' : 'doc-tree-document';
+        
+        html += `
+            <div class="doc-tree-item ${typeClass}" data-path="${currentPath}" data-type="${isFolder ? 'folder' : 'document'}" style="margin-left:${indent}px;display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #f0f0f0;">
+                <span class="doc-tree-icon">${icon}</span>
+                <input type="text" class="doc-name-input" value="${escapeHtml(itemName)}" placeholder="${isFolder ? '目录名称' : '文档名称'}" style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                <button class="btn btn-sm btn-danger" onclick="removeCycleTreeItem('${currentPath}')" title="删除">🗑️</button>
+            </div>`;
+        
+        // 递归渲染子条目
+        if (itemData.children && itemData.children.length > 0) {
+            html += renderDocTreeItems(itemData.children, currentPath, [...pathStack, index]);
+        }
+    });
     
-    const item = document.createElement('div');
-    item.className = 'document-edit-item';
-    item.dataset.index = newIndex;
-    item.innerHTML = `
-        <input type="text" class="doc-name-input" value="" placeholder="文档名称">
-        <button class="btn btn-sm btn-danger" onclick="removeDocument(${newIndex})">删除</button>
-    `;
-    
-    container.appendChild(item);
+    return html;
 }
 
 /**
- * 删除文档需求
+ * 添加文档到周期（在根级）
  */
-window.removeDocument = function(index) {
+window.addCycleDocument = function() {
     const container = document.getElementById('documentListEditor');
     if (!container) return;
     
-    const item = container.querySelector(`[data-index="${index}"]`);
-    if (item) {
-        item.remove();
-    }
+    const existingItems = container.querySelectorAll('.doc-tree-item');
+    const newIndex = existingItems.length;
+    const newPath = `${newIndex}`;
+    
+    const item = document.createElement('div');
+    item.className = 'doc-tree-item doc-tree-document';
+    item.dataset.path = newPath;
+    item.dataset.type = 'document';
+    item.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #f0f0f0;';
+    item.innerHTML = `
+        <span class="doc-tree-icon">📄</span>
+        <input type="text" class="doc-name-input" value="" placeholder="文档名称" style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+        <button class="btn btn-sm btn-danger" onclick="removeCycleTreeItem('${newPath}')" title="删除">🗑️</button>
+    `;
+    
+    container.appendChild(item);
+    // 聚焦到新输入框
+    const input = item.querySelector('.doc-name-input');
+    if (input) setTimeout(() => input.focus(), 100);
 };
 
 /**
- * 保存周期文档需求
+ * 添加目录到周期（在根级）
  */
-export function saveCycleDocuments() {
+window.addCycleFolder = function() {
+    const container = document.getElementById('documentListEditor');
+    if (!container) return;
+    
+    const existingItems = container.querySelectorAll('.doc-tree-item');
+    const newIndex = existingItems.length;
+    const newPath = `${newIndex}`;
+    
+    const item = document.createElement('div');
+    item.className = 'doc-tree-item doc-tree-folder';
+    item.dataset.path = newPath;
+    item.dataset.type = 'folder';
+    item.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #f0f0f0;';
+    item.innerHTML = `
+        <span class="doc-tree-icon">📁</span>
+        <input type="text" class="doc-name-input" value="" placeholder="目录名称" style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+        <button class="btn btn-sm btn-danger" onclick="removeCycleTreeItem('${newPath}')" title="删除">🗑️</button>
+    `;
+    
+    container.appendChild(item);
+    const input = item.querySelector('.doc-name-input');
+    if (input) setTimeout(() => input.focus(), 100);
+};
+
+/**
+ * 删除树中的条目
+ */
+window.removeCycleTreeItem = function(path) {
+    const container = document.getElementById('documentListEditor');
+    if (!container) return;
+    
+    const item = container.querySelector(`.doc-tree-item[data-path="${path}"]`);
+    if (!item) return;
+    
+    // 找到所有以该路径为前缀的子条目
+    const prefix = path + '.';
+    const children = container.querySelectorAll(`.doc-tree-item[data-path^="${prefix}"]`);
+    
+    // 删除子条目
+    children.forEach(child => child.remove());
+    // 删除自身
+    item.remove();
+};
+
+/**
+ * 保存周期文档需求（支持目录树结构）
+ */
+window.saveCycleDocuments = function() {
     const modal = document.getElementById('cycleDocumentEditorModal');
     if (!modal) return;
     
@@ -268,31 +405,93 @@ export function saveCycleDocuments() {
     const config = appState.projectConfig;
     const existingDocs = config.documents[cycle]?.required_docs || [];
     
-    // 收集文档列表，同时保留原有属性
-    const inputs = container.querySelectorAll('.doc-name-input');
-    const docs = Array.from(inputs)
-        .map((input, index) => {
-            const name = input.value.trim();
-            if (!name) return null;
+    // 构建索引映射：按名称查找现有条目
+    function buildExistingMap(items) {
+        const map = {};
+        for (const item of items) {
+            const itemData = typeof item === 'object' && item !== null ? item : { name: item };
+            const key = itemData.name || item;
+            map[key] = itemData;
+        }
+        return map;
+    }
+    const existingMap = buildExistingMap(existingDocs);
+    
+    // 收集顶层条目（data-path 不含 .）
+    const topItems = container.querySelectorAll('.doc-tree-item:not([data-path*="."])');
+    
+    function collectItem(itemEl) {
+        const path = itemEl.dataset.path;
+        const type = itemEl.dataset.type || 'document';
+        const input = itemEl.querySelector('.doc-name-input');
+        const name = input ? input.value.trim() : '';
+        
+        if (!name) return null;
+        
+        const existing = existingMap[name];
+        
+        let result;
+        if (type === 'folder') {
+            // 目录：保留原有属性，收集子条目
+            result = {
+                type: 'folder',
+                name: name,
+                attributes: (existing && existing.attributes) ? existing.attributes : {},
+                filename_template: (existing && existing.filename_template) ? existing.filename_template : '',
+                match_keywords: (existing && existing.match_keywords) ? existing.match_keywords : [],
+                exclude_keywords: (existing && existing.exclude_keywords) ? existing.exclude_keywords : [],
+                children: []
+            };
             
-            // 查找同名的现有文档，保留其属性
-            const existingDoc = existingDocs.find(d => {
-                const existingName = typeof d === 'object' ? d.name : d;
-                return existingName === name;
+            // 收集子条目（path 以当前 path. 开头且下一级深度相同）
+            const childPrefix = path + '.';
+            const childItems = container.querySelectorAll(`.doc-tree-item[data-path^="${childPrefix}"]`);
+            // 只取直接子级（路径中只有一个点号在 childPrefix 之后）
+            const directChildren = Array.from(childItems).filter(el => {
+                const subPath = el.dataset.path.substring(childPrefix.length);
+                return !subPath.includes('.');
             });
             
-            if (existingDoc && typeof existingDoc === 'object') {
-                // 保留原有文档的所有属性，只更新名称
-                return {
-                    ...existingDoc,
+            for (const childEl of directChildren) {
+                const childResult = collectItem(childEl);
+                if (childResult) result.children.push(childResult);
+            }
+        } else {
+            // 文档
+            if (existing && typeof existing === 'object') {
+                result = {
+                    ...existing,
                     name: name
                 };
+            } else {
+                result = { name: name };
             }
             
-            // 新文档，只返回名称
-            return name;
-        })
-        .filter(v => v);
+            // 收集子目录
+            const childPrefix = path + '.';
+            const childItems = container.querySelectorAll(`.doc-tree-item[data-path^="${childPrefix}"]`);
+            const directChildren = Array.from(childItems).filter(el => {
+                const subPath = el.dataset.path.substring(childPrefix.length);
+                return !subPath.includes('.');
+            });
+            
+            if (directChildren.length > 0) {
+                if (!result.children) result.children = [];
+                for (const childEl of directChildren) {
+                    const childResult = collectItem(childEl);
+                    if (childResult) result.children.push(childResult);
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    const docs = [];
+    for (const itemEl of topItems) {
+        const item = collectItem(itemEl);
+        if (item) docs.push(item);
+    }
     
     // 更新配置
     if (!config.documents[cycle]) {
@@ -300,10 +499,10 @@ export function saveCycleDocuments() {
     }
     config.documents[cycle].required_docs = docs;
     
-    closeModal(modal);
+    modal.classList.remove('show');
     renderCycleEditor(config.cycles, config.documents);
-    showNotification('文档需求保存成功', 'success');
-}
+    showNotification('保存成功', 'success');
+};
 
 /**
  * 保存需求配置

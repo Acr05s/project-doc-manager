@@ -1547,6 +1547,7 @@ function moveNode(nodeId, targetId) {
     target.expanded = true;
 
     renderTree();
+    selectNode(nodeId);  // 保持焦点在移动的条目上
     markDirty();
     showNotification('移动成功', 'success');
 }
@@ -1603,6 +1604,7 @@ function moveNodeUp(nodeId) {
     [siblings[index - 1], siblings[index]] = [siblings[index], siblings[index - 1]];
     
     renderTree();
+    selectNode(nodeId);  // 保持焦点在移动的条目上
     markDirty();
     showNotification('上移成功', 'success');
 }
@@ -1622,6 +1624,7 @@ function moveNodeDown(nodeId) {
     [siblings[index], siblings[index + 1]] = [siblings[index + 1], siblings[index]];
     
     renderTree();
+    selectNode(nodeId);  // 保持焦点在移动的条目上
     markDirty();
     showNotification('下移成功', 'success');
 }
@@ -1658,6 +1661,7 @@ function outdentNode(nodeId) {
     grandParent.children.splice(parentIndex + 1, 0, node);
     
     renderTree();
+    selectNode(nodeId);  // 保持焦点在移动的条目上
     markDirty();
     showNotification('提级成功', 'success');
 }
@@ -1691,6 +1695,7 @@ function indentNode(nodeId) {
     prevSibling.expanded = true;
     
     renderTree();
+    selectNode(nodeId);  // 保持焦点在移动的条目上
     markDirty();
     showNotification('降级成功', 'success');
 }
@@ -1820,6 +1825,18 @@ function moveNodeToCycle(nodeIdOrIds) {
         target.expanded = true;
 
         renderTree();
+        // 保持焦点在第一个被移动的条目上
+        if (nodes.length === 1) {
+            selectNode(nodes[0].id);
+        } else if (nodes.length > 1) {
+            // 多选移动：选中所有被移动的节点
+            clearAllSelections();
+            for (const node of nodes) {
+                addNodeSelection(node.id);
+            }
+            selectedNode = nodes[nodes.length - 1].id;
+            window._treeSelectedNode = selectedNode;
+        }
         markDirty();
         showNotification(`已移动 ${nodes.length} 个节点`, 'success');
         closeDialog();

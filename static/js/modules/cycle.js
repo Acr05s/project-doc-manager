@@ -61,15 +61,19 @@ export async function calculateCycleStatus(cycle) {
     let allArchived = true;
 
     for (const doc of requiredDocs) {
-        const docsList = docsByName[doc.name] || [];
-        const requirement = doc.requirement || '';
+        // 跳过目录节点，只检查文档
+        const docData = typeof doc === 'object' && doc !== null ? doc : { name: doc };
+        if (docData.type === 'folder') continue;
+        
+        const docsList = docsByName[docData.name] || [];
+        const requirement = docData.requirement || '';
         
         // 检查是否已归档
-        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
+        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[docData.name];
         
         // 检查是否标记为不涉及（从文档列表和项目配置中）
         const isNotInvolvedFromDocs = docsList.some(d => d.not_involved || d._not_involved);
-        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[docData.name];
         const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
         
         // 如果标记为不涉及，视为文件完整、属性完整、已归档
@@ -110,7 +114,7 @@ export async function calculateCycleStatus(cycle) {
             
             for (const attrDef of customAttrDefs) {
                 // 检查文档是否有这个自定义属性的要求
-                if (doc.attributes && doc.attributes[attrDef.id] === true) {
+                if (docData.attributes && docData.attributes[attrDef.id] === true) {
                     // 检查是否有任何文档完成了该属性
                     const isCompleted = docsList.some(d => {
                         const value = getDocValue(d, attrDef.id);
