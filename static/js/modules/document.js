@@ -962,42 +962,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     // 兼容旧格式（字符串）、新格式（对象）和文件夹节点
     // 将目录下的文档展平到文档列表，保留目录路径用于显示
     const requiredDocsRaw = docsInfo.required_docs || [];
-    
-    /**
-     * 递归展平树形结构，提取所有文档节点
-     * @param {Array} items - 条目数组
-     * @param {string} folderPath - 当前目录路径（用于显示）
-     * @param {number} baseIdx - 基础序号
-     * @returns {Array} 展平的文档数组
-     */
-    function flattenDocTree(items, folderPath, baseIdx) {
-        const result = [];
-        let idx = baseIdx;
-        for (const item of items) {
-            const itemData = typeof item === 'object' && item !== null ? item : { name: item };
-            if (itemData.type === 'folder') {
-                // 目录：展平其子文档，附加目录路径
-                const childDocs = flattenDocTree(
-                    itemData.children || [],
-                    folderPath ? `${folderPath}/${itemData.name}` : itemData.name,
-                    idx
-                );
-                result.push(...childDocs);
-                idx += childDocs.length;
-            } else {
-                // 文档：添加到结果
-                result.push({
-                    ...itemData,
-                    _originalIndex: itemData.index !== undefined && itemData.index !== null ? itemData.index : (idx + 1),
-                    _folderPath: folderPath || null  // 记录所在目录路径
-                });
-                idx++;
-            }
-        }
-        return result;
-    }
-    
-    const requiredDocs = flattenDocTree(requiredDocsRaw, '', 0)
+
+    const requiredDocs = flattenRequiredDocs(requiredDocsRaw)
         .sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
 
     // 获取已上传的文档
@@ -1053,30 +1019,31 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
         console.warn('获取标注完成审批状态失败:', e);
     }
 
-    // 按文档类型分组
+    // 按文档类型分组（使用 _docKey 作为匹配键，兼容旧数据）
     const docsByName = {};
     for (const doc of uploadedDocs) {
         const key = doc.doc_name;
         if (!docsByName[key]) docsByName[key] = [];
         docsByName[key].push(doc);
     }
-    
+
     // 获取所有已上传文档的类型名称
     const uploadedDocTypes = new Set(uploadedDocs.map(doc => doc.doc_name));
-    
+
     // 合并required_docs和已上传的文档类型
     let allDocTypes = [...requiredDocs];
-    
+
     // 添加已上传但不在required_docs中的文档类型
-    let maxIndex = requiredDocs.length > 0 
-        ? Math.max(...requiredDocs.map(d => d._originalIndex || 0)) 
+    let maxIndex = requiredDocs.length > 0
+        ? Math.max(...requiredDocs.map(d => d._originalIndex || 0))
         : 0;
     uploadedDocTypes.forEach(docType => {
         // 过滤掉系统生成的随机值（以 "Custom " 开头的文档类型）
-        if (!docType.startsWith('Custom ') && !requiredDocs.some(reqDoc => reqDoc.name === docType)) {
+        if (!docType.startsWith('Custom ') && !requiredDocs.some(reqDoc => reqDoc._docKey === docType || reqDoc.name === docType)) {
             maxIndex++;
             allDocTypes.push({
                 name: docType,
+                _docKey: docType,
                 requirement: '无要求',
                 index: maxIndex,
                 _originalIndex: maxIndex
@@ -1086,31 +1053,33 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
     
     // 应用过滤
         allDocTypes = allDocTypes.filter(doc => {
-            const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
-            const hasFiles = (docsByName[doc.name] || []).length > 0;
-            const isNotInvolvedFromDocs = (docsByName[doc.name] || []).some(d => d.not_involved || d._not_involved);
-            const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+            const dk = doc._docKey || doc.name;
+            const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[dk];
+            const hasFiles = (docsByName[dk] || docsByName[doc.name] || []).length > 0;
+            const isNotInvolvedFromDocs = (docsByName[dk] || docsByName[doc.name] || []).some(d => d.not_involved || d._not_involved);
+            const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[dk];
             const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
-            
+
             if (filterOptions.hideArchived && isArchived) {
                 return false;
             }
             if (filterOptions.hideCompleted && (hasFiles || isNotInvolved)) {
                 return false;
             }
-            
+
             // 关键字筛选
             if (filterOptions.keyword) {
                 const keyword = filterOptions.keyword.toLowerCase();
                 const matchesDocType = doc.name.toLowerCase().includes(keyword);
+                const matchesFolderPath = (doc._folderPath || '').toLowerCase().includes(keyword);
                 const matchesCycle = cycle.toLowerCase().includes(keyword);
-                const matchesFileName = (docsByName[doc.name] || [])
+                const matchesFileName = (docsByName[dk] || docsByName[doc.name] || [])
                     .some(d => (d.original_filename || d.filename || '').toLowerCase().includes(keyword));
-                if (!matchesDocType && !matchesCycle && !matchesFileName) {
+                if (!matchesDocType && !matchesFolderPath && !matchesCycle && !matchesFileName) {
                     return false;
                 }
             }
-            
+
             return true;
         });
     
@@ -1158,11 +1127,12 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                 </thead>
                 <tbody>
                     ${allDocTypes.map((doc, index) => {
-                        const docsList = docsByName[doc.name] || [];
-                        
+                        const dk = doc._docKey || doc.name;
+                        const docsList = docsByName[dk] || docsByName[doc.name] || [];
+
                         // 检查是否已归档
-                        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[doc.name];
-                        const pendingRequest = pendingArchiveMap[doc.name];
+                        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[dk];
+                        const pendingRequest = pendingArchiveMap[dk];
                         
                         // 构建文档树形目录结构
                         const fileListHtml = docsList.length > 0
@@ -1173,14 +1143,14 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         
                         // 分析要求并计算每个要求的完成状态
                         // 从 required_docs 中找到当前文档的 attributes
-                        const currentDocInfo = requiredDocs.find(rd => rd.name === doc.name);
+                        const currentDocInfo = requiredDocs.find(rd => (rd._docKey || rd.name) === dk);
                         const attributes = currentDocInfo?.attributes;
                         // 要求状态: 'none'-无文件或无要求, 'full'-全部完成, 'partial'-部分完成, 'empty'-全未完成
                         const requirementStatus = analyzeRequirementStatus(attributes, docsList);
                         
                         // 检查是否标记为不涉及（从文档列表或项目配置中）
                         const isNotInvolvedFromDocs = docsList.some(d => d.not_involved || d._not_involved);
-                        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+                        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[dk];
                         const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
                         
                         // 生成要求标签HTML
@@ -1242,7 +1212,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         }
                         
                         return `
-                        <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}" data-doc-name="${escapeAttr(doc.name)}">
+                        <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}" data-doc-name="${escapeAttr(dk)}">
                             <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
@@ -1334,13 +1304,13 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                 }
                                                 completeBlock = `<span style="font-size:11px;color:#856404;background:#fff3cd;padding:1px 6px;border-radius:3px;cursor:default;" title="${escapeAttr(annTooltip)}">⏳ 审批中</span>${annFlowHtml}`;
                                             } else if (!isArchived) {
-                                                completeBlock = `<button class="annotation-complete-btn" onclick="handleAnnotationCompletePerEntry('${did}','${escapeAttr(doc.name)}','${entry.id}','${escapeAttr(entry.remark || '')}')">完成</button>`;
+                                                completeBlock = `<button class="annotation-complete-btn" onclick="handleAnnotationCompletePerEntry('${did}','${escapeAttr(dk)}','${entry.id}','${escapeAttr(entry.remark || '')}')">完成</button>`;
                                             }
                                             // 删除按钮：仅自己的批注、未归档、该文档无任何待审批/已完成的标注
                                             const isMyEntry = entry.user_id && String(entry.user_id) === String(authState.user?.id || '');
                                             const isMyEntryByName = !isMyEntry && entry.username && entry.username === (authState.user?.username || '');
                                             if ((isMyEntry || isMyEntryByName) && !isArchived && !docHasPendingAnnotation && !completeInfo) {
-                                                deleteBlock = `<button class="annotation-delete-btn" onclick="handleDeleteAnnotation('${did}','${escapeAttr(doc.name)}','${entry.id}')" title="删除此批注">删除</button>`;
+                                                deleteBlock = `<button class="annotation-delete-btn" onclick="handleDeleteAnnotation('${did}','${escapeAttr(dk)}','${entry.id}')" title="删除此批注">删除</button>`;
                                             }
                                             return `<div style=\"margin-bottom:5px;padding:5px 6px;border-left:2px solid #e5edf5;background:#fafcff;border-radius:3px;max-width:420px;\">\n\
                                                 <div style=\"font-size:11px;color:#5a6b7b;margin-bottom:2px;\">${escapeHtml(formatReviewEntryUser(entry))} · ${escapeHtml(formatReviewEntryTime(entry.time))}</div>\n\
@@ -1399,69 +1369,69 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                                                     const canForwardToPM = nextStage && nextStage.required_role === 'project_admin' && nextStage.status === 'pending';
                                                     if (canForwardToPM) {
                                                         return `
-                                                        <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
+                                                        <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                             ➡️ 流转项目经理复核
                                                         </button>
-                                                        <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                        <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
                                                             ✅ 直接归档
                                                         </button>
-                                                        <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                        <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                             ❌ 驳回
                                                         </button>`;
                                                     } else {
                                                         return `
-                                                        <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
+                                                        <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'approve_finalize', '${cycle}')">
                                                             ✅ 批准归档
                                                         </button>
-                                                        <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                        <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                             ❌ 驳回
                                                         </button>`;
                                                     }
                                                 }
                                                 return `
-                                                <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
+                                                <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'approve', '${cycle}')">
                                                     ✅ 审批通过
                                                 </button>
-                                                <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
+                                                <button class="btn btn-danger btn-sm" onclick="setDocumentRowFocusByName('${dk}');handleQuickApprove('${pendingRequest.id}', 'reject', '${cycle}')">
                                                     ❌ 驳回
                                                 </button>`;
                                             })()}
                                             ${pendingRequest.requester_username === authState.user?.username ? `
-                                                <button class="btn btn-secondary btn-sm" style="margin-top:4px;" onclick="setDocumentRowFocusByName('${doc.name}');handleWithdrawArchive('${appState.currentProjectId}', '${pendingRequest.id}', '${cycle}')">
+                                                <button class="btn btn-secondary btn-sm" style="margin-top:4px;" onclick="setDocumentRowFocusByName('${dk}');handleWithdrawArchive('${appState.currentProjectId}', '${pendingRequest.id}', '${cycle}')">
                                                     ↩️ 撤回审批
                                                 </button>
-                                                <button class="btn btn-info btn-sm" style="margin-top:4px;" onclick="setDocumentRowFocusByName('${doc.name}');handleContractorQuickApprove('${pendingRequest.id}', '${cycle}')">
+                                                <button class="btn btn-info btn-sm" style="margin-top:4px;" onclick="setDocumentRowFocusByName('${dk}');handleContractorQuickApprove('${pendingRequest.id}', '${cycle}')">
                                                     ⚡ 快速审批
                                                 </button>
                                             ` : ''}
                                         ` : `
                                             ${!isNotInvolved && hasDocOpPermission('doc_op_upload') ? `
-                                                <button class="btn btn-primary btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');openUploadModal('${cycle}', '${doc.name}')">
+                                                <button class="btn btn-primary btn-sm" onclick="setDocumentRowFocusByName('${dk}');openUploadModal('${cycle}', '${dk}')">
                                                     📁 上传/选择文档
                                                 </button>
                                                 ${docsList.length > 0 && hasDocOpPermission('doc_op_edit') ? `
-                                                    <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');openMaintainModal('${cycle}', '${doc.name}')">
+                                                    <button class="btn btn-success btn-sm" onclick="setDocumentRowFocusByName('${dk}');openMaintainModal('${cycle}', '${dk}')">
                                                         ✏️ 编辑
                                                     </button>
                                                 ` : ''}
                                             ` : ''}
                                             ${hasDocOpPermission('doc_op_not_involved') ? `
-                                                <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');markDocumentNotInvolved('${cycle}', '${doc.name}')">
+                                                <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${dk}');markDocumentNotInvolved('${cycle}', '${dk}')">
                                                     ${isNotInvolved ? '🚫 撤销不涉及' : '🚫 不涉及'}
                                                 </button>
                                             ` : ''}
                                             ${!isNotInvolved && hasDocOpPermission('doc_op_archive') ? `
-                                                <button class="btn btn-info btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');archiveDocument('${cycle}', '${doc.name}')">
+                                                <button class="btn btn-info btn-sm" onclick="setDocumentRowFocusByName('${dk}');archiveDocument('${cycle}', '${dk}')">
                                                     📦 确认归档
                                                 </button>
                                             ` : ''}
                                         `}
                                     ` : `
-                                        <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${doc.name}');unarchiveDocument('${cycle}', '${doc.name}')">
+                                        <button class="btn btn-warning btn-sm" onclick="setDocumentRowFocusByName('${dk}');unarchiveDocument('${cycle}', '${dk}')">
                                             📤 撤销归档
                                         </button>
-                                        ${approvedArchiveMap[doc.name] ? `
-                                            <button class="btn btn-outline-info btn-sm" style="margin-top:4px;" onclick="showApprovalTimelineModal('${approvedArchiveMap[doc.name].id}', '${cycle}')">
+                                        ${approvedArchiveMap[dk] ? `
+                                            <button class="btn btn-outline-info btn-sm" style="margin-top:4px;" onclick="showApprovalTimelineModal('${approvedArchiveMap[dk].id}', '${cycle}')">
                                                 📊 流转查看
                                             </button>
                                         ` : ''}
@@ -2386,8 +2356,7 @@ function displayDocumentRequirements() {
         console.log('cycleDocs:', cycleDocs);
         if (cycleDocs && cycleDocs.required_docs) {
             console.log('cycleDocs.required_docs exists:', cycleDocs.required_docs.length, 'docs');
-            const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
-            console.log('docInfo:', docInfo);
+            const docInfo = findDocInRequiredDocs(cycleDocs.required_docs, appState.currentDocument);
             if (docInfo) {
                 requirement = buildDisplayRequirementText(docInfo, appState.projectConfig);
                 console.log('requirement:', requirement);
@@ -3350,8 +3319,7 @@ function generateDynamicEditForm(doc, cycle, docName) {
         console.log('[generateDynamicEditForm] cycleDocs:', cycleDocs);
         
         if (cycleDocs && cycleDocs.required_docs) {
-            const docInfo = cycleDocs.required_docs.find(d => d.name === docName);
-            console.log('[generateDynamicEditForm] docInfo:', docInfo);
+            const docInfo = findDocInRequiredDocs(cycleDocs.required_docs, docName);
             
             if (docInfo) {
                 requirement = buildDisplayRequirementText(docInfo, appState.projectConfig);
@@ -4092,10 +4060,8 @@ export async function archiveDocument(cycle, docName) {
             return { status: 'error', message: '文档配置不存在' };
         }
         
-        // 查找当前文档类型的要求
-        const docConfig = (docsInfo.required_docs || []).find(d => 
-            (typeof d === 'object' ? d.name : d) === docName
-        );
+        // 查找当前文档类型的要求（支持目录嵌套）
+        const docConfig = findDocInRequiredDocs(docsInfo.required_docs || [], docName);
         const requirement = docConfig?.requirement || '';
         
         // 获取已上传的该类型文档列表
@@ -4287,21 +4253,22 @@ export async function batchArchiveCycle(cycle) {
         const uploadedDocs = await getCycleDocuments(cycle);
         
         // 找出所有未归档且有文件的文档类型
-        const requiredDocs = docsInfo.required_docs || [];
+        const requiredDocs = flattenRequiredDocs(docsInfo.required_docs || []);
         const archivedDocs = appState.projectConfig.documents_archived?.[cycle] || {};
-        
+
         // 筛选出可以归档的文档类型（未归档且有文件）
         const docsToArchive = [];
         const docsWithMissingRequirements = [];
-        
+
         for (const docConfig of requiredDocs) {
+            const docKey = docConfig._docKey || docConfig.name;
             const docName = typeof docConfig === 'object' ? docConfig.name : docConfig;
-            
+
             // 跳过已归档的
-            if (archivedDocs[docName]) continue;
-            
+            if (archivedDocs[docKey]) continue;
+
             // 获取该文档类型的文件
-            const docTypeFiles = uploadedDocs.filter(d => d.doc_name === docName);
+            const docTypeFiles = uploadedDocs.filter(d => d.doc_name === docKey || d.doc_name === docName);
             
             // 如果没有文件，跳过
             if (docTypeFiles.length === 0) continue;
@@ -4324,11 +4291,11 @@ export async function batchArchiveCycle(cycle) {
             
             if (hasMissingRequirements) {
                 docsWithMissingRequirements.push({
-                    docName,
+                    docName: docKey,
                     unmetFiles
                 });
             } else {
-                docsToArchive.push(docName);
+                docsToArchive.push(docKey);
             }
         }
         
@@ -5393,6 +5360,50 @@ function escapeAttr(str) {
     return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/**
+ * 递归展平 required_docs 树形结构，提取所有文档节点（模块级工具函数）
+ */
+export function flattenRequiredDocs(items, folderPath = '') {
+    const result = [];
+    if (!items || !Array.isArray(items)) return result;
+    let idx = 0;
+    for (const item of items) {
+        const itemData = typeof item === 'object' && item !== null ? item : { name: item };
+        if (itemData.type === 'folder') {
+            const newPath = folderPath ? `${folderPath}/${itemData.name}` : itemData.name;
+            const childDocs = flattenRequiredDocs(itemData.children || [], newPath);
+            result.push(...childDocs);
+            idx += childDocs.length;
+        } else {
+            const fp = folderPath || null;
+            const docKey = fp ? `${fp}/${itemData.name}` : itemData.name;
+            result.push({
+                ...itemData,
+                _originalIndex: itemData.index !== undefined && itemData.index !== null ? itemData.index : (idx + 1),
+                _folderPath: fp,
+                _docKey: docKey
+            });
+            idx++;
+        }
+    }
+    return result;
+}
+
+// 递归查找 required_docs 中的文档节点（支持目录嵌套）
+function findDocInRequiredDocs(requiredDocs, docKey) {
+    if (!requiredDocs || !Array.isArray(requiredDocs)) return null;
+    for (const item of requiredDocs) {
+        if (typeof item !== 'object' || item === null) continue;
+        if (item.type === 'folder') {
+            const found = findDocInRequiredDocs(item.children || [], docKey);
+            if (found) return found;
+        } else if (item.name === docKey || item._docKey === docKey) {
+            return item;
+        }
+    }
+    return null;
+}
+
 // 渲染主页面单个文档行（保留原有的属性显示和缺失要求检查）
 function renderMainFileRow(d, cycle, docInfo, depth = 0, isArchived = false) {
     const getField = (name) => d[name] !== undefined ? d[name] : d[`_${name}`];
@@ -5437,7 +5448,9 @@ function renderMainFileRow(d, cycle, docInfo, depth = 0, isArchived = false) {
     // 自定义属性
     const predefinedFields = new Set(['doc_date', 'signer', 'party_a_signer', 'party_b_signer', 'sign_date', 'no_signature', 'party_a_seal', 'party_b_seal', 'has_seal_marked', 'has_seal', 'no_seal', 'other_seal', 'not_involved', 'id', 'doc_name', 'filename', 'original_filename', 'upload_time', 'last_modified', 'directory', 'cycle', 'file_path', 'source', 'file_size', 'doc_id', 'project_name', 'project_id', 'file_type', 'status', 'matched_file', 'matched_time', 'archived', 'custom_attrs', 'zip_name', 'zip_file', 'zip_path', 'rel_path']);
     const cycleDocs = appState.projectConfig?.documents?.[cycle];
-    const currentDocInfo = cycleDocs?.required_docs?.find(rd => rd.name === docInfo.name);
+    const currentDocInfo = cycleDocs?.required_docs
+        ? findDocInRequiredDocs(cycleDocs.required_docs, docInfo._docKey || docInfo.name)
+        : null;
     const requiredCustomAttrs = currentDocInfo?.attributes || {};
     const customDefs = appState.projectConfig?.custom_attribute_definitions || [];
     customDefs.forEach(attrDef => {
@@ -5864,7 +5877,9 @@ function renderDocItem(doc, cycle, docName, indent) {
     const reqDocInfo = (() => {
         if (!appState.projectConfig || !cycle || !docName) return null;
         const cycleDocs = appState.projectConfig.documents?.[cycle];
-        return cycleDocs?.required_docs?.find(d => d.name === docName) || null;
+        return cycleDocs?.required_docs
+            ? findDocInRequiredDocs(cycleDocs.required_docs, docName)
+            : null;
     })();
     customDefs.forEach(attrDef => {
         // 若能找到文档要求配置，则只展示该文档要求的属性
@@ -6000,14 +6015,12 @@ export async function generateReport() {
             // 获取该周期的文档要求
             const cycleDocs = appState.projectConfig.documents[cycle];
             if (cycleDocs) {
-                // 收集要求的文档并按前端显示顺序排序
+                // 收集要求的文档并按前端显示顺序排序（展平目录结构）
                 const requiredDocsRaw = cycleDocs.required_docs || [];
-                cycleData.requiredDocs = requiredDocsRaw.map((doc, idx) => ({
-                    ...doc,
-                    _originalIndex: doc.index !== undefined && doc.index !== null ? doc.index : (idx + 1)
-                })).sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
+                cycleData.requiredDocs = flattenRequiredDocs(requiredDocsRaw)
+                    .sort((a, b) => (a._originalIndex || 0) - (b._originalIndex || 0));
                 cycleData.statistics.totalDocs = cycleData.requiredDocs.filter(doc =>
-                    !appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name]
+                    !appState.projectConfig.documents_not_involved?.[cycle]?.[doc._docKey || doc.name]
                 ).length;
                 
                 // 获取已上传的文档
@@ -6020,7 +6033,7 @@ export async function generateReport() {
                     const reviewEntries = parseReviewEntries(doc.review_result || '');
                     
                     // 检查文档是否合规
-                    const docConfig = cycleData.requiredDocs.find(d => d.name === docName);
+                    const docConfig = cycleData.requiredDocs.find(d => (d._docKey || d.name) === docName || d.name === docName);
                     const requirement = docConfig?.requirement || '';
                     const attributes = docConfig?.attributes || {};
                     const missing = checkMissingRequirements(doc, requirement, attributes);
@@ -6045,8 +6058,9 @@ export async function generateReport() {
                 
                 // 识别缺失的文档（排除"不涉及"的文档，不涉及不算未上传）
                 cycleData.missingDocs = cycleData.requiredDocs.filter(doc => {
-                    if (uploadedDocNames.has(doc.name)) return false;
-                    const isNotInvolved = appState.projectConfig.documents_not_involved?.[cycle]?.[doc.name];
+                    const dk = doc._docKey || doc.name;
+                    if (uploadedDocNames.has(dk) || uploadedDocNames.has(doc.name)) return false;
+                    const isNotInvolved = appState.projectConfig.documents_not_involved?.[cycle]?.[dk];
                     return !isNotInvolved;
                 });
                 cycleData.statistics.missingDocs = cycleData.missingDocs.length;
@@ -6073,7 +6087,7 @@ export async function generateReport() {
                     
                     Object.entries(docsByType).forEach(([docName, docs]) => {
                         // 获取该文档类型的要求
-                        const docConfig = cycleData.requiredDocs.find(d => d.name === docName);
+                        const docConfig = cycleData.requiredDocs.find(d => (d._docKey || d.name) === docName || d.name === docName);
                         const requirement = docConfig?.requirement || '';
                         const hasSignRequirement = requirement.includes('签字') || requirement.includes('签名');
                         const hasSealRequirement = requirement.includes('盖章') || requirement.includes('章');
@@ -6306,7 +6320,7 @@ function showReportModal(reportData) {
                             <div class="missing-docs" style="margin-bottom: 15px;">
                                 <h5 style="margin-bottom: 10px; color: #dc3545;">缺失文档:</h5>
                                 <ul style="margin: 0; padding-left: 20px;">
-                                    ${cycle.missingDocs.map((doc, index) => `<li>${doc._originalIndex || (index + 1)}. ${doc.name}</li>`).join('')}
+                                    ${cycle.missingDocs.map((doc, index) => `<li>${doc._originalIndex || (index + 1)}. ${doc._folderPath ? doc._folderPath + '/' : ''}${doc.name}</li>`).join('')}
                                 </ul>
                             </div>
                         ` : `<p style="color: #28a745;">✓ 所有文档已上传</p>`}
@@ -6324,9 +6338,9 @@ function showReportModal(reportData) {
                                 
                                 // 按前端显示顺序排序文档类型
                                 const sortedDocTypes = cycle.requiredDocs
-                                    .map(doc => doc.name)
+                                    .map(doc => doc._docKey || doc.name)
                                     .filter(name => docsByType[name])
-                                    .concat(Object.keys(docsByType).filter(name => !cycle.requiredDocs.some(doc => doc.name === name)));
+                                    .concat(Object.keys(docsByType).filter(name => !cycle.requiredDocs.some(doc => (doc._docKey || doc.name) === name)));
                                 
                                 // 生成按类型分组的表格HTML
                                 return sortedDocTypes.map((typeName, typeIndex) => {
@@ -7762,7 +7776,7 @@ export async function smartRecognizeDocument() {
         if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
             const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
             if (cycleDocs && cycleDocs.required_docs) {
-                const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
+                const docInfo = findDocInRequiredDocs(cycleDocs.required_docs, appState.currentDocument);
                 if (docInfo) {
                     requirement = docInfo.requirement || '';
                     // 处理特殊情况：甲方提供 = 无特殊要求
@@ -8098,7 +8112,7 @@ export function handleBatchEdit() {
     if (appState.projectConfig && appState.currentCycle && appState.currentDocument) {
         const cycleDocs = appState.projectConfig.documents[appState.currentCycle];
         if (cycleDocs && cycleDocs.required_docs) {
-            const docInfo = cycleDocs.required_docs.find(doc => doc.name === appState.currentDocument);
+            const docInfo = findDocInRequiredDocs(cycleDocs.required_docs, appState.currentDocument);
             if (docInfo) {
                 requirement = docInfo.requirement || '无特殊要求';
                 // 解析附加属性

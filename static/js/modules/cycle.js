@@ -4,7 +4,7 @@
 
 import { appState, elements } from './app-state.js';
 import { getCycleDocuments, calculateCycleProgress } from './api.js';
-import { renderCycleDocuments } from './document.js';
+import { renderCycleDocuments, flattenRequiredDocs } from './document.js';
 
 /**
  * 渲染项目周期列表
@@ -45,9 +45,9 @@ export async function calculateCycleStatus(cycle) {
     const docsInfo = appState.projectConfig.documents[cycle];
     if (!docsInfo) return 'incomplete';
 
-    const requiredDocs = docsInfo.required_docs || [];
+    const requiredDocs = flattenRequiredDocs(docsInfo.required_docs || []);
     const uploadedDocs = await getCycleDocuments(cycle);
-    
+
     // 按文档类型分组
     const docsByName = {};
     for (const doc of uploadedDocs) {
@@ -61,19 +61,17 @@ export async function calculateCycleStatus(cycle) {
     let allArchived = true;
 
     for (const doc of requiredDocs) {
-        // 跳过目录节点，只检查文档
-        const docData = typeof doc === 'object' && doc !== null ? doc : { name: doc };
-        if (docData.type === 'folder') continue;
-        
-        const docsList = docsByName[docData.name] || [];
-        const requirement = docData.requirement || '';
-        
+        const docData = doc;
+        const dk = docData._docKey || docData.name;
+
+        const docsList = docsByName[dk] || docsByName[docData.name] || [];
+
         // 检查是否已归档
-        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[docData.name];
-        
+        const isArchived = appState.projectConfig.documents_archived?.[cycle]?.[dk];
+
         // 检查是否标记为不涉及（从文档列表和项目配置中）
         const isNotInvolvedFromDocs = docsList.some(d => d.not_involved || d._not_involved);
-        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[docData.name];
+        const isNotInvolvedFromConfig = appState.projectConfig.documents_not_involved?.[cycle]?.[dk];
         const isNotInvolved = isNotInvolvedFromDocs || isNotInvolvedFromConfig;
         
         // 如果标记为不涉及，视为文件完整、属性完整、已归档
@@ -92,8 +90,9 @@ export async function calculateCycleStatus(cycle) {
         // 检查是否已归档
         if (!isArchived) {
             allArchived = false;
-            
+
             // 检查附加属性
+            const requirement = docData.requirement || '';
             const requireSigner = requirement.includes('签名') || requirement.includes('签字');
             const requireSeal = requirement.includes('盖章') || requirement.includes('章');
             
@@ -303,9 +302,10 @@ function initCycleSearch() {
     cycles.forEach(cycle => {
         const docsInfo = documents[cycle];
         if (!docsInfo || !Array.isArray(docsInfo.required_docs)) return;
-        docsInfo.required_docs.forEach(doc => {
+        const flatDocs = flattenRequiredDocs(docsInfo.required_docs);
+        flatDocs.forEach(doc => {
             const requirement = (doc.requirement || doc.doc_type || doc.category || '文档要求').toString();
-            const docName = (doc.name || '').toString();
+            const docName = (doc._docKey || doc.name || '').toString();
             searchIndex.push({ cycle, requirement, docName });
         });
     });

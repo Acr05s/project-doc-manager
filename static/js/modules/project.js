@@ -622,7 +622,21 @@ export async function handleLoadProject(e) {
 function showApplyRequirementsDialog(requirementsId, requirementsName, configData) {
     const cycleCount = configData.cycles?.length || 0;
     const docCount = Object.values(configData.documents || {}).reduce(
-        (sum, docs) => sum + (docs.required_docs?.length || 0), 0
+        (sum, docs) => {
+            const items = docs.required_docs || [];
+            let count = 0;
+            function countDocs(arr) {
+                for (const item of arr) {
+                    if (typeof item === 'object' && item !== null && item.type === 'folder') {
+                        countDocs(item.children || []);
+                    } else {
+                        count++;
+                    }
+                }
+            }
+            countDocs(items);
+            return sum + count;
+        }, 0
     );
 
     // 如果有当前项目，直接应用，不显示对话框
@@ -949,9 +963,22 @@ function generatePackagePreview(projectConfig) {
             docsByType[docName][directory].push(doc);
         });
         
-        // 获取需求文档列表（定义了页面上文档类型的顺序）
-        const requiredDocs = docData.required_docs || [];
-        const docNamesOrder = requiredDocs.map(reqDoc => reqDoc.name).filter(name => name in docsByType);
+        // 获取需求文档列表（定义了页面上文档类型的顺序，展平目录结构）
+        const requiredDocsRaw = docData.required_docs || [];
+        function flattenForOrder(items, prefix) {
+            const result = [];
+            for (const item of items) {
+                if (typeof item === 'object' && item !== null && item.type === 'folder') {
+                    const p = prefix ? `${prefix}/${item.name}` : item.name;
+                    result.push(...flattenForOrder(item.children || [], p));
+                } else {
+                    const name = typeof item === 'object' && item !== null ? item.name : item;
+                    result.push(prefix ? `${prefix}/${name}` : name);
+                }
+            }
+            return result;
+        }
+        const docNamesOrder = flattenForOrder(requiredDocsRaw, '').filter(name => name in docsByType);
         
         // 如果required_docs为空，使用docsByType的键作为顺序
         const allDocNames = docNamesOrder.length > 0 ? docNamesOrder : Object.keys(docsByType);
