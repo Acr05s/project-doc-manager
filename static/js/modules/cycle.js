@@ -42,6 +42,7 @@ export function renderCycles() {
  * 返回: 'complete' (绿色-完整无误), 'partial' (橙色-文件对属性不对), 'incomplete' (红色-文件不完整)
  */
 export async function calculateCycleStatus(cycle) {
+    if (!appState.projectConfig?.documents) return 'incomplete';
     const docsInfo = appState.projectConfig.documents[cycle];
     if (!docsInfo) return 'incomplete';
 
@@ -61,6 +62,7 @@ export async function calculateCycleStatus(cycle) {
     let allArchived = true;
 
     for (const doc of requiredDocs) {
+        if (doc._isFolder) continue;
         const docData = doc;
         const dk = docData._docKey || docData.name;
 
@@ -303,7 +305,7 @@ function initCycleSearch() {
         const docsInfo = documents[cycle];
         if (!docsInfo || !Array.isArray(docsInfo.required_docs)) return;
         const flatDocs = flattenRequiredDocs(docsInfo.required_docs);
-        flatDocs.forEach(doc => {
+        flatDocs.filter(doc => !doc._isFolder).forEach(doc => {
             const requirement = (doc.requirement || doc.doc_type || doc.category || '文档要求').toString();
             const docName = (doc._docKey || doc.name || '').toString();
             searchIndex.push({ cycle, requirement, docName });

@@ -686,6 +686,7 @@ function getNodeActions(node) {
     } else if (node.type === 'document') {
         actions += `<button class="tree-action-btn" onclick="addTreeNode('folder','${node.id}')" title="添加子目录">➕ 目录</button>`;
     } else if (node.type === 'folder') {
+        actions += `<button class="tree-action-btn" onclick="addTreeNode('document','${node.id}')" title="添加文档">➕ 文档</button>`;
         actions += `<button class="tree-action-btn" onclick="addTreeNode('folder','${node.id}')" title="添加子目录">➕ 目录</button>`;
         actions += `<button class="tree-action-btn" onclick="addTreeNode('file','${node.id}')" title="添加文件">➕ 文件</button>`;
     }
@@ -957,7 +958,7 @@ window.addTreeNode = function(type, explicitParentId) {
     // 智能查找合适的父节点：如果当前选中节点类型不兼容，向上查找
     const typeParentRules = {
         cycle: ['root'],
-        document: ['cycle'],
+        document: ['cycle', 'folder'],
         folder: ['cycle', 'document', 'folder'],
         file: ['folder']
     };
@@ -1537,7 +1538,7 @@ function handleDrop(e) {
     // 类型兼容检查
     const rules = {
         cycle: ['root'],
-        document: ['cycle'],
+        document: ['cycle', 'folder'],
         folder: ['cycle', 'document', 'folder'],
         file: ['folder']
     };
@@ -1822,7 +1823,7 @@ function moveNodeToCycle(nodeIdOrIds) {
         // 类型兼容检查
         const rules = {
             cycle: ['root'],
-            document: ['cycle'],
+            document: ['cycle', 'folder'],
             folder: ['cycle', 'document', 'folder'],
             file: ['folder']
         };
@@ -1930,7 +1931,7 @@ function updateToolbarState() {
     const node = findNode(currentTreeData, selectedNode);
     if (!node) return;
 
-    if (addDocBtn) addDocBtn.disabled = (node.type !== 'cycle');
+    if (addDocBtn) addDocBtn.disabled = (node.type !== 'cycle' && node.type !== 'folder');
     if (addFolderBtn) addFolderBtn.disabled = (node.type !== 'cycle' && node.type !== 'document' && node.type !== 'folder');
     if (editBtn) editBtn.disabled = (node.type === 'root');
     if (deleteBtn) deleteBtn.disabled = (node.type === 'root');

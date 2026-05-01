@@ -14,6 +14,7 @@ from datetime import datetime
 from .base import DocumentConfig, setup_logging, ensure_dir
 from .folder_manager import FolderManager
 from .document_list import DocumentListManager
+from app.services.task_service import flatten_required_docs
 
 logger = setup_logging(__name__)
 
@@ -111,8 +112,20 @@ class ExportManager:
                             # 处理相对路径
                             if not file_path.is_absolute():
                                 # 相对路径，相对于项目的uploads目录
+                                # file_path_str 格式为 {project_name}/uploads/...，需剥离前缀避免路径重复
                                 project_uploads_dir = self.folder_manager.get_documents_folder(project_name)
-                                file_path = project_uploads_dir / file_path_str
+                                prefix_patterns = [
+                                    f'projects/{project_name}/uploads/',
+                                    f'{project_name}/uploads/',
+                                ]
+                                rel_path = file_path_str
+                                for p in prefix_patterns:
+                                    if rel_path.startswith(p):
+                                        rel_path = rel_path[len(p):]
+                                        break
+                                if rel_path.startswith('uploads/'):
+                                    rel_path = rel_path[len('uploads/'):]
+                                file_path = project_uploads_dir / rel_path
                             
                             if not file_path.exists():
                                 skipped_files.append({
@@ -255,7 +268,9 @@ class ExportManager:
                     'documents': []
                 }
                 
-                for doc in docs_info.get('required_docs', []):
+                # 展平 required_docs（处理目录嵌套）
+                flat_docs = flatten_required_docs(docs_info.get('required_docs', []))
+                for doc in flat_docs:
                     cycle_data['documents'].append({
                         'name': doc.get('name', ''),
                         'requirement': doc.get('requirement', '')

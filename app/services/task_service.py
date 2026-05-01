@@ -12,6 +12,144 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# ==================== 辅助函数 ====================
+
+def flatten_required_docs(required_docs, folder_path=''):
+    """展平 required_docs 结构，处理目录嵌套
+    
+    将目录节点展开，提取其中的文档名（支持 children 和 files 两种子节点格式）。
+    
+    Args:
+        required_docs: required_docs 列表
+        folder_path: 当前目录路径（递归用）
+    
+    Returns:
+        list of dict: 展平后的文档列表，每项包含 name, _originalIndex, _folderPath, _docKey
+    """
+    result = []
+    if not required_docs or not isinstance(required_docs, list):
+        return result
+    
+    counter = [0]  # 使用列表实现引用传递
+    
+    def _flatten(items, fp, folder_doc_counter=None):
+        if folder_doc_counter is None:
+            folder_doc_counter = {}
+        for item in items:
+            if not isinstance(item, dict):
+                # 旧格式：字符串
+                counter[0] += 1
+                name = str(item)
+                result.append({
+                    'name': name,
+                    '_originalIndex': counter[0],
+                    '_folderPath': fp or None,
+                    '_docKey': fp + '/' + name if fp else name
+                })
+                continue
+            
+            if item.get('type') == 'folder':
+                folder_name = item.get('name', '')
+                new_path = fp + '/' + folder_name if fp else folder_name
+                counter[0] += 1
+                # 处理 children（子目录和文档节点）
+                _flatten(item.get('children', []), new_path, folder_doc_counter)
+                # 处理 files（文件条目）
+                for file_item in item.get('files', []):
+                    counter[0] += 1
+                    file_name = file_item.get('name', '') if isinstance(file_item, dict) else str(file_item)
+                    result.append({
+                        'name': file_name,
+                        '_originalIndex': counter[0],
+                        '_folderPath': new_path,
+                        '_docKey': new_path + '/' + file_name if new_path else file_name
+                    })
+            else:
+                counter[0] += 1
+                name = item.get('name', '')
+                result.append({
+                    'name': name,
+                    '_originalIndex': counter[0],
+                    '_folderPath': fp or None,
+                    '_docKey': fp + '/' + name if fp else name,
+                    'requirement': item.get('requirement', ''),
+                    'attributes': item.get('attributes', {})
+                })
+    
+    _flatten(required_docs, folder_path)
+    return result
+
+
+def build_archive_tree(required_docs, cycle_prefix, cycle_dir):
+    """遍历 required_docs 树，为每个文档节点生成 (doc_key, doc_name, archive_dir_prefix) 三元组。
+
+    folder 节点会体现为 ZIP 中的目录层级，编号与前端树形结构一致。
+
+    Args:
+        required_docs: required_docs 列表（可含 folder 节点）
+        cycle_prefix: 周期编号前缀，如 "1"
+        cycle_dir: 周期目录名，如 "项目名/1.测试周期"
+
+    Returns:
+        list of dict: 每项包含 doc_key, doc_name, archive_dir, seq_prefix
+    """
+    result = []
+    if not required_docs or not isinstance(required_docs, list):
+        return result
+
+    def _walk(items, parent_prefix, parent_dir, folder_path=''):
+        seq = 0
+        for item in items:
+            if not isinstance(item, dict):
+                seq += 1
+                name = str(item)
+                prefix = f"{parent_prefix}.{seq}"
+                doc_key = f"{folder_path}/{name}" if folder_path else name
+                result.append({
+                    'doc_key': doc_key,
+                    'doc_name': name,
+                    'archive_dir': parent_dir,
+                    'seq_prefix': prefix,
+                })
+                continue
+
+            if item.get('type') == 'folder':
+                seq += 1
+                folder_name = item.get('name', '')
+                prefix = f"{parent_prefix}.{seq}"
+                new_folder_path = f"{folder_path}/{folder_name}" if folder_path else folder_name
+                folder_dir = f"{parent_dir}/{prefix} {folder_name}"
+                # 递归处理 children
+                _walk(item.get('children', []), prefix, folder_dir, new_folder_path)
+                # 处理 files
+                child_seq = len(item.get('children', []))
+                for file_item in item.get('files', []):
+                    child_seq += 1
+                    child_prefix = f"{prefix}.{child_seq}"
+                    file_name = file_item.get('name', '') if isinstance(file_item, dict) else str(file_item)
+                    doc_key = f"{new_folder_path}/{file_name}"
+                    result.append({
+                        'doc_key': doc_key,
+                        'doc_name': file_name,
+                        'archive_dir': folder_dir,
+                        'seq_prefix': child_prefix,
+                    })
+            else:
+                seq += 1
+                name = item.get('name', '')
+                prefix = f"{parent_prefix}.{seq}"
+                doc_key = f"{folder_path}/{name}" if folder_path else name
+                result.append({
+                    'doc_key': doc_key,
+                    'doc_name': name,
+                    'archive_dir': parent_dir,
+                    'seq_prefix': prefix,
+                })
+
+    _walk(required_docs, cycle_prefix, cycle_dir)
+    return result
+
+
 class TaskService:
     """任务服务类"""
 
@@ -643,28 +781,32 @@ class TaskService:
                     logger.info(f"[打包] '{test_cycle}' 归档文档: {list(archived_docs.keys())[:10]}")
                 
                 # 判断文档是否应该被打包（根据scope）
-                def should_include_doc(cycle, doc_name, has_uploaded_files):
-                    """判断文档是否应该被打包"""
-                    is_not_involved = documents_not_involved.get(cycle, {}).get(doc_name, False)
-                    is_archived = documents_archived.get(cycle, {}).get(doc_name, False)
+                def should_include_doc(cycle, doc_key, has_uploaded_files):
+                    """判断文档是否应该被打包
+                    doc_key 可能是 'doc_name' 或 '目录/doc_name' 格式
+                    """
+                    cycle_not_involved = documents_not_involved.get(cycle, {})
+                    cycle_archived = documents_archived.get(cycle, {})
+                    # 同时检查完整 key 和纯名称
+                    doc_name_only = doc_key.rsplit('/', 1)[-1] if '/' in doc_key else doc_key
+                    is_not_involved = cycle_not_involved.get(doc_key, False) or cycle_not_involved.get(doc_name_only, False)
+                    is_archived = cycle_archived.get(doc_key, False) or cycle_archived.get(doc_name_only, False)
                     
                     # 标记为不涉及的文档始终包含（视为已归档）
                     if is_not_involved:
                         if scope == 'skip_not_involved':
-                            logger.info(f"[打包过滤] {cycle}/{doc_name}: 不涉及，跳过（skip_not_involved模式）")
+                            logger.info(f"[打包过滤] {cycle}/{doc_key}: 不涉及，跳过（skip_not_involved模式）")
                             return False
-                        logger.info(f"[打包过滤] {cycle}/{doc_name}: 不涉及，包含")
+                        logger.info(f"[打包过滤] {cycle}/{doc_key}: 不涉及，包含")
                         return True
-                    
+
                     if scope == 'archived':
-                        # 只打包已归档的文档
                         result = is_archived
-                        logger.info(f"[打包过滤] {cycle}/{doc_name}: archived模式, is_archived={is_archived}, 结果={result}")
+                        logger.info(f"[打包过滤] {cycle}/{doc_key}: archived模式, is_archived={is_archived}, 结果={result}")
                         return result
                     else:
-                        # 打包所有有上传文件的文档
                         result = has_uploaded_files
-                        logger.info(f"[打包过滤] {cycle}/{doc_name}: matched模式, has_files={has_uploaded_files}, 结果={result}")
+                        logger.info(f"[打包过滤] {cycle}/{doc_key}: matched模式, has_files={has_uploaded_files}, 结果={result}")
                         return result
                 
                 # 统计文件总数（根据scope过滤）
@@ -774,148 +916,52 @@ class TaskService:
                                 doc_files_map[doc_name] = []
                             doc_files_map[doc_name].append(doc_meta)
                         
-                        # 按照 required_docs 的顺序处理文档类型
-                        # 使用 enumerate 获取原始序号（从1开始），即使跳过某些文档也保持原始序号
-                        for doc_type_seq, req_doc in enumerate(required_docs, 1):
-                            doc_name = req_doc.get('name', '未知')
-                            has_files = doc_name in doc_files_map and len(doc_files_map[doc_name]) > 0
-                            
-                            logger.info(f"[打包文档] 处理: {doc_name}, has_files={has_files}, doc_type_seq={doc_type_seq}")
-                            
-                            # 检查是否应该包含此文档类型
-                            if not should_include_doc(cycle, doc_name, has_files):
+                        # 使用 build_archive_tree 遍历 required_docs 树，
+                        # 保留 folder 节点作为 ZIP 目录层级
+                        clean_cycle = clean_name_prefix(cycle)
+                        cycle_dir = f"{project_name}/{cycle_idx}.{clean_cycle}"
+                        archive_entries = build_archive_tree(
+                            required_docs, str(cycle_idx), cycle_dir
+                        )
+
+                        for entry in archive_entries:
+                            doc_key = entry['doc_key']
+                            doc_name = entry['doc_name']
+                            archive_base = entry['archive_dir']
+                            seq_prefix = entry['seq_prefix']
+
+                            has_files = doc_key in doc_files_map and len(doc_files_map[doc_key]) > 0
+
+                            logger.info(f"[打包文档] 处理: {doc_name}, doc_key={doc_key}, has_files={has_files}, seq={seq_prefix}")
+
+                            if not should_include_doc(cycle, doc_key, has_files):
                                 logger.info(f"[打包文档] 跳过: {doc_name} (should_include_doc=false)")
                                 continue
-                            
-                            # 如果该文档类型没有上传的文件，检查是否标记为不涉及
+
                             if not has_files:
-                                # 检查是否标记为不涉及
-                                is_not_involved = documents_not_involved.get(cycle, {}).get(doc_name, False)
+                                not_involved_cycle = documents_not_involved.get(cycle, {})
+                                is_not_involved = not_involved_cycle.get(doc_key, False) or not_involved_cycle.get(doc_name, False)
                                 if is_not_involved:
-                                    clean_cycle = clean_name_prefix(cycle)
-                                    placeholder_filename = f"{cycle_idx}.{doc_type_seq} {doc_name}（本次项目不涉及）.txt"
-                                    archive_path = f"{project_name}/{cycle_idx}.{clean_cycle}/{placeholder_filename}"
+                                    placeholder_filename = f"{seq_prefix} {doc_name}（本次项目不涉及）.txt"
+                                    archive_path = f"{archive_base}/{placeholder_filename}"
                                     zipf.writestr(archive_path, '')
                                     processed_files += 1
-                                    # 更新进度
                                     if total_files > 0:
                                         progress = int(100 * processed_files / (total_files + not_involved_count))
                                         self.tasks_store[task_id]['progress'] = min(progress, 95)
                                     self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files + not_involved_count})'
                                     self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
                                 continue
-                            
-                            # 直接遍历该文档类型的所有文件（已经通过should_include_doc过滤）
-                            doc_files = doc_files_map[doc_name]
-                            
-                            # 按子目录排序（无子目录的在前），确保顺序一致
-                            def get_sort_key(doc_meta):
-                                d = doc_meta.get('directory', '') or ''
-                                d = d.strip()
-                                if d == '/':
-                                    d = ''
-                                return (d != '', d)
-                            
-                            sorted_files = sorted(doc_files, key=get_sort_key)
-                            
-                            # 调试：打印所有文件的 directory 字段
-                            for i, f in enumerate(sorted_files):
-                                logger.info(f"[打包目录] {doc_name} 文件{i}: directory='{f.get('directory', '')}', filename='{f.get('original_filename', '')}'")
-                            
-                            # 先分组：无子目录的文件 和 有子目录的文件
-                            files_no_subdir = [f for f in sorted_files if not (f.get('directory', '') or '').strip() or (f.get('directory', '') or '').strip() == '/']
-                            files_with_subdir = [f for f in sorted_files if (f.get('directory', '') or '').strip() and (f.get('directory', '') or '').strip() != '/']
-                            
-                            logger.info(f"[打包目录] {doc_name}: 无子目录文件={len(files_no_subdir)}, 有子目录文件={len(files_with_subdir)}")
-                            logger.info(f"[打包目录] files_no_subdir={[f.get('original_filename') for f in files_no_subdir]}")
-                            logger.info(f"[打包目录] files_with_subdir={[f.get('original_filename') for f in files_with_subdir]}")
-                            
-                            # 为有子目录的文件按【第一级目录】分组
-                            main_dir_groups = {}  # {main_dir: {remaining_path: [files]}}
-                            for f in files_with_subdir:
-                                d = f.get('directory', '').strip()
-                                root_dir = f.get('root_directory', '')
-                                if root_dir:
-                                    effective_dir = d if d != '/' else ''
-                                else:
-                                    dir_value = d.lstrip('/')
-                                    parts = dir_value.split('/')
-                                    real_start_idx = 0
-                                    for i, part in enumerate(parts):
-                                        if not re.match(r'^tmp[a-z0-9]+_\d{14,}$', part, re.IGNORECASE):
-                                            real_start_idx = i
-                                            break
-                                    meaningful_parts = parts[real_start_idx:]
-                                    effective_dir = '/' + '/'.join(meaningful_parts) if meaningful_parts else '/'
-                                    if effective_dir == '/':
-                                        effective_dir = ''
-                                
-                                if not effective_dir or effective_dir == '/':
-                                    files_no_subdir.append(f)
-                                    continue
-                                
-                                parts = effective_dir.strip('/').split('/')
-                                main_dir = parts[0]
-                                remaining = '/'.join(parts[1:]) if len(parts) > 1 else ''
-                                if main_dir not in main_dir_groups:
-                                    main_dir_groups[main_dir] = {}
-                                if remaining not in main_dir_groups[main_dir]:
-                                    main_dir_groups[main_dir][remaining] = []
-                                main_dir_groups[main_dir][remaining].append(f)
-                            
-                            # -------------------------------------------------------
-                            # 新序号规则：
-                            # 连续递增的 item_seq 分配给每个无子目录的文件和每个主目录：
-                            #   无子目录文件  → X.Y.N   （直接放文档类型目录）
-                            #   主目录        → X.Y.M   （目录名前缀）
-                            #     主目录内文件 → X.Y.M.K  （放主目录及剩余子路径下，K从1开始）
-                            # 单文件（整个文档类型只有1个文件且无子目录）
-                            #   → 直接放周期目录，前缀 X.Y（不加第三级序号）
-                            # -------------------------------------------------------
-                            
-                            total_items = len(files_no_subdir) + len(main_dir_groups)
-                            is_single_file = (total_items == 1 and len(files_no_subdir) == 1)
-                            
-                            logger.info(f"[打包序号] 周期={cycle} 文档类型={doc_name} "
-                                        f"无子目录文件数={len(files_no_subdir)} "
-                                        f"主目录数={len(main_dir_groups)} "
-                                        f"total_items={total_items} is_single={is_single_file} "
-                                        f"主目录列表={sorted(main_dir_groups.keys())} "
-                                        f"主目录文件数={[(d, sum(len(v) for v in g.values())) for d, g in main_dir_groups.items()]}")
-                            
-                            # 构建处理列表: (doc_meta, item_seq, main_dir, remaining, sub_seq, inner_seq)
-                            processing_list = []
-                            _item_seq = 0
-                            
-                            # 1. 无子目录的文件，每个占一个 _item_seq
-                            for _f in files_no_subdir:
-                                _item_seq += 1
-                                processing_list.append((_f, _item_seq, None, None, None, None))
-                            
-                            # 2. 每个主目录占一个 _item_seq，主目录下每个 remaining 占一个 sub_seq，文件占 inner_seq
-                            for _main_dir in sorted(main_dir_groups.keys()):
-                                _item_seq += 1
-                                _main_dir_seq = _item_seq
-                                remaining_groups = main_dir_groups[_main_dir]
-                                _sub_seq = 0
-                                for _remaining in sorted(remaining_groups.keys()):
-                                    _sub_seq += 1
-                                    _files = remaining_groups[_remaining]
-                                    for _inner_idx, _f in enumerate(_files, 1):
-                                        processing_list.append((_f, _main_dir_seq, _main_dir, _remaining, _sub_seq, _inner_idx))
-                            
-                            logger.info(f"[打包序号] processing_list长度={len(processing_list)} "
-                                        f"分配预览(前5条)={[(p[1], p[2], p[3], p[4], p[5]) for p in processing_list[:5]]}")
-                            
-                            # 处理所有文件
-                            clean_cycle = clean_name_prefix(cycle)
-                            for _doc_meta, _item_seq_val, _main_dir, _remaining, _sub_seq, _inner_seq in processing_list:
+
+                            doc_files = doc_files_map[doc_key]
+                            is_single_file = (len(doc_files) == 1)
+
+                            for file_idx, _doc_meta in enumerate(doc_files, 1):
                                 file_path = _doc_meta.get('file_path')
                                 if not file_path:
                                     logger.warning(f"[打包] 文件路径为空: {doc_name}")
                                     continue
-                                
-                                # 解析文件路径
+
                                 file_path_obj = Path(file_path)
                                 if not file_path_obj.is_absolute():
                                     normalized_path = file_path_obj.as_posix()
@@ -924,61 +970,33 @@ class TaskService:
                                     else:
                                         relative_path = normalized_path
                                     file_path_obj = self.doc_manager.config.projects_base_folder / relative_path
-                                
+
                                 if not file_path_obj.exists():
                                     logger.warning(f"[打包] 文件不存在: {file_path_obj}")
                                     continue
-                                
+
                                 filename = _doc_meta.get('original_filename') or _doc_meta.get('filename') or file_path_obj.name
-                                
+
                                 if is_single_file:
-                                    # 单文件：直接放在周期目录下，前缀 X.Y
-                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}"
-                                    archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}"
-                                    clean_name = clean_filename(filename, file_index_prefix)
-                                    archive_path = f"{archive_dir}/{clean_name}"
-                                elif _main_dir is not None:
-                                    clean_main_dir = clean_name_prefix(_main_dir)
-                                    archive_dir = (
-                                        f"{project_name}/{cycle_idx}.{clean_cycle}"
-                                        f"/{cycle_idx}.{doc_type_seq} {doc_name}"
-                                        f"/{cycle_idx}.{doc_type_seq}.{_item_seq_val} {clean_main_dir}"
-                                    )
-                                    if _remaining:
-                                        remaining_parts = _remaining.split('/')
-                                        clean_leaf = clean_name_prefix(remaining_parts[-1])
-                                        if len(remaining_parts) > 1:
-                                            middle_path = '/'.join(remaining_parts[:-1])
-                                            archive_dir += (
-                                                f"/{middle_path}"
-                                                f"/{cycle_idx}.{doc_type_seq}.{_item_seq_val}.{_sub_seq} {clean_leaf}"
-                                            )
-                                        else:
-                                            archive_dir += f"/{cycle_idx}.{doc_type_seq}.{_item_seq_val}.{_sub_seq} {clean_leaf}"
-                                        file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{_item_seq_val}.{_sub_seq}.{_inner_seq}"
-                                    else:
-                                        file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{_item_seq_val}.{_inner_seq}"
-                                    clean_name = clean_filename(filename, file_index_prefix)
-                                    archive_path = f"{archive_dir}/{clean_name}"
-                                    logger.info(f"[打包子目录] {doc_name}: main_dir='{_main_dir}', remaining='{_remaining}', sub_seq={_sub_seq}, archive_dir='{archive_dir}'")
+                                    file_prefix = seq_prefix
+                                    archive_dir = archive_base
                                 else:
-                                    # 无子目录：前缀 X.Y.N，放文档类型目录下
-                                    file_index_prefix = f"{cycle_idx}.{doc_type_seq}.{_item_seq_val}"
-                                    archive_dir = f"{project_name}/{cycle_idx}.{clean_cycle}/{cycle_idx}.{doc_type_seq} {doc_name}"
-                                    clean_name = clean_filename(filename, file_index_prefix)
-                                    archive_path = f"{archive_dir}/{clean_name}"
-                                
+                                    file_prefix = f"{seq_prefix}.{file_idx}"
+                                    archive_dir = f"{archive_base}/{seq_prefix} {doc_name}"
+
+                                clean_name = clean_filename(filename, file_prefix)
+                                archive_path = f"{archive_dir}/{clean_name}"
+
                                 logger.info(f"[打包写入] {doc_name}: {filename} -> {archive_path}")
                                 zipf.write(file_path_obj, archive_path)
-                                logger.info(f"[打包成功] {doc_name}: {filename}")
                                 processed_files += 1
-                                
-                                # 更新进度
-                                progress = int(100 * processed_files / total_files)
-                                self.tasks_store[task_id]['progress'] = progress
+
+                                if total_files > 0:
+                                    progress = int(100 * processed_files / total_files)
+                                    self.tasks_store[task_id]['progress'] = progress
                                 self.tasks_store[task_id]['message'] = f'正在打包... ({processed_files}/{total_files})'
                                 self.tasks_store[task_id]['updated_at'] = now_with_timezone().isoformat()
-                                
+
                                 if processed_files % 5 == 0:
                                     self._save_tasks()
                 

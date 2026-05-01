@@ -14,6 +14,7 @@ from app.models.user import user_manager
 from app.models.message import message_manager
 from app.routes.settings import now_with_timezone
 from app.utils.notification import send_email
+from app.services.task_service import flatten_required_docs
 
 logger = logging.getLogger(__name__)
 
@@ -1192,7 +1193,9 @@ class ScheduledReportService:
             uploaded_docs = cycle_info.get('uploaded_docs', []) if isinstance(cycle_info, dict) else []
 
             completed_docs_count = 0
-            for idx, req in enumerate(required_docs):
+            # 展平 required_docs（处理目录嵌套）
+            flat_required = flatten_required_docs(required_docs)
+            for idx, req in enumerate(flat_required):
                 doc_name = str(req.get('name') or '').strip()
                 requirement = str(req.get('requirement') or '').strip()
                 if not doc_name:
@@ -1222,9 +1225,9 @@ class ScheduledReportService:
                 'archived': 0,      # 本期归档数
                 'total_archived': 0,  # 累计归档数
                 'document_changes': 0,
-                'required': len(required_docs),
+                'required': len(flat_required),
                 'completed': completed_docs_count,
-                'pending': max(0, len(required_docs) - completed_docs_count),
+                'pending': max(0, len(flat_required) - completed_docs_count),
                 'uploaded_unique': 0,
                 'all_uploaded_unique': 0,
             })

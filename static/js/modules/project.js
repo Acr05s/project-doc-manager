@@ -629,6 +629,7 @@ function showApplyRequirementsDialog(requirementsId, requirementsName, configDat
                 for (const item of arr) {
                     if (typeof item === 'object' && item !== null && item.type === 'folder') {
                         countDocs(item.children || []);
+                        countDocs(item.files || []);
                     } else {
                         count++;
                     }
@@ -971,6 +972,7 @@ function generatePackagePreview(projectConfig) {
                 if (typeof item === 'object' && item !== null && item.type === 'folder') {
                     const p = prefix ? `${prefix}/${item.name}` : item.name;
                     result.push(...flattenForOrder(item.children || [], p));
+                    result.push(...flattenForOrder(item.files || [], p));
                 } else {
                     const name = typeof item === 'object' && item !== null ? item.name : item;
                     result.push(prefix ? `${prefix}/${name}` : name);

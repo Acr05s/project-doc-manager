@@ -15,6 +15,7 @@ from app.utils.json_file_manager import json_file_manager
 from app.utils.base import normalize_file_path
 from src.services.preview_service import PreviewService
 from app.routes.settings import now_with_timezone
+from app.services.task_service import flatten_required_docs
 
 document_bp = Blueprint('document', __name__)
 doc_manager = None
@@ -724,10 +725,23 @@ def _resolve_file_path(metadata):
     
     if project_name:
         project_uploads_dir = doc_manager.get_documents_folder(project_name)
-        full_path = Path(os.path.join(str(project_uploads_dir), normalized_path))
+        # 剥离项目名前缀避免路径重复
+        # normalized_path 格式为 {project_name}/uploads/... 或 projects/{project_name}/uploads/...
+        prefix_patterns = [
+            f'projects/{project_name}/uploads/',
+            f'{project_name}/uploads/',
+        ]
+        rel_path = normalized_path
+        for p in prefix_patterns:
+            if rel_path.startswith(p):
+                rel_path = rel_path[len(p):]
+                break
+        if rel_path.startswith('uploads/'):
+            rel_path = rel_path[len('uploads/'):]
+        full_path = Path(os.path.join(str(project_uploads_dir), rel_path))
         if full_path.exists():
             return full_path
-    
+
     # 最后尝试uploads目录
     if hasattr(doc_manager, 'config') and hasattr(doc_manager.config, 'upload_folder'):
         upload_folder = doc_manager.config.upload_folder
@@ -1021,10 +1035,11 @@ def get_cycle_progress():
         else:
             project_config = doc_manager.current_project or {}
         
-        # 获取该周期的需求文档数
+        # 获取该周期的需求文档数（展平目录结构，不计算目录节点本身）
         docs_info = project_config.get('documents', {}).get(cycle, {})
         required_docs = docs_info.get('required_docs', [])
-        total_required = len(required_docs)
+        flat_required_for_count = flatten_required_docs(required_docs)
+        total_required = len(flat_required_for_count)
         
         # 获取已上传的文档
         all_docs = doc_manager.get_documents(cycle, project_id=project_id)
@@ -1054,18 +1069,20 @@ def get_cycle_progress():
                     docs_by_name[doc_name] = []
                 docs_by_name[doc_name].append(doc)
             
-            # 检查每个需求文档的完成状态
-            for req_doc in required_docs:
-                # 兼容旧格式（字符串）和新格式（对象），跳过目录节点
+            # 检查每个需求文档的完成状态（先展平目录结构）
+            flat_required = flatten_required_docs(required_docs)
+            for req_doc in flat_required:
+                # 兼容旧格式（字符串）和新格式（对象）
                 if isinstance(req_doc, str):
                     doc_name = req_doc
                     requirement = ''
                 else:
-                    if req_doc.get('type') == 'folder':
-                        continue  # 跳过目录节点
                     doc_name = req_doc.get('name', '')
                     requirement = req_doc.get('requirement', '').strip()
                 has_no_requirement = not requirement
+
+                # 用 _docKey（含目录前缀）匹配 uploaded_docs 中的 doc_name
+                doc_key = req_doc.get('_docKey', doc_name) if isinstance(req_doc, dict) else doc_name
                 
                 # 更详细的要求识别
                 require_signer = '签名' in requirement or '签字' in requirement
@@ -1076,7 +1093,7 @@ def get_cycle_progress():
                 require_party_b_seal = '乙方' in requirement and ('盖章' in requirement or '章' in requirement)
                 require_owner_signer = '业主' in requirement and ('签名' in requirement or '签字' in requirement)
                 
-                uploaded_docs = docs_by_name.get(doc_name, [])
+                uploaded_docs = docs_by_name.get(doc_key, [])
                 
                 if len(uploaded_docs) > 0:
                     doc_names.add(doc_name)
@@ -3142,12 +3159,15 @@ def check_all_compliance():
         for cycle, docs_info in project_config.get('documents', {}).items():
             results[cycle] = []
             
-            for doc in docs_info.get('required_docs', []):
+            # 展平 required_docs（处理目录嵌套）
+            flat_required = flatten_required_docs(docs_info.get('required_docs', []))
+            for doc in flat_required:
                 doc_name = doc['name']
+                doc_key = doc.get('_docKey', doc_name)
                 requirement = doc.get('requirement', '')
-                
+
                 # 查找该文档下的所有上传文件
-                docs = doc_manager.get_documents(cycle=cycle, doc_name=doc_name)
+                docs = doc_manager.get_documents(cycle=cycle, doc_name=doc_key)
                 
                 cycle_doc_result = {
                     'doc_name': doc_name,
