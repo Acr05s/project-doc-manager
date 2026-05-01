@@ -361,49 +361,117 @@ function setupSyncScroll() {
 
     let syncing = false;
 
+    // 在 iframe 内部查找实际的可滚动容器（PDF embed、图片、HTML body 等）
+    function findScrollTargets(doc, win) {
+        const targets = [];
+        // 1. PDF embed 元素及其父级
+        const embed = doc.querySelector('embed');
+        if (embed) {
+            targets.push(embed);
+            // 有些浏览器在 embed 的父级 div 上滚动
+            let parent = embed.parentElement;
+            while (parent && parent !== doc.body) {
+                if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth) {
+                    targets.push(parent);
+                }
+                parent = parent.parentElement;
+            }
+        }
+        // 2. img 元素（大图预览）
+        const img = doc.querySelector('img');
+        if (img && (img.naturalWidth > 0 || img.width > 0)) {
+            targets.push(img);
+        }
+        // 3. window 和 document.documentElement（HTML 内容滚动）
+        targets.push(win);
+        targets.push(doc.documentElement);
+        return targets;
+    }
+
+    function getScrollState(doc, win) {
+        // 优先检查 embed 的滚动位置（PDF 场景）
+        const embed = doc.querySelector('embed');
+        if (embed && (embed.scrollHeight > embed.clientHeight || embed.scrollWidth > embed.clientWidth)) {
+            return {
+                scrollTop: embed.scrollTop || 0,
+                scrollLeft: embed.scrollLeft || 0,
+                scrollHeight: embed.scrollHeight || 1,
+                scrollWidth: embed.scrollWidth || 1,
+                clientHeight: embed.clientHeight || 1,
+                clientWidth: embed.clientWidth || 1,
+                setScroll: (x, y) => { embed.scrollLeft = x; embed.scrollTop = y; }
+            };
+        }
+        // 检查 documentElement 滚动
+        const de = doc.documentElement;
+        if (de.scrollHeight > de.clientHeight || de.scrollWidth > de.clientWidth) {
+            return {
+                scrollTop: de.scrollTop || win.scrollY || 0,
+                scrollLeft: de.scrollLeft || win.scrollX || 0,
+                scrollHeight: de.scrollHeight || 1,
+                scrollWidth: de.scrollWidth || 1,
+                clientHeight: de.clientHeight || 1,
+                clientWidth: de.clientWidth || 1,
+                setScroll: (x, y) => { win.scrollTo(x, y); }
+            };
+        }
+        // 默认使用 window
+        return {
+            scrollTop: win.scrollY || 0,
+            scrollLeft: win.scrollX || 0,
+            scrollHeight: Math.max(de.scrollHeight, doc.body ? doc.body.scrollHeight : 0) || 1,
+            scrollWidth: Math.max(de.scrollWidth, doc.body ? doc.body.scrollWidth : 0) || 1,
+            clientHeight: win.innerHeight || de.clientHeight || 1,
+            clientWidth: win.innerWidth || de.clientWidth || 1,
+            setScroll: (x, y) => { win.scrollTo(x, y); }
+        };
+    }
+
     function onFrameLoad(sourceFrame, targetFrame) {
         try {
             const sourceDoc = sourceFrame.contentDocument || sourceFrame.contentWindow.document;
             const targetDoc = targetFrame.contentDocument || targetFrame.contentWindow.document;
-
-            // PDF 在 iframe 中由浏览器内置查看器渲染，
-            // 我们尝试监听 iframe 内部的 scroll 事件
             const sourceWin = sourceFrame.contentWindow;
             const targetWin = targetFrame.contentWindow;
 
-            sourceWin.addEventListener('scroll', () => {
+            // 在 iframe 内找到所有可能的滚动源
+            const sourceTargets = findScrollTargets(sourceDoc, sourceWin);
+            const targetTargets = findScrollTargets(targetDoc, targetWin);
+
+            function scrollHandler(fromWin, fromDoc, toWin, toDoc) {
                 if (syncing || !(syncCheckbox && syncCheckbox.checked)) return;
                 syncing = true;
                 try {
-                    const scrollTop = sourceWin.scrollY || sourceDoc.documentElement.scrollTop || 0;
-                    const scrollHeight = sourceDoc.documentElement.scrollHeight || 1;
-                    const clientHeight = sourceDoc.documentElement.clientHeight || 1;
-                    const ratio = scrollTop / Math.max(1, scrollHeight - clientHeight);
+                    const fromState = getScrollState(fromDoc, fromWin);
+                    const toState = getScrollState(toDoc, toWin);
 
-                    const targetScrollHeight = targetDoc.documentElement.scrollHeight || 1;
-                    const targetClientHeight = targetDoc.documentElement.clientHeight || 1;
-                    const targetScrollTop = ratio * Math.max(0, targetScrollHeight - targetClientHeight);
-                    targetWin.scrollTo(0, targetScrollTop);
+                    // 按比例计算目标滚动位置（同时处理水平和垂直）
+                    const yMax = Math.max(1, fromState.scrollHeight - fromState.clientHeight);
+                    const xMax = Math.max(1, fromState.scrollWidth - fromState.clientWidth);
+                    const yRatio = yMax > 0 ? fromState.scrollTop / yMax : 0;
+                    const xRatio = xMax > 0 ? fromState.scrollLeft / xMax : 0;
+
+                    const targetY = yRatio * Math.max(0, toState.scrollHeight - toState.clientHeight);
+                    const targetX = xRatio * Math.max(0, toState.scrollWidth - toState.clientWidth);
+
+                    toState.setScroll(targetX, targetY);
                 } catch (e) { /* cross-origin */ }
                 syncing = false;
-            });
+            }
 
-            targetWin.addEventListener('scroll', () => {
-                if (syncing || !(syncCheckbox && syncCheckbox.checked)) return;
-                syncing = true;
-                try {
-                    const scrollTop = targetWin.scrollY || targetDoc.documentElement.scrollTop || 0;
-                    const scrollHeight = targetDoc.documentElement.scrollHeight || 1;
-                    const clientHeight = targetDoc.documentElement.clientHeight || 1;
-                    const ratio = scrollTop / Math.max(1, scrollHeight - clientHeight);
+            // 在 source frame 的所有滚动目标上绑定事件
+            for (const target of sourceTargets) {
+                target.addEventListener('scroll', () => {
+                    scrollHandler(sourceWin, sourceDoc, targetWin, targetDoc);
+                }, { passive: true });
+            }
 
-                    const sourceScrollHeight = sourceDoc.documentElement.scrollHeight || 1;
-                    const sourceClientHeight = sourceDoc.documentElement.clientHeight || 1;
-                    const sourceScrollTop = ratio * Math.max(0, sourceScrollHeight - sourceClientHeight);
-                    sourceWin.scrollTo(0, sourceScrollTop);
-                } catch (e) { /* cross-origin */ }
-                syncing = false;
-            });
+            // 在 target frame 的所有滚动目标上绑定事件（双向同步）
+            for (const target of targetTargets) {
+                target.addEventListener('scroll', () => {
+                    scrollHandler(targetWin, targetDoc, sourceWin, sourceDoc);
+                }, { passive: true });
+            }
         } catch (e) {
             // cross-origin iframe — 无法同步滚动
         }

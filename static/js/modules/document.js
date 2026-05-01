@@ -1134,7 +1134,10 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                             const fPath = doc._folderPath;
                             const folderDocsCount = allDocTypes.filter(d => !d._isFolder && d._folderPath === fPath).length;
                             const folderIndent = (doc._depth || 0) * 16;
-                            return `<tr class="folder-header-row" data-folder="${escapeAttr(fPath)}" onclick="window._toggleFolder(this)" style="cursor:pointer;user-select:none;"><td style="text-align:center;vertical-align:middle;font-weight:500;width:80px;min-width:80px;padding-left:${folderIndent}px;">${doc._displayIndex || doc._originalIndex || ''}</td><td colspan="4"><span class="folder-toggle-icon" style="display:inline-block;font-size:11px;transition:transform 0.18s;margin-right:4px;">▼</span>📁 ${escapeHtml(doc._folderName)} <span style="font-weight:400;font-size:12px;color:#7a8798;margin-left:8px;">(${folderDocsCount} 项文档)</span></td></tr>${folderDocsCount === 0 ? `<tr data-folder-child="${escapeAttr(fPath)}"><td colspan="5" style="text-align:center;color:#aaa;font-size:13px;padding:10px;">此目录下暂无文档需求</td></tr>` : ''}`;
+                            const fdepth = doc._depth || 0;
+                            const fFontSize = fdepth <= 0 ? 15 : fdepth === 1 ? 14 : 13;
+                            const fFontWeight = fdepth <= 0 ? 700 : fdepth === 1 ? 600 : 500;
+                            return `<tr class="folder-header-row" data-folder="${escapeAttr(fPath)}" onclick="window._toggleFolder(this)" style="cursor:pointer;user-select:none;"><td style="text-align:center;vertical-align:middle;width:80px;min-width:80px;padding-left:${folderIndent}px;"><span style="font-size:${fFontSize}px;font-weight:${fFontWeight};">${doc._displayIndex || doc._originalIndex || ''}</span></td><td colspan="4"><span class="folder-toggle-icon" style="display:inline-block;font-size:11px;transition:transform 0.18s;margin-right:4px;">▼</span>📁 ${escapeHtml(doc._folderName)} <span style="font-weight:400;font-size:12px;color:#7a8798;margin-left:8px;">(${folderDocsCount} 项文档)</span></td></tr>${folderDocsCount === 0 ? `<tr data-folder-child="${escapeAttr(fPath)}"><td colspan="5" style="text-align:center;color:#aaa;font-size:13px;padding:10px;">此目录下暂无文档需求</td></tr>` : ''}`;
                         }
                         const dk = doc._docKey || doc.name;
                         const docsList = docsByName[dk] || docsByName[doc.name] || [];
@@ -1188,6 +1191,11 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
 
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
                         const docIndex = doc._displayIndex || (doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1));
+
+                        // 根据层级深度计算序号样式：层级越浅字号越大，突出父级
+                        const docDepth = doc._depth || 0;
+                        const indexFontSize = docDepth <= 0 ? 15 : docDepth === 1 ? 14 : 13;
+                        const indexFontWeight = docDepth <= 0 ? 700 : docDepth === 1 ? 600 : 500;
                         
                         // 确定显示的状态标签：优先显示"不涉及"，然后是"已归档"，然后是"待审核"
                         const statusTag = isNotInvolved 
@@ -1222,7 +1230,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         const docIndent = (doc._depth || 0) * 16;
                         return `
                         <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}" data-doc-name="${escapeAttr(dk)}"${folderChildAttr}>
-                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px; padding-left: ${docIndent}px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
+                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px; padding-left: ${docIndent}px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span style="font-size:${indexFontSize}px;font-weight:${indexFontWeight};">${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
