@@ -495,6 +495,17 @@ export function setupEventListeners() {
         });
     }
 
+    const toolbarCopy = document.getElementById('toolbarCopy');
+    if (toolbarCopy) {
+        toolbarCopy.addEventListener('click', () => {
+            if (!window._treeSelectedNode) {
+                showNotification('请先选择要复制的节点', 'info');
+                return;
+            }
+            window.copyTreeNode(window._treeSelectedNode);
+        });
+    }
+
     const toolbarBatchMove = document.getElementById('toolbarBatchMove');
     if (toolbarBatchMove) {
         toolbarBatchMove.addEventListener('click', () => {

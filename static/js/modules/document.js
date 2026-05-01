@@ -1133,7 +1133,8 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         if (doc._isFolder) {
                             const fPath = doc._folderPath;
                             const folderDocsCount = allDocTypes.filter(d => !d._isFolder && d._folderPath === fPath).length;
-                            return `<tr class="folder-header-row" data-folder="${escapeAttr(fPath)}" onclick="window._toggleFolder(this)" style="cursor:pointer;user-select:none;"><td colspan="5"><span class="folder-toggle-icon" style="display:inline-block;font-size:11px;transition:transform 0.18s;margin-right:4px;">▼</span>📁 ${escapeHtml(fPath)} <span style="font-weight:400;font-size:12px;color:#7a8798;margin-left:8px;">(${folderDocsCount} 项文档)</span></td></tr>${folderDocsCount === 0 ? `<tr data-folder-child="${escapeAttr(fPath)}"><td colspan="5" style="text-align:center;color:#aaa;font-size:13px;padding:10px;">此目录下暂无文档需求</td></tr>` : ''}`;
+                            const folderIndent = (doc._depth || 0) * 16;
+                            return `<tr class="folder-header-row" data-folder="${escapeAttr(fPath)}" onclick="window._toggleFolder(this)" style="cursor:pointer;user-select:none;"><td style="text-align:center;vertical-align:middle;font-weight:500;width:80px;min-width:80px;padding-left:${folderIndent}px;">${doc._displayIndex || doc._originalIndex || ''}</td><td colspan="4"><span class="folder-toggle-icon" style="display:inline-block;font-size:11px;transition:transform 0.18s;margin-right:4px;">▼</span>📁 ${escapeHtml(doc._folderName)} <span style="font-weight:400;font-size:12px;color:#7a8798;margin-left:8px;">(${folderDocsCount} 项文档)</span></td></tr>${folderDocsCount === 0 ? `<tr data-folder-child="${escapeAttr(fPath)}"><td colspan="5" style="text-align:center;color:#aaa;font-size:13px;padding:10px;">此目录下暂无文档需求</td></tr>` : ''}`;
                         }
                         const dk = doc._docKey || doc.name;
                         const docsList = docsByName[dk] || docsByName[doc.name] || [];
@@ -1186,7 +1187,7 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         const docDisplayName = escapeHtml(doc.name);
 
                         // 获取文档序号 - 使用原始序号，确保筛选后序号不变
-                        const docIndex = doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1);
+                        const docIndex = doc._displayIndex || (doc._originalIndex !== undefined && doc._originalIndex !== null ? doc._originalIndex : (index + 1));
                         
                         // 确定显示的状态标签：优先显示"不涉及"，然后是"已归档"，然后是"待审核"
                         const statusTag = isNotInvolved 
@@ -1218,9 +1219,10 @@ export async function renderCycleDocuments(cycle, filterOptions = null) {
                         }
                         
                         const folderChildAttr = doc._folderPath ? ` data-folder-child="${escapeAttr(doc._folderPath)}"` : '';
+                        const docIndent = (doc._depth || 0) * 16;
                         return `
                         <tr class="doc-row ${isArchived || isNotInvolved ? 'archived' : ''}" data-doc-name="${escapeAttr(dk)}"${folderChildAttr}>
-                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
+                            <td style="text-align: center; vertical-align: top; padding: 10px; font-weight: 500; width: 80px; min-width: 80px; padding-left: ${docIndent}px;"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><span>${docIndex}</span><span style="font-size: 12px;">${indexStatusIcon}</span></div></td>
                             <td class="col-org" style="text-align: center; width: 250px;">
                                 <div class="org-info" style="display: inline-block; text-align: center;">
                                     <div style="position: relative; border: 1px solid transparent; padding: 10px; border-radius: 4px;">
@@ -5412,12 +5414,11 @@ function escapeAttr(str) {
 /**
  * 递归展平 required_docs 树形结构，提取所有文档节点（模块级工具函数）
  */
-export function flattenRequiredDocs(items, folderPath = '', _counter = null, _folderCounters = null) {
+export function flattenRequiredDocs(items, folderPath = '', _counter = null, _folderCounters = null, _parentPrefix = '') {
     const result = [];
     if (!items || !Array.isArray(items)) return result;
     const isTopLevel = !_counter;
     const counter = _counter || { value: 0 };
-    // 每个文件夹层级的文档序号独立计数，key 为 folderPath（顶层用 '__root__'）
     const folderCounters = _folderCounters || {};
     if (isTopLevel) {
         folderCounters['__root__'] = 0;
@@ -5427,22 +5428,28 @@ export function flattenRequiredDocs(items, folderPath = '', _counter = null, _fo
         if (itemData.type === 'folder') {
             const newPath = folderPath ? `${folderPath}/${itemData.name}` : itemData.name;
             counter.value++;
-            // 初始化该目录下的文档计数器
+            const levelKey = folderPath || '__root__';
+            folderCounters[levelKey] = (folderCounters[levelKey] || 0) + 1;
             folderCounters[newPath] = 0;
+            const folderDepth = folderPath ? folderPath.split('/').length : 0;
+            const displayIndex = _parentPrefix ? `${_parentPrefix}.${folderCounters[levelKey]}` : `${folderCounters[levelKey]}`;
             result.push({
                 _isFolder: true,
                 _folderPath: newPath,
                 _folderName: itemData.name,
-                _originalIndex: counter.value,
+                _originalIndex: folderCounters[levelKey],
+                _displayIndex: displayIndex,
                 _sortIndex: counter.value,
+                _depth: folderDepth,
                 name: itemData.name,
                 _docKey: `__folder__${newPath}`
             });
-            // 处理 children（子目录和文档节点）
-            const childDocs = flattenRequiredDocs(itemData.children || [], newPath, counter, folderCounters);
+            // children 中统一包含 file/folder/document 节点，按原始顺序遍历
+            const childDocs = flattenRequiredDocs(itemData.children || [], newPath, counter, folderCounters, displayIndex);
             result.push(...childDocs);
-            // 处理 files（文件条目，来自 treeToConfig 的 serializeFolder）
-            if (itemData.files && Array.isArray(itemData.files)) {
+            // 向后兼容：旧格式 files[] 仅在 children 中没有 type:'file' 时处理
+            const childrenHasFiles = (itemData.children || []).some(c => c && c.type === 'file');
+            if (!childrenHasFiles && itemData.files && Array.isArray(itemData.files)) {
                 for (const file of itemData.files) {
                     counter.value++;
                     folderCounters[newPath] = (folderCounters[newPath] || 0) + 1;
@@ -5451,28 +5458,56 @@ export function flattenRequiredDocs(items, folderPath = '', _counter = null, _fo
                     result.push({
                         name: fileName,
                         _originalIndex: folderCounters[newPath],
+                        _displayIndex: `${displayIndex}.${folderCounters[newPath]}`,
                         _sortIndex: counter.value,
                         _folderPath: newPath,
                         _docKey: `${newPath}/${fileName}`,
+                        _depth: newPath.split('/').length,
                         match_keywords: fileData.match_keywords || [],
                         exclude_keywords: fileData.exclude_keywords || [],
                         attributes: fileData.attributes || {}
                     });
                 }
             }
+        } else if (itemData.type === 'file') {
+            // 新格式：file 节点直接在 children 中
+            counter.value++;
+            const fp = folderPath || null;
+            const levelKey = fp || '__root__';
+            folderCounters[levelKey] = (folderCounters[levelKey] || 0) + 1;
+            const fileName = itemData.name || '';
+            const docKey = fp ? `${fp}/${fileName}` : fileName;
+            const fileDepth = fp ? fp.split('/').length : 0;
+            const displayIndex = _parentPrefix ? `${_parentPrefix}.${folderCounters[levelKey]}` : `${folderCounters[levelKey]}`;
+            result.push({
+                name: fileName,
+                _originalIndex: folderCounters[levelKey],
+                _displayIndex: displayIndex,
+                _sortIndex: counter.value,
+                _folderPath: fp,
+                _docKey: docKey,
+                _depth: fileDepth,
+                match_keywords: itemData.match_keywords || [],
+                exclude_keywords: itemData.exclude_keywords || [],
+                attributes: itemData.attributes || {}
+            });
         } else {
             counter.value++;
             const fp = folderPath || null;
             const docKey = fp ? `${fp}/${itemData.name}` : itemData.name;
-            // 根据所在目录（或顶层）分配本级序号
             const levelKey = fp || '__root__';
             folderCounters[levelKey] = (folderCounters[levelKey] || 0) + 1;
+            const docDepth = fp ? fp.split('/').length : 0;
+            const localIdx = itemData.index !== undefined && itemData.index !== null ? itemData.index : folderCounters[levelKey];
+            const displayIndex = _parentPrefix ? `${_parentPrefix}.${localIdx}` : `${localIdx}`;
             result.push({
                 ...itemData,
-                _originalIndex: itemData.index !== undefined && itemData.index !== null ? itemData.index : folderCounters[levelKey],
+                _originalIndex: localIdx,
+                _displayIndex: displayIndex,
                 _sortIndex: counter.value,
                 _folderPath: fp,
-                _docKey: docKey
+                _docKey: docKey,
+                _depth: docDepth
             });
         }
     }

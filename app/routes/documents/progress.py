@@ -2,6 +2,7 @@
 
 from flask import request, jsonify
 from .utils import get_doc_manager
+from app.services.task_service import flatten_required_docs
 
 
 def get_cycle_progress():
@@ -23,9 +24,10 @@ def get_cycle_progress():
         else:
             project_config = getattr(doc_manager, 'current_project', {}) or {}
         
-        # 获取该周期的需求文档数
+        # 获取该周期的需求文档数（展平目录结构）
         docs_info = project_config.get('documents', {}).get(cycle, {})
-        required_docs = docs_info.get('required_docs', [])
+        required_docs_raw = docs_info.get('required_docs', [])
+        required_docs = flatten_required_docs(required_docs_raw)
         total_required = len(required_docs)
         
         # 获取已上传的文档
@@ -58,8 +60,12 @@ def get_cycle_progress():
             
             # 检查每个需求文档的完成状态
             for req_doc in required_docs:
-                doc_name = req_doc.get('name', '')
-                requirement = req_doc.get('requirement', '').strip()
+                if isinstance(req_doc, str):
+                    doc_name = req_doc
+                    requirement = ''
+                else:
+                    doc_name = req_doc.get('_docKey', '') or req_doc.get('name', '')
+                    requirement = req_doc.get('requirement', '').strip()
                 has_no_requirement = not requirement
                 
                 # 更详细的要求识别

@@ -1018,6 +1018,8 @@ class DocumentManager:
         # 如果项目配置中没有文档，再从内存中的documents_db获取
         if not result:
             for doc_id, doc in self.documents_db.items():
+                if not isinstance(doc, dict):
+                    continue
                 # 过滤周期
                 if cycle and doc.get('cycle') != cycle:
                     continue

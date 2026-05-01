@@ -8,31 +8,32 @@ from .utils import get_doc_manager
 def smart_recognize():
     """智能识别文档属性（签章、盖章等）"""
     try:
+        doc_manager = get_doc_manager()
         file = request.files.get('file')
         party_a = request.form.get('party_a', '')
         party_b = request.form.get('party_b', '')
         requirement = request.form.get('requirement', '')
-        
+
         if not file:
             return jsonify({'status': 'error', 'message': '未选择文件'}), 400
-        
+
         # 保存临时文件
         import tempfile
         import os
         from pathlib import Path
-        
+
         temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir) / file.filename
         file.save(str(temp_path))
-        
+
         try:
             # 解析需要识别的属性
             attributes_to_recognize = parse_recognition_requirements(requirement)
-            
+
             # 调用智能识别服务，传入动态配置
             result = doc_manager.smart_recognize_document(
-                str(temp_path), 
-                party_a, 
+                str(temp_path),
+                party_a,
                 party_b,
                 attributes_to_recognize
             )
@@ -43,10 +44,14 @@ def smart_recognize():
                 temp_path.unlink()
             if Path(temp_dir).exists():
                 Path(temp_dir).rmdir()
-                
+
     except Exception as e:
         import traceback
-        doc_manager.log_operation('智能识别', f'失败: {e}\n{traceback.format_exc()}', 'error')
+        try:
+            doc_manager = get_doc_manager()
+            doc_manager.log_operation('智能识别', f'失败: {e}\n{traceback.format_exc()}', 'error')
+        except Exception:
+            pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 

@@ -64,7 +64,7 @@ function renderDirNode(node, depth) {
                 <span class="db-dir-toggle" style="font-size:11px;transition:transform 0.18s;display:inline-block;min-width:12px;">▼</span>
                 <span style="font-size:13px;">📁</span>
                 <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(node.name)}</span>
-                <span style="color:#888;font-size:11px;flex-shrink:0;">(${node.file_count})</span>
+                <span style="color:#888;font-size:11px;flex-shrink:0;">(${node.matched_count || 0}/${node.file_count})</span>
             </div>
             <div class="db-dir-children" id="${dirId}" style="display:block;">
                 ${renderTree(node.children || [], depth + 1)}
@@ -172,7 +172,7 @@ async function loadBrowserTree() {
 
         container.innerHTML = renderTree(result.tree);
         const statusBar = document.getElementById('dbStatusBar');
-        if (statusBar) statusBar.textContent = `共 ${result.total || 0} 个文件`;
+        if (statusBar) statusBar.textContent = `共 ${result.total || 0} 个文件，已使用 ${result.matched_total || 0} 个`;
 
         bindTreeEvents(container);
     } catch (e) {

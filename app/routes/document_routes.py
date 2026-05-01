@@ -1546,9 +1546,11 @@ def search_files():
                 project_name = project_result.get('project', {}).get('name', '')
                 if project_name and hasattr(doc_manager, 'data_manager'):
                     doc_index = doc_manager.data_manager.load_documents_index(project_name)
-                    for doc_id, doc_data in doc_index.items():
-                        doc_manager.documents_db[doc_id] = doc_data
-        
+                    docs_dict = doc_index.get('documents', {}) if isinstance(doc_index, dict) else {}
+                    for doc_id, doc_data in docs_dict.items():
+                        if isinstance(doc_data, dict):
+                            doc_manager.documents_db[doc_id] = doc_data
+
         # 如果只有 project_id，查项目名
         if not project_name and project_id:
             project_result = doc_manager.load_project(project_id)
@@ -1634,8 +1636,10 @@ def browse_file_tree():
             if project_result and project_result.get('status') == 'success':
                 if project_name and hasattr(doc_manager, 'data_manager'):
                     doc_index = doc_manager.data_manager.load_documents_index(project_name)
-                    for did, ddata in doc_index.items():
-                        doc_manager.documents_db[did] = ddata
+                    docs_dict = doc_index.get('documents', {}) if isinstance(doc_index, dict) else {}
+                    for did, ddata in docs_dict.items():
+                        if isinstance(ddata, dict):
+                            doc_manager.documents_db[did] = ddata
 
         uploads_dir = doc_manager.config.projects_base_folder / project_name / 'uploads'
         if not uploads_dir.exists():
@@ -1660,6 +1664,8 @@ def browse_file_tree():
                     children = build_tree(item, rel_path)
                     file_count = sum(1 for c in children if c['type'] == 'file') + sum(
                         c.get('file_count', 0) for c in children if c['type'] == 'dir')
+                    matched_count = sum(1 for c in children if c['type'] == 'file' and c.get('matched')) + sum(
+                        c.get('matched_count', 0) for c in children if c['type'] == 'dir')
                     if file_count > 0:
                         entries.append({
                             'type': 'dir',
@@ -1667,7 +1673,8 @@ def browse_file_tree():
                             'path': str(item),
                             'rel_path': rel_path,
                             'children': children,
-                            'file_count': file_count
+                            'file_count': file_count,
+                            'matched_count': matched_count
                         })
                 elif item.is_file() and item.suffix.lower() in ALLOWED_EXTS:
                     used_by = _collect_zip_used_by(item, doc_manager.documents_db.values())
@@ -1691,8 +1698,10 @@ def browse_file_tree():
         tree = build_tree(uploads_dir)
         total = sum(1 for _ in uploads_dir.rglob('*')
                     if _.is_file() and not _.name.startswith('.') and _.suffix.lower() in ALLOWED_EXTS)
+        matched_total = sum(1 for entry in tree if entry['type'] == 'file' and entry.get('matched')) + sum(
+            entry.get('matched_count', 0) for entry in tree if entry['type'] == 'dir')
 
-        return jsonify({'status': 'success', 'tree': tree, 'total': total})
+        return jsonify({'status': 'success', 'tree': tree, 'total': total, 'matched_total': matched_total})
 
     except Exception as e:
         import traceback
@@ -1914,13 +1923,27 @@ def _normalize_zip_source_path(path_value):
     return str(path_value).replace('\\', '/').rstrip('/')
 
 
+def _match_file_path(normalized_file_path, meta):
+    """检查文件路径是否与文档元数据中的路径匹配"""
+    for key in ('source_path', 'original_path', 'file_path'):
+        meta_path = _normalize_zip_source_path(meta.get(key))
+        if not meta_path:
+            continue
+        if meta_path == normalized_file_path:
+            return True
+        if normalized_file_path.endswith('/' + meta_path) or normalized_file_path.endswith('\\' + meta_path):
+            return True
+    return False
+
+
 def _collect_zip_used_by(file_path, metas):
-    """按 ZIP 源路径精确匹配，避免同名文件被误标记为已使用。"""
+    """按文件路径精确匹配，避免同名文件被误标记为已使用。"""
     normalized_file_path = _normalize_zip_source_path(file_path)
     used_by = []
     for meta in metas or []:
-        meta_source_path = _normalize_zip_source_path(meta.get('source_path') or meta.get('original_path'))
-        if not meta_source_path or meta_source_path != normalized_file_path:
+        if not isinstance(meta, dict):
+            continue
+        if not _match_file_path(normalized_file_path, meta):
             continue
         cycle = meta.get('cycle', '')
         doc_name = meta.get('doc_name', '')
@@ -1935,8 +1958,9 @@ def _collect_match_details(file_path, metas):
     normalized_file_path = _normalize_zip_source_path(file_path)
     details = []
     for meta in metas or []:
-        meta_source_path = _normalize_zip_source_path(meta.get('source_path') or meta.get('original_path'))
-        if not meta_source_path or meta_source_path != normalized_file_path:
+        if not isinstance(meta, dict):
+            continue
+        if not _match_file_path(normalized_file_path, meta):
             continue
         details.append({
             'cycle': meta.get('cycle', ''),
@@ -2368,9 +2392,10 @@ def search_zip_files():
                 if project_name and hasattr(doc_manager, 'data_manager'):
                     # 从索引文件加载文档数据
                     doc_index = doc_manager.data_manager.load_documents_index(project_name)
-                    # 将文档数据加载到 documents_db
-                    for doc_id, doc_data in doc_index.items():
-                        doc_manager.documents_db[doc_id] = doc_data
+                    docs_dict = doc_index.get('documents', {}) if isinstance(doc_index, dict) else {}
+                    for doc_id, doc_data in docs_dict.items():
+                        if isinstance(doc_data, dict):
+                            doc_manager.documents_db[doc_id] = doc_data
                 for cycle_name, cycle_info in (project_config.get('documents', {}) or {}).items():
                     for uploaded_doc in (cycle_info.get('uploaded_docs', []) or []):
                         project_uploaded_docs.append({

@@ -47,23 +47,38 @@ def flatten_required_docs(required_docs, folder_path=''):
                     '_docKey': fp + '/' + name if fp else name
                 })
                 continue
-            
+
             if item.get('type') == 'folder':
                 folder_name = item.get('name', '')
                 new_path = fp + '/' + folder_name if fp else folder_name
                 counter[0] += 1
-                # 处理 children（子目录和文档节点）
+                # children 中统一包含 file/folder/document 节点
                 _flatten(item.get('children', []), new_path, folder_doc_counter)
-                # 处理 files（文件条目）
-                for file_item in item.get('files', []):
-                    counter[0] += 1
-                    file_name = file_item.get('name', '') if isinstance(file_item, dict) else str(file_item)
-                    result.append({
-                        'name': file_name,
-                        '_originalIndex': counter[0],
-                        '_folderPath': new_path,
-                        '_docKey': new_path + '/' + file_name if new_path else file_name
-                    })
+                # 向后兼容：旧格式 files[] 仅在 children 中没有 type:'file' 时处理
+                children_has_files = any(
+                    isinstance(c, dict) and c.get('type') == 'file'
+                    for c in item.get('children', [])
+                )
+                if not children_has_files:
+                    for file_item in item.get('files', []):
+                        counter[0] += 1
+                        file_name = file_item.get('name', '') if isinstance(file_item, dict) else str(file_item)
+                        result.append({
+                            'name': file_name,
+                            '_originalIndex': counter[0],
+                            '_folderPath': new_path,
+                            '_docKey': new_path + '/' + file_name if new_path else file_name
+                        })
+            elif item.get('type') == 'file':
+                # 新格式：file 节点直接在 children 中
+                counter[0] += 1
+                file_name = item.get('name', '')
+                result.append({
+                    'name': file_name,
+                    '_originalIndex': counter[0],
+                    '_folderPath': fp or None,
+                    '_docKey': fp + '/' + file_name if fp else file_name
+                })
             else:
                 counter[0] += 1
                 name = item.get('name', '')
@@ -119,21 +134,38 @@ def build_archive_tree(required_docs, cycle_prefix, cycle_dir):
                 prefix = f"{parent_prefix}.{seq}"
                 new_folder_path = f"{folder_path}/{folder_name}" if folder_path else folder_name
                 folder_dir = f"{parent_dir}/{prefix} {folder_name}"
-                # 递归处理 children
+                # children 中统一包含 file/folder/document 节点
                 _walk(item.get('children', []), prefix, folder_dir, new_folder_path)
-                # 处理 files
-                child_seq = len(item.get('children', []))
-                for file_item in item.get('files', []):
-                    child_seq += 1
-                    child_prefix = f"{prefix}.{child_seq}"
-                    file_name = file_item.get('name', '') if isinstance(file_item, dict) else str(file_item)
-                    doc_key = f"{new_folder_path}/{file_name}"
-                    result.append({
-                        'doc_key': doc_key,
-                        'doc_name': file_name,
-                        'archive_dir': folder_dir,
-                        'seq_prefix': child_prefix,
-                    })
+                # 向后兼容：旧格式 files[] 仅在 children 中没有 type:'file' 时处理
+                children_has_files = any(
+                    isinstance(c, dict) and c.get('type') == 'file'
+                    for c in item.get('children', [])
+                )
+                if not children_has_files:
+                    child_seq = len(item.get('children', []))
+                    for file_item in item.get('files', []):
+                        child_seq += 1
+                        child_prefix = f"{prefix}.{child_seq}"
+                        file_name = file_item.get('name', '') if isinstance(file_item, dict) else str(file_item)
+                        doc_key = f"{new_folder_path}/{file_name}"
+                        result.append({
+                            'doc_key': doc_key,
+                            'doc_name': file_name,
+                            'archive_dir': folder_dir,
+                            'seq_prefix': child_prefix,
+                        })
+            elif item.get('type') == 'file':
+                # 新格式：file 节点直接在 children 中
+                seq += 1
+                file_name = item.get('name', '')
+                prefix = f"{parent_prefix}.{seq}"
+                doc_key = f"{folder_path}/{file_name}" if folder_path else file_name
+                result.append({
+                    'doc_key': doc_key,
+                    'doc_name': file_name,
+                    'archive_dir': parent_dir,
+                    'seq_prefix': prefix,
+                })
             else:
                 seq += 1
                 name = item.get('name', '')

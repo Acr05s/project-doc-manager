@@ -370,12 +370,15 @@ function buildFolderNode(child, idPrefix) {
         type: 'folder',
         expanded: false,
         children: [],
-        attributes: child.attributes || {},
+        attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(child.attributes || {}) },
+        doc_note: child.doc_note || '',
         filename_template: child.filename_template || '',
         match_keywords: child.match_keywords || [],
         exclude_keywords: child.exclude_keywords || []
     };
-    if (child.files && Array.isArray(child.files)) {
+    // 向后兼容：旧格式 files[] 先加入（仅当 children 中没有 type:'file' 时）
+    const childrenHasFiles = child.children && child.children.some(c => c.type === 'file');
+    if (!childrenHasFiles && child.files && Array.isArray(child.files)) {
         child.files.forEach((file, fileIdx) => {
             const fileData = typeof file === 'object' ? file : { name: file };
             folderNode.children.push({
@@ -383,6 +386,9 @@ function buildFolderNode(child, idPrefix) {
                 name: fileData.name || file,
                 type: 'file',
                 children: [],
+                attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(fileData.attributes || {}) },
+                doc_note: fileData.doc_note || '',
+                filename_template: fileData.filename_template || '',
                 match_keywords: fileData.match_keywords || [],
                 exclude_keywords: fileData.exclude_keywords || []
             });
@@ -392,8 +398,20 @@ function buildFolderNode(child, idPrefix) {
         child.children.forEach((subChild, subIdx) => {
             if (subChild.type === 'folder') {
                 folderNode.children.push(buildFolderNode(subChild, `${idPrefix}_${subIdx}`));
+            } else if (subChild.type === 'file') {
+                const fileData = typeof subChild === 'object' ? subChild : { name: subChild };
+                folderNode.children.push({
+                    id: `file_${idPrefix}_${subIdx}`,
+                    name: fileData.name || subChild,
+                    type: 'file',
+                    children: [],
+                    attributes: { ...DEFAULT_DOC_ATTRIBUTES, ...(fileData.attributes || {}) },
+                    doc_note: fileData.doc_note || '',
+                    filename_template: fileData.filename_template || '',
+                    match_keywords: fileData.match_keywords || [],
+                    exclude_keywords: fileData.exclude_keywords || []
+                });
             } else {
-                // 文档节点：还原为 document 节点
                 const docObj = typeof subChild === 'object' && subChild !== null ? subChild : { name: subChild };
                 const docNode = {
                     id: `doc_infolder_${idPrefix}_${subIdx}`,
@@ -601,7 +619,7 @@ function escapeHtml(str) {
  * 生成属性标签 HTML（签字/盖章等）
  */
 function getAttributeTags(node) {
-    if (node.type !== 'document') return '';
+    if (node.type !== 'document' && node.type !== 'file' && node.type !== 'folder') return '';
 
     const attrs = node.attributes || {};
     const tags = [];
@@ -707,13 +725,14 @@ function getNodeActions(node) {
             actions += `<button class="tree-action-btn" onclick="moveNodeToCycle('${node.id}')" title="移动到其它周期">📂</button>`;
         }
         
-        if (node.type === 'document') {
+        if (node.type === 'document' || node.type === 'file' || node.type === 'folder') {
             actions += `<button class="tree-action-btn" onclick="openAttributePanel('${node.id}')" title="设置属性">⚙️</button>`;
         }
         // 文件名模板和关键词：文档、目录、文件都可以设置
         if (['document', 'folder', 'file'].includes(node.type)) {
             actions += `<button class="tree-action-btn" onclick="openMatchSettings('${node.id}')" title="匹配设置">🏷️</button>`;
         }
+        actions += `<button class="tree-action-btn" onclick="copyTreeNode('${node.id}')" title="复制（含子项）">📋</button>`;
         actions += `<button class="tree-action-btn" onclick="editTreeNode('${node.id}')" title="编辑名称">✏️</button>`;
         actions += `<button class="tree-action-btn delete" onclick="deleteTreeNode('${node.id}')" title="删除">🗑️</button>`;
     }
@@ -1026,8 +1045,19 @@ window.addTreeNode = function(type, explicitParentId) {
         newNode.exclude_keywords = [];
     }
 
-    // 目录和文件节点也支持匹配关键词
-    if (type === 'folder' || type === 'file') {
+    // 文件节点也支持属性和匹配关键词
+    if (type === 'file') {
+        newNode.attributes = { ...DEFAULT_DOC_ATTRIBUTES };
+        newNode.doc_note = '';
+        newNode.filename_template = '';
+        newNode.match_keywords = [];
+        newNode.exclude_keywords = [];
+    }
+
+    // 目录节点支持属性和匹配关键词
+    if (type === 'folder') {
+        newNode.attributes = { ...DEFAULT_DOC_ATTRIBUTES };
+        newNode.doc_note = '';
         newNode.filename_template = '';
         newNode.match_keywords = [];
         newNode.exclude_keywords = [];
@@ -1143,7 +1173,7 @@ function renderPredefinedAttributes(targetNodes) {
  */
 window.openAttributePanel = function(nodeId) {
     const node = findNode(currentTreeData, nodeId);
-    if (!node || node.type !== 'document') {
+    if (!node || (node.type !== 'document' && node.type !== 'file' && node.type !== 'folder')) {
         // 找不到节点时清空面板，避免展示上一个节点的残留数据
         const panel = document.getElementById('attributePanel');
         if (panel) panel.style.display = 'none';
@@ -1459,6 +1489,157 @@ window.addPresetKeyword = function(keyword) {
     } else {
         keywordsEl.value = keyword;
     }
+};
+
+// ==================== 复制节点 ====================
+
+function deepCloneNode(node) {
+    const clone = { ...node };
+    clone.id = `${node.type}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (node.attributes) {
+        clone.attributes = { ...node.attributes };
+    }
+    if (node.match_keywords) {
+        clone.match_keywords = [...node.match_keywords];
+    }
+    if (node.exclude_keywords) {
+        clone.exclude_keywords = [...node.exclude_keywords];
+    }
+    if (node.children && node.children.length > 0) {
+        clone.children = node.children.map(child => deepCloneNode(child));
+    } else {
+        clone.children = [];
+    }
+    if (node.files && Array.isArray(node.files)) {
+        clone.files = node.files.map(f => ({
+            ...f,
+            match_keywords: f.match_keywords ? [...f.match_keywords] : [],
+            exclude_keywords: f.exclude_keywords ? [...f.exclude_keywords] : []
+        }));
+    }
+    return clone;
+}
+
+window.copyTreeNode = function(nodeId) {
+    const node = findNode(currentTreeData, nodeId);
+    if (!node) return;
+
+    const result = getParentAndSiblings(nodeId);
+    if (!result || !result.parent) {
+        showNotification('无法复制根节点', 'warning');
+        return;
+    }
+
+    const typeNames = { cycle: '周期', document: '文档', folder: '目录', file: '文件' };
+    const typeName = typeNames[node.type] || '节点';
+    const hasChildren = node.children && node.children.length > 0;
+    let desc = `复制${typeName}"${node.name}"`;
+    if (hasChildren) {
+        desc += `（含 ${node.children.length} 个子项）`;
+    }
+
+    const existingModal = document.getElementById('copyNodeModal');
+    if (existingModal) existingModal.remove();
+
+    // 构建目标位置选项树
+    const typeParentRules = {
+        cycle: ['root'],
+        document: ['cycle', 'folder'],
+        folder: ['cycle', 'document', 'folder'],
+        file: ['folder']
+    };
+    const allowedParents = typeParentRules[node.type] || [];
+
+    function buildCopyTargetOptions(parentNode, prefix, sourceId) {
+        let options = '';
+        if (parentNode.id === 'root' && allowedParents.includes('root')) {
+            // root 本身作为选项已在外层处理
+        }
+        if (!parentNode.children) return options;
+        for (const child of parentNode.children) {
+            if (child.id === sourceId) continue;
+            if (allowedParents.includes(child.type)) {
+                const typeIcon = child.type === 'cycle' ? '📂' : child.type === 'document' ? '📄' : '📁';
+                const isCurrent = (child.id === result.parent.id);
+                const label = isCurrent ? `${prefix}${typeIcon} ${escapeHtml(child.name)} (当前位置)` : `${prefix}${typeIcon} ${escapeHtml(child.name)}`;
+                options += `<option value="${child.id}" ${isCurrent ? 'selected' : ''}>${label}</option>`;
+            }
+            if (child.children && child.children.length > 0) {
+                options += buildCopyTargetOptions(child, prefix + '　　', sourceId);
+            }
+        }
+        return options;
+    }
+
+    let targetOptions = '';
+    if (allowedParents.includes('root')) {
+        const isCurrent = (result.parent.id === 'root');
+        targetOptions += `<option value="root" ${isCurrent ? 'selected' : ''}>📁 ${escapeHtml(currentTreeData.name || '根节点')}${isCurrent ? ' (当前位置)' : ''}</option>`;
+    }
+    targetOptions += buildCopyTargetOptions(currentTreeData, '　　', nodeId);
+
+    const dialog = document.createElement('div');
+    dialog.id = 'copyNodeModal';
+    dialog.className = 'modal';
+    dialog.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;">复制节点</h3>
+                <button class="close-btn" id="copyNodeCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 15px;">
+                <p style="margin-bottom:10px;">${desc}</p>
+                <label style="display:block;margin-bottom:6px;font-weight:bold;">选择目标位置：</label>
+                <select id="copyNodeTargetSelect" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:14px;" size="10">
+                    ${targetOptions}
+                </select>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;padding:10px 15px;">
+                <button class="btn btn-primary" id="copyNodeConfirmBtn">确认复制</button>
+                <button class="btn" id="copyNodeCancelBtn">取消</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(dialog);
+    dialog.classList.add('show');
+
+    function closeDialog() {
+        dialog.classList.remove('show');
+        setTimeout(() => dialog.remove(), 200);
+    }
+
+    dialog.querySelector('#copyNodeCloseBtn').addEventListener('click', closeDialog);
+    dialog.querySelector('#copyNodeCancelBtn').addEventListener('click', closeDialog);
+    dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) closeDialog();
+    });
+
+    dialog.querySelector('#copyNodeConfirmBtn').addEventListener('click', () => {
+        const targetId = document.getElementById('copyNodeTargetSelect').value;
+        if (!targetId) {
+            showNotification('请选择目标位置', 'warning');
+            return;
+        }
+        const target = targetId === 'root' ? currentTreeData : findNode(currentTreeData, targetId);
+        if (!target) return;
+
+        if (!allowedParents.includes(target.type) && !(targetId === 'root' && allowedParents.includes('root'))) {
+            showNotification('该位置不允许放置此类型节点', 'error');
+            return;
+        }
+
+        const cloned = deepCloneNode(node);
+        cloned.name = node.name + ' (副本)';
+        if (!target.children) target.children = [];
+        target.children.push(cloned);
+        target.expanded = true;
+
+        renderTree();
+        selectNode(cloned.id);
+        markDirty();
+        showNotification(`${typeName}"${node.name}"复制成功`, 'success');
+        closeDialog();
+    });
 };
 
 // ==================== 树操作工具函数 ====================
@@ -1899,6 +2080,7 @@ function updateToolbarState() {
     const deleteBtn = document.getElementById('toolbarDelete');
     const attrBtn = document.getElementById('toolbarAttr');
     const batchMoveBtn = document.getElementById('toolbarBatchMove');
+    const copyBtn = document.getElementById('toolbarCopy');
 
     if (!selectedNode || selectedNodes.length === 0) {
         if (addDocBtn) addDocBtn.disabled = true;
@@ -1907,6 +2089,7 @@ function updateToolbarState() {
         if (deleteBtn) deleteBtn.disabled = true;
         if (attrBtn) attrBtn.disabled = true;
         if (batchMoveBtn) batchMoveBtn.disabled = true;
+        if (copyBtn) copyBtn.disabled = true;
         hideAttributePanelIfNoSelection();
         return;
     }
@@ -1918,12 +2101,13 @@ function updateToolbarState() {
         if (editBtn) editBtn.disabled = true;
         if (deleteBtn) deleteBtn.disabled = false;
         if (batchMoveBtn) batchMoveBtn.disabled = false;
+        if (copyBtn) copyBtn.disabled = true;
 
-        const allDocs = selectedNodes.every(id => {
+        const allDocsOrFiles = selectedNodes.every(id => {
             const node = findNode(currentTreeData, id);
-            return node && node.type === 'document';
+            return node && (node.type === 'document' || node.type === 'file' || node.type === 'folder');
         });
-        if (attrBtn) attrBtn.disabled = !allDocs;
+        if (attrBtn) attrBtn.disabled = !allDocsOrFiles;
         return;
     }
 
@@ -1935,8 +2119,9 @@ function updateToolbarState() {
     if (addFolderBtn) addFolderBtn.disabled = (node.type !== 'cycle' && node.type !== 'document' && node.type !== 'folder');
     if (editBtn) editBtn.disabled = (node.type === 'root');
     if (deleteBtn) deleteBtn.disabled = (node.type === 'root');
-    if (attrBtn) attrBtn.disabled = (node.type !== 'document');
+    if (attrBtn) attrBtn.disabled = (node.type !== 'document' && node.type !== 'file' && node.type !== 'folder');
     if (batchMoveBtn) batchMoveBtn.disabled = (node.type === 'root');
+    if (copyBtn) copyBtn.disabled = (node.type === 'root');
 }
 
 /**
@@ -1948,8 +2133,8 @@ function updateAttributePanelForSelection() {
         return;
     }
     
-    // 检查是否全是文档
-    const docNodes = selectedNodes.map(id => findNode(currentTreeData, id)).filter(n => n && n.type === 'document');
+    // 检查是否全是文档或文件
+    const docNodes = selectedNodes.map(id => findNode(currentTreeData, id)).filter(n => n && (n.type === 'document' || n.type === 'file' || n.type === 'folder'));
     
     if (docNodes.length === 0) {
         hideAttributePanelIfNoSelection();
@@ -2178,21 +2363,23 @@ function treeToConfig() {
             filename_template: folder.filename_template || '',
             match_keywords: folder.match_keywords || [],
             exclude_keywords: folder.exclude_keywords || [],
-            files: [],
             children: []
         };
         if (folder.children) {
             for (const child of folder.children) {
                 if (child.type === 'file') {
-                    result.files.push({
+                    result.children.push({
+                        type: 'file',
                         name: child.name,
+                        attributes: child.attributes || {},
+                        doc_note: child.doc_note || '',
+                        filename_template: child.filename_template || '',
                         match_keywords: child.match_keywords || [],
                         exclude_keywords: child.exclude_keywords || []
                     });
                 } else if (child.type === 'folder') {
                     result.children.push(serializeFolder(child));
                 } else if (child.type === 'document') {
-                    // 目录下的文档节点：序列化为带 children 的文档对象
                     const docObj = {
                         name: child.name,
                         attributes: child.attributes || {},
